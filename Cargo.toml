@@ -1,0 +1,49 @@
+[package]
+name = "task_deck"
+version = "1.0.0"
+edition = "2024"
+
+[[bin]]
+name = "TaskDeck"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+egui = "0.33.0"
+wgpu = "27.0.1"
+egui-wgpu = "0.33.0"
+winit = "0.30.12"
+egui-winit = "0.33.0"
+pollster = "0.4.0"
+
+egui_extras = { version = "0.33.3", features = ["svg"] }
+
+epaint = "0.33.0"
+emath = "0.33.0"
+
+reqwest = { version = "0.11", features = ["blocking"] }
+image = "0.25"
+tempfile = "3.20.0"
+rev_lines = "0.3.0"
+mimalloc = "0.1.47"
+toml = "0.9.5"
+toml_edit = "0.23.7"
+
+palette = "0.7.6"
+kmeans_colors = "0.7.1"
+
+[build-dependencies]
+embed-resource = "3.0"
+chrono = "0.4"
+
+[profile.release]
+opt-level = 3          # Maximum optimization for speed
+lto = "fat"            # Full link-time optimization (best performance)
+codegen-units = 1      # Forces full cross-module optimization
+strip = "symbols"      # Removes debug symbols (smaller binary)
+panic = "abort"        # Smaller + faster panic handling
+incremental = false    # Disable incremental builds (forces full optimization)
+debug = false          # No debug info in final binary
