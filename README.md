@@ -1,5 +1,6 @@
 My vision was to create a desktop calendar that would function like a physical calendar in that it would always be visible. Thus the application is made to consume very few system resources when idle (window not active and not being interacted with), allowing for it to be constantly displayed on an additional monitor. I personally have the application always set to fullscreen on my third monitor.
 
+<img width="1914" height="1076" alt="taskdeck_example_main" src="https://github.com/user-attachments/assets/6c94e2a4-e513-4287-9d75-c2429afe3af0" />
 
 ## How to use
 You can either download and extract one of the precomplied releases, possibly available in the releases tab, or you can compile the project yourself.
