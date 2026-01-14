@@ -2,7 +2,7 @@ My vision was to create a desktop calendar that would function like a physical c
 
 
 ## How to use
-You can either donwload and extract one of the precomplied releases, possibly available in the releases tab, or you can compile the project yourself.
+You can either download and extract one of the precomplied releases, possibly available in the releases tab, or you can compile the project yourself.
 
 The executable should be in a folder that also contains an "images" folder and a "taskdeck_data" folder. Deleting these folders or running the executable in a place where these folders are not present may cause the application to not function if it is unable to create these folders.
 
