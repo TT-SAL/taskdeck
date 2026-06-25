@@ -699,4 +699,11 @@ impl ApplicationHandler for App<'_> {
             window.request_redraw();
         }
     }
+
+    // Called once when the event loop is shutting down (Quit button, window close,
+    // etc.). Flush any buffered state so notepad edits made right before exit are
+    // not lost. Note: this does not run on a hard kill or on panic (panic = abort).
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.task_app.flush_pending_saves();
+    }
 }

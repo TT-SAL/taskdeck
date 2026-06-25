@@ -191,3 +191,61 @@ pub fn read_lines_range(offset: usize, limit: usize, exe_path: &PathBuf) -> Resu
     Ok(archives)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn active(
+        importance: Option<u8>,
+        time_importance: Option<u8>,
+        is_event: bool,
+        deadline: Option<DateTime<Local>>,
+    ) -> Active {
+        Active {
+            importance,
+            time_importance,
+            name: "test".to_string(),
+            created: Local.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
+            deadline,
+            is_event,
+        }
+    }
+
+    #[test]
+    fn calendar_item_color_mapping() {
+        let dl = Some(Local.with_ymd_and_hms(2025, 6, 1, 12, 0, 0).unwrap());
+        // Events always map to palette index 5, regardless of importance.
+        assert_eq!(active(None, None, true, dl).calendar_item_color(), 5);
+        // Deadline tasks map by importance.
+        assert_eq!(active(Some(3), None, false, dl).calendar_item_color(), 3);
+        // Urgency tasks map by time_importance.
+        assert_eq!(active(None, Some(2), false, None).calendar_item_color(), 2);
+        // Nothing set falls back to 0.
+        assert_eq!(active(None, None, false, None).calendar_item_color(), 0);
+    }
+
+    #[test]
+    fn importance_score_malformed_is_huge_despite_jitter() {
+        // No importance, no time_importance, no deadline hits the "broken entry"
+        // branch (1e9), times the <=10% random tie-break multiplier in [1.0, 1.1).
+        let now = Local.with_ymd_and_hms(2025, 6, 1, 12, 0, 0).unwrap();
+        let score = active(None, None, false, None).importance_score(now);
+        assert!(score >= 1_000_000_000.0, "score was {score}");
+        assert!(score < 1_100_000_000.0, "score was {score}");
+    }
+
+    #[test]
+    fn importance_score_event_closer_scores_higher() {
+        // Event-like items (deadline only) score 1e9 / (|days_to_event| + 1), so a
+        // nearer event must outrank a farther one even after the <=10% jitter.
+        let now = Local.with_ymd_and_hms(2025, 6, 1, 12, 0, 0).unwrap();
+        let soon = active(None, None, true, Some(now + chrono::Duration::days(1)));
+        let later = active(None, None, true, Some(now + chrono::Duration::days(10)));
+        assert!(
+            soon.importance_score(now) > later.importance_score(now),
+            "nearer event should score higher"
+        );
+    }
+}
+

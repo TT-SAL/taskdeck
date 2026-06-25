@@ -44,6 +44,26 @@ pub fn next_three_weekdays(now: DateTime<Local>) -> (String, String, String) {
     )
 }
 
+/// Number of days in `month` (1..=12) of `year`, accounting for leap years.
+/// Falls back to 31 for an out-of-range month so callers never get a 0-length
+/// day range.
+pub fn days_in_month(year: i32, month: u32) -> u32 {
+    let (next_year, next_month) = if month >= 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    match (
+        NaiveDate::from_ymd_opt(year, month, 1),
+        NaiveDate::from_ymd_opt(next_year, next_month, 1),
+    ) {
+        (Some(first), Some(next_first)) => {
+            next_first.signed_duration_since(first).num_days() as u32
+        }
+        _ => 31,
+    }
+}
+
 pub fn resolve_colorscheme(
     schemes: &HashMap<u32, ColorScheme>,
     selected_id: u32,
@@ -100,4 +120,58 @@ pub fn read_notepad_text(exe_path: &PathBuf) -> Result<String, Box<dyn Error>> {
 
     let text: String = serde_json::from_reader(reader)?;
     return Ok(text);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Timelike;
+
+    #[test]
+    fn ordinal_suffix_basic_and_teens() {
+        assert_eq!(ordinal_suffix(1), "st");
+        assert_eq!(ordinal_suffix(2), "nd");
+        assert_eq!(ordinal_suffix(3), "rd");
+        assert_eq!(ordinal_suffix(4), "th");
+        // The 11/12/13 teens are always "th" despite ending in 1/2/3.
+        assert_eq!(ordinal_suffix(11), "th");
+        assert_eq!(ordinal_suffix(12), "th");
+        assert_eq!(ordinal_suffix(13), "th");
+        assert_eq!(ordinal_suffix(21), "st");
+        assert_eq!(ordinal_suffix(22), "nd");
+        assert_eq!(ordinal_suffix(23), "rd");
+        assert_eq!(ordinal_suffix(111), "th");
+    }
+
+    #[test]
+    fn days_in_month_handles_leap_years_and_bounds() {
+        assert_eq!(days_in_month(2024, 2), 29); // leap year
+        assert_eq!(days_in_month(2025, 2), 28); // common year
+        assert_eq!(days_in_month(2000, 2), 29); // divisible by 400
+        assert_eq!(days_in_month(1900, 2), 28); // divisible by 100, not 400
+        assert_eq!(days_in_month(2025, 1), 31);
+        assert_eq!(days_in_month(2025, 4), 30);
+        assert_eq!(days_in_month(2025, 12), 31); // December wraps to next year internally
+        assert_eq!(days_in_month(2025, 0), 31); // out-of-range month -> safe fallback
+        assert_eq!(days_in_month(2025, 13), 31); // out-of-range month -> safe fallback
+    }
+
+    #[test]
+    fn parse_time_input_accepts_valid_noon() {
+        // Noon is never inside a DST spring-forward gap, so this is unambiguous in
+        // any local timezone the test happens to run in.
+        let dt = parse_time_input(15, 6, 2025, 12, 30).expect("valid date should parse");
+        assert_eq!(dt.year(), 2025);
+        assert_eq!(dt.month(), 6);
+        assert_eq!(dt.day(), 15);
+        assert_eq!(dt.hour(), 12);
+        assert_eq!(dt.minute(), 30);
+    }
+
+    #[test]
+    fn parse_time_input_rejects_impossible_dates() {
+        assert!(parse_time_input(31, 2, 2025, 12, 0).is_err()); // Feb 31
+        assert!(parse_time_input(30, 2, 2024, 12, 0).is_err()); // Feb 30, even in a leap year
+        assert!(parse_time_input(15, 13, 2025, 12, 0).is_err()); // month 13
+    }
 }

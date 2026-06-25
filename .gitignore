@@ -1,0 +1,11 @@
+# Cargo build artifacts and executables
+/target/
+
+# rustfmt backup files
+**/*.rs.bk
+
+# MSVC debugging information (Windows builds)
+*.pdb
+
+# Note: Cargo.lock is intentionally committed — this crate ships a binary
+# (`TaskDeck`), so a locked, reproducible dependency set is wanted.

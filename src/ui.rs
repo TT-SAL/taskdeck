@@ -91,7 +91,9 @@ pub struct TaskApp {
     /* ───────────────────────── Time & Date ───────────────────────── */
     date: DateTime<Local>,
     next_three_weekdays: (String, String, String),
-    chrono_tick_counter: u16,
+    /// Timestamp of the most recent notepad edit, used to debounce autosave.
+    /// `None` once there is nothing pending to save.
+    last_textbox_edit_time: Option<Instant>,
 
     /* ───────────────────────── Tasks & Events ───────────────────────── */
     active_things: Vec<Active>,
@@ -226,7 +228,7 @@ impl TaskApp {
             /* Time */
             date: now,
             next_three_weekdays: next_three_weekdays(now),
-            chrono_tick_counter: 0,
+            last_textbox_edit_time: None,
 
             /* Tasks */
             list_tasks: config
@@ -445,10 +447,17 @@ impl TaskApp {
     }
 
     fn show_weather_forecast(&mut self, ui: &mut Ui) {
-        if self.weather_is_broken_flag {
-            ui.label("WEATHER IS BROKEN");
-        } else {
-            ui.vertical(|ui| {
+        ui.vertical(|ui| {
+            if self.weather_is_broken_flag {
+                // No usable forecast yet — either the first fetch hasn't completed
+                // or the data arrived in an unexpected shape. Show a small notice in
+                // place of the grids; the notepad below stays reachable regardless.
+                ui.add_space(75.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(120.0);
+                    ui.label(RichText::new("WEATHER IS BROKEN").size(14.0).color(Color32::from_white_alpha(165)));
+                });
+            } else {
                 ui.horizontal(|ui| {
                     ui.add_space(147.0);
                     ui.label(RichText::new(&self.next_three_weekdays.0).size(14.0).color(Color32::from_white_alpha(165)));
@@ -480,20 +489,27 @@ impl TaskApp {
 
                     let day_3 = &self.weather_data_cache[2];
                     self.display_stuff(day_3, ui, "thirdweathergrid".to_string());
-                } else {
-                    ui.add_space(15.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space(5.0);
-
-                        if ui.add(egui::TextEdit::multiline(&mut self.textbox_text)
-                            .background_color(Color32::from_black_alpha(40))
-                        ).changed() {
-                            self.should_save_textbox_text = true;
-                        }
-                    });
                 }
-            });
-        }
+            }
+
+            // The notepad occupies the right panel whenever 3-day weather is off.
+            // It is deliberately decoupled from `weather_is_broken_flag` so a failed
+            // or still-pending weather fetch can never hide the user's notes
+            // (CODE_REVIEW A6).
+            if !self.three_day_weather {
+                ui.add_space(15.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(5.0);
+
+                    if ui.add(egui::TextEdit::multiline(&mut self.textbox_text)
+                        .background_color(Color32::from_black_alpha(40))
+                    ).changed() {
+                        self.should_save_textbox_text = true;
+                        self.last_textbox_edit_time = Some(Instant::now());
+                    }
+                });
+            }
+        });
     }
 
     fn show_calendar(&mut self, ui: &mut egui::Ui) {
@@ -921,12 +937,33 @@ impl TaskApp {
 
     pub fn summarize_calendar(&mut self) {
         // 1) Sort and separate active things
-        let (mut events, mut tasks): (Vec<_>, Vec<_>) = self.active_things
+        let (mut events, tasks): (Vec<_>, Vec<_>) = self.active_things
             .drain(..)
             .partition(|a| a.is_event);
 
-        events.sort_by_key(|e| e.deadline.expect("Event without a deadline"));
-        tasks.sort_by_key(|t| std::cmp::Reverse(t.importance_score(self.date) as u16));
+        // Sort events by deadline. Events are expected to always carry a deadline,
+        // but a hand-edited / corrupted save could violate that. Sorting on the
+        // `Option` (which orders `None` first) keeps this panic-free; the per-day
+        // filtering below never places a deadline-less event on the grid, and such
+        // items are still retained in `active_things` rather than dropped.
+        events.sort_by_key(|e| e.deadline);
+
+        // Sort tasks by importance score, highest first. The score is evaluated
+        // exactly once per task here — capturing the intended per-rebuild random
+        // shuffle a single time, which also keeps the comparator consistent — and
+        // the resulting `f32` is compared directly. The old code cast the score to
+        // `u16`, which saturated everything above 65535 (the high-importance
+        // exponential curves and the 1e9 event/broken scores) to the same value
+        // and flattened their ordering.
+        let now = self.date;
+        let mut scored_tasks: Vec<(f32, Active)> = tasks
+            .into_iter()
+            .map(|t| (t.importance_score(now), t))
+            .collect();
+        scored_tasks.sort_by(|(a, _), (b, _)| {
+            b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let tasks: Vec<Active> = scored_tasks.into_iter().map(|(_, t)| t).collect();
 
         let deadline_tasks: Vec<Active> = tasks.iter().filter(|task| task.deadline.is_some()).cloned().collect();
 
@@ -962,7 +999,7 @@ impl TaskApp {
                 // Filter items for this date
                 let day_events: Vec<_> = events
                     .iter()
-                    .filter(|e| e.deadline.unwrap().date_naive() == current)
+                    .filter(|e| e.deadline.map_or(false, |d| d.date_naive() == current))
                     .cloned()
                     .collect();
 
@@ -983,18 +1020,19 @@ impl TaskApp {
                     }
                 }
 
-                // 6) Sort chosen by exact deadline time
-                chosen.sort_by_key(|a| a.deadline.unwrap());
+                // 6) Sort chosen by exact deadline time. Every item here came from
+                // `day_events`/`day_tasks`, which only retain dated items, so the
+                // deadline is present; format defensively regardless.
+                chosen.sort_by_key(|a| a.deadline);
 
                 let chosen_str: Vec<(String, String, usize)> = chosen
                     .into_iter()
                     .map(|a| {
                         let time = a.deadline
-                            .unwrap()
-                            .format("%H:%M")
-                            .to_string();
+                            .map(|d| d.format("%H:%M").to_string())
+                            .unwrap_or_default();
                         let color_id = a.calendar_item_color();
-                        
+
                         (a.name, time, color_id)
                     })
                     .collect();
@@ -1003,15 +1041,14 @@ impl TaskApp {
                 let mut all_for_day = Vec::new();
                 all_for_day.extend(day_events);
                 all_for_day.extend(day_tasks);
-                all_for_day.sort_by_key(|a| a.deadline.unwrap());
+                all_for_day.sort_by_key(|a| a.deadline);
 
                 let all_str: Vec<(String, String, bool)> = all_for_day
                     .into_iter()
                     .map(|a| {
                         let time = a.deadline
-                            .unwrap()
-                            .format("%H:%M")
-                            .to_string();
+                            .map(|d| d.format("%H:%M").to_string())
+                            .unwrap_or_default();
                         (a.name, time, a.is_event)
                     })
                     .collect();
@@ -1081,11 +1118,18 @@ impl TaskApp {
                 ui.set_max_height(35.0);
 
                 ui.horizontal_centered(|ui| {
+                    // Constrain the day picker to the days that actually exist in
+                    // the selected month/year (e.g. Feb has 28/29), and snap an
+                    // already-selected day back into range when the month changes,
+                    // so invalid dates like "Feb 31" can't be entered.
+                    let max_day = utilities::days_in_month(self.year_input, self.month_input as u32) as i32;
+                    self.day_input = self.day_input.clamp(1, max_day);
+
                     ComboBox::from_id_source("day")
                         .width(40.0)
                         .selected_text(RichText::from(format!("{:02}", self.day_input)).font(space_font.clone()))
                         .show_ui(ui, |ui| {
-                            for day in 1..=31 {
+                            for day in 1..=max_day {
                                 ui.selectable_value(
                                     &mut self.day_input,
                                     day,
@@ -1269,7 +1313,13 @@ impl TaskApp {
         let static_weather_data = self.weather_service.data.read().map(|w| w.clone())
             .unwrap_or_else(|_| vec![]);
 
-        if static_weather_data.len() != 24 {
+        // The reshape below indexes `static_weather_data[hour][day]` for all 24
+        // hours and days 0..=2, so both the outer length (24 hours) and every
+        // inner length (>= 3 days) must hold. A partial/short Open-Meteo response
+        // (DST edge, API change, truncated payload) would otherwise panic here.
+        if static_weather_data.len() != 24
+            || static_weather_data.iter().any(|hour| hour.len() < 3)
+        {
             self.weather_is_broken_flag = true;
             return ();
         }
@@ -1318,7 +1368,14 @@ impl TaskApp {
         if self.should_save_textbox_text {
             let _ = utilities::save_notepad_text(self.textbox_text.clone(), &self.exe_file_path);
             self.should_save_textbox_text = false;
+            self.last_textbox_edit_time = None;
         }
+    }
+
+    /// Force-persist any unsaved state before the application exits.
+    /// Currently only the notepad text is buffered; this is a no-op when clean.
+    pub fn flush_pending_saves(&mut self) {
+        self.save_textbox_text();
     }
     fn set_colorscheme(&mut self) {
         let selected_scheme = if let Some(scheme) = self.colorschemes.get(&self.selected_colorscheme_id) {
@@ -1424,14 +1481,17 @@ impl TaskApp {
             self.next_three_weekdays = next_three_weekdays(self.date);
         }
 
-        if self.chrono_tick_counter > 12000 {
-            if self.should_save_textbox_text {
+        // Debounced notepad autosave: persist ~2s after the last edit. This uses
+        // wall-clock time so the cadence does not depend on the (uncapped) frame
+        // rate. A final flush also runs on exit (App::exiting), so edits made just
+        // before quitting are never lost.
+        if self.should_save_textbox_text {
+            let due = self
+                .last_textbox_edit_time
+                .map_or(true, |t| t.elapsed() >= std::time::Duration::from_secs(2));
+            if due {
                 self.save_textbox_text();
             }
-
-            self.chrono_tick_counter = 0;
-        } else {
-            self.chrono_tick_counter += 1;
         }
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
@@ -1488,12 +1548,18 @@ impl TaskApp {
         .show(ctx, |ui| {
             
             let screen_rect = ctx.available_rect();
-            ctx.layer_painter(egui::LayerId::background()).image(
-                self.background_image_texture.as_ref().unwrap().id(), //THIS WILL CRASH THE APP IF BACKGROUND HAS NOT BEEN INITALIZED
-                screen_rect,
-                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
-                egui::Color32::WHITE.gamma_multiply((self.background_image_tint_percent as f32 / 100.0).clamp(0.0, 1.0)),
-            );
+            // Skip the background draw if the texture hasn't been initialized yet
+            // rather than unwrapping. In practice it's set from
+            // `pending_initial_background` at the top of `ui()`, but guarding here
+            // removes the latent crash if that ever fails to run.
+            if let Some(background_texture) = self.background_image_texture.as_ref() {
+                ctx.layer_painter(egui::LayerId::background()).image(
+                    background_texture.id(),
+                    screen_rect,
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                    egui::Color32::WHITE.gamma_multiply((self.background_image_tint_percent as f32 / 100.0).clamp(0.0, 1.0)),
+                );
+            }
 
             ui.horizontal_top(|ui| {
 
@@ -1677,7 +1743,7 @@ impl TaskApp {
         
         if self.expand_calendar_day_flag {
             if let Some(index) = self.expanded_day {
-                let day = &mut self.calendar_elements[index];
+                if let Some(day) = self.calendar_elements.get(index) {
                 let selected_date = day.4;
 
                 let (weekday_str, formatted_date) = utilities::format_date(selected_date);
@@ -1777,6 +1843,14 @@ impl TaskApp {
                                         });
                             });
                     });
+                } else {
+                    // The calendar was rebuilt smaller (e.g. a midnight date
+                    // rollover or a reduced week count) while this popup was open,
+                    // so the cached `expanded_day` index no longer points at a day.
+                    // Close the popup instead of indexing out of bounds.
+                    self.expand_calendar_day_flag = false;
+                    self.expanded_day = None;
+                }
             }
         }
 
