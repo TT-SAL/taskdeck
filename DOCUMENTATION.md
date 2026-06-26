@@ -28,6 +28,7 @@
 11. Configuration reference (`userconfig.toml`)
 12. Custom calendar widgets reference
 13. Glossary of state flags
+14. Design decisions & deliberate trade-offs
 
 ---
 
@@ -296,8 +297,9 @@ pre-fill the date fields from the selected day).
 - **Data shaping** (`fix_and_cache_weather_data`, in `ui.rs`): the raw hourly data is reshaped
   into 3 days × 12 two-hour slots, averaging consecutive hours' temperature, taking the **worse**
   (max) weather code, and treating the slot as "day" if either hour was day. If the raw shape
-  isn't the expected 24 buckets, `weather_is_broken_flag` is set and the UI shows
-  "WEATHER IS BROKEN".
+  isn't the expected 24 hourly buckets (each with at least 3 days), `weather_is_broken_flag` is
+  set; the forecast grids are then replaced by a "WEATHER IS BROKEN" notice, while the notepad (when
+  3-day weather is off) stays available regardless.
 - **Icons** (`icon_for_wmo`): maps WMO codes → one of the embedded SVGs, choosing day/night
   variants where available. The big comment block documents the `weather_svgs_2` naming scheme.
 - **`CITIES`**: a static list (~200 entries) of `name/lat/lon` used as map markers.
@@ -382,6 +384,73 @@ visual language: a rounded "notch" around the day number, two-line wrapped item 
 
 When any modal flag is set, `hovered_calendar_cell` is cleared at the end of `ui()` so the
 calendar doesn't show a hover state behind a modal.
+
+---
+
+## 14. Design Decisions & Deliberate Trade-offs
+
+These are choices that look like problems at first glance but are intentional. They are recorded
+here (rather than in `CODE_REVIEW.md`) so that a future reader — or a future review pass — does not
+"fix" them and regress something the maintainer wants. **Please read this section before proposing
+changes in these areas.**
+
+### 14.1 Uncapped, forced-repaint render loop
+
+`present_mode = AutoNoVsync` (`AppState` in `initialization.rs`) together with an unconditional
+`window.request_redraw()` after every `RedrawRequested` while awake means the app renders as fast
+as the GPU allows, with no frame cap, whenever it is focused/active.
+
+This is **wanted**, for two reasons:
+
+1. The uncapped frame rate is a feature. Seeing the calendar run at very high fps is part of the
+   appeal; capping it (`Fifo` / `AutoVsync`) is explicitly *not* desired.
+2. The "active drain" window barely exists in practice. The app lives on a secondary monitor and is
+   idle the vast majority of the time; when it is unfocused with the cursor away, the 10 s
+   idle-sleep stops the redraw loop entirely (`in_sleep`). So it only renders flat-out during the
+   rare moments of direct interaction — which is exactly when the smoothness is wanted.
+
+The forced repaint is also **load-bearing for the animations**. The row animations are hand-rolled
+(`row_anim` advanced by a `dt` taken from egui's `i.time`, once per *drawn* frame) and never call
+egui's repaint scheduler. Without the forced `request_redraw()`, frames would only arrive on
+discrete input events and animations would freeze mid-transition. Reactive / "repaint on input
+only" rewrites have broken exactly this in the past.
+
+Related: `RendererOptions { predictable_texture_filtering: true }` and the `AutoNoVsync` present
+mode were chosen so the app behaves consistently across different GPUs. If the render loop is ever
+revisited, revisit these together — but the loop itself is correct for this project's goals.
+
+### 14.2 Single-file `ui.rs` / large `TaskApp`
+
+`TaskApp` holds ~70 fields and `ui()` is one very long method in a ~2,600-line `ui.rs`. This is
+deliberate: on a solo project, keeping the whole application in one file makes it easier to hold the
+entire thing in your head. **Splitting `ui.rs` into submodules is not wanted.**
+
+The one self-contained refinement that would still be welcome (without splitting the file) is
+collapsing the many parallel `*_flag` booleans into a single `enum Modal { None, NewTask, … }`, so
+that "two modals open at once" becomes unrepresentable. That is tracked as an open item in
+`CODE_REVIEW.md`; the file structure itself is not.
+
+### 14.3 Hand-tuned magic numbers in the calendar widgets & animation
+
+The custom calendar widgets (`calendarwidgets.rs`) and the calendar animation are pixel-tuned with
+many literal offsets, against an assumed ~160×215 cell. These numbers are the product of extended
+hand-tuning that produced an animation the maintainer is happy with, and the literals are the
+accepted price of that result. **Do not "clean up" or parameterize the animation/widget magic
+numbers** — they are hard to re-derive and easy to break.
+
+(The separate, lower-stakes note about *static side-panel/dialog* spacers not adapting to non-100%
+DPI or arbitrary window sizes is tracked in `CODE_REVIEW.md`. It is largely moot while the app runs
+fullscreen on a chosen monitor, and even then the animation/widget code stays untouched.)
+
+### 14.4 Random tie-break shuffle in `importance_score`
+
+`Active::importance_score` multiplies the final score by a small random factor in `[1.0, 1.1)`
+derived from the current millisecond. This is **intentional**: it gives the task list a gentle
+shuffle between rebuilds rather than a frozen order, and is not a bug to remove.
+
+When the priority sort was changed to compare `f32` directly (see §7 and `CODE_REVIEW.md` B3), the
+score is now evaluated **once per task per rebuild** and stored, so the shuffle is preserved while
+the comparator stays consistent within a single sort.
 
 ---
 

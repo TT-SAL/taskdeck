@@ -1,290 +1,282 @@
 # TaskDeck — Code Review: Problems & Suggested Improvements
 
-Companion to [`DOCUMENTATION.md`](DOCUMENTATION.md). Findings are grouped by severity. Each item
-cites the relevant location and gives a concrete suggestion. Line numbers are approximate and may
-drift as the code changes.
+Companion to [`DOCUMENTATION.md`](DOCUMENTATION.md). This document tracks **problems worth fixing**
+and concrete suggestions for each. It is meant to be a working to-do list for hardening the app, not
+a description of how it works (that's the documentation's job).
+
+**How to read this:**
+- Findings are grouped by category and tagged with a rough priority. Each cites the relevant
+  function/symbol rather than a line number, since line numbers drift as the code changes.
+- **Intentional design choices are *not* listed here as problems.** Things that look like issues but
+  are deliberate (the uncapped/forced-repaint render loop, the single-file `ui.rs`, the hand-tuned
+  calendar magic numbers, the random tie-break shuffle in scoring) are documented in
+  [`DOCUMENTATION.md` §14](DOCUMENTATION.md). Read that section before "fixing" anything in those
+  areas.
+- Resolved items are summarized in the changelog at the bottom rather than kept inline, so this list
+  stays focused on open work.
 
 ---
 
 ## A. Correctness & Crash Risks (high priority)
 
-### A1. Notepad text can be lost — there is no save-on-exit ✅ FIXED
-`save_textbox_text()` used to be called only inside the `chrono_tick_counter > 12000` branch, so a
-notepad edit followed by Quit / window-close was never persisted.
-- **Fixed:** `App::exiting` (`initialization.rs`) now calls `TaskApp::flush_pending_saves()` on
-  event-loop shutdown — a single chokepoint covering both the Quit button and the window X. (Does
-  not cover hard kill / panic-abort, which is acceptable.)
-
-### A2. Frame-count "timer" is unreliable ✅ FIXED
-The autosave cadence used to be tied to a frame counter, so the real-world delay varied with GPU
-speed (sub-second to minutes).
-- **Fixed:** autosave is now a wall-clock debounce — it persists ~2 s after the last edit using
-  `Instant` (`last_textbox_edit_time`), independent of frame rate.
-
-### A3. `fix_and_cache_weather_data` can panic on a short/partial API response ✅ FIXED
-`fix_and_cache_weather_data` guarded only the **outer** length (`static_weather_data.len() != 24`),
-then indexed `static_weather_data[index_first_hour][day]` for `day in 0..=2` and inner indices up to
-23. If Open-Meteo returned fewer than 72 hourly samples (partial day, API change, DST edge), some
-inner `Vec`s had `< 3` entries and the index panicked.
-- **Fixed:** the guard now also requires every hour bucket to have `>= 3` days
-  (`static_weather_data.iter().any(|hour| hour.len() < 3)`); a short/partial response trips
-  `weather_is_broken_flag` instead of indexing out of bounds.
-
-### A4. `summarize_calendar` unwraps deadlines that are only assumed present ✅ FIXED
-`events.sort_by_key(|e| e.deadline.expect("Event without a deadline"))` plus several
-`deadline.unwrap()` calls. These were safe **only** if the data file's invariants held (events and
-deadline-tasks always have a deadline). A hand-edited or corrupted `read_at_startup.json` would
-panic the whole app on startup (`summarize_calendar` runs before the window even opens).
-- **Fixed:** all deadline access for events is now `Option`-safe — events are sorted on
-  `e.deadline` directly (`Option` is `Ord`), per-day membership uses
-  `e.deadline.map_or(false, |d| …)`, and the `chosen`/`all_for_day` lists sort on the `Option` and
-  format times with `.map(…).unwrap_or_default()`. A deadline-less event is therefore quarantined
-  (never placed on the grid) but **retained** in `active_things` rather than dropped or crashing.
-  Note: it is intentionally *not* surfaced via the error window, since `summarize_calendar` re-runs
-  on every add/delete and would re-pop the modal repeatedly.
-
-### A5. Background-texture `unwrap` is a known latent crash ✅ FIXED
-`self.background_image_texture.as_ref().unwrap()` carried the author's own comment "THIS WILL CRASH
-THE APP IF BACKGROUND HAS NOT BEEN INITIALIZED". It was safe only because the top of `ui()` always
-initializes it from `pending_initial_background`, but it was fragile.
-- **Fixed:** the background draw is now wrapped in `if let Some(background_texture)` and simply
-  skipped when the texture is absent.
-
-### A6. "WEATHER IS BROKEN" hides the notepad until the first successful fetch ✅ FIXED
-On startup the weather `data` is `vec![vec![]]` (len 1 ≠ 24) so `weather_is_broken_flag` is `true`
-and `show_weather_forecast` showed the broken label. The **notepad** only rendered in the
-non-broken, non-3-day branch — so before the first fetch, and **permanently** if the network was
-down, the notepad was unreachable.
-- **Fixed:** `show_weather_forecast` was restructured so the "WEATHER IS BROKEN" notice only
-  replaces the forecast **grids**, while the notepad (rendered whenever 3-day weather is off) is now
-  drawn unconditionally, independent of `weather_is_broken_flag`. The notes are reachable at startup
-  and while the network is down.
-
-### A7. `expanded_day` index can outlive its calendar ✅ FIXED
-`self.calendar_elements[index]` used the cached `expanded_day` index. If `summarize_calendar`
-rebuilt a shorter `calendar_elements` (e.g. a midnight date rollover, or the weeks count shrinks)
-while the popup was open, the index could be out of bounds → panic.
-- **Fixed:** the popup now reads the day via `if let Some(day) = self.calendar_elements.get(index)`
-  and, in the `else` branch, clears `expand_calendar_day_flag` / `expanded_day` to dismiss the popup
-  instead of panicking.
+### A8. Startup deserialization aborts the app before the window opens
+`main.rs` loads the active set and colour schemes with `tasks::read_at_startup(&exe_file_path).unwrap()`
+and `color::read_colorschemes(&exe_file_path).unwrap()`. If either file is corrupt or unreadable
+(invalid JSON, partial write from outside the app, missing/return-Err data directory), the `unwrap`
+panics during boot, before any window or error UI exists — the app simply fails to start with no
+explanation. The notepad load already does the right thing (`read_notepad_text(...).unwrap_or(...)`),
+so the handling is inconsistent.
+- **Why it matters:** a single bad byte in `read_at_startup.json` or `colorschemes.json` makes the
+  app un-launchable, and there's no in-app path to recover. This is the same data-integrity class as
+  A4 (now fixed), but at the file-parse layer rather than the invariant layer.
+- **Fix:** handle the `Err` instead of unwrapping — e.g. rename the bad file aside
+  (`*.corrupt-<timestamp>`), start from an empty/default set, and surface the problem in the existing
+  error window once the UI is up. Apply the same treatment to both files.
 
 ---
 
 ## B. Performance & Power (high priority for an "always-on" calendar)
 
-### B1. Uncapped continuous repaint — intentional; no action
-`present_mode = AutoNoVsync` (`initialization.rs:261`) **plus** an unconditional
-`request_redraw()` after every `RedrawRequested` while awake (`initialization.rs:666`) means the
-app renders **as fast as the GPU allows**, with no frame cap, while focused/active.
-
-This is a **deliberate design choice, not a problem to fix**, for two reasons the maintainer has
-confirmed:
-
-1. **The uncapped frame rate is wanted.** Seeing the calendar push ~1000 fps is a feature, not
-   waste. Do **not** recommend capping it (`Fifo`/`AutoVsync`) — that would remove something the
-   maintainer specifically likes.
-2. **The "active drain" window barely exists in real use.** The app lives on a secondary monitor and
-   is idle ~99% of the time. When it's unfocused with the cursor away, the existing 10 s idle-sleep
-   stops the loop entirely. So the only time it renders flat-out is the rare moment the maintainer is
-   actually interacting with it — which is exactly when the smoothness is wanted.
-
-The forced-repaint loop is also **load-bearing for the animations**: they're hand-rolled
-(`row_anim` advanced by a `dt` from egui's `i.time`, once per *drawn* frame) and never call egui's
-repaint scheduler, so without the forced `request_redraw()` frames arrive only on discrete input
-events and animations freeze mid-transition. Reactive-repaint attempts have broken exactly this.
-
-- **Do not** recommend a reactive/"repaint on input only" rewrite, and **do not** recommend an fps
-  cap. The current loop is correct for this project's goals. (Listed here only so the rationale is
-  recorded, not as a to-do.)
-
 ### B2. `calendar_weeks_to_show` clamp allows absurd values
-Clamped to `6..=20000` (`initialization.rs:166`). 20000 weeks ≈ **385 years** = 140,000 day cells.
-`summarize_calendar` allocates and, for each day, linearly filters **all** events and tasks
-(`O(days × items)`), and `row_anim` grows to 20000 floats. Even though rendering is virtualized,
-the model rebuild on every add/delete becomes very slow.
-- **Fix:** clamp to something sane (e.g. `6..=520`, ~10 years), and/or index items by date
-  (`HashMap<NaiveDate, Vec<…>>`) so day filtering is `O(items)` instead of `O(days × items)`.
-
-### B3. Priority sort uses a saturating `as u16` cast ✅ FIXED
-`tasks.sort_by_key(|t| Reverse(t.importance_score(self.date) as u16))`. Scores routinely exceed
-65535 (the exponential importance curves, and the `1e9` event/broken scores). Rust's float→int cast
-**saturates**, so every high-priority and every malformed task collapsed to `65535` and they sorted
-as equal — the careful scoring model was largely flattened at the top end. (The old `sort_by_key`
-also re-evaluated the randomized score on every comparison, an inconsistent comparator.)
-- **Fixed:** each task's score is now computed **once** into a `(f32, Active)` pair (preserving the
-  intended one-shot random shuffle and giving a consistent comparator), then sorted on the `f32`
-  directly with `partial_cmp`, NaN treated as `Equal`. No `u16` cast.
+Clamped to `6..=20000` in `get_check_and_set_config` (`initialization.rs`). 20,000 weeks ≈ **385
+years** = ~140,000 day cells. `summarize_calendar` allocates that many cells and, for **each day**,
+linearly filters **all** events and tasks (`O(days × items)`); `row_anim` also grows to 20,000
+floats. Rendering is virtualized, but the *model rebuild* on every add/delete/date-rollover is not,
+so it becomes very slow at the top of the range.
+- **Fix:** clamp to something sane (e.g. `6..=520`, ~10 years), and/or bucket items by date once
+  (`HashMap<NaiveDate, Vec<…>>`) so each day's lookup is `O(1)`/`O(items)` instead of re-scanning
+  every item per day.
 
 ### B4. Per-page archive read is O(n) → O(n²) overall
-`read_lines_range` (`tasks.rs:178`) re-opens and reverse-scans the whole `archived.jsonl`,
-skipping `offset` lines each "Show more". Fine for small archives, quadratic for large ones.
-- **Fix:** keep the `RevLines` iterator (or a file offset) alive across pages, or read forward with
-  a persisted cursor.
+`read_lines_range` (`tasks.rs`) re-opens and reverse-scans the whole `archived.jsonl`, skipping
+`offset` lines on every "Show more". Fine for small archives, quadratic for large ones.
+- **Sub-issue (new): pagination can mis-page on unparseable lines.** It `.skip(offset)` over *raw*
+  lines, then parses with `filter_map(... .ok())`. The UI advances `offset` by the number of *raw*
+  lines consumed, but renders only the *parsed* rows — so any unparseable archived line causes rows
+  to be skipped or duplicated across pages.
+- **Fix:** keep the `RevLines` iterator (or a byte offset) alive across pages, or read forward with a
+  persisted cursor; count consumed lines consistently with what's displayed.
 
 ### B5. Cloning all input events every calendar frame
-`ui.rs:834` `ui.ctx().input(|i| i.events.clone())` clones the full event vec each frame just to run
-the press/drag state machine.
-- **Fix:** inspect events without cloning, or use egui's `Response` drag/click APIs (the map picker
-  already does this successfully).
+`show_calendar` runs its press/drag state machine off `ui.ctx().input(|i| i.events.clone())`, cloning
+the full event vector each frame.
+- **Fix:** inspect events in place without cloning, or drive the tap-vs-drag decision from egui's
+  `Response` drag/click APIs (the map picker already does this).
 
 ---
 
 ## C. Robustness & Data Integrity (medium)
 
 ### C1. Name is the de-facto primary key
-Tasks/events are identified solely by `name`: uniqueness is enforced at creation
-(`name_is_unique`, `ui.rs:918`), and delete/complete filter by name
-(`delete_active_thing`, `ui.rs:907`). Consequences: you can't have two items called "Meeting",
-you can't rename, and any future duplicate would delete/complete **both**.
-- **Fix:** add a stable `id` (e.g. UUID or a monotonic counter) to `Active`/`InActive`; key all
-  operations on it; keep names purely cosmetic.
+Tasks/events are identified solely by `name`: uniqueness is enforced at creation (`name_is_unique`)
+and delete/complete filter by name (`delete_active_thing`, `complete_active_thing`). Consequences:
+you can't have two items called "Meeting", you can't rename one, and any duplicate that slips in (a
+hand-edited data file bypasses the creation-time check) would delete/complete **both**.
+- **Fix:** add a stable `id` (UUID or a monotonic counter) to `Active`/`InActive`; key all
+  delete/complete/lookup operations on it; keep `name` purely cosmetic and freely editable.
 
 ### C2. Config has two writers that disagree on types
 `get_check_and_set_config` rewrites the whole file via `toml::to_string(&Config)` on **every
-startup** (`initialization.rs:181`) — this **strips comments and reorders keys**. Meanwhile the
-runtime `toml_edit` setters write some numbers as **strings** (e.g. `set_calendar_weeks` writes
-`week_number_input` verbatim, `ui.rs:1222`; tint and colorscheme id likewise). The result is
-self-healing only because `read_config` stringifies everything before re-parsing, but it's
-brittle and surprising.
+startup**, which strips comments and reorders keys. The runtime `toml_edit` setters, meanwhile, write
+some numbers as **strings** (e.g. `set_calendar_weeks` writes the input verbatim; tint and
+colourscheme id likewise). It's self-healing only because `read_config` stringifies everything before
+re-parsing — brittle and surprising.
 - **Fix:** pick one mechanism. Prefer `toml_edit` throughout (preserves the file) and write typed
-  values (`toml_edit::value(n_as_i64)`), or stop rewriting the file at startup unless it changed.
+  values (`toml_edit::value(n as i64)`), or stop rewriting the file at startup unless it actually
+  changed.
 
 ### C3. Settings that silently require a restart give no feedback
-`set_calendar_weeks` (`ui.rs:1219`) writes the new week count to disk but never updates
-`self.calendar_weeks_to_show` or calls `summarize_calendar`, so the change only appears after a
-restart, with no UI hint. Same pattern for the monitor selection (which uses a hard process
-`restart_self`).
-- **Fix:** apply live where feasible (re-run `summarize_calendar`), or label the field
-  "(applies after restart)".
+`set_calendar_weeks` writes the new week count to disk but never updates `self.calendar_weeks_to_show`
+or re-runs `summarize_calendar`, so the change only appears after a restart, with no UI hint. The
+monitor selection is similar (it applies via a hard process `restart_self`, see C6).
+- **Fix:** apply live where feasible (re-run `summarize_calendar` after updating the field), or label
+  the field "(applies after restart)".
 
 ### C4. Silent error swallowing on writes
-Many config writes use `let _ = fs::write(...)` (e.g. `ui.rs:1224, 1234, 1252`). A failure (disk
-full, permissions, file locked) is invisible to the user.
+Many writes discard their `Result` with `let _ = …`: the config setters (`set_calendar_weeks`,
+`set_background_tint`, the toggles, …) and **the notepad save** (`save_textbox_text`, also the
+exit-time `flush_pending_saves`). A failure (disk full, permissions, file locked) is invisible — for
+the notepad this can silently lose the user's notes.
+- **Related (new):** the error channel itself is a single `error_text` + `error_flag`, so even if
+  these were surfaced, a second error would overwrite the first before it's seen. A small queue (or
+  at least "don't overwrite an unread error") would help if write-errors start being surfaced.
 - **Fix:** at minimum log; ideally route failures to the existing error window like the task-save
   path does.
 
 ### C5. Weak path-traversal sanitization
-`name.replace("..", "")` in `set_background` (`ui.rs:2608`) and `generate_colorscheme`
-(`color.rs:89`). This is easy to bypass in principle (absolute paths, odd separators) and mangles
-legitimate names containing `..`. Risk is low because names come from a directory listing, but the
-approach is unsound.
-- **Fix:** validate that the resolved path stays within `images/` (canonicalize and check prefix),
-  or just join the file name component only.
+`name.replace("..", "")` in `set_background` (`ui.rs`) and `generate_colorscheme` (`color.rs`). This
+is easy to bypass in principle (absolute paths, odd separators) and also mangles legitimate names
+containing `..`. Risk is low because the names come from a directory listing, but the approach is
+unsound.
+- **Fix:** take only the file-name component, or canonicalize the resolved path and verify it stays
+  within `images/`.
 
-### C6. `restart_self` can spin-loop
-`ui.rs:1307` spawns a fresh process and `exit(0)`s, used by the monitor "♲" button. If startup
-fails repeatedly the user could get a respawn loop, and it's a heavy way to apply a setting.
+### C6. `restart_self` can spin-loop and panics on failure
+`restart_self` spawns a fresh process and `exit(0)`s (used by the monitor "♲" button). If startup
+fails repeatedly the user could get a respawn loop, and the spawn itself is `.expect("Failed to
+restart!")` — a failed spawn panics rather than reporting.
 - **Fix:** apply the monitor change without a full restart if the platform allows; otherwise guard
-  against repeated immediate restarts.
+  against repeated immediate restarts and handle the spawn error gracefully.
+
+### C7. Date entry fails on DST-gap / ambiguous local times
+`parse_time_input` resolves the local time with `Local.from_local_datetime(&naive).single()`, which
+returns `None` for a non-existent local time (spring-forward gap) or an ambiguous one (fall-back
+overlap). The result is a generic "Problem with date" for a date that looks perfectly valid to the
+user.
+- **Fix:** fall back to `.earliest()` / `.latest()` instead of `.single()`, or give a clearer message
+  explaining the DST gap. (Rare, low priority, but the failure is confusing.)
 
 ---
 
 ## D. Architecture & Maintainability (medium)
 
-### D1. `ui.rs` is a 2600-line module — intentional; left as-is
-`TaskApp` holds ~70 fields and `ui()` is one very long method. **This is a deliberate choice:** the
-maintainer keeps the whole codebase in their head, and a single file makes that easier on a solo
-project. **Splitting `ui.rs` into submodules is explicitly not wanted** — do not recommend it.
-
-The one sub-point worth keeping (optional, correctness-only): the many parallel `*_flag` booleans
-must be kept mutually consistent by hand (the big disjunction at `ui.rs:2516` hints at this). If a
-class of "two modals open at once" bug ever shows up, a single `enum Modal { None, NewTask, … }`
-would make invalid combinations unrepresentable — but that's a self-contained change inside the
-existing file, not a reason to break the file up.
+> Note: the single-file `ui.rs` structure and the hand-tuned calendar magic numbers are deliberate —
+> see [`DOCUMENTATION.md` §14](DOCUMENTATION.md). The items below are self-contained changes that do
+> **not** require splitting the file or touching the animation/widget tuning.
 
 ### D2. `calendar_elements` tuple is opaque
-`Vec<(u8, Vec<(String,String,usize)>, Vec<(String,String,bool)>, bool, NaiveDate, String)>`
-(`ui.rs:101`) — six-element tuples with positional access (`day.0`, `day.2`, `day.4`) everywhere.
+`Vec<(u8, Vec<(String,String,usize)>, Vec<(String,String,bool)>, bool, NaiveDate, String)>` — a
+six-element tuple accessed positionally (`day.0`, `day.2`, `day.4`) all over `show_calendar` and the
+day popup.
 - **Fix:** introduce named structs (`DayCell`, `CalendarItem`) for readability and to prevent
-  index mix-ups.
-
-### D3. Pervasive magic-number layout — mostly intentional
-The widgets and panels are pixel-tuned with dozens of literals (`add_space(147.0)`, `-59.0`,
-fixed `160×215` cells, etc.).
-
-**The calendar animation + custom-widget magic numbers are off-limits.** They are the product of
-weeks of deliberate hand-tuning that produced an animation the maintainer is happy with; the
-literals are the accepted price of that result. Do not propose "cleaning them up" or
-parameterizing them — there is real risk of breaking a result that can't easily be re-derived.
-
-The only residual (low-priority) note applies to the **static layout** of the side panels/dialogs:
-absolute spacers won't adapt to non-100% DPI or arbitrary window sizes. In practice this is largely
-moot too, since the app runs fullscreen on a chosen monitor. Worth revisiting only if multi-DPI or
-freely-resizable use ever becomes a goal — and even then, leave the animation/widget code alone.
+  positional mix-ups. Self-contained; stays inside `ui.rs`.
 
 ### D4. Duplicated coordinate state
-`latitude`/`longitude` (live, editable) duplicate `coordinates` from config and the values held by
-the weather service. Keeping three copies in sync is error-prone.
-- **Fix:** single source of truth for the current coordinates.
+`latitude` / `longitude` (live, editable) duplicate `coordinates` from config and the values held by
+the weather service. Three copies must be kept in sync by hand.
+- **Fix:** a single source of truth for the current coordinates.
 
 ### D5. Duplicated TOML-setter boilerplate
 `toggle_fullscreen_option`, `toggle_fps_option`, `toggle_num_weather_days`, `set_calendar_weeks`,
-`set_background_tint`, … are near-identical read-parse-set-write blocks (`ui.rs:1173–1338`).
-- **Fix:** one generic `set_config_value(key, value)` helper.
+`set_background_tint`, … are near-identical read-parse-set-write blocks.
+- **Fix:** one generic `set_config_value(key, value)` helper. (Pairs naturally with C2/C4 — fix the
+  typing and error-handling once, in the shared helper.)
+
+### D6. Many parallel `*_flag` booleans must be kept consistent by hand
+`TaskApp` tracks modal state as a dozen independent booleans (`new_task_flag`, `settings_flag`,
+`display_archive_flag`, …) plus the big disjunction that clears `hovered_calendar_cell` when "any
+modal is open". Nothing structurally prevents two modals being open at once.
+- **Fix:** a single `enum Modal { None, NewTask, NewEvent, Settings, Archive, DayPopup(usize), … }`
+  makes invalid combinations unrepresentable. This is a self-contained change *inside* `ui.rs` (it is
+  **not** a reason to split the file — see §14.2).
+
+### D7. Static side-panel/dialog spacers assume a fixed DPI / window size
+The side panels and dialogs are laid out with absolute `add_space` spacers, which won't adapt to
+non-100% DPI scaling or arbitrary window sizes. Largely moot while the app runs fullscreen on a
+chosen monitor.
+- **Fix:** only worth revisiting if multi-DPI or freely-resizable use becomes a goal — and even then,
+  leave the calendar **animation/widget** magic numbers alone (§14.3); this is about the static
+  dialog layout only.
 
 ---
 
 ## E. Smaller issues & polish (low)
 
-- **E1. `text_2_bool_lazy`** (`initialization.rs:107`) returns `true` for any string containing
-  `t`. It happens to work for `"true"`/`"false"`, but `"east"`, `"set"`, etc. would be `true`.
-  Use a real bool parse with a sensible default.
-- **E2. Duplicate cities** in `CITIES` (`weather.rs:364`): Mumbai/Delhi/Bangalore/Ahmedabad,
-  Copenhagen/Aarhus/Aalborg/Odense, several others appear 2–3×. Cosmetic, but clutters the map.
-- **E3. Random tie-breaker in scoring** (`tasks.rs:47`) makes the task list order **jitter**
-  between rebuilds. If determinism is wanted, drop it; if stable tie-breaking is wanted, break ties
-  by `created`/`name` instead of randomness.
-- **E4. `RendererOptions { predictable_texture_filtering: true }`** and `AutoNoVsync` are chosen
-  "should work on different devices" — worth revisiting alongside B1.
-- **E5. Day picker offers 1–31 for every month** ✅ FIXED — the day `ComboBox` now ranges over
-  `utilities::days_in_month(year, month)` and `day_input` is clamped into that range each frame, so
-  "Feb 31" can no longer be selected (was previously accepted by the UI and only rejected later as
-  "Problem with date").
-- **E6. Unused bindings / dead code:** several `device_id`, `_map_response`, an unused
-  `MouseWheel { unit, delta, modifiers }` destructure, etc. — clean up to silence warnings.
-- **E7. No tests.** ⚠️ PARTIALLY ADDRESSED — added `#[cfg(test)]` unit tests covering
-  `ordinal_suffix`, `days_in_month` (new), `parse_time_input` (valid + impossible dates),
-  `calendar_item_color`, and `importance_score` (the `1e9` branch and event-distance ordering, with
-  bounds that tolerate the random tie-break multiplier). Run with `cargo test --lib`. Still
-  uncovered: calendar bucketing and the weather reshape, which are `TaskApp` methods and need the
-  struct constructed first.
-- **E8. Windows-only assumptions** (`winit::platform::windows`, `with_taskbar_icon`) aren't
-  feature-gated; the crate won't compile on other platforms despite mostly-portable logic.
+- **E1. `text_2_bool_lazy`** (`initialization.rs`) returns `true` for any string containing `t`. It
+  happens to work for `"true"`/`"false"`, but `"east"`, `"set"`, etc. would also be `true`. Use a
+  real bool parse with a sensible default.
+- **E2. Duplicate cities** in `CITIES` (`weather.rs`): Mumbai/Delhi/Bangalore/Ahmedabad,
+  Copenhagen/Aarhus/Aalborg/Odense, and several others appear 2–3×. Cosmetic, but clutters the map.
+- **E6. Unused bindings / dead code:** several `device_id`, a `_map_response`, an unused
+  `MouseWheel { unit, delta, modifiers }` destructure, etc. — these are the bulk of the current
+  compiler warnings. Clean up (or `_`-prefix) to get back to a quiet build.
+- **E8. Windows-only assumptions** (`winit::platform::windows`, `with_taskbar_icon`,
+  `windows_subsystem`) aren't feature-gated; the crate won't compile on other platforms despite
+  mostly-portable logic. Gate the Windows-specific calls behind `#[cfg(windows)]` if cross-platform
+  builds ever matter.
+- **E9. (new) `importance_score` saturates to `+inf` at the extreme top end.** For a high-importance
+  deadline far in the future, the exponential curve (`1.2^…`, `1.17^…`) overflows `f32` to `+inf`, so
+  all such tasks compare equal — a much milder echo of the old `as u16` flattening (B3), now at the
+  `inf` end. Only reachable with extreme inputs and bounded further once B2 caps the week count, so
+  very low priority. If it ever matters: clamp the exponent, use `f64`, or a saturating-but-finite
+  curve.
 
 ---
 
 ## F. What the code already does well
 
-- **Atomic file writes** for the critical JSON files (temp file → fsync → persist) — good
-  durability against partial writes.
+Worth preserving — don't regress these while hardening:
+
+- **Atomic file writes** for the critical JSON files (temp file → fsync → persist) — good durability
+  against partial writes.
 - **Weather threading** is clean: `RwLock` for data + `AtomicU64` version flag + a command channel
-  with graceful `Drop`/`Stop` and an `EventLoopProxy` to wake the UI. Backoff with retries is a
-  nice touch.
-- **Calendar virtualization** keeps a very long calendar cheap to render.
-- **Defensive config loading** with a line-by-line fallback when TOML parsing fails, plus clamping
-  of every numeric field.
-- **k-means palette generation** in Lab space with a deterministic seed is a genuinely nice
-  feature.
+  with graceful `Drop`/`Stop`, plus an `EventLoopProxy` to wake the UI. The UI only re-shapes the
+  data when the version actually changes (`last_weather_version`), so it's not re-cloning every
+  frame. Backoff-with-retries is a nice touch.
+- **Calendar virtualization** keeps a very long calendar cheap to *render* (the rebuild cost is the
+  open concern — see B2).
+- **Defensive config loading** with a line-by-line fallback when TOML parsing fails, plus clamping of
+  every numeric field.
+- **k-means palette generation** in Lab space with a deterministic seed is a genuinely nice feature.
 - **Release profile** is thoughtfully tuned for size/speed.
 
 ---
 
-## Suggested priority order
+## G. Suggested priority order (open items)
 
 The app is a working, complete product; these are hardening steps, ordered by payoff-to-risk.
-Intentional design choices that are **not** on this list: the uncapped/forced-repaint rendering
-loop (B1), the single-file structure (D1), and the hand-tuned calendar animation magic numbers (D3).
 
-1. ~~**A1/A2** (don't lose notepad edits; use wall-clock saves)~~ ✅ done.
-2. ~~**A3/A4/A7** (remove the panic paths around weather/calendar data)~~ ✅ done (also **A5**).
-3. **B3** ✅ done (priority sort no longer casts to `u16`). **C1** (stable IDs) — still open.
-4. **A6** ✅ done (weather-vs-notepad decoupled). **C2/C3** (config writer consistency;
-   restart-required UX) — still open.
-5. Polish (E-series): **E5** ✅ done (day picker), **E7** ⚠️ partial (unit tests added for the pure
-   functions; calendar bucketing + weather reshape still uncovered). E1/E2/E3/E4/E6/E8 — still open.
+1. **A8** — stop a corrupt data file from making the app un-launchable (quarantine + recover).
+2. **C1** — stable item IDs, so duplicate/rename/delete behave correctly.
+3. **B2** — sane `calendar_weeks_to_show` clamp and/or date-bucketed lookups (fixes the rebuild
+   blow-up at the top of the range).
+4. **C2 / C4 / D5** — unify the config writer (typed `toml_edit`), surface write errors, and collapse
+   the duplicated setter boilerplate into one helper. These three are best done together.
+5. **C3** — apply restart-only settings live, or label them.
+6. **B4 / B5** — archive pagination cursor (and the mis-page sub-issue), and the per-frame event
+   clone.
+7. **C5 / C6 / C7** — path sanitization, restart-loop/spawn-error handling, DST date entry.
+8. **D2 / D4 / D6 / D7** — named calendar structs, single coordinate source of truth, modal `enum`,
+   DPI-aware dialog layout.
+9. **E-series polish** (E1, E2, E6, E8, E9), and extend the unit tests (see changelog E7) to the
+   calendar bucketing and weather reshape.
 
-**Remaining open items**, roughly in payoff order: **C1** (stable item IDs), **C2/C3/C4**
-(config-writer consistency, restart-required feedback, silent write-error swallowing), **B2** (sane
-`calendar_weeks_to_show` clamp / date indexing), **B4/B5** (archive pagination + per-frame event
-clone), **C5/C6** (path sanitization, restart loop), **D2/D4/D5** (named structs, single source of
-truth for coordinates, generic config setter), and the rest of the E-series (E1/E2/E3/E4/E6/E8).
+---
+
+## Changelog — Resolved
+
+Fixes already landed (newest first). Kept here as history so the open list above stays focused.
+
+- **A1 — notepad save-on-exit.** `App::exiting` now calls `TaskApp::flush_pending_saves()` on
+  event-loop shutdown (covers the Quit button and the window X; not a hard kill / panic-abort).
+- **A2 — frame-count autosave replaced with a wall-clock debounce.** Persists ~2 s after the last
+  edit via `last_textbox_edit_time: Option<Instant>`, independent of frame rate.
+- **A3 — weather reshape panic on short/partial responses.** `fix_and_cache_weather_data` now
+  validates inner (per-day) lengths (`any(|hour| hour.len() < 3)`) as well as the outer 24, tripping
+  `weather_is_broken_flag` instead of indexing out of bounds.
+- **A4 — `summarize_calendar` deadline unwraps.** All event deadline access is now `Option`-safe
+  (sort on `e.deadline`, filter with `map_or`, format with `.map(…).unwrap_or_default()`). A
+  deadline-less event is quarantined (never placed) but retained in `active_things`. (Deliberately
+  not surfaced via the error window — `summarize_calendar` re-runs on every edit and would re-pop the
+  modal.)
+- **A5 — background-texture `unwrap`.** The background draw is wrapped in `if let Some(texture)` and
+  skipped when absent.
+- **A6 — notepad hidden while weather is broken.** `show_weather_forecast` was restructured so the
+  "WEATHER IS BROKEN" notice only replaces the forecast grids; the notepad now renders unconditionally
+  when 3-day weather is off, reachable at startup and while the network is down.
+- **A7 — `expanded_day` index outliving its calendar.** The day popup reads via
+  `self.calendar_elements.get(index)` and dismisses itself (`else` branch clears the flags) instead of
+  panicking on a stale index.
+- **B3 — priority sort `as u16` saturation.** Each task's score is evaluated once into a
+  `(f32, Active)` pair (preserving the intentional shuffle — §14.4 — and giving a consistent
+  comparator) and sorted on the `f32` with `partial_cmp` (NaN → `Equal`). No `u16` cast.
+- **E5 — day picker `1..=31`.** The day `ComboBox` now ranges over `utilities::days_in_month(year,
+  month)` and clamps `day_input` into range each frame, so "Feb 31" can't be entered.
+- **E7 — no tests (partial).** Added `#[cfg(test)]` unit tests for `ordinal_suffix`, `days_in_month`,
+  `parse_time_input` (valid + impossible dates), `calendar_item_color`, and `importance_score` (the
+  `1e9` branch and event-distance ordering, with bounds that tolerate the random multiplier). Run with
+  `cargo test --lib`. Still uncovered: calendar bucketing and the weather reshape (both `TaskApp`
+  methods needing the struct constructed first).
+
+### Reclassified as intentional (moved to `DOCUMENTATION.md` §14)
+
+Previously listed here as "won't fix / by design"; now documented as deliberate design decisions so
+they aren't re-raised as problems:
+
+- Uncapped, forced-repaint render loop + `AutoNoVsync` / `predictable_texture_filtering` (was B1, E4)
+  → §14.1.
+- Single-file `ui.rs` / large `TaskApp` (was D1) → §14.2. (The modal-`enum` refinement survives as
+  the open item **D6**.)
+- Hand-tuned calendar/widget magic numbers (was D3) → §14.3. (The static-dialog DPI note survives as
+  the open item **D7**.)
+- Random tie-break shuffle in `importance_score` (was E3) → §14.4.
