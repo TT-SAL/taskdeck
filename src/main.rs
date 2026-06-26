@@ -26,7 +26,23 @@ async fn run() {
     //this allows us to use the debug exe as though it was located in the final folder structure
     let exe_file_path = std::env::current_exe().expect("error finding exe path");
 
-    let active_items: Vec<Active> = tasks::read_at_startup(&exe_file_path).unwrap();
+    // Collected non-fatal startup recovery messages (e.g. quarantined corrupt
+    // files), surfaced in the error window once the UI is up.
+    let mut startup_errors: Vec<String> = Vec::new();
+
+    // A corrupt/unreadable active set must not abort the boot; quarantine the
+    // bad file and start from an empty set instead.
+    let active_items: Vec<Active> = match tasks::read_at_startup(&exe_file_path) {
+        Ok(items) => items,
+        Err(e) => {
+            startup_errors.push(tasks::quarantine_corrupt_file(
+                &exe_file_path,
+                "read_at_startup.json",
+                e.as_ref(),
+            ));
+            Vec::new()
+        }
+    };
 
     let images_path = PathBuf::from("images");
     // Try reading the directory, if it fails, return an empty vector
@@ -38,7 +54,19 @@ async fn run() {
         Err(_) => vec![],
     };
     
-    let mut colorschemes = color::read_colorschemes(&exe_file_path).unwrap();
+    // Same treatment for the colour schemes: a corrupt file falls back to the
+    // default scheme (inserted below) rather than panicking at boot.
+    let mut colorschemes = match color::read_colorschemes(&exe_file_path) {
+        Ok(schemes) => schemes,
+        Err(e) => {
+            startup_errors.push(tasks::quarantine_corrupt_file(
+                &exe_file_path,
+                "colorschemes.json",
+                e.as_ref(),
+            ));
+            std::collections::HashMap::new()
+        }
+    };
 
     if colorschemes.is_empty() {
         colorschemes.insert(0, ColorScheme::default_scheme());
@@ -63,6 +91,11 @@ async fn run() {
         three_day_weather,
         background_image_tint_percent,
         weather_service: get_weather(coordinates, proxy),
+        startup_error: if startup_errors.is_empty() {
+            None
+        } else {
+            Some(startup_errors.join("\n\n"))
+        },
     };
 
     let mut task_app = TaskApp::new(setup_config);

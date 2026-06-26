@@ -130,15 +130,23 @@ main → pollster::block_on(run())
 run():
   1. EventLoop::new(); create an EventLoopProxy (used to wake UI from the weather thread)
   2. get_check_and_set_config()  → Config (reads + normalizes userconfig.toml)
-  3. tasks::read_at_startup()    → Vec<Active>
+  3. tasks::read_at_startup()    → Vec<Active>   (corrupt file → quarantine + empty set, see below)
   4. enumerate images/ dir       → background_options
-  5. color::read_colorschemes()  → HashMap<u32, ColorScheme> (inserts default if empty)
+  5. color::read_colorschemes()  → HashMap<u32, ColorScheme> (inserts default if empty;
+                                    corrupt file → quarantine + default scheme)
   6. utilities::read_notepad_text()
   7. get_weather(coords, proxy)  → spawns the background weather thread, returns WeatherService
   8. build TaskAppConfig → TaskApp::new(...)
   9. task_app.summarize_calendar()   (initial calendar build / sort)
   10. App::new(task_app, ...) → event_loop.run_app(&mut app)
 ```
+
+**Corrupt-file recovery.** Steps 3 and 5 must not abort the boot. If `read_at_startup.json` or
+`colorschemes.json` is unreadable or fails to parse, `tasks::quarantine_corrupt_file` renames the bad
+file aside (`<name>.corrupt-<timestamp>`, preserved for manual recovery) and startup continues from an
+empty active set / the default colour scheme. The recovery message(s) are passed to `TaskApp` via
+`TaskAppConfig::startup_error` and shown in the existing error window once the UI is up. The notepad
+load already degrades gracefully via `unwrap_or`.
 
 ### 5.2 The two top-level structs
 
@@ -190,14 +198,22 @@ forecast is picked up.
 
 ```rust
 struct Active {
+    id: u64,                      // stable identity; what delete/complete/lookup key on (see below)
     importance: Option<u8>,       // 0..=4 ("Not"→"Lethally" important); Some only for deadline tasks
     time_importance: Option<u8>,  // 0..=2 (urgency); Some only for deadline-less tasks
-    name: String,                 // also the de-facto unique identity (see §7)
+    name: String,                 // cosmetic only — may repeat and be edited freely
     created: DateTime<Local>,
     deadline: Option<DateTime<Local>>,
     is_event: bool,               // events render with a distinct palette color (index 5)
 }
 ```
+
+**Identity.** Items are keyed by `id`, not `name`: delete/complete/lookup and the calendar day
+popup all operate on the id, so duplicate or renamed names are harmless. `id` is a monotonic `u64`
+handed out by `TaskApp::add_active_thing` from `TaskApp::next_id`. `id == 0` is an "unassigned"
+sentinel: items loaded from a pre-id or hand-edited save (the field is `#[serde(default)]`) are
+backfilled at startup by `tasks::assign_missing_ids`, which preserves any existing ids and seeds
+`next_id` past the current maximum. New ids persist on the next save.
 
 Three valid shapes:
 | Kind | `is_event` | `importance` | `time_importance` | `deadline` |
@@ -208,8 +224,9 @@ Three valid shapes:
 
 ### `InActive` (`tasks.rs`) — an archived item
 
-Same fields minus `time_importance`, plus `inactivated: DateTime<Local>`. Produced by
-`Active::to_inactive()` when a task is completed.
+Same fields minus `time_importance`, plus `inactivated: DateTime<Local>`. Carries the originating
+`Active::id` (also `#[serde(default)]` for legacy rows). Produced by `Active::to_inactive()` when a
+task is completed.
 
 ### Persistence functions
 
@@ -254,11 +271,17 @@ Runs at startup and after any add/delete/complete and on date rollover. Steps:
 
 1. Partition `active_things` into events and tasks; sort events by deadline, tasks by score.
 2. Compute `deadline_tasks` (tasks that have a deadline) — these are the ones placeable on the grid.
-3. Find the Monday of the current week; iterate `calendar_weeks_to_show × 7` days.
-4. For each day, collect that day's events and deadline-tasks; choose up to **3** (events first),
+3. **Bucket** the events and the deadline-tasks by day via `tasks::bucket_by_deadline_day`
+   (`HashMap<NaiveDate, Vec<&Active>>`, borrowing — no clones). This makes each cell an O(1) lookup,
+   so the whole build is **O(days + items)** instead of the old O(days × items) per-day scan. Each
+   bucket preserves the source order (events by deadline, tasks by score), so the "take 3" selection
+   below is unchanged.
+4. Find the Monday of the current week; iterate `calendar_weeks_to_show × 7` days.
+5. For each day, look up that day's events and deadline-tasks; choose up to **3** (events first),
    sorted by exact time → `chosen_str: Vec<(name, "HH:MM", color_id)>`.
-5. Also build the **full** day list (`all_str: Vec<(name, "HH:MM", is_event)>`) for the day popup.
-6. Record per-row month-boundary labels in `row_contains_month_switch`.
+6. Also build the **full** day list (`all_str: Vec<(id, name, "HH:MM", is_event)>`) for the day
+   popup — the `id` lets the popup's complete/delete buttons act on the right item.
+7. Record per-row month-boundary labels in `row_contains_month_switch`.
 
 Output is cached in `self.calendar_elements: Vec<(day_u8, chosen[3], full_list, is_today, NaiveDate, day_label)>`.
 
@@ -324,7 +347,10 @@ pre-fill the date fields from the selected day).
 ## 11. Configuration Reference — `taskdeck_data/userconfig.toml`
 
 `get_check_and_set_config` reads the file (falling back to line-by-line parsing if TOML parsing
-fails), clamps/validates each field, then **re-serializes the normalized `Config` back to disk**.
+fails), clamps/validates each field, then writes the normalized values back to disk via
+`write_normalized_config`. That writer uses `toml_edit`, so it **preserves existing comments, key
+order, and unknown keys** and writes each value with its real TOML type (integers/float-arrays, not
+strings). A missing or unparseable file falls back to a fresh document (same self-heal as before).
 
 | Key | Type | Default | Validation |
 |-----|------|---------|-----------|
@@ -333,15 +359,26 @@ fails), clamps/validates each field, then **re-serializes the normalized `Config
 | `background` | string | `""` | filename within `images/` |
 | `enable_fps_counter` | bool | `false` | |
 | `window_size_startup` | `[f32; 2]` | `[1280, 720]` | rejected if either dim `< 200` |
-| `calendar_weeks_to_show` | usize | `100` | clamped `6..=20000` |
+| `calendar_weeks_to_show` | usize | `100` | clamped `CALENDAR_WEEKS_MIN..=MAX` (`6..=520`, ~10 years) |
 | `background_image_tint_percent` | u32 | `30` | clamped `1..=100` |
-| `selected_monitor_name` | string | `""` | matched against `available_monitors()` |
+| `selected_monitor_name` | string | `""` | matched against `available_monitors()`; Settings shows "No monitors detected" (no crash) if the list is empty |
 | `selected_colorscheme_id` | u32 | `0` | clamped `0..=200000` |
 | `three_day_weather` | bool | `false` | |
 
-Runtime setting changes are written back through `toml_edit` (preserving the rest of the doc),
-e.g. `update_background_config`, `toggle_fullscreen_option`, `set_calendar_weeks`,
-`set_weather_coordinates`, `set_selected_monitor_name`, `set_colorscheme`.
+Runtime setting changes go through one shared helper, `TaskApp::write_config_value(key, value)`
+(read → parse → set typed value → write), wrapped by `persist_config_value(key, value)` which routes
+any write failure to the error window instead of dropping it. The boolean toggles and the background
+picker call `persist_config_value` directly; the setters that also mutate live state
+(`set_calendar_weeks`, `set_background_tint`, `set_weather_coordinates`, `set_selected_monitor_name`,
+`set_colorscheme`) do their side-effect and then call it. Both the startup writer and these setters
+share the same mechanism and value types, so the file no longer round-trips numbers as strings.
+
+**Apply timing.** Most settings apply live. `set_calendar_weeks` updates `calendar_weeks_to_show`
+and re-runs `summarize_calendar` immediately (committed on Enter / focus-loss, not per keystroke, to
+avoid rebuilding the calendar on every character); the clamp bounds are the shared
+`CALENDAR_WEEKS_MIN/MAX` constants so the live value matches what a restart would load. The **startup
+monitor** is the exception — the window binds to a monitor at launch, so that choice only takes
+effect after a restart; the UI says "(applies after restart)" and the ♲ button restarts the app.
 
 ---
 

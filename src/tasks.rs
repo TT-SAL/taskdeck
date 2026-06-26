@@ -1,11 +1,17 @@
-use std::{error::Error, fs::{self, File, OpenOptions}, io::{BufReader, BufWriter, Write}, path::PathBuf};
-use chrono::{DateTime, Local};
+use std::{collections::HashMap, error::Error, fs::{self, File, OpenOptions}, io::{BufReader, BufWriter, Write}, path::PathBuf};
+use chrono::{DateTime, Local, NaiveDate};
 use rev_lines::RevLines;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Active {
+    /// Stable identity for the item. Unlike `name` (which is cosmetic and may
+    /// repeat), this is what delete/complete/lookup key on. `0` is the
+    /// "unassigned" sentinel for items loaded from a pre-id or hand-edited save;
+    /// `assign_missing_ids` backfills those at startup.
+    #[serde(default)]
+    pub id: u64,
     pub importance: Option<u8>,
     pub time_importance: Option<u8>,
     pub name: String,
@@ -50,7 +56,8 @@ impl Active {
         return score * random_variation;
     }
     pub fn to_inactive(self) -> InActive {
-        InActive { 
+        InActive {
+            id: self.id,
             importance: self.importance,
             name: self.name,
             created: self.created,
@@ -72,8 +79,27 @@ impl Active {
     }
 }
 
+/// Group dated items by their deadline day, preserving input order within each
+/// day's bucket. The returned vectors borrow from `items`, so the caller can
+/// build the calendar with O(1) per-cell lookups instead of re-scanning every
+/// item for every day (the old `O(days × items)` rebuild). Items without a
+/// deadline are skipped (they are never placed on the grid).
+pub fn bucket_by_deadline_day(items: &[Active]) -> HashMap<NaiveDate, Vec<&Active>> {
+    let mut buckets: HashMap<NaiveDate, Vec<&Active>> = HashMap::new();
+    for item in items {
+        if let Some(deadline) = item.deadline {
+            buckets.entry(deadline.date_naive()).or_default().push(item);
+        }
+    }
+    buckets
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InActive {
+    /// Carried over from the `Active` item so archived rows keep a stable
+    /// identity. See `Active::id`.
+    #[serde(default)]
+    pub id: u64,
     pub importance: Option<u8>,
     pub name: String,
     pub created: DateTime<Local>,
@@ -123,6 +149,52 @@ pub fn read_at_startup(exe_path: &PathBuf) -> Result<Vec<Active>, Box<dyn Error>
     let read_at_startup: Vec<Active> = serde_json::from_reader(reader)?;
 
     return Ok(read_at_startup);
+}
+
+/// Backfill stable ids onto any items that lack one (`id == 0`) — e.g. loaded
+/// from a pre-id save file or a hand-edited file. Existing non-zero ids are
+/// preserved, and newly assigned ids continue past the current maximum so they
+/// never collide. Returns the next free id, used to seed `TaskApp::next_id`.
+pub fn assign_missing_ids(items: &mut [Active]) -> u64 {
+    let mut next = items.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+    for item in items.iter_mut() {
+        if item.id == 0 {
+            item.id = next;
+            next += 1;
+        }
+    }
+    next
+}
+
+/// Move a corrupt or unreadable startup data file aside so the app can boot from
+/// a clean default instead of panicking. The bad file is renamed to
+/// `<file_name>.corrupt-<timestamp>` (preserved for manual recovery), and a
+/// human-readable description is returned for display in the error window.
+pub fn quarantine_corrupt_file(exe_path: &PathBuf, file_name: &str, cause: &dyn Error) -> String {
+    let data_dir = match get_data_dir(exe_path) {
+        Ok(dir) => dir,
+        // No data directory to quarantine within (e.g. first run / missing dir);
+        // there is nothing to move aside, so just report and start from defaults.
+        Err(_) => return format!("Could not read {file_name} ({cause}). Started from defaults."),
+    };
+
+    let file_path = data_dir.join(file_name);
+    if !file_path.exists() {
+        return format!("Could not read {file_name} ({cause}). Started from defaults.");
+    }
+
+    let timestamp = Local::now().format("%Y%m%d-%H%M%S");
+    let quarantine_path = data_dir.join(format!("{file_name}.corrupt-{timestamp}"));
+
+    match fs::rename(&file_path, &quarantine_path) {
+        Ok(()) => format!(
+            "{file_name} was unreadable ({cause}).\nIt was moved to {} and the app started from defaults.",
+            quarantine_path.display()
+        ),
+        Err(rename_err) => format!(
+            "{file_name} was unreadable ({cause}), and it could not be moved aside ({rename_err}). Started from defaults."
+        ),
+    }
 }
 
 pub fn oversafe_activesave(payload: &Vec<Active>, exe_path: &PathBuf) -> Result<(), Box<dyn Error>> {
@@ -203,6 +275,7 @@ mod tests {
         deadline: Option<DateTime<Local>>,
     ) -> Active {
         Active {
+            id: 0,
             importance,
             time_importance,
             name: "test".to_string(),
@@ -246,6 +319,110 @@ mod tests {
             soon.importance_score(now) > later.importance_score(now),
             "nearer event should score higher"
         );
+    }
+
+    #[test]
+    fn quarantine_moves_corrupt_file_aside() {
+        // A fake exe living directly in a dir that contains taskdeck_data/, so
+        // get_data_dir resolves to <tmp>/taskdeck_data.
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path().join("taskdeck_data");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let bad_file = data_dir.join("read_at_startup.json");
+        fs::write(&bad_file, b"{ this is not valid json").unwrap();
+
+        let fake_exe = tmp.path().join("app.exe");
+        let cause = std::io::Error::new(std::io::ErrorKind::InvalidData, "bad json");
+
+        let msg = quarantine_corrupt_file(&fake_exe, "read_at_startup.json", &cause);
+
+        // The corrupt file is moved aside, not left in place...
+        assert!(!bad_file.exists(), "corrupt file should have been renamed away");
+        // ...to a sibling preserved for manual recovery...
+        let quarantined: Vec<_> = fs::read_dir(&data_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("read_at_startup.json.corrupt-")
+            })
+            .collect();
+        assert_eq!(quarantined.len(), 1, "expected exactly one quarantined copy");
+        // ...and the message names the file so the error window is meaningful.
+        assert!(msg.contains("read_at_startup.json"), "message was {msg}");
+    }
+
+    #[test]
+    fn quarantine_reports_when_no_file_present() {
+        // No taskdeck_data dir at all: nothing to move, but we still get a
+        // human-readable message rather than panicking.
+        let tmp = tempfile::tempdir().unwrap();
+        let fake_exe = tmp.path().join("app.exe");
+        let cause = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
+
+        let msg = quarantine_corrupt_file(&fake_exe, "colorschemes.json", &cause);
+        assert!(msg.contains("colorschemes.json"), "message was {msg}");
+    }
+
+    #[test]
+    fn assign_missing_ids_backfills_and_preserves() {
+        // A legacy/hand-edited mix: two unassigned (id 0) items around one that
+        // already carries id 5.
+        let mut items = vec![
+            active(Some(2), None, false, None),
+            Active { id: 5, ..active(Some(2), None, false, None) },
+            active(Some(2), None, false, None),
+        ];
+
+        let next = assign_missing_ids(&mut items);
+
+        // Existing id is untouched; the two zeros get fresh ids past the max.
+        assert_eq!(items[1].id, 5, "existing id must be preserved");
+        assert_eq!(items[0].id, 6);
+        assert_eq!(items[2].id, 7);
+        assert_eq!(next, 8, "next free id continues past the assigned maximum");
+
+        // Every item now has a distinct, non-zero id.
+        let ids: std::collections::HashSet<u64> = items.iter().map(|a| a.id).collect();
+        assert_eq!(ids.len(), items.len());
+        assert!(!ids.contains(&0));
+    }
+
+    #[test]
+    fn assign_missing_ids_starts_at_one_when_empty() {
+        let mut items: Vec<Active> = Vec::new();
+        assert_eq!(assign_missing_ids(&mut items), 1);
+    }
+
+    #[test]
+    fn bucket_by_deadline_day_groups_and_preserves_order() {
+        let day1_morning = Local.with_ymd_and_hms(2025, 6, 1, 9, 0, 0).unwrap();
+        let day1_evening = Local.with_ymd_and_hms(2025, 6, 1, 17, 0, 0).unwrap();
+        let day2 = Local.with_ymd_and_hms(2025, 6, 2, 12, 0, 0).unwrap();
+
+        // Two items on day 1 (in this order), one on day 2, one deadline-less.
+        let mut a = active(Some(2), None, false, Some(day1_morning));
+        a.id = 1;
+        let mut b = active(Some(2), None, false, Some(day1_evening));
+        b.id = 2;
+        let mut c = active(None, None, true, Some(day2));
+        c.id = 3;
+        let mut d = active(None, Some(1), false, None); // no deadline → skipped
+        d.id = 4;
+
+        let items = vec![a, b, c, d];
+        let buckets = bucket_by_deadline_day(&items);
+
+        // Only the two distinct deadline days are present (deadline-less skipped).
+        assert_eq!(buckets.len(), 2);
+        // Day 1's bucket keeps input order.
+        let d1: Vec<u64> = buckets[&day1_morning.date_naive()].iter().map(|x| x.id).collect();
+        assert_eq!(d1, vec![1, 2]);
+        // Day 2 has just the one item.
+        let d2: Vec<u64> = buckets[&day2.date_naive()].iter().map(|x| x.id).collect();
+        assert_eq!(d2, vec![3]);
     }
 }
 

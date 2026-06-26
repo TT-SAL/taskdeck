@@ -5,6 +5,16 @@ use tempfile::NamedTempFile;
 
 use crate::color::ColorScheme;
 
+/// Build a TOML array `[a, b]` of two floats for the config file. Used for the
+/// `coordinates` and `window_size_startup` pairs so both the startup writer and
+/// the runtime setters emit a real numeric array (not a stringified one).
+pub fn float_pair_array(pair: [f32; 2]) -> toml_edit::Array {
+    let mut arr = toml_edit::Array::new();
+    arr.push(pair[0] as f64);
+    arr.push(pair[1] as f64);
+    arr
+}
+
 pub fn ordinal_suffix(day: u32) -> &'static str {
     match day % 100 {
         11 | 12 | 13 => "th",
@@ -126,6 +136,18 @@ pub fn read_notepad_text(exe_path: &PathBuf) -> Result<String, Box<dyn Error>> {
 mod tests {
     use super::*;
     use chrono::Timelike;
+
+    #[test]
+    fn float_pair_array_emits_numeric_toml_array() {
+        let arr = float_pair_array([12.5, -3.0]);
+        // Two real float entries, not a stringified "[..]".
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr.get(0).and_then(|v| v.as_float()), Some(12.5));
+        assert_eq!(arr.get(1).and_then(|v| v.as_float()), Some(-3.0));
+        // Rendered as a TOML array, parseable back by the config reader.
+        let rendered = toml_edit::value(arr).to_string();
+        assert!(rendered.contains('['), "rendered as array: {rendered}");
+    }
 
     #[test]
     fn ordinal_suffix_basic_and_teens() {

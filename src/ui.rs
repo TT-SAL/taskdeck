@@ -63,6 +63,10 @@ pub struct TaskAppConfig {
     pub three_day_weather: bool,
     pub background_image_tint_percent: u32,
     pub weather_service: WeatherService,
+    /// Message describing any non-fatal startup recovery (e.g. a corrupt data
+    /// file that was quarantined), to surface in the error window once the UI is
+    /// up. `None` when startup loaded cleanly.
+    pub startup_error: Option<String>,
 }
 
 pub struct TaskApp {
@@ -99,11 +103,14 @@ pub struct TaskApp {
     active_things: Vec<Active>,
     list_tasks: Vec<Active>,
     archive: Option<Vec<InActive>>,
+    /// Next stable id to hand out to a newly created item. Seeded past the
+    /// highest id present at startup (see `tasks::assign_missing_ids`).
+    next_id: u64,
 
     calendar_elements: Vec<(
         u8,
         Vec<(String, String, usize)>,
-        Vec<(String, String, bool)>,
+        Vec<(u64, String, String, bool)>,
         bool,
         NaiveDate,
         String,
@@ -154,8 +161,10 @@ pub struct TaskApp {
     background_tint_input: String,
 
     /* ───────────────────────── Errors & Confirmations ───────────────────────── */
-    confirm_complete_task: Option<String>,
-    confirm_delete_task: Option<String>,
+    /// Id of the item awaiting a complete/delete confirmation. The dialog looks
+    /// up the (cosmetic) name from this id for display.
+    confirm_complete_task: Option<u64>,
+    confirm_delete_task: Option<u64>,
     error_text: String,
 
     /* ───────────────────────── FPS / Monitor ───────────────────────── */
@@ -205,6 +214,11 @@ impl TaskApp {
             .position(|b| b == &config.background)
             .unwrap_or(0);
 
+        // Backfill stable ids onto any items from a pre-id / hand-edited save and
+        // seed the id counter past the highest one in use.
+        let mut active_items = config.active_items;
+        let next_id = tasks::assign_missing_ids(&mut active_items);
+
         Self {
             /* Animation */
             row_anim: Vec::new(),
@@ -231,14 +245,14 @@ impl TaskApp {
             last_textbox_edit_time: None,
 
             /* Tasks */
-            list_tasks: config
-                .active_items
+            list_tasks: active_items
                 .iter()
                 .filter(|t| !t.is_event)
                 .cloned()
                 .collect(),
-            active_things: config.active_items,
+            active_things: active_items,
             archive: None,
+            next_id,
             calendar_elements: Vec::new(),
 
             /* Weather */
@@ -266,7 +280,7 @@ impl TaskApp {
             /* Flags */
             new_task_flag: false,
             new_event_flag: false,
-            error_flag: false,
+            error_flag: config.startup_error.is_some(),
             display_archive_flag: false,
             expand_calendar_day_flag: false,
             settings_flag: false,
@@ -287,7 +301,7 @@ impl TaskApp {
             /* Errors */
             confirm_complete_task: None,
             confirm_delete_task: None,
-            error_text: String::new(),
+            error_text: config.startup_error.unwrap_or_default(),
 
             /* FPS / Monitor */
             fps_counter: FpsCounter::new(),
@@ -383,12 +397,12 @@ impl TaskApp {
                                         let delete_button = egui::Button::new("x").min_size(min_button_size).corner_radius(CornerRadius::same(8));
                                         if ui.add(complete_button).clicked() {
                                             self.user_wants_to_complete_task_flag = true;
-                                            self.confirm_complete_task = Some(task.name.clone());
+                                            self.confirm_complete_task = Some(task.id);
                                         }
 
                                         if ui.add(delete_button).clicked() {
                                             self.user_wants_to_delete_task_flag = true;
-                                            self.confirm_delete_task = Some(task.name.clone());
+                                            self.confirm_delete_task = Some(task.id);
                                         }
                                     });
                                 };
@@ -906,7 +920,10 @@ impl TaskApp {
     }
 
     fn add_active_thing(&mut self, name: String, deadline: Option<DateTime<Local>>, importance: Option<u8>, is_event: bool, time_importance: Option<u8>) {
+        let id = self.next_id;
+        self.next_id += 1;
         self.active_things.push(Active {
+            id,
             name,
             deadline,
             importance,
@@ -920,19 +937,15 @@ impl TaskApp {
         }
     }
 
-    fn delete_active_thing(&mut self, name: &str) {
+    fn delete_active_thing(&mut self, id: u64) {
         self.user_wants_to_delete_task_flag = false;
-        self.active_things = self.active_things.iter().filter(|task| task.name != name).cloned().collect();
+        self.active_things.retain(|task| task.id != id);
         self.confirm_delete_task = None;
         self.summarize_calendar();
-        
+
         if let Err(text) = tasks::oversafe_activesave(&self.active_things, &self.exe_file_path) {
             self.show_error(format!("Saving error:\n{}", text.to_string()));
         };
-    }
-
-    fn name_is_unique(&self, input_name: &str) -> bool {
-        !self.active_things.iter().any(|x| x.name == input_name)
     }
 
     pub fn summarize_calendar(&mut self) {
@@ -967,12 +980,21 @@ impl TaskApp {
 
         let deadline_tasks: Vec<Active> = tasks.iter().filter(|task| task.deadline.is_some()).cloned().collect();
 
-        // 2) Rebuild active_things sorted (if you need to keep the order)
+        // 2) Bucket dated items by day once, so each calendar cell is an O(1) map
+        // lookup instead of a linear scan over every event/task (the old
+        // O(days × items) rebuild). Build the buckets before moving the vecs into
+        // active_things; iterating the already-sorted vecs keeps each bucket in
+        // order — events by deadline, tasks by importance score (which the "take
+        // 3" preview selection below relies on).
+        let events_by_date = tasks::bucket_by_deadline_day(&events);
+        let tasks_by_date = tasks::bucket_by_deadline_day(&deadline_tasks);
+
+        // 3) Rebuild active_things sorted (if you need to keep the order)
         self.active_things.clear();
-        self.active_things.extend(events.clone());
+        self.active_things.extend(events.iter().cloned());
         self.active_things.extend(tasks);
 
-        // 3) Determine the starting Monday
+        // 4) Determine the starting Monday
         let today = self.date;
         let monday = today
             .date_naive()
@@ -983,12 +1005,14 @@ impl TaskApp {
 
         let mut last_days_vec: Vec<Option<(String, String)>> = vec![];
 
-        // 4) Iterate n weeks x 7 days
+        let empty: Vec<&Active> = Vec::new();
+
+        // 5) Iterate n weeks x 7 days
         for week in 0..self.calendar_weeks_to_show {
             let mut contains_first_day_of_month = None;
             for day in 0..7 {
                 let current = monday + Duration::days((week * 7 + day) as i64);
-                
+
                 if current.day() == 1 {
                     let prev_month = current - Duration::days(2);
                     contains_first_day_of_month = Some((prev_month.month().to_string(), current.month().to_string()));
@@ -996,31 +1020,22 @@ impl TaskApp {
 
                 let is_current_day: bool = current == self.date.date_naive();
 
-                // Filter items for this date
-                let day_events: Vec<_> = events
-                    .iter()
-                    .filter(|e| e.deadline.map_or(false, |d| d.date_naive() == current))
-                    .cloned()
-                    .collect();
+                // O(1) lookups for this date's items (already ordered per bucket).
+                let day_events = events_by_date.get(&current).unwrap_or(&empty);
+                let day_tasks = tasks_by_date.get(&current).unwrap_or(&empty);
 
-                let day_tasks: Vec<_> = deadline_tasks
-                    .iter()
-                    .filter(|t| t.deadline.unwrap().date_naive() == current)
-                    .cloned()
-                    .collect();
-
-                // 5) Pick up to 3: events first, then tasks
-                let mut chosen = Vec::new();
+                // 6) Pick up to 3: events first, then tasks
+                let mut chosen: Vec<&Active> = Vec::new();
                 for e in day_events.iter().take(3) {
-                    chosen.push(e.clone());
+                    chosen.push(e);
                 }
                 if chosen.len() < 3 {
                     for t in day_tasks.iter().take(3 - chosen.len()) {
-                        chosen.push(t.clone());
+                        chosen.push(t);
                     }
                 }
 
-                // 6) Sort chosen by exact deadline time. Every item here came from
+                // 7) Sort chosen by exact deadline time. Every item here came from
                 // `day_events`/`day_tasks`, which only retain dated items, so the
                 // deadline is present; format defensively regardless.
                 chosen.sort_by_key(|a| a.deadline);
@@ -1033,23 +1048,23 @@ impl TaskApp {
                             .unwrap_or_default();
                         let color_id = a.calendar_item_color();
 
-                        (a.name, time, color_id)
+                        (a.name.clone(), time, color_id)
                     })
                     .collect();
 
-                // 7) Build complete list for the day, sorted by deadline
-                let mut all_for_day = Vec::new();
-                all_for_day.extend(day_events);
-                all_for_day.extend(day_tasks);
+                // 8) Build complete list for the day, sorted by deadline
+                let mut all_for_day: Vec<&Active> = Vec::new();
+                all_for_day.extend(day_events.iter().copied());
+                all_for_day.extend(day_tasks.iter().copied());
                 all_for_day.sort_by_key(|a| a.deadline);
 
-                let all_str: Vec<(String, String, bool)> = all_for_day
+                let all_str: Vec<(u64, String, String, bool)> = all_for_day
                     .into_iter()
                     .map(|a| {
                         let time = a.deadline
                             .map(|d| d.format("%H:%M").to_string())
                             .unwrap_or_default();
-                        (a.name, time, a.is_event)
+                        (a.id, a.name.clone(), time, a.is_event)
                     })
                     .collect();
 
@@ -1070,15 +1085,15 @@ impl TaskApp {
         self.error_text = errortext;
     }
 
-    fn complete_active_thing(&mut self, name: &str) {
-        if let Some(thing) = self.active_things.iter().find(|x| x.name == name) {
+    fn complete_active_thing(&mut self, id: u64) {
+        if let Some(thing) = self.active_things.iter().find(|x| x.id == id) {
             let found_inactive: InActive = thing.clone().to_inactive();
 
             if let Err(text) = tasks::save_inactive(&found_inactive, &self.exe_file_path) {
                 self.show_error(format!("Error archiving:\n{}", text.to_string()));
             };
 
-            self.delete_active_thing(name);
+            self.delete_active_thing(id);
 
             self.confirm_complete_task = None;
             self.user_wants_to_complete_task_flag = false;
@@ -1198,115 +1213,69 @@ impl TaskApp {
             });
     }
 
-    fn update_background_config(&self, new_background: &str) -> Result<(), Box<dyn std::error::Error>> {
-        // Read the existing file
+    /// Read the user config, set `key` to a typed value, and write it back.
+    /// Single source of truth for the read-parse-set-write boilerplate every
+    /// runtime setter used to duplicate. Values go in with their real TOML type
+    /// (bool / integer / float-array / string) — never stringified numbers — so
+    /// this agrees with the startup writer (`write_normalized_config`).
+    fn write_config_value(
+        &self,
+        key: &str,
+        value: impl Into<toml_edit::Value>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let toml_content = fs::read_to_string(&self.userconfig_path)?;
-
-        // Parse the TOML content
         let mut doc = toml_content.parse::<DocumentMut>()?;
-
-        // Insert or update the background key
-        doc["background"] = toml_edit::value(new_background);
-
-        // Write the updated content back to the file
+        doc[key] = toml_edit::value(value);
         fs::write(&self.userconfig_path, doc.to_string())?;
-
         Ok(())
     }
 
-    fn toggle_fullscreen_option(&self, yesorno: bool) -> Result<(), Box<dyn std::error::Error>> {
-        // Read the existing file
-        let toml_content = fs::read_to_string(&self.userconfig_path)?;
-
-        // Parse the TOML content
-        let mut doc = toml_content.parse::<DocumentMut>()?;
-
-        // Update or insert the key within [window]
-        doc["start_in_fullscreen"] = toml_edit::value(yesorno);
-
-        // Write back to the file
-        fs::write(&self.userconfig_path, doc.to_string())?;
-
-        Ok(())
+    /// As `write_config_value`, but routes any failure to the error window
+    /// instead of silently dropping it (disk full, permissions, locked file).
+    fn persist_config_value(&mut self, key: &str, value: impl Into<toml_edit::Value>) {
+        if let Err(e) = self.write_config_value(key, value) {
+            self.show_error(format!("Could not save setting \"{}\":\n{}", key, e));
+        }
     }
 
-    fn toggle_fps_option(&self, yesorno: bool) -> Result<(), Box<dyn std::error::Error>> {
-        // Read the existing file
-        let toml_content = fs::read_to_string(&self.userconfig_path)?;
-
-        // Parse the TOML content
-        let mut doc = toml_content.parse::<DocumentMut>()?;
-
-        // Update or insert the key within [window]
-        doc["enable_fps_counter"] = toml_edit::value(yesorno);
-
-        // Write back to the file
-        fs::write(&self.userconfig_path, doc.to_string())?;
-
-        Ok(())
-    }
-    fn toggle_num_weather_days(&self, yesorno: bool) -> Result<(), Box<dyn std::error::Error>> {
-        // Read the existing file
-        let toml_content = fs::read_to_string(&self.userconfig_path)?;
-
-        // Parse the TOML content
-        let mut doc = toml_content.parse::<DocumentMut>()?;
-
-        // Update or insert the key within [window]
-        doc["three_day_weather"] = toml_edit::value(yesorno);
-
-        // Write back to the file
-        fs::write(&self.userconfig_path, doc.to_string())?;
-
-        Ok(())
-    }
-    fn set_calendar_weeks(&self) {
-        if let Ok(toml_content) = fs::read_to_string(&self.userconfig_path) {
-            if let Ok(mut doc) = toml_content.parse::<DocumentMut>() {
-                doc["calendar_weeks_to_show"] = toml_edit::value(self.week_number_input.clone().chars().take(5).collect::<String>());
-
-                let _ = fs::write(&self.userconfig_path, doc.to_string());
+    fn set_calendar_weeks(&mut self) {
+        let truncated: String = self.week_number_input.chars().take(5).collect();
+        match truncated.parse::<usize>() {
+            Ok(weeks) => {
+                let clamped = weeks.clamp(
+                    crate::initialization::CALENDAR_WEEKS_MIN,
+                    crate::initialization::CALENDAR_WEEKS_MAX,
+                );
+                self.calendar_weeks_to_show = clamped;
+                // Reflect the applied (post-clamp) value back into the field.
+                self.week_number_input = clamped.to_string();
+                self.persist_config_value("calendar_weeks_to_show", clamped as i64);
+                // Apply immediately rather than only after a restart: rebuild the
+                // calendar model and resize the per-row animation cache.
+                self.summarize_calendar();
+                self.sync_calendar_caches();
             }
-        }       
+            // Unparseable / empty input: restore the field to the active value.
+            Err(_) => self.week_number_input = self.calendar_weeks_to_show.to_string(),
+        }
     }
     fn set_background_tint(&mut self) {
-        if let Ok(toml_content) = fs::read_to_string(&self.userconfig_path) {
-            if let Ok(mut doc) = toml_content.parse::<DocumentMut>() {
-                let filtered_input = self.background_tint_input.clone().chars().take(3).collect::<String>();
-                doc["background_image_tint_percent"] = toml_edit::value(filtered_input.clone());
-
-                let _ = fs::write(&self.userconfig_path, doc.to_string());
-
-                if let Ok(number) = filtered_input.parse::<u32>() {
-                    self.background_image_tint_percent = number.clamp(0, 100);
-                }
-            }
-        }       
+        let filtered: String = self.background_tint_input.chars().take(3).collect();
+        if let Ok(number) = filtered.parse::<u32>() {
+            let clamped = number.clamp(0, 100);
+            self.background_image_tint_percent = clamped;
+            self.persist_config_value("background_image_tint_percent", clamped as i64);
+        }
     }
     fn set_weather_coordinates(&mut self) {
         let coords = [self.latitude, self.longitude];
         self.weather_service.set_coordinates(coords);
-
-        if let Ok(toml_content) = fs::read_to_string(&self.userconfig_path) {
-            if let Ok(mut doc) = toml_content.parse::<DocumentMut>() {
-                let coordinates = format!("[{},{}]", self.latitude, self.longitude);
-
-                doc["coordinates"] = toml_edit::value(coordinates);
-
-                let _ = fs::write(&self.userconfig_path, doc.to_string());
-            }
-        }
+        self.persist_config_value("coordinates", utilities::float_pair_array(coords));
     }
     fn set_selected_monitor_name(&mut self) {
         self.selected_monitor_name = self.monitor_options.get(self.selected_monitor_index).unwrap_or(&"".to_string()).to_string();
-
-        if let Ok(toml_content) = fs::read_to_string(&self.userconfig_path) {
-            if let Ok(mut doc) = toml_content.parse::<DocumentMut>() {
-                doc["selected_monitor_name"] = toml_edit::value(self.selected_monitor_name.clone().chars().take(1000).collect::<String>());
-
-                let _ = fs::write(&self.userconfig_path, doc.to_string());
-            }
-        }
+        let name: String = self.selected_monitor_name.chars().take(1000).collect();
+        self.persist_config_value("selected_monitor_name", name);
     }
     fn fix_and_cache_weather_data(&mut self) {
         self.weather_is_broken_flag = false;
@@ -1366,7 +1335,10 @@ impl TaskApp {
     }
     fn save_textbox_text(&mut self) {
         if self.should_save_textbox_text {
-            let _ = utilities::save_notepad_text(self.textbox_text.clone(), &self.exe_file_path);
+            // A silent failure here loses the user's notes; surface it instead.
+            if let Err(e) = utilities::save_notepad_text(self.textbox_text.clone(), &self.exe_file_path) {
+                self.show_error(format!("Could not save notepad text:\n{}", e));
+            }
             self.should_save_textbox_text = false;
             self.last_textbox_edit_time = None;
         }
@@ -1386,13 +1358,7 @@ impl TaskApp {
 
         self.active_colorscheme = selected_scheme;
 
-        if let Ok(toml_content) = fs::read_to_string(&self.userconfig_path) {
-            if let Ok(mut doc) = toml_content.parse::<DocumentMut>() {
-                doc["selected_colorscheme_id"] = toml_edit::value(self.selected_colorscheme_id.to_string());
-
-                let _ = fs::write(&self.userconfig_path, doc.to_string());
-            }
-        }
+        self.persist_config_value("selected_colorscheme_id", self.selected_colorscheme_id as i64);
     }
     fn rename_current_colorscheme(&mut self) {
         self.colorschemes.entry(self.selected_colorscheme_id).or_insert(ColorScheme::default_scheme()).rename(self.colorscheme_rename_input.clone());
@@ -1576,44 +1542,56 @@ impl TaskApp {
         });
 
         if self.user_wants_to_complete_task_flag {
-            if let Some(name) = self.confirm_complete_task.clone() {
-                egui::Window::new("Confirm Complete")
-                    .collapsible(false)
-                    .resizable(false)
-                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                    .show(ctx, |ui| {
-                        ui.label(format!("Are you sure you want to mark \"{}\" as complete?", name));
-                        ui.horizontal(|ui| {
-                            if ui.button("Yes").clicked() {
-                                self.complete_active_thing(&name);
-                            }
-                            if ui.button("No").clicked() {
-                                self.confirm_complete_task = None;
-                                self.user_wants_to_complete_task_flag = false;
-                            }
+            if let Some(id) = self.confirm_complete_task {
+                // Resolve the cosmetic name for display; if the item is gone
+                // (e.g. removed underneath the dialog), dismiss instead of acting.
+                if let Some(name) = self.active_things.iter().find(|x| x.id == id).map(|x| x.name.clone()) {
+                    egui::Window::new("Confirm Complete")
+                        .collapsible(false)
+                        .resizable(false)
+                        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                        .show(ctx, |ui| {
+                            ui.label(format!("Are you sure you want to mark \"{}\" as complete?", name));
+                            ui.horizontal(|ui| {
+                                if ui.button("Yes").clicked() {
+                                    self.complete_active_thing(id);
+                                }
+                                if ui.button("No").clicked() {
+                                    self.confirm_complete_task = None;
+                                    self.user_wants_to_complete_task_flag = false;
+                                }
+                            });
                         });
-                    });
+                } else {
+                    self.confirm_complete_task = None;
+                    self.user_wants_to_complete_task_flag = false;
+                }
             }
         }
 
         if self.user_wants_to_delete_task_flag {
-            if let Some(name) = self.confirm_delete_task.clone() {
-                egui::Window::new("Confirm Delete")
-                    .collapsible(false)
-                    .resizable(false)
-                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                    .show(ctx, |ui| {
-                        ui.label(format!("Are you sure you want to delete \"{}\"?", name));
-                        ui.horizontal(|ui| {
-                            if ui.button("Yes").clicked() {
-                                self.delete_active_thing(&name);
-                            }
-                            if ui.button("No").clicked() {
-                                self.confirm_delete_task = None;
-                                self.user_wants_to_delete_task_flag = false;
-                            }
+            if let Some(id) = self.confirm_delete_task {
+                if let Some(name) = self.active_things.iter().find(|x| x.id == id).map(|x| x.name.clone()) {
+                    egui::Window::new("Confirm Delete")
+                        .collapsible(false)
+                        .resizable(false)
+                        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                        .show(ctx, |ui| {
+                            ui.label(format!("Are you sure you want to delete \"{}\"?", name));
+                            ui.horizontal(|ui| {
+                                if ui.button("Yes").clicked() {
+                                    self.delete_active_thing(id);
+                                }
+                                if ui.button("No").clicked() {
+                                    self.confirm_delete_task = None;
+                                    self.user_wants_to_delete_task_flag = false;
+                                }
+                            });
                         });
-                    });
+                } else {
+                    self.confirm_delete_task = None;
+                    self.user_wants_to_delete_task_flag = false;
+                }
             }
         }
 
@@ -1638,18 +1616,16 @@ impl TaskApp {
                         
                         ui.horizontal(|ui| {
                             if ui.button("Ok").clicked() {
-                                if self.name_is_unique(&self.event_name_input) {
-                                    match utilities::parse_time_input(self.day_input, self.month_input, self.year_input, self.hour_input, self.minute_input) {
-                                        Ok(date) => {
-                                            self.add_active_thing(self.event_name_input.clone(), Some(date), None, true, None);
-                                            self.new_event_flag = false;
-                                        },
-                                        _ => {
-                                            self.show_error("Problem with date".to_string());
-                                        },
-                                    }
-                                } else {
-                                    self.show_error("An item with that name already exists".to_string());
+                                // Names are cosmetic now (items are keyed by id),
+                                // so duplicates are allowed.
+                                match utilities::parse_time_input(self.day_input, self.month_input, self.year_input, self.hour_input, self.minute_input) {
+                                    Ok(date) => {
+                                        self.add_active_thing(self.event_name_input.clone(), Some(date), None, true, None);
+                                        self.new_event_flag = false;
+                                    },
+                                    _ => {
+                                        self.show_error("Problem with date".to_string());
+                                    },
                                 }
                             }
 
@@ -1713,24 +1689,22 @@ impl TaskApp {
                             if ui.button("Ok").clicked() {
                                 let importance = self.task_importance_input;
                                 let date = utilities::parse_time_input(self.day_input, self.month_input, self.year_input, self.hour_input, self.minute_input);
-                                
-                                if self.name_is_unique(&self.task_name_input) {
-                                    if !self.use_date_for_addable {
-                                        self.add_active_thing(self.task_name_input.clone(), None, None, false, Some(self.time_importance_input));
-                                        self.new_task_flag = false;
-                                    } else {
-                                        match date {
-                                            Ok(date) => {
-                                                self.add_active_thing(self.task_name_input.clone(), Some(date), Some(importance), false, None);
-                                                self.new_task_flag = false;
-                                            },
-                                            _ => {self.show_error("Problem with date".to_string())},
-                                        }
+
+                                // Names are cosmetic now (items are keyed by id),
+                                // so duplicates are allowed.
+                                if !self.use_date_for_addable {
+                                    self.add_active_thing(self.task_name_input.clone(), None, None, false, Some(self.time_importance_input));
+                                    self.new_task_flag = false;
+                                } else {
+                                    match date {
+                                        Ok(date) => {
+                                            self.add_active_thing(self.task_name_input.clone(), Some(date), Some(importance), false, None);
+                                            self.new_task_flag = false;
+                                        },
+                                        _ => {self.show_error("Problem with date".to_string())},
                                     }
-                            } else {
-                                self.show_error("An item with that name already exists".to_string());
-                            }
                                 }
+                            }
 
                             if ui.button("Cancel").clicked() {
                                 self.new_task_flag = false;
@@ -1765,7 +1739,7 @@ impl TaskApp {
                             .auto_shrink([true, true])
                             .max_height(280.0)
                             .show(ui, |ui| {
-                                for (event_name, event_time, is_event) in &day.2 {
+                                for (item_id, event_name, event_time, is_event) in &day.2 {
                                     egui::Frame::new()
                                         .fill(Color32::from_white_alpha(15))
                                         .stroke(egui::Stroke::new(1.5, ui.visuals().text_color()))
@@ -1791,7 +1765,7 @@ impl TaskApp {
                                                             
                                                             if ui.add(delete_button).clicked() {
                                                                 self.user_wants_to_delete_task_flag = true;
-                                                                self.confirm_delete_task = Some(event_name.clone());
+                                                                self.confirm_delete_task = Some(*item_id);
                                                             }
                                                         });
                                                     } else {
@@ -1802,12 +1776,12 @@ impl TaskApp {
                                                             let delete_button = egui::Button::new("x").min_size(min_button_size).corner_radius(CornerRadius::same(8));
                                                             if ui.add(complete_button).clicked() {
                                                                 self.user_wants_to_complete_task_flag = true;
-                                                                self.confirm_complete_task = Some(event_name.clone());
+                                                                self.confirm_complete_task = Some(*item_id);
                                                             }
 
                                                             if ui.add(delete_button).clicked() {
                                                                 self.user_wants_to_delete_task_flag = true;
-                                                                self.confirm_delete_task = Some(event_name.clone());
+                                                                self.confirm_delete_task = Some(*item_id);
                                                             }
                                                         });
                                                     }
@@ -1944,16 +1918,18 @@ impl TaskApp {
 
                             // Check if the selection changed
                             if previous_index != self.selected_background_index {
-                                let new_background = &self.background_options[self.selected_background_index];
+                                // Own the name so no borrow of `self` is held across
+                                // the `&mut self` persist call.
+                                let new_background = self.background_options[self.selected_background_index].clone();
 
-                                self.background_image_texture = Some(set_background(ctx, new_background.to_string()));
+                                self.background_image_texture = Some(set_background(ctx, new_background.clone()));
 
-                                let _ = self.update_background_config(new_background);
+                                self.persist_config_value("background", new_background);
                             }
 
                             if ui.button("♲").clicked() {
                                 let available_background_name_to_refresh_into = self.background_options[self.selected_background_index].to_string();
-                                let _ = self.update_background_config(&available_background_name_to_refresh_into);
+                                self.persist_config_value("background", available_background_name_to_refresh_into.clone());
                                 self.background_image_texture = Some(set_background(ctx, available_background_name_to_refresh_into));
                             }
                         });
@@ -1962,33 +1938,54 @@ impl TaskApp {
                         ui.horizontal_centered(|ui| {
                             ui.label("Selected startup monitor:");
 
-                            // Keep track of the previously selected index
-                            let previous_index = {
-                                self.monitor_options.iter().enumerate().find(|(_, name)| name == &&self.selected_monitor_name ).unwrap_or((0, &&self.selected_monitor_name))
-                            };
-                            self.selected_monitor_index = previous_index.0;
+                            if self.monitor_options.is_empty() {
+                                // winit can report unnamed monitors (name() == None) and
+                                // some headless/remote setups report none at all; either
+                                // way the list is empty. Show a placeholder instead of
+                                // indexing into it (which would panic).
+                                ui.add_enabled(false, egui::Label::new("No monitors detected"));
+                            } else {
+                                // Sync the selected index to the saved name (falling back
+                                // to the first monitor if the saved name isn't present).
+                                let previous_index = self
+                                    .monitor_options
+                                    .iter()
+                                    .position(|name| name == &self.selected_monitor_name)
+                                    .unwrap_or(0);
+                                self.selected_monitor_index = previous_index;
 
-                            ComboBox::from_id_salt("monitor_combo")
-                                .selected_text(&self.monitor_options[self.selected_monitor_index])
-                                .show_ui(ui, |ui| {
-                                    for (i, monitor_name) in self.monitor_options.iter().enumerate() {
-                                        ui.selectable_value(
-                                            &mut self.selected_monitor_index,
-                                            i,
-                                            monitor_name,
-                                        );
-                                    }
-                                });
+                                let selected_text = self
+                                    .monitor_options
+                                    .get(self.selected_monitor_index)
+                                    .cloned()
+                                    .unwrap_or_default();
 
-                            if previous_index.0 != self.selected_monitor_index {
-                                self.set_selected_monitor_name();
+                                ComboBox::from_id_salt("monitor_combo")
+                                    .selected_text(selected_text)
+                                    .show_ui(ui, |ui| {
+                                        for (i, monitor_name) in self.monitor_options.iter().enumerate() {
+                                            ui.selectable_value(
+                                                &mut self.selected_monitor_index,
+                                                i,
+                                                monitor_name,
+                                            );
+                                        }
+                                    });
+
+                                if previous_index != self.selected_monitor_index {
+                                    self.set_selected_monitor_name();
+                                }
                             }
 
-                            if ui.button("♲").clicked() {
+                            // The window is bound to its monitor at startup, so the
+                            // monitor choice only takes effect after a restart. Make
+                            // that explicit instead of silently saving the setting.
+                            if ui.button("♲").on_hover_text("Restart now to move the window to the selected monitor").clicked() {
                                 self.restart_self();
                             }
+                            ui.label(RichText::new("(applies after restart)").weak());
 
-                        });                        
+                        });
                         ui.end_row();
                         ui.end_row();
                         ui.horizontal_centered(|ui| {
@@ -1997,7 +1994,7 @@ impl TaskApp {
                             ui.checkbox(&mut self.start_in_fullscreen, "Start in fullscreen");
 
                             if previous_selection != self.start_in_fullscreen {
-                                let _ = self.toggle_fullscreen_option(self.start_in_fullscreen);
+                                self.persist_config_value("start_in_fullscreen", self.start_in_fullscreen);
                             }
                         });
                         ui.end_row();
@@ -2008,7 +2005,7 @@ impl TaskApp {
                             ui.checkbox(&mut self.enable_fps_counter, "Enable fps counter");
 
                             if previous_selection != self.enable_fps_counter {
-                                let _ = self.toggle_fps_option(self.enable_fps_counter);
+                                self.persist_config_value("enable_fps_counter", self.enable_fps_counter);
                             }
                         });
                         ui.end_row();
@@ -2019,7 +2016,7 @@ impl TaskApp {
                             ui.checkbox(&mut self.three_day_weather, "Show weather for three days");
 
                             if previous_selection != self.three_day_weather {
-                                let _ = self.toggle_num_weather_days(self.three_day_weather);
+                                self.persist_config_value("three_day_weather", self.three_day_weather);
                             }
                         });
                         ui.end_row();
@@ -2027,7 +2024,10 @@ impl TaskApp {
                         ui.horizontal_centered(|ui| {
                             ui.set_max_width(300.0);
                             ui.label("Number of displayed weeks: ");
-                            if ui.text_edit_singleline(&mut self.week_number_input).changed() {
+                            // Commit on Enter / focus loss rather than every keystroke:
+                            // applying re-builds the (potentially large) calendar model,
+                            // so we don't want to do it per character.
+                            if ui.text_edit_singleline(&mut self.week_number_input).lost_focus() {
                                 self.set_calendar_weeks();
                             }
                         });

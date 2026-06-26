@@ -106,7 +106,14 @@ fn read_config(path: &PathBuf) -> HashMap<String, String> {
 
 fn text_2_bool_lazy(text: &String) -> bool {
     text.contains("t")
-} 
+}
+
+/// Allowed range for `calendar_weeks_to_show`. Shared by the startup loader and
+/// the live setter (`TaskApp::set_calendar_weeks`) so both clamp identically.
+/// The upper bound is ~10 years: enough for any realistic planning horizon while
+/// keeping the calendar model rebuild (and `row_anim`) bounded.
+pub const CALENDAR_WEEKS_MIN: usize = 6;
+pub const CALENDAR_WEEKS_MAX: usize = 520;
 
 pub fn get_check_and_set_config() -> Config {
     let config_path = PathBuf::from("taskdeck_data").join(PathBuf::from("userconfig.toml"));
@@ -163,7 +170,7 @@ pub fn get_check_and_set_config() -> Config {
             .unwrap_or([0.0, 0.0]),
         calendar_weeks_to_show: extracted
             .get("calendar_weeks_to_show")
-            .and_then(|n| n.parse::<usize>().ok().and_then(|x| Some(x.clamp(6, 20000))))
+            .and_then(|n| n.parse::<usize>().ok().map(|x| x.clamp(CALENDAR_WEEKS_MIN, CALENDAR_WEEKS_MAX)))
             .unwrap_or(100),
         background_image_tint_percent: extracted
             .get("background_image_tint_percent")
@@ -178,11 +185,38 @@ pub fn get_check_and_set_config() -> Config {
             .unwrap_or(0),
     };
 
-    if let Some(toml_string) = toml::to_string(&config).ok() {
-        let _ = fs::write(config_path, toml_string);
-    }
+    write_normalized_config(&config_path, &config);
 
     config
+}
+
+/// Persist the normalized/clamped config back to disk using `toml_edit`, so the
+/// runtime setters (also `toml_edit`) and this startup writer share one
+/// mechanism and one set of value types. Unlike the old `toml::to_string`
+/// rewrite, this preserves any comments, key ordering, and unknown keys already
+/// in the file; it only updates the keys we own, and writes numbers as real
+/// integers/float-arrays rather than strings. A missing or unparseable file
+/// falls back to a fresh document (the same self-healing the old code did).
+fn write_normalized_config(path: &PathBuf, config: &Config) {
+    use toml_edit::{value, DocumentMut};
+
+    let mut doc = fs::read_to_string(path)
+        .ok()
+        .and_then(|c| c.parse::<DocumentMut>().ok())
+        .unwrap_or_default();
+
+    doc["start_in_fullscreen"] = value(config.start_in_fullscreen);
+    doc["coordinates"] = value(crate::utilities::float_pair_array(config.coordinates));
+    doc["background"] = value(config.background.clone());
+    doc["enable_fps_counter"] = value(config.enable_fps_counter);
+    doc["window_size_startup"] = value(crate::utilities::float_pair_array(config.window_size_startup));
+    doc["calendar_weeks_to_show"] = value(config.calendar_weeks_to_show as i64);
+    doc["selected_monitor_name"] = value(config.selected_monitor_name.clone());
+    doc["selected_colorscheme_id"] = value(config.selected_colorscheme_id as i64);
+    doc["three_day_weather"] = value(config.three_day_weather);
+    doc["background_image_tint_percent"] = value(config.background_image_tint_percent as i64);
+
+    let _ = fs::write(path, doc.to_string());
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -705,5 +739,50 @@ impl ApplicationHandler for App<'_> {
     // not lost. Note: this does not run on a hard kill or on panic (panic = abort).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.task_app.flush_pending_saves();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_config() -> Config {
+        Config {
+            start_in_fullscreen: true,
+            coordinates: [60.17, 24.94],
+            background: "pic.png".to_string(),
+            enable_fps_counter: false,
+            window_size_startup: [1280.0, 720.0],
+            calendar_weeks_to_show: 100,
+            selected_monitor_name: "Main".to_string(),
+            selected_colorscheme_id: 3,
+            three_day_weather: true,
+            background_image_tint_percent: 30,
+        }
+    }
+
+    #[test]
+    fn write_normalized_config_preserves_comments_and_writes_typed_values() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("userconfig.toml");
+
+        // A file with a user comment and a *stringified* number, as the old buggy
+        // runtime setters used to write.
+        fs::write(&path, "# keep me\ncalendar_weeks_to_show = \"100\"\n").unwrap();
+
+        write_normalized_config(&path, &sample_config());
+
+        let written = fs::read_to_string(&path).unwrap();
+        // The comment survives (the old `toml::to_string` rewrite dropped it).
+        assert!(written.contains("# keep me"), "comment lost:\n{written}");
+
+        // Values come back with their real TOML types, not as quoted strings.
+        let doc = written.parse::<toml_edit::DocumentMut>().unwrap();
+        assert_eq!(doc["calendar_weeks_to_show"].as_integer(), Some(100));
+        assert_eq!(doc["selected_colorscheme_id"].as_integer(), Some(3));
+        assert_eq!(doc["background_image_tint_percent"].as_integer(), Some(30));
+        assert_eq!(doc["start_in_fullscreen"].as_bool(), Some(true));
+        assert!(doc["coordinates"].is_array(), "coordinates should be an array");
+        assert!(doc["window_size_startup"].is_array(), "window size should be an array");
     }
 }
