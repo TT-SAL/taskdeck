@@ -55,13 +55,18 @@ _All items in this section are resolved — see the changelog._
 > see [`DOCUMENTATION.md` §14](DOCUMENTATION.md). The items below are self-contained changes that do
 > **not** require splitting the file or touching the animation/widget tuning.
 
-### D6. Many parallel `*_flag` booleans must be kept consistent by hand
-`TaskApp` tracks modal state as a dozen independent booleans (`new_task_flag`, `settings_flag`,
-`display_archive_flag`, …) plus the big disjunction that clears `hovered_calendar_cell` when "any
-modal is open". Nothing structurally prevents two modals being open at once.
-- **Fix:** a single `enum Modal { None, NewTask, NewEvent, Settings, Archive, DayPopup(usize), … }`
-  makes invalid combinations unrepresentable. This is a self-contained change *inside* `ui.rs` (it is
-  **not** a reason to split the file — see §14.2).
+### D6. Modal state as parallel `*_flag` booleans  *(partially resolved)*
+`TaskApp` tracks modal state as ~13 independent booleans. The "any modal open" disjunctions are now
+centralized (see changelog), but the booleans themselves remain.
+- **Reframed — a flat `enum Modal` is *not* a faithful fix.** Inspecting the render gates shows the
+  modals intentionally **nest/stack**: the colour-scheme manager is a stack
+  (`color_picker → edit_colorscheme → rename|delete-confirm`, each gated on its child not being open),
+  the complete/delete **confirmations render over** the day popup, and **Task+/Event+ open over** the
+  day popup. A single `enum Modal { … }` assumes mutual exclusivity and would change that behaviour.
+- **Fix (deferred):** model a modal **stack** (e.g. `Vec<Modal>` or a small primary-modal enum plus an
+  orthogonal confirmation overlay), not a flat enum. Best sequenced with the UI/archive redesign so the
+  modal model is designed against the new screens rather than retrofitted. Until then, `any_modal_open()`
+  is the single place that knows the full set.
 
 ### D7. Static side-panel/dialog spacers assume a fixed DPI / window size
 The side panels and dialogs are laid out with absolute `add_space` spacers, which won't adapt to
@@ -75,21 +80,16 @@ chosen monitor.
 
 ## E. Smaller issues & polish (low)
 
-- **E2. Duplicate cities** in `CITIES` (`weather.rs`): Mumbai/Delhi/Bangalore/Ahmedabad,
-  Copenhagen/Aarhus/Aalborg/Odense, and several others appear 2–3×. Cosmetic, but clutters the map.
-- **E6. Unused bindings / dead code:** several `device_id`, a `_map_response`, etc. — the bulk of the
-  current compiler warnings (15 remain). Clean up (or `_`-prefix) to get back to a quiet build. (The
-  `MouseWheel { unit, delta, modifiers }` destructure was cleared as part of B5.)
 - **E8. Windows-only assumptions** (`winit::platform::windows`, `with_taskbar_icon`,
   `windows_subsystem`) aren't feature-gated; the crate won't compile on other platforms despite
   mostly-portable logic. Gate the Windows-specific calls behind `#[cfg(windows)]` if cross-platform
   builds ever matter.
-- **E9. (new) `importance_score` saturates to `+inf` at the extreme top end.** For a high-importance
-  deadline far in the future, the exponential curve (`1.2^…`, `1.17^…`) overflows `f32` to `+inf`, so
-  all such tasks compare equal — a much milder echo of the old `as u16` flattening (B3), now at the
-  `inf` end. Only reachable with extreme inputs and bounded further once B2 caps the week count, so
-  very low priority. If it ever matters: clamp the exponent, use `f64`, or a saturating-but-finite
-  curve.
+- **E10. (new) Deprecated egui layout APIs.** 6 build warnings remain, all from deprecated egui
+  methods in layout code: `Ui::allocate_ui_at_rect` (×5, calendar cell + map + colour-scheme dialogs)
+  and `Ui::child_ui_with_id_source` (×1). Migrating to `allocate_new_ui` / `new_child` changes the
+  call shape (a `UiBuilder`), and these sit in the hand-tuned calendar/dialog layout (§14.3), so it
+  needs care + a visual check rather than a blind rename. (The trivial `ComboBox::from_id_source` →
+  `from_id_salt` rename was already done as part of E6.)
 
 ---
 
@@ -116,10 +116,11 @@ Worth preserving — don't regress these while hardening:
 
 The app is a working, complete product; these are hardening steps, ordered by payoff-to-risk.
 
-1. **D6** — modal `enum` to replace the parallel `*_flag` booleans.
-2. **D7** — DPI-aware dialog layout (largely moot while fullscreen; lowest priority).
-3. **E-series polish** (E2, E6, E8, E9), and extend the unit tests (see changelog E7) to the
-   weather reshape.
+1. **E8 / E10** — Windows `cfg`-gating (only if cross-platform becomes a goal); egui layout-API
+   deprecation migration (needs a visual check).
+2. **D6 (remainder)** — model a modal **stack** to replace the `*_flag` booleans; deferred to the
+   UI/archive redesign (a flat enum isn't faithful — see D6).
+3. **D7** — DPI-aware dialog layout (largely moot while fullscreen; lowest priority).
 
 _(B4 is deferred pending the archive redesign — see B4.)_
 
@@ -129,6 +130,22 @@ _(B4 is deferred pending the archive redesign — see B4.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **E2 / E6 / E9 — polish.**
+  - **E2:** removed 21 exact-duplicate entries from `CITIES` (`weather.rs`); 289 → 268 unique cities,
+    the de-cluttered map shows each once. Verified the unique-name set is otherwise unchanged.
+  - **E6:** cleared the unused-binding warnings (the `device_id`/`position` `WindowEvent` destructures
+    → `{ .. }`) and did the trivial `ComboBox::from_id_source` → `from_id_salt` rename. Build warnings
+    15 → 6; the remaining 6 are egui layout-API deprecations, now tracked as **E10**.
+  - **E9:** `importance_score` clamps the exponential exponent to a shared `MAX_SCORE_EXPONENT`, so the
+    `1.2^…`/`1.17^…`/`1.15^…` curves saturate to a large **finite** `f32` instead of overflowing to
+    `+inf` for far-future deadlines. Unit-tested (`…_stays_finite_for_far_future_deadline`).
+- **D6 (partial) — one `any_modal_open()` predicate.** The two hand-maintained "is any modal open"
+  flag disjunctions (one gating the calendar tap/drag machine, one clearing the hovered cell) had
+  **drifted apart** — and *both* omitted `coordinates_map_flag` and `edit_colorscheme_flag`, so
+  calendar input leaked behind the map picker and the colour-scheme editor. Both are replaced by a
+  single `TaskApp::any_modal_open()` listing all 13 modal flags, fixing the drift/omissions and giving
+  one place to update when a modal is added. The booleans themselves (and the flat-`enum` idea, now
+  reframed) remain open under D6.
 - **D2 / D4 / E1 — named calendar model, single coordinate field, real bool parse.**
   - **D2:** the opaque `calendar_elements` 6-tuple is now `Vec<DayCell>`, with
     `DayCell { day_number, preview: Vec<PreviewItem>, items: Vec<DayItem>, is_today, date, label }`.

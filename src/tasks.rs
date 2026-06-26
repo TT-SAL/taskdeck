@@ -20,15 +20,26 @@ pub struct Active {
     pub is_event: bool,
 }
 
+/// Upper bound on the exponent fed to the importance-score exponentials, chosen
+/// so even the steepest base (`1.2^x`) stays a finite `f32` (comfortably under
+/// `f32::MAX`) instead of overflowing to `+inf` for far-future deadlines.
+const MAX_SCORE_EXPONENT: f32 = 480.0;
+
 impl Active {
     pub fn importance_score(&self, time_now: DateTime<Local>) -> f32 {
         let  score = match (self.importance, self.time_importance, self.deadline) {
             (Some(importance), _, Some(deadline)) => {
                 let days_since_creation = (deadline - time_now).num_hours() as f32 / 24.0;
 
+                // Clamp the exponent so the exponential curves saturate to a large
+                // *finite* value rather than overflowing f32 to +inf for far-future
+                // deadlines — `+inf` would make all such tasks compare exactly
+                // equal (see CODE_REVIEW E9).
+                let exp = (0.5 * days_since_creation + 20.0).min(MAX_SCORE_EXPONENT);
+
                 match importance {
-                    4 => 1.2_f32.powf(0.5 * days_since_creation + 20.0) + 5.0,
-                    3 => 1.17_f32.powf(0.5 * days_since_creation + 20.0) + 5.0,
+                    4 => 1.2_f32.powf(exp) + 5.0,
+                    3 => 1.17_f32.powf(exp) + 5.0,
                     2 => 0.1747502645671 * days_since_creation + 11.3587671968606,
                     1 => 0.0965675735297 * days_since_creation + 6.276892278847,
                     _ => 0.0402194752135 * days_since_creation + 2.6142658953751,
@@ -38,7 +49,7 @@ impl Active {
                 let days_since_creation = (time_now - self.created).num_hours() as f32 / 24.0;
 
                 match time_importance {
-                    2 => 1.15_f32.powf(0.4 * days_since_creation + 20.0) - 5.0,
+                    2 => 1.15_f32.powf((0.4 * days_since_creation + 20.0).min(MAX_SCORE_EXPONENT)) - 5.0,
                     1 => 0.5403960772338 * days_since_creation + 8.3798162245677,
                     _ => 0.0440665332331 * days_since_creation + 0.6833311078751,
                 }
@@ -306,6 +317,16 @@ mod tests {
         let score = active(None, None, false, None).importance_score(now);
         assert!(score >= 1_000_000_000.0, "score was {score}");
         assert!(score < 1_100_000_000.0, "score was {score}");
+    }
+
+    #[test]
+    fn importance_score_stays_finite_for_far_future_deadline() {
+        let now = Local.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        // Importance 4, deadline ~100 years out: without the exponent clamp the
+        // 1.2^x curve overflows f32 to +inf (flattening all such tasks to equal).
+        let far = active(Some(4), None, false, Some(now + chrono::Duration::days(36500)));
+        let score = far.importance_score(now);
+        assert!(score.is_finite(), "score should be finite, got {score}");
     }
 
     #[test]

@@ -458,11 +458,7 @@ pub static CITIES: &[City] = &[
     City { name: "Takoradi", latitude: 4.8997, longitude: -1.7600 },
     City { name: "Tema", latitude: 5.6667, longitude: -0.0167 },
 
-    City { name: "Ahmedabad", latitude: 23.0225, longitude: 72.5714 },
-    City { name: "Bangalore", latitude: 12.9716, longitude: 77.5946 },
     City { name: "Chennai", latitude: 13.0827, longitude: 80.2707 },
-    City { name: "Delhi", latitude: 28.7041, longitude: 77.1025 },
-    City { name: "Mumbai", latitude: 19.0760, longitude: 72.8777 },
 
     City { name: "Cork", latitude: 51.8985, longitude: -8.4756 },
     City { name: "Dublin", latitude: 53.3498, longitude: -6.2603 },
@@ -503,22 +499,10 @@ pub static CITIES: &[City] = &[
     City { name: "Hamilton", latitude: -37.7870, longitude: 175.2793 },
     City { name: "Wellington", latitude: -41.2865, longitude: 174.7762 },
 
-    City { name: "Abuja", latitude: 9.0765, longitude: 7.3986 },
-    City { name: "Ibadan", latitude: 7.3775, longitude: 3.9470 },
-    City { name: "Kano", latitude: 12.0022, longitude: 8.5919 },
-    City { name: "Lagos", latitude: 6.5244, longitude: 3.3792 },
-    City { name: "Port Harcourt", latitude: 4.8156, longitude: 7.0498 },
 
-    City { name: "Faisalabad", latitude: 31.4504, longitude: 73.1350 },
     City { name: "Islamabad", latitude: 33.6844, longitude: 73.0479 },
-    City { name: "Karachi", latitude: 24.8607, longitude: 67.0011 },
-    City { name: "Lahore", latitude: 31.5546, longitude: 74.3572 },
-    City { name: "Multan", latitude: 30.1575, longitude: 71.5249 },
 
-    City { name: "Cebu City", latitude: 10.3157, longitude: 123.8854 },
     City { name: "Davao City", latitude: 7.1907, longitude: 125.4553 },
-    City { name: "Manila", latitude: 14.5995, longitude: 120.9842 },
-    City { name: "Quezon City", latitude: 14.6760, longitude: 121.0437 },
     City { name: "Zamboanga City", latitude: 6.9214, longitude: 122.0790 },
 
     City { name: "Jurong East", latitude: 1.3330, longitude: 103.7420 },
@@ -669,13 +653,8 @@ pub static CITIES: &[City] = &[
     City { name: "Izmir", latitude: 38.4192, longitude: 27.1287 },
     City { name: "Konya", latitude: 37.8716, longitude: 32.4840 },
 
-    City { name: "Aalborg", latitude: 57.0488, longitude: 9.9217 },
-    City { name: "Aarhus", latitude: 56.1629, longitude: 10.2039 },
-    City { name: "Copenhagen", latitude: 55.6761, longitude: 12.5683 },
-    City { name: "Esbjerg", latitude: 55.4765, longitude: 8.4594 },
     City { name: "Frederiksberg", latitude: 55.6803, longitude: 12.5333 },
     City { name: "Helsingør", latitude: 56.0333, longitude: 12.6167 },
-    City { name: "Odense", latitude: 55.4038, longitude: 10.4024 },
     City { name: "Randers", latitude: 56.4608, longitude: 10.0364 },
     City { name: "Silkeborg", latitude: 56.1705, longitude: 9.5452 },
     City { name: "Vejle", latitude: 55.7110, longitude: 9.5369 },

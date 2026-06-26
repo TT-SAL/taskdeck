@@ -705,21 +705,21 @@ impl ApplicationHandler for App<'_> {
                     self.window.as_ref().unwrap().request_redraw();
                 }
             }
-            WindowEvent::CursorEntered { device_id } => {
+            WindowEvent::CursorEntered { .. } => {
                 self.cursor_inside_window = true;
                 self.last_active = None;
                 self.in_sleep = false;
                 self.handle_redraw(event_loop);
                 self.window.as_ref().unwrap().request_redraw();
             }
-            WindowEvent::CursorMoved { device_id, position } => {
+            WindowEvent::CursorMoved { .. } => {
                 self.cursor_inside_window = true;
                 self.last_active = None;
                 self.in_sleep = false;
                 self.handle_redraw(event_loop);
                 self.window.as_ref().unwrap().request_redraw();
             }
-            WindowEvent::CursorLeft { device_id } => {
+            WindowEvent::CursorLeft { .. } => {
                 self.cursor_inside_window = false;
                 self.last_active = None;
                 self.in_sleep = false;

@@ -890,7 +890,7 @@ impl TaskApp {
 
                         const DRAG_THRESHOLD_POINTS: f32 = 6.0;
 
-                        if !(self.expand_calendar_day_flag | self.display_archive_flag | self.error_flag | self.new_task_flag | self.user_wants_to_delete_task_flag | self.user_wants_to_complete_task_flag | self.new_event_flag | self.settings_flag) {
+                        if !self.any_modal_open() {
                             // Inspect input events in place rather than cloning the
                             // whole event vector every frame (B5). The closure only
                             // mutates `self` fields and reads `visible_cells`; it must
@@ -1127,6 +1127,28 @@ impl TaskApp {
         self.error_text = errortext;
     }
 
+    /// True when any modal/overlay window is open. This is the single source of
+    /// truth for "is the calendar covered" — used both to suppress the calendar
+    /// tap/drag machine and to clear the hovered cell. It replaces two
+    /// hand-maintained flag disjunctions that had drifted apart and *both* missed
+    /// the map picker and colour-scheme editor (so calendar input leaked behind
+    /// them). Adding a future modal means adding one line here.
+    fn any_modal_open(&self) -> bool {
+        self.new_task_flag
+            || self.new_event_flag
+            || self.settings_flag
+            || self.display_archive_flag
+            || self.expand_calendar_day_flag
+            || self.error_flag
+            || self.user_wants_to_complete_task_flag
+            || self.user_wants_to_delete_task_flag
+            || self.coordinates_map_flag
+            || self.color_picker_flag
+            || self.edit_colorscheme_flag
+            || self.rename_colorscheme_flag
+            || self.user_wants_to_delete_colorscheme_flag
+    }
+
     fn complete_active_thing(&mut self, id: u64) {
         if let Some(thing) = self.active_things.iter().find(|x| x.id == id) {
             let found_inactive: InActive = thing.clone().to_inactive();
@@ -1182,7 +1204,7 @@ impl TaskApp {
                     let max_day = utilities::days_in_month(self.year_input, self.month_input as u32) as i32;
                     self.day_input = self.day_input.clamp(1, max_day);
 
-                    ComboBox::from_id_source("day")
+                    ComboBox::from_id_salt("day")
                         .width(40.0)
                         .selected_text(RichText::from(format!("{:02}", self.day_input)).font(space_font.clone()))
                         .show_ui(ui, |ui| {
@@ -1196,7 +1218,7 @@ impl TaskApp {
                         });
                     ui.label(RichText::new(".").font(space_font.clone()));
 
-                    ComboBox::from_id_source("month")
+                    ComboBox::from_id_salt("month")
                         .width(40.0)
                         .selected_text(RichText::from(format!("{:02}", self.month_input)).font(space_font.clone()))
                         .show_ui(ui, |ui| {
@@ -1210,7 +1232,7 @@ impl TaskApp {
                         });
                     ui.label(RichText::new(".").font(space_font.clone()));
 
-                    ComboBox::from_id_source("year")
+                    ComboBox::from_id_salt("year")
                         .width(60.0)
                         .selected_text(RichText::from(format!("{}", self.year_input)).font(space_font.clone()))
                         .show_ui(ui, |ui| {
@@ -1225,7 +1247,7 @@ impl TaskApp {
 
                     ui.add_space(10.0);
 
-                    ComboBox::from_id_source("hour")
+                    ComboBox::from_id_salt("hour")
                         .width(35.0)
                         .selected_text(RichText::from(format!("{:02}", self.hour_input)).font(space_font.clone()))
                         .show_ui(ui, |ui| {
@@ -1239,7 +1261,7 @@ impl TaskApp {
                         });
                     ui.label(RichText::new(":").font(space_font.clone()));
 
-                    ComboBox::from_id_source("minute")
+                    ComboBox::from_id_salt("minute")
                         .width(35.0)
                         .selected_text(RichText::from(format!("{:02}", self.minute_input)).font(space_font.clone()))
                         .show_ui(ui, |ui| {
@@ -2637,7 +2659,7 @@ impl TaskApp {
                 });
         }
 
-    if self.expand_calendar_day_flag || self.display_archive_flag || self.error_flag || self.new_task_flag || self.user_wants_to_delete_task_flag || self.user_wants_to_complete_task_flag || self.new_event_flag || self.settings_flag || self.rename_colorscheme_flag || self.user_wants_to_delete_colorscheme_flag || self.color_picker_flag {
+    if self.any_modal_open() {
         self.hovered_calendar_cell = None;
     }
     }
