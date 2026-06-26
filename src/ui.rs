@@ -25,6 +25,39 @@ struct PressState {
     cancelled: bool,
 }
 
+/// One item in a day cell's compact preview (at most 3 are shown in the cell).
+#[derive(Clone)]
+struct PreviewItem {
+    name: String,
+    /// "HH:MM", or empty for an undated item.
+    time: String,
+    /// Palette index (see `Active::calendar_item_color`).
+    color_id: usize,
+}
+
+/// One item in a day's full list, shown in the day popup. Carries the stable
+/// `id` so the popup's complete/delete buttons act on the right item.
+#[derive(Clone)]
+struct DayItem {
+    id: u64,
+    name: String,
+    time: String,
+    is_event: bool,
+}
+
+/// One day cell of the calendar model, cached in `TaskApp::calendar_elements`
+/// and consumed by `show_calendar` (the `preview`) and the day popup (`items`).
+/// Named fields replace what used to be an opaque positional 6-tuple.
+#[derive(Clone)]
+struct DayCell {
+    day_number: u8,
+    preview: Vec<PreviewItem>,
+    items: Vec<DayItem>,
+    is_today: bool,
+    date: NaiveDate,
+    label: String,
+}
+
 impl FpsCounter {
     fn new() -> Self {
         Self {
@@ -107,14 +140,7 @@ pub struct TaskApp {
     /// highest id present at startup (see `tasks::assign_missing_ids`).
     next_id: u64,
 
-    calendar_elements: Vec<(
-        u8,
-        Vec<(String, String, usize)>,
-        Vec<(u64, String, String, bool)>,
-        bool,
-        NaiveDate,
-        String,
-    )>,
+    calendar_elements: Vec<DayCell>,
 
     /* ───────────────────────── Weather ───────────────────────── */
     pub weather_service: WeatherService,
@@ -177,8 +203,10 @@ pub struct TaskApp {
     coordinates_map_flag: bool,
     map_zoom: f32,
     map_offset: Vec2,
-    latitude: f32,
-    longitude: f32,
+    /// Live, editable coordinates `[lat, lon]` — the single source of truth for
+    /// the map picker. Pushed to the weather service (its own thread-local copy)
+    /// and persisted only on confirm, via `set_weather_coordinates`.
+    coordinates: [f32; 2],
     map_texture: Option<TextureHandle>,
 
     /* ───────────────────────── Color Schemes ───────────────────────── */
@@ -313,8 +341,7 @@ impl TaskApp {
             coordinates_map_flag: false,
             map_zoom: 1.0,
             map_offset: Vec2::ZERO,
-            latitude: config.coordinates[0],
-            longitude: config.coordinates[1],
+            coordinates: config.coordinates,
             map_texture: None,
 
             /* Colors */
@@ -606,7 +633,7 @@ impl TaskApp {
                 .min_col_width(daybox_width)
                 .max_col_width(daybox_width)
                 .show(ui, |ui| {
-                    let day_current = self.calendar_elements.iter().position(|x| x.3);
+                    let day_current = self.calendar_elements.iter().position(|c| c.is_today);
 
                     for (i, day) in WEEK_DAYS.iter().enumerate() {
                         ui.vertical_centered(|ui| {
@@ -785,42 +812,45 @@ impl TaskApp {
 
                                 row_ui.allocate_ui_at_rect(inner_rect, |ui| {
                                     ui.set_min_size(inner_rect.size());
-                                    let (_, widget_items, full_list, is_strong, _, day_label) = &mut self.calendar_elements[idx];
+                                    let cell = &self.calendar_elements[idx];
+                                    let preview = &cell.preview;
+                                    let is_strong = cell.is_today;
+                                    let day_label = &cell.label;
                                     ui.vertical(|ui| {
-                                        let num = full_list.len();
+                                        let num = cell.items.len();
                                         if num == 0 {
-                                            ui.add(calendarwidgets::DayNumber::new(day_label, *is_strong));
+                                            ui.add(calendarwidgets::DayNumber::new(day_label, is_strong));
                                             ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
-                                                ui.add(calendarwidgets::RotatedNumberOnly::new(day_label, *is_strong));
+                                                ui.add(calendarwidgets::RotatedNumberOnly::new(day_label, is_strong));
                                             });
                                         } else if num == 1 {
-                                            let first = &widget_items[0];
-                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.0, *is_strong, &first.1, self.active_colorscheme[first.2]));
+                                            let first = &preview[0];
+                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, self.active_colorscheme[first.color_id]));
                                             ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
-                                                ui.add(calendarwidgets::RotatedNumberOnly::new(day_label, *is_strong));
+                                                ui.add(calendarwidgets::RotatedNumberOnly::new(day_label, is_strong));
                                             });
                                         } else if num == 2 {
-                                            let first = &widget_items[0];
-                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.0, *is_strong, &first.1, self.active_colorscheme[first.2]));
-                                            let second = &widget_items[1];
-                                            ui.add(calendarwidgets::MiddleHeader::new(&second.0, Some(&second.1), self.active_colorscheme[second.2]));
+                                            let first = &preview[0];
+                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, self.active_colorscheme[first.color_id]));
+                                            let second = &preview[1];
+                                            ui.add(calendarwidgets::MiddleHeader::new(&second.name, Some(&second.time), self.active_colorscheme[second.color_id]));
                                             ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
-                                                ui.add(calendarwidgets::RotatedNumberOnly::new(day_label, *is_strong));
+                                                ui.add(calendarwidgets::RotatedNumberOnly::new(day_label, is_strong));
                                             });
                                         } else if num == 3 {
-                                            let first = &widget_items[0];
-                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.0, *is_strong, &first.1, self.active_colorscheme[first.2]));
-                                            let second = &widget_items[1];
-                                            ui.add(calendarwidgets::MiddleHeader::new(&second.0, None, self.active_colorscheme[second.2]));
-                                            let third = &widget_items[2];
-                                            ui.add(calendarwidgets::BottomHeaderRotated::new(day_label, &third.0, *is_strong, &third.1, Some(&second.1), self.active_colorscheme[third.2]));
+                                            let first = &preview[0];
+                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, self.active_colorscheme[first.color_id]));
+                                            let second = &preview[1];
+                                            ui.add(calendarwidgets::MiddleHeader::new(&second.name, None, self.active_colorscheme[second.color_id]));
+                                            let third = &preview[2];
+                                            ui.add(calendarwidgets::BottomHeaderRotated::new(day_label, &third.name, is_strong, &third.time, Some(&second.time), self.active_colorscheme[third.color_id]));
                                         } else {
-                                            let first = &widget_items[0];
-                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.0, *is_strong, &first.1, self.active_colorscheme[first.2]));
-                                            let second = &widget_items[1];
-                                            ui.add(calendarwidgets::MiddleHeader::new(&second.0, None, self.active_colorscheme[second.2]));
-                                            let third = &widget_items[2];
-                                            ui.add(calendarwidgets::ButtonHeaderRotated::new(day_label, &third.0, *is_strong, &third.1, Some(&second.1), self.active_colorscheme[third.2]));
+                                            let first = &preview[0];
+                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, self.active_colorscheme[first.color_id]));
+                                            let second = &preview[1];
+                                            ui.add(calendarwidgets::MiddleHeader::new(&second.name, None, self.active_colorscheme[second.color_id]));
+                                            let third = &preview[2];
+                                            ui.add(calendarwidgets::ButtonHeaderRotated::new(day_label, &third.name, is_strong, &third.time, Some(&second.time), self.active_colorscheme[third.color_id]));
                                         }
                                     });
                                 });
@@ -1045,15 +1075,14 @@ impl TaskApp {
                 // deadline is present; format defensively regardless.
                 chosen.sort_by_key(|a| a.deadline);
 
-                let chosen_str: Vec<(String, String, usize)> = chosen
+                let preview: Vec<PreviewItem> = chosen
                     .into_iter()
-                    .map(|a| {
-                        let time = a.deadline
+                    .map(|a| PreviewItem {
+                        name: a.name.clone(),
+                        time: a.deadline
                             .map(|d| d.format("%H:%M").to_string())
-                            .unwrap_or_default();
-                        let color_id = a.calendar_item_color();
-
-                        (a.name.clone(), time, color_id)
+                            .unwrap_or_default(),
+                        color_id: a.calendar_item_color(),
                     })
                     .collect();
 
@@ -1063,18 +1092,26 @@ impl TaskApp {
                 all_for_day.extend(day_tasks.iter().copied());
                 all_for_day.sort_by_key(|a| a.deadline);
 
-                let all_str: Vec<(u64, String, String, bool)> = all_for_day
+                let items: Vec<DayItem> = all_for_day
                     .into_iter()
-                    .map(|a| {
-                        let time = a.deadline
+                    .map(|a| DayItem {
+                        id: a.id,
+                        name: a.name.clone(),
+                        time: a.deadline
                             .map(|d| d.format("%H:%M").to_string())
-                            .unwrap_or_default();
-                        (a.id, a.name.clone(), time, a.is_event)
+                            .unwrap_or_default(),
+                        is_event: a.is_event,
                     })
                     .collect();
 
-                let day_label = current.day().to_string();
-                calendar.push((current.day() as u8, chosen_str, all_str, is_current_day, current, day_label));
+                calendar.push(DayCell {
+                    day_number: current.day() as u8,
+                    preview,
+                    items,
+                    is_today: is_current_day,
+                    date: current,
+                    label: current.day().to_string(),
+                });
             }
             last_days_vec.push(contains_first_day_of_month);
         }
@@ -1273,7 +1310,7 @@ impl TaskApp {
         }
     }
     fn set_weather_coordinates(&mut self) {
-        let coords = [self.latitude, self.longitude];
+        let coords = self.coordinates;
         self.weather_service.set_coordinates(coords);
         self.persist_config_value("coordinates", utilities::float_pair_array(coords));
     }
@@ -1731,7 +1768,7 @@ impl TaskApp {
         if self.expand_calendar_day_flag {
             if let Some(index) = self.expanded_day {
                 if let Some(day) = self.calendar_elements.get(index) {
-                let selected_date = day.4;
+                let selected_date = day.date;
 
                 let (weekday_str, formatted_date) = utilities::format_date(selected_date);
 
@@ -1752,7 +1789,7 @@ impl TaskApp {
                             .auto_shrink([true, true])
                             .max_height(280.0)
                             .show(ui, |ui| {
-                                for (item_id, event_name, event_time, is_event) in &day.2 {
+                                for item in &day.items {
                                     egui::Frame::new()
                                         .fill(Color32::from_white_alpha(15))
                                         .stroke(egui::Stroke::new(1.5, ui.visuals().text_color()))
@@ -1765,12 +1802,12 @@ impl TaskApp {
                                                 let time_font = FontId::new(13.0, FontFamily::Name("space".into()));
                                                 let text_font = FontId::new(12.0, FontFamily::Name("spaceb".into()));
 
-                                                ui.label(RichText::new(event_time).font(time_font));
+                                                ui.label(RichText::new(&item.time).font(time_font));
 
-                                                ui.add(Label::new(RichText::new(event_name.clone()).color(Color32::from_white_alpha(120)).font(text_font)).wrap().selectable(false));
-                                                
+                                                ui.add(Label::new(RichText::new(item.name.clone()).color(Color32::from_white_alpha(120)).font(text_font)).wrap().selectable(false));
+
                                                 if ui.rect_contains_pointer(ui.max_rect()) {
-                                                    if *is_event {
+                                                    if item.is_event {
                                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                             let min_button_size = Vec2::new(24.0, 24.0);
 
@@ -1778,7 +1815,7 @@ impl TaskApp {
                                                             
                                                             if ui.add(delete_button).clicked() {
                                                                 self.user_wants_to_delete_task_flag = true;
-                                                                self.confirm_delete_task = Some(*item_id);
+                                                                self.confirm_delete_task = Some(item.id);
                                                             }
                                                         });
                                                     } else {
@@ -1789,12 +1826,12 @@ impl TaskApp {
                                                             let delete_button = egui::Button::new("x").min_size(min_button_size).corner_radius(CornerRadius::same(8));
                                                             if ui.add(complete_button).clicked() {
                                                                 self.user_wants_to_complete_task_flag = true;
-                                                                self.confirm_complete_task = Some(*item_id);
+                                                                self.confirm_complete_task = Some(item.id);
                                                             }
 
                                                             if ui.add(delete_button).clicked() {
                                                                 self.user_wants_to_delete_task_flag = true;
-                                                                self.confirm_delete_task = Some(*item_id);
+                                                                self.confirm_delete_task = Some(item.id);
                                                             }
                                                         });
                                                     }
@@ -1816,15 +1853,15 @@ impl TaskApp {
                                             }
                                             ui.add_space(5.0);
                                             if ui.button("Event+").clicked() {
-                                                self.day_input = day.0 as i32;
-                                                self.month_input = (day.4.month0() + 1) as i32;
-                                                self.year_input = day.4.year_ce().1 as i32;
+                                                self.day_input = day.day_number as i32;
+                                                self.month_input = (day.date.month0() + 1) as i32;
+                                                self.year_input = day.date.year_ce().1 as i32;
                                                 self.new_event_flag = true;
                                             }
                                             if ui.button("Task+").clicked() {
-                                                self.day_input = day.0 as i32;
-                                                self.month_input = (day.4.month0() + 1) as i32;
-                                                self.year_input = day.4.year_ce().1 as i32;
+                                                self.day_input = day.day_number as i32;
+                                                self.month_input = (day.date.month0() + 1) as i32;
+                                                self.year_input = day.date.year_ce().1 as i32;
                                                 self.new_task_flag = true;
                                             }
                                         });
@@ -2058,14 +2095,14 @@ impl TaskApp {
                         ui.horizontal_centered(|ui| {
                             ui.label("Weather Coordinates: ");
 
-                            let y_slider = egui::DragValue::new(&mut self.latitude)
+                            let y_slider = egui::DragValue::new(&mut self.coordinates[0])
                                 .prefix("Latitude (Y): ")
                                 .range(-90..=90)
                                 .fixed_decimals(2)
                                 .speed(0.0025);
                             ui.add(y_slider);
 
-                            let x_slider = egui::DragValue::new(&mut self.longitude)
+                            let x_slider = egui::DragValue::new(&mut self.coordinates[1])
                                 .prefix("Longitude (X): ")
                                 .range(-180..=180)
                                 .fixed_decimals(2)
@@ -2217,15 +2254,15 @@ impl TaskApp {
                                     uv_min.y + local_uv.y * uv_size.y,
                                 );
 
-                                self.longitude = world_uv.x * 360.0 - 180.0;
-                                self.latitude = (1.0 - world_uv.y) * 180.0 - 90.0;
+                                self.coordinates[1] = world_uv.x * 360.0 - 180.0;
+                                self.coordinates[0] = (1.0 - world_uv.y) * 180.0 - 90.0;
                             }
                         }
 
                         // ---------------- SELECTED MARKER ----------------
                         let world_uv = egui::pos2(
-                            (self.longitude + 180.0) / 360.0,
-                            1.0 - ((self.latitude + 90.0) / 180.0),
+                            (self.coordinates[1] + 180.0) / 360.0,
+                            1.0 - ((self.coordinates[0] + 90.0) / 180.0),
                         );
 
                         let local_uv = egui::pos2(
@@ -2291,9 +2328,9 @@ impl TaskApp {
                     ui.allocate_ui_at_rect(footer_rect, |ui| {
                         ui.horizontal_centered(|ui| {
                             ui.add_space(20.0);
-                            ui.label(format!("Lat: {:.2}", self.latitude));
+                            ui.label(format!("Lat: {:.2}", self.coordinates[0]));
                             ui.separator();
-                            ui.label(format!("Lon: {:.2}", self.longitude));
+                            ui.label(format!("Lon: {:.2}", self.coordinates[1]));
                             ui.separator();
                             ui.label(format!("Zoom: {:.2}x", self.map_zoom));
 

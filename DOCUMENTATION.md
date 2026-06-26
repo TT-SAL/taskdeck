@@ -278,12 +278,14 @@ Runs at startup and after any add/delete/complete and on date rollover. Steps:
    below is unchanged.
 4. Find the Monday of the current week; iterate `calendar_weeks_to_show × 7` days.
 5. For each day, look up that day's events and deadline-tasks; choose up to **3** (events first),
-   sorted by exact time → `chosen_str: Vec<(name, "HH:MM", color_id)>`.
-6. Also build the **full** day list (`all_str: Vec<(id, name, "HH:MM", is_event)>`) for the day
+   sorted by exact time → the cell `preview: Vec<PreviewItem { name, time, color_id }>`.
+6. Also build the **full** day list (`items: Vec<DayItem { id, name, time, is_event }>`) for the day
    popup — the `id` lets the popup's complete/delete buttons act on the right item.
 7. Record per-row month-boundary labels in `row_contains_month_switch`.
 
-Output is cached in `self.calendar_elements: Vec<(day_u8, chosen[3], full_list, is_today, NaiveDate, day_label)>`.
+Output is cached in `self.calendar_elements: Vec<DayCell>`, where
+`DayCell { day_number, preview, items, is_today, date, label }` — named fields replacing the former
+opaque positional 6-tuple.
 
 ### 8.2 `show_calendar` (view + virtualization + animation)
 

@@ -55,18 +55,6 @@ _All items in this section are resolved — see the changelog._
 > see [`DOCUMENTATION.md` §14](DOCUMENTATION.md). The items below are self-contained changes that do
 > **not** require splitting the file or touching the animation/widget tuning.
 
-### D2. `calendar_elements` tuple is opaque
-`Vec<(u8, Vec<(String,String,usize)>, Vec<(String,String,bool)>, bool, NaiveDate, String)>` — a
-six-element tuple accessed positionally (`day.0`, `day.2`, `day.4`) all over `show_calendar` and the
-day popup.
-- **Fix:** introduce named structs (`DayCell`, `CalendarItem`) for readability and to prevent
-  positional mix-ups. Self-contained; stays inside `ui.rs`.
-
-### D4. Duplicated coordinate state
-`latitude` / `longitude` (live, editable) duplicate `coordinates` from config and the values held by
-the weather service. Three copies must be kept in sync by hand.
-- **Fix:** a single source of truth for the current coordinates.
-
 ### D6. Many parallel `*_flag` booleans must be kept consistent by hand
 `TaskApp` tracks modal state as a dozen independent booleans (`new_task_flag`, `settings_flag`,
 `display_archive_flag`, …) plus the big disjunction that clears `hovered_calendar_cell` when "any
@@ -87,9 +75,6 @@ chosen monitor.
 
 ## E. Smaller issues & polish (low)
 
-- **E1. `text_2_bool_lazy`** (`initialization.rs`) returns `true` for any string containing `t`. It
-  happens to work for `"true"`/`"false"`, but `"east"`, `"set"`, etc. would also be `true`. Use a
-  real bool parse with a sensible default.
 - **E2. Duplicate cities** in `CITIES` (`weather.rs`): Mumbai/Delhi/Bangalore/Ahmedabad,
   Copenhagen/Aarhus/Aalborg/Odense, and several others appear 2–3×. Cosmetic, but clutters the map.
 - **E6. Unused bindings / dead code:** several `device_id`, a `_map_response`, etc. — the bulk of the
@@ -131,9 +116,9 @@ Worth preserving — don't regress these while hardening:
 
 The app is a working, complete product; these are hardening steps, ordered by payoff-to-risk.
 
-1. **D2 / D4 / D6 / D7** — named calendar structs, single coordinate source of truth, modal `enum`,
-   DPI-aware dialog layout.
-2. **E-series polish** (E1, E2, E6, E8, E9), and extend the unit tests (see changelog E7) to the
+1. **D6** — modal `enum` to replace the parallel `*_flag` booleans.
+2. **D7** — DPI-aware dialog layout (largely moot while fullscreen; lowest priority).
+3. **E-series polish** (E2, E6, E8, E9), and extend the unit tests (see changelog E7) to the
    weather reshape.
 
 _(B4 is deferred pending the archive redesign — see B4.)_
@@ -144,6 +129,17 @@ _(B4 is deferred pending the archive redesign — see B4.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **D2 / D4 / E1 — named calendar model, single coordinate field, real bool parse.**
+  - **D2:** the opaque `calendar_elements` 6-tuple is now `Vec<DayCell>`, with
+    `DayCell { day_number, preview: Vec<PreviewItem>, items: Vec<DayItem>, is_today, date, label }`.
+    `show_calendar`, the day popup, and the "find today" lookup all use named fields instead of
+    `day.0`/`.2`/`.4`. This is what the coming completed-tasks overlay will extend.
+  - **D4:** `TaskApp`'s two loose `latitude`/`longitude` fields collapse into one
+    `coordinates: [f32; 2]` (the type already used by config, the weather API, and `float_pair_array`).
+    The weather service keeps its own copy by necessity (it runs on the worker thread); that's the only
+    remaining duplicate and it's updated explicitly in `set_weather_coordinates`.
+  - **E1:** `text_2_bool_lazy` (true for any string containing `t`) is replaced by `parse_config_bool`
+    (case-insensitive `true`/`1`/`yes`/`on`, else `false`). Unit-tested.
 - **C5 / C6 / C7 — path sanitization, restart error handling, DST-safe date entry.**
   - **C5:** the unsound `name.replace("..", "")` in `set_background` and `generate_colorscheme` is
     replaced by one shared `utilities::safe_image_path(name)`, which keeps only the final path

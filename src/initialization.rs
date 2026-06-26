@@ -104,8 +104,12 @@ fn read_config(path: &PathBuf) -> HashMap<String, String> {
     config
 }
 
-fn text_2_bool_lazy(text: &String) -> bool {
-    text.contains("t")
+/// Parse a boolean config value. Accepts the canonical `true`/`false` written by
+/// the config writer plus a few common variants (case-insensitive, surrounding
+/// whitespace ignored); anything unrecognised defaults to `false`. The old
+/// `contains("t")` heuristic treated e.g. `"east"` or `"set"` as `true`.
+fn parse_config_bool(text: &str) -> bool {
+    matches!(text.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on")
 }
 
 /// Allowed range for `calendar_weeks_to_show`. Shared by the startup loader and
@@ -139,15 +143,15 @@ pub fn get_check_and_set_config() -> Config {
             .unwrap_or([1280.0, 720.0]),
         start_in_fullscreen: extracted
             .get("start_in_fullscreen")
-            .map(text_2_bool_lazy)
+            .map(|s| parse_config_bool(s))
             .unwrap_or(false),
         enable_fps_counter: extracted
             .get("enable_fps_counter")
-            .map(text_2_bool_lazy)
+            .map(|s| parse_config_bool(s))
             .unwrap_or(false),
         three_day_weather: extracted
             .get("three_day_weather")
-            .map(text_2_bool_lazy)
+            .map(|s| parse_config_bool(s))
             .unwrap_or(false),
         background: extracted
             .get("background")
@@ -758,6 +762,17 @@ mod tests {
             selected_colorscheme_id: 3,
             three_day_weather: true,
             background_image_tint_percent: 30,
+        }
+    }
+
+    #[test]
+    fn parse_config_bool_only_true_for_real_truthy_values() {
+        for t in ["true", "TRUE", " True ", "1", "yes", "on"] {
+            assert!(parse_config_bool(t), "{t:?} should parse true");
+        }
+        // The old contains("t") heuristic wrongly returned true for these.
+        for f in ["false", "east", "set", "", "0", "no", "off"] {
+            assert!(!parse_config_bool(f), "{f:?} should parse false");
         }
     }
 
