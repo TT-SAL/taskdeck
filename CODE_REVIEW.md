@@ -25,7 +25,12 @@ _All items in this section are resolved — see the changelog._
 
 ## B. Performance & Power (high priority for an "always-on" calendar)
 
-### B4. Per-page archive read is O(n) → O(n²) overall
+### B4. Per-page archive read is O(n) → O(n²) overall  *(deferred — archive redesign)*
+> **Deferred:** this is archive-subsystem work, and the archive is slated for a redesign that
+> dissolves it into the calendar (a "show completed tasks" overlay + upward scroll). That redesign
+> would replace line-offset pagination with **date-ranged** reads, retiring this issue's framing
+> rather than fixing it in place — so don't patch `read_lines_range` now.
+
 `read_lines_range` (`tasks.rs`) re-opens and reverse-scans the whole `archived.jsonl`, skipping
 `offset` lines on every "Show more". Fine for small archives, quadratic for large ones.
 - **Sub-issue (new): pagination can mis-page on unparseable lines.** It `.skip(offset)` over *raw*
@@ -35,38 +40,12 @@ _All items in this section are resolved — see the changelog._
 - **Fix:** keep the `RevLines` iterator (or a byte offset) alive across pages, or read forward with a
   persisted cursor; count consumed lines consistently with what's displayed.
 
-### B5. Cloning all input events every calendar frame
-`show_calendar` runs its press/drag state machine off `ui.ctx().input(|i| i.events.clone())`, cloning
-the full event vector each frame.
-- **Fix:** inspect events in place without cloning, or drive the tap-vs-drag decision from egui's
-  `Response` drag/click APIs (the map picker already does this).
 
 ---
 
 ## C. Robustness & Data Integrity (medium)
 
-### C5. Weak path-traversal sanitization
-`name.replace("..", "")` in `set_background` (`ui.rs`) and `generate_colorscheme` (`color.rs`). This
-is easy to bypass in principle (absolute paths, odd separators) and also mangles legitimate names
-containing `..`. Risk is low because the names come from a directory listing, but the approach is
-unsound.
-- **Fix:** take only the file-name component, or canonicalize the resolved path and verify it stays
-  within `images/`.
-
-### C6. `restart_self` can spin-loop and panics on failure
-`restart_self` spawns a fresh process and `exit(0)`s (used by the monitor "♲" button). If startup
-fails repeatedly the user could get a respawn loop, and the spawn itself is `.expect("Failed to
-restart!")` — a failed spawn panics rather than reporting.
-- **Fix:** apply the monitor change without a full restart if the platform allows; otherwise guard
-  against repeated immediate restarts and handle the spawn error gracefully.
-
-### C7. Date entry fails on DST-gap / ambiguous local times
-`parse_time_input` resolves the local time with `Local.from_local_datetime(&naive).single()`, which
-returns `None` for a non-existent local time (spring-forward gap) or an ambiguous one (fall-back
-overlap). The result is a generic "Problem with date" for a date that looks perfectly valid to the
-user.
-- **Fix:** fall back to `.earliest()` / `.latest()` instead of `.single()`, or give a clearer message
-  explaining the DST gap. (Rare, low priority, but the failure is confusing.)
+_All items in this section are resolved — see the changelog._
 
 ---
 
@@ -113,9 +92,9 @@ chosen monitor.
   real bool parse with a sensible default.
 - **E2. Duplicate cities** in `CITIES` (`weather.rs`): Mumbai/Delhi/Bangalore/Ahmedabad,
   Copenhagen/Aarhus/Aalborg/Odense, and several others appear 2–3×. Cosmetic, but clutters the map.
-- **E6. Unused bindings / dead code:** several `device_id`, a `_map_response`, an unused
-  `MouseWheel { unit, delta, modifiers }` destructure, etc. — these are the bulk of the current
-  compiler warnings. Clean up (or `_`-prefix) to get back to a quiet build.
+- **E6. Unused bindings / dead code:** several `device_id`, a `_map_response`, etc. — the bulk of the
+  current compiler warnings (15 remain). Clean up (or `_`-prefix) to get back to a quiet build. (The
+  `MouseWheel { unit, delta, modifiers }` destructure was cleared as part of B5.)
 - **E8. Windows-only assumptions** (`winit::platform::windows`, `with_taskbar_icon`,
   `windows_subsystem`) aren't feature-gated; the crate won't compile on other platforms despite
   mostly-portable logic. Gate the Windows-specific calls behind `#[cfg(windows)]` if cross-platform
@@ -152,13 +131,12 @@ Worth preserving — don't regress these while hardening:
 
 The app is a working, complete product; these are hardening steps, ordered by payoff-to-risk.
 
-1. **B4 / B5** — archive pagination cursor (and the mis-page sub-issue), and the per-frame event
-   clone.
-2. **C5 / C6 / C7** — path sanitization, restart-loop/spawn-error handling, DST date entry.
-3. **D2 / D4 / D6 / D7** — named calendar structs, single coordinate source of truth, modal `enum`,
+1. **D2 / D4 / D6 / D7** — named calendar structs, single coordinate source of truth, modal `enum`,
    DPI-aware dialog layout.
-4. **E-series polish** (E1, E2, E6, E8, E9), and extend the unit tests (see changelog E7) to the
+2. **E-series polish** (E1, E2, E6, E8, E9), and extend the unit tests (see changelog E7) to the
    weather reshape.
+
+_(B4 is deferred pending the archive redesign — see B4.)_
 
 ---
 
@@ -166,6 +144,23 @@ The app is a working, complete product; these are hardening steps, ordered by pa
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **C5 / C6 / C7 — path sanitization, restart error handling, DST-safe date entry.**
+  - **C5:** the unsound `name.replace("..", "")` in `set_background` and `generate_colorscheme` is
+    replaced by one shared `utilities::safe_image_path(name)`, which keeps only the final path
+    component (`Path::file_name`) — defeating `..`, absolute paths, drive prefixes, and embedded
+    separators — and returns `None` for names with no file component. Unit-tested.
+  - **C6:** `restart_self` no longer panics. It's now `&mut self`, reports a failure to locate the exe
+    or spawn the child via the error window, and `exit`s **only** on a successful spawn — so a failed
+    restart leaves the running process intact instead of crashing or looping.
+  - **C7:** `parse_time_input` resolves local times with `.earliest()` (so a fall-back **ambiguous**
+    time picks the earlier instant instead of failing) and, for a spring-forward **gap**, nudges one
+    hour forward to land just past it. The `Single` path is unchanged (covered by the existing test);
+    the DST branches are tz-dependent so aren't unit-tested.
+- **B5 — no per-frame clone of the input event vector.** `show_calendar`'s tap-vs-drag state machine
+  used `ui.ctx().input(|i| i.events.clone())` every frame. It now inspects `&i.events` in place inside
+  the `input(|i| …)` closure (the closure only mutates `self` / reads `visible_cells`, no re-entrant
+  `ctx` calls). Behaviour is identical. Also dropped the unused `MouseWheel { unit, delta, modifiers }`
+  destructure in the same arm to `{ .. }`, clearing 3 of the E6 warnings (build now at 15).
 - **B2 — calendar rebuild is no longer O(days × items), and the week count is sanely clamped.**
   `summarize_calendar` now buckets events and deadline-tasks by day **once**
   (`tasks::bucket_by_deadline_day` → `HashMap<NaiveDate, Vec<&Active>>`, borrowing, no clones) and does

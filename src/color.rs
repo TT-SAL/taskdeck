@@ -86,10 +86,8 @@ pub fn read_colorschemes(exe_path: &PathBuf) -> Result<HashMap<u32, ColorScheme>
 }
 
 pub fn generate_colorscheme(name: String) -> Option<ColorScheme> {
-    let cleaned = name.replace("..", "");
-
-    let mut path = PathBuf::from("images");
-    path.push(&cleaned);
+    // Confine the lookup to `images/` (defends against path traversal).
+    let path = crate::utilities::safe_image_path(&name)?;
 
     let image_bytes = fs::read(&path).ok()?;
     let image = image::load_from_memory(&image_bytes).ok()?;

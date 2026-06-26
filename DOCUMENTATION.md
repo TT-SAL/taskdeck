@@ -95,7 +95,7 @@ cargo build --release
 
 | Path | Purpose |
 |------|---------|
-| `images/` | User background images (`*.jpg/png`); the Settings dropdown lists this directory. |
+| `images/` | User background images (`*.jpg/png`); the Settings dropdown lists this directory. Names are resolved through `utilities::safe_image_path` (final component only — no traversal out of `images/`). |
 | `weather_svgs_2/` | Weather icon SVGs, **embedded at compile time** via `include_image!`. |
 | `fonts/` | TTF fonts, **embedded at compile time** (`FSEX300`, `DejaVuSans`, `Anton`, `SpaceMono`, `LexendGiga`, `FacultyGlyphic`). |
 | `1920px-Blue_Marble_2002.png`, `icon.png`, `noback.png` | Embedded at compile time. |
@@ -297,7 +297,8 @@ Output is cached in `self.calendar_elements: Vec<(day_u8, chosen[3], full_list, 
   3→`+BottomHeaderRotated`, 4+→`+ButtonHeaderRotated` with an overflow "…" button).
 - **Click vs drag:** a manual press/drag state machine (`PressState`, `DRAG_THRESHOLD_POINTS`)
   distinguishes a tap (opens the day popup) from a scroll-drag (ignored). It is disabled while any
-  modal flag is set.
+  modal flag is set. The events are inspected in place inside `ctx.input(|i| …)` (not cloned per
+  frame).
 
 ### 8.3 Day popup
 
@@ -333,7 +334,8 @@ pre-fill the date fields from the selected day).
 
 - **`ColorScheme`**: `{ name, colors: [[u8;4];6], is_user_configurable }`. Six RGBA colors index
   the calendar item tints by `calendar_item_color()`.
-- **`generate_colorscheme(image_name)`**: loads an image from `images/`, downsamples to 200×200,
+- **`generate_colorscheme(image_name)`**: resolves the name with `utilities::safe_image_path` (keeps
+  only the final path component, so the load can't escape `images/`), loads it, downsamples to 200×200,
   drops near-transparent pixels, converts to CIE-Lab, runs **k-means** (`get_kmeans_hamerly`, k=6,
   deterministic seed 42), sorts clusters by a visual-significance heuristic
   (`population*0.6 + saturation*0.2 + |L-50|*0.2`), and emits 6 colors at fixed alpha 80.
@@ -379,6 +381,8 @@ avoid rebuilding the calendar on every character); the clamp bounds are the shar
 `CALENDAR_WEEKS_MIN/MAX` constants so the live value matches what a restart would load. The **startup
 monitor** is the exception — the window binds to a monitor at launch, so that choice only takes
 effect after a restart; the UI says "(applies after restart)" and the ♲ button restarts the app.
+`restart_self` spawns a fresh copy and `exit`s only on a successful spawn; if locating the exe or
+spawning fails it reports the error and keeps the current process running (no panic, no respawn loop).
 
 ---
 

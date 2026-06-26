@@ -861,57 +861,62 @@ impl TaskApp {
                         const DRAG_THRESHOLD_POINTS: f32 = 6.0;
 
                         if !(self.expand_calendar_day_flag | self.display_archive_flag | self.error_flag | self.new_task_flag | self.user_wants_to_delete_task_flag | self.user_wants_to_complete_task_flag | self.new_event_flag | self.settings_flag) {
-                            let events = ui.ctx().input(|i| i.events.clone());
-                            for ev in events {
-                                match ev {
-                                    Event::PointerButton { pos, button, pressed, .. } => {
-                                        if button == PointerButton::Primary {
-                                            if pressed {
-                                                if let Some((idx, _)) = visible_cells.iter().find(|(_, r)| r.contains(pos)) {
-                                                    self.press_origin = Some(PressState {
-                                                        idx: *idx,
-                                                        press_pos: pos,
-                                                        cancelled: false,
-                                                    });
-                                                    #[cfg(debug_assertions)] {
-                                                        println!("press_origin at {}", idx);
+                            // Inspect input events in place rather than cloning the
+                            // whole event vector every frame (B5). The closure only
+                            // mutates `self` fields and reads `visible_cells`; it must
+                            // not call back into `ctx`/`ui` input (would re-lock).
+                            ui.ctx().input(|i| {
+                                for ev in &i.events {
+                                    match ev {
+                                        Event::PointerButton { pos, button, pressed, .. } => {
+                                            if *button == PointerButton::Primary {
+                                                if *pressed {
+                                                    if let Some((idx, _)) = visible_cells.iter().find(|(_, r)| r.contains(*pos)) {
+                                                        self.press_origin = Some(PressState {
+                                                            idx: *idx,
+                                                            press_pos: *pos,
+                                                            cancelled: false,
+                                                        });
+                                                        #[cfg(debug_assertions)] {
+                                                            println!("press_origin at {}", idx);
+                                                        }
+                                                    } else {
+                                                        self.press_origin = None;
                                                     }
                                                 } else {
-                                                    self.press_origin = None;
-                                                }
-                                            } else {
-                                                if let Some(press) = self.press_origin.take() {
-                                                    let release_idx_opt = visible_cells.iter().find(|(_, r)| r.contains(pos)).map(|(i, _)| *i);
+                                                    if let Some(press) = self.press_origin.take() {
+                                                        let release_idx_opt = visible_cells.iter().find(|(_, r)| r.contains(*pos)).map(|(i, _)| *i);
 
-                                                    let dist = press.press_pos.distance(pos);
-                                                    let moved = dist > DRAG_THRESHOLD_POINTS;
+                                                        let dist = press.press_pos.distance(*pos);
+                                                        let moved = dist > DRAG_THRESHOLD_POINTS;
 
-                                                    if !press.cancelled && !moved {
-                                                        if let Some(release_idx) = release_idx_opt {
-                                                            if release_idx == press.idx {
-                                                                self.expanded_day = Some(release_idx);
-                                                                self.expand_calendar_day_flag = true;
+                                                        if !press.cancelled && !moved {
+                                                            if let Some(release_idx) = release_idx_opt {
+                                                                if release_idx == press.idx {
+                                                                    self.expanded_day = Some(release_idx);
+                                                                    self.expand_calendar_day_flag = true;
+                                                                }
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
-                                        }
-                                    },
-                                    Event::PointerMoved(pos) => if let Some(press) = &mut self.press_origin {
-                                        let dist = press.press_pos.distance(pos);
-                                        if dist > DRAG_THRESHOLD_POINTS {
-                                            press.cancelled = true;
-                                        }
-                                    },
-                                    Event::MouseWheel { unit, delta, modifiers } => {
-                                        if let Some(press) = &mut self.press_origin {
-                                            press.cancelled = true;
-                                        }
-                                    },
-                                    _ => (),
+                                        },
+                                        Event::PointerMoved(pos) => if let Some(press) = &mut self.press_origin {
+                                            let dist = press.press_pos.distance(*pos);
+                                            if dist > DRAG_THRESHOLD_POINTS {
+                                                press.cancelled = true;
+                                            }
+                                        },
+                                        Event::MouseWheel { .. } => {
+                                            if let Some(press) = &mut self.press_origin {
+                                                press.cancelled = true;
+                                            }
+                                        },
+                                        _ => (),
+                                    }
                                 }
-                            }
+                            });
                         }
                         ui.add_space(2.0);
                     });
@@ -1323,15 +1328,23 @@ impl TaskApp {
 
         self.weather_data_cache = weather_datas;
     }
-    fn restart_self(&self) {
-        let exe = std::env::current_exe().expect("Failed to get exe path!");
+    fn restart_self(&mut self) {
+        // Restart by spawning a fresh copy and exiting. Any failure is reported
+        // and leaves the current process running rather than panicking — and
+        // because we only `exit` on a successful spawn, a failed restart can't
+        // tear down the running app or spin a respawn loop.
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(e) => {
+                self.show_error(format!("Could not restart (couldn't find the executable):\n{}", e));
+                return;
+            }
+        };
 
-        Command::new(exe)
-            .args(std::env::args().skip(1))
-            .spawn()
-            .expect("Failed to restart!");
-
-        exit(0);
+        match Command::new(exe).args(std::env::args().skip(1)).spawn() {
+            Ok(_) => exit(0),
+            Err(e) => self.show_error(format!("Could not restart:\n{}", e)),
+        }
     }
     fn save_textbox_text(&mut self) {
         if self.should_save_textbox_text {
@@ -2679,15 +2692,15 @@ fn attempt_background(path: PathBuf) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, B
 }
 
 fn set_background(ctx: &Context, name: String) -> TextureHandle {
-    let cleaned = name.replace("..", "");
-
-    let mut path = PathBuf::from("images");
-    path.push(cleaned);
-
-    let image = match attempt_background(path) {
-        Ok(background) => background,
-        Err(_) => image::load_from_memory(include_bytes!("../noback.png")).expect("Did not get access to fallback background").to_rgba8()
-    };
+    // Fall back to the bundled placeholder if the name is unusable or the file
+    // can't be loaded. `safe_image_path` keeps this confined to `images/`.
+    let image = utilities::safe_image_path(&name)
+        .and_then(|path| attempt_background(path).ok())
+        .unwrap_or_else(|| {
+            image::load_from_memory(include_bytes!("../noback.png"))
+                .expect("Did not get access to fallback background")
+                .to_rgba8()
+        });
 
     let size = [image.width() as usize, image.height() as usize];
 

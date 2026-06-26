@@ -5,6 +5,17 @@ use tempfile::NamedTempFile;
 
 use crate::color::ColorScheme;
 
+/// Resolve a user-supplied image name to a path inside `images/`, defending
+/// against path traversal. Only the final path component is kept, so `..`,
+/// absolute paths, drive prefixes, and embedded separators can't escape the
+/// directory. Returns `None` when `name` has no usable file-name component
+/// (e.g. `""`, `".."`, `"sub/"`). This is the single source of truth for that
+/// check — both the background loader and the colour-scheme generator use it.
+pub fn safe_image_path(name: &str) -> Option<PathBuf> {
+    let file_name = std::path::Path::new(name).file_name()?;
+    Some(PathBuf::from("images").join(file_name))
+}
+
 /// Build a TOML array `[a, b]` of two floats for the config file. Used for the
 /// `coordinates` and `window_size_startup` pairs so both the startup writer and
 /// the runtime setters emit a real numeric array (not a stringified one).
@@ -41,8 +52,17 @@ pub fn format_date(naive: NaiveDate) -> (String, String) {
 pub fn parse_time_input(day: i32, month: i32, year: i32, hour: i32, minute: i32) -> Result<DateTime<Local>, Box<dyn Error>> {
     let string_method = format!("{}-{}-{} {}:{}", year, month, day, hour, minute);
     let naive_date_time = NaiveDateTime::parse_from_str(&string_method, "%Y-%-m-%-d %-H:%-M")?;
-    let date_time = Local.from_local_datetime(&naive_date_time).single()
-        .ok_or("Failed to convert to local datetime")?;
+
+    // `.single()` returns `None` for a non-existent local time (DST spring-forward
+    // gap) or an ambiguous one (fall-back overlap), failing on a date the user
+    // sees as perfectly valid. Instead:
+    //  - ambiguous overlap  -> take the earliest of the two instants;
+    //  - spring-forward gap -> nudge one hour forward, landing just past the gap.
+    let date_time = Local
+        .from_local_datetime(&naive_date_time)
+        .earliest()
+        .or_else(|| Local.from_local_datetime(&(naive_date_time + Duration::hours(1))).earliest())
+        .ok_or("Failed to convert to a valid local time")?;
     Ok(date_time)
 }
 
@@ -136,6 +156,28 @@ pub fn read_notepad_text(exe_path: &PathBuf) -> Result<String, Box<dyn Error>> {
 mod tests {
     use super::*;
     use chrono::Timelike;
+
+    #[test]
+    fn safe_image_path_confines_to_images_dir() {
+        let images = PathBuf::from("images");
+
+        // Ordinary names resolve directly under images/.
+        assert_eq!(safe_image_path("pic.png"), Some(images.join("pic.png")));
+
+        // Traversal and absolute paths are reduced to their final component, so
+        // they can't escape images/.
+        assert_eq!(safe_image_path("../../etc/passwd"), Some(images.join("passwd")));
+        assert_eq!(safe_image_path("/etc/passwd"), Some(images.join("passwd")));
+        assert_eq!(safe_image_path("sub/dir/p.png"), Some(images.join("p.png")));
+        // A trailing separator is ignored — the final named component is kept.
+        assert_eq!(safe_image_path("sub/"), Some(images.join("sub")));
+        // Windows-style separators are handled too.
+        assert_eq!(safe_image_path(r"..\..\win.png"), Some(images.join("win.png")));
+
+        // Names with no usable file component are rejected.
+        assert_eq!(safe_image_path(""), None);
+        assert_eq!(safe_image_path(".."), None);
+    }
 
     #[test]
     fn float_pair_array_emits_numeric_toml_array() {
