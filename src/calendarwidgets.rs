@@ -779,7 +779,7 @@ impl<'a> egui::Widget for ButtonHeaderRotated<'a> {
         let button_pos = Pos2::new(rect.left() + margin, rect.bottom() - margin - button_size.y);
         let button_rect = Rect::from_min_size(button_pos, button_size);
 
-        ui.allocate_ui_at_rect(button_rect, |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(button_rect), |ui| {
             let painter = ui.painter();
 
             // Draw the rounded frame (border)

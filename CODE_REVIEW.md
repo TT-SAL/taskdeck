@@ -84,12 +84,7 @@ chosen monitor.
   `windows_subsystem`) aren't feature-gated; the crate won't compile on other platforms despite
   mostly-portable logic. Gate the Windows-specific calls behind `#[cfg(windows)]` if cross-platform
   builds ever matter.
-- **E10. (new) Deprecated egui layout APIs.** 6 build warnings remain, all from deprecated egui
-  methods in layout code: `Ui::allocate_ui_at_rect` (×5, calendar cell + map + colour-scheme dialogs)
-  and `Ui::child_ui_with_id_source` (×1). Migrating to `allocate_new_ui` / `new_child` changes the
-  call shape (a `UiBuilder`), and these sit in the hand-tuned calendar/dialog layout (§14.3), so it
-  needs care + a visual check rather than a blind rename. (The trivial `ComboBox::from_id_source` →
-  `from_id_salt` rename was already done as part of E6.)
+- **E10. ✅ FIXED — Deprecated egui layout APIs.** See the changelog.
 
 ---
 
@@ -116,8 +111,8 @@ Worth preserving — don't regress these while hardening:
 
 The app is a working, complete product; these are hardening steps, ordered by payoff-to-risk.
 
-1. **E8 / E10** — Windows `cfg`-gating (only if cross-platform becomes a goal); egui layout-API
-   deprecation migration (needs a visual check).
+1. **E8** — Windows `cfg`-gating (only if cross-platform becomes a goal). _(E10, the egui layout-API
+   deprecation migration, is resolved — see the changelog.)_
 2. **D6 (remainder)** — model a modal **stack** to replace the `*_flag` booleans; deferred to the
    UI/archive redesign (a flat enum isn't faithful — see D6).
 3. **D7** — DPI-aware dialog layout (largely moot while fullscreen; lowest priority).
@@ -130,6 +125,20 @@ _(B4 is deferred pending the archive redesign — see B4.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **E10 — deprecated egui layout APIs migrated (no visual/behaviour change).** The 6 remaining build
+  warnings are cleared by moving off the deprecated `Ui` methods to the `UiBuilder` API:
+  - the 5 `Ui::allocate_ui_at_rect(rect, add)` calls (calendar cell in `show_calendar`, the map area
+    and footer in the coordinate picker, the colour swatch in the scheme editor, and the overflow
+    button in `calendarwidgets::ButtonHeaderRotated`) → `scope_builder(UiBuilder::new().max_rect(rect), add)`;
+  - the 1 `Ui::child_ui_with_id_source(rect, layout, row, None)` (the per-row calendar child) →
+    `new_child(UiBuilder::new().id_salt(row).max_rect(rect).layout(layout))`.
+  These are **provably equivalent** rather than re-tuned: in egui 0.33 `allocate_ui_at_rect` is
+  literally `scope_builder(UiBuilder::new().max_rect(rect), add)`, and the `None` `ui_stack_info`
+  resolves to `UiStackInfo::default()` — exactly what `UiBuilder::new()` already carries — so the
+  hand-tuned calendar/dialog layout (§14.3) is untouched. Note the deprecation hint pointed at
+  `allocate_new_ui`, but that is *itself* deprecated in favour of `scope_builder`, so we target
+  `scope_builder` directly to avoid swapping one warning for another. Build is now warning-free;
+  `cargo test --lib` still green (17 passed).
 - **E2 / E6 / E9 — polish.**
   - **E2:** removed 21 exact-duplicate entries from `CITIES` (`weather.rs`); 289 → 268 unique cities,
     the de-cluttered map shows each once. Verified the unique-name set is otherwise unchanged.

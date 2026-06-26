@@ -751,11 +751,11 @@ impl TaskApp {
                             );
 
                             // Build child UI inside scaled rect
-                            let mut row_ui = ui.child_ui_with_id_source(
-                                scaled_row_rect,
-                                Layout::left_to_right(Align::Center),
-                                row,
-                                None,
+                            let mut row_ui = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .id_salt(row)
+                                    .max_rect(scaled_row_rect)
+                                    .layout(Layout::left_to_right(Align::Center)),
                             );
 
                             // Render all cells
@@ -810,7 +810,7 @@ impl TaskApp {
                                     self.hovered_calendar_cell = Some(idx);
                                 }
 
-                                row_ui.allocate_ui_at_rect(inner_rect, |ui| {
+                                row_ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
                                     ui.set_min_size(inner_rect.size());
                                     let cell = &self.calendar_elements[idx];
                                     let preview = &cell.preview;
@@ -2203,7 +2203,7 @@ impl TaskApp {
                     // -------------------------------------------------
                     // MAP AREA
                     // -------------------------------------------------
-                    let _map_response = ui.allocate_ui_at_rect(map_rect, |ui| {
+                    let _map_response = ui.scope_builder(egui::UiBuilder::new().max_rect(map_rect), |ui| {
                         let (rect, response) = ui.allocate_exact_size(
                             map_size,
                             egui::Sense::click_and_drag(),
@@ -2347,7 +2347,7 @@ impl TaskApp {
                     // -------------------------------------------------
                     // FOOTER
                     // -------------------------------------------------
-                    ui.allocate_ui_at_rect(footer_rect, |ui| {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(footer_rect), |ui| {
                         ui.horizontal_centered(|ui| {
                             ui.add_space(20.0);
                             ui.label(format!("Lat: {:.2}", self.coordinates[0]));
@@ -2527,7 +2527,7 @@ impl TaskApp {
                                     );
 
                                     // Draw color button
-                                    ui.allocate_ui_at_rect(rect, |ui| {
+                                    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                                         ui.color_edit_button_srgba_unmultiplied(&mut scheme.colors[i]);
                                     });
 
