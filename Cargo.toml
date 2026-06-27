@@ -12,17 +12,17 @@ chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-egui = "0.33.0"
-wgpu = "27.0.1"
-egui-wgpu = "0.33.0"
-winit = "0.30.12"
-egui-winit = "0.33.0"
+egui = "0.35.0"
+wgpu = "29.0"
+egui-wgpu = "0.35.0"
+winit = "0.30.13"
+egui-winit = "0.35.0"
 pollster = "0.4.0"
 
-egui_extras = { version = "0.33.3", features = ["svg"] }
+egui_extras = { version = "0.35.0", features = ["svg"] }
 
-epaint = "0.33.0"
-emath = "0.33.0"
+epaint = "0.35.0"
+emath = "0.35.0"
 
 reqwest = { version = "0.11", features = ["blocking"] }
 image = "0.25"
