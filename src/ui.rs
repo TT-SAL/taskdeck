@@ -444,15 +444,35 @@ impl TaskApp {
         });
     }
 
-    fn display_stuff(&self, thing: &Vec<(String, f64, i32, bool)>, ui: &mut Ui, grid_id: String) {
+    fn display_stuff(&self, thing: &Vec<(String, f64, i32, bool)>, ui: &mut Ui, grid_id: String, upper_day: bool) {
         egui::Grid::new(grid_id)
             .spacing(Vec2::new(10.0, 10.0))
             .min_col_width(80.0)
             .max_col_width(80.0)
             .show(ui, |ui| {
+                let nth_cell_to_highlight = match self.date.hour() {
+                    0..2 => 0,
+                    2..4 => 1,
+                    4..6 => 2,
+                    6..8 => 3,
+                    8..10 => 4,
+                    10..12 => 5,
+                    12..14 => 6,
+                    14..16 => 7,
+                    16..18 => 8,
+                    18..20 => 9,
+                    20..22 => 10,
+                    _ => 11,
+                };
                 for (i, (time, temp, wmo_code, is_day)) in thing.iter().enumerate() {
                     egui::Frame::default()
-                        .stroke(Stroke::new(0.5, Color32::from_white_alpha(150)))
+                        .stroke(
+                            if i == nth_cell_to_highlight && upper_day {
+                                Stroke::new(0.6, Color32::WHITE)
+                            } else {
+                                Stroke::new(0.5, Color32::from_white_alpha(150))
+                            }                            
+                        )
                         .corner_radius(CornerRadius::same(15))
                         .inner_margin(egui::Margin {
                             left: 10,
@@ -471,13 +491,24 @@ impl TaskApp {
                                 ui.horizontal(|ui| {
                                     ui.add_space(37.0);
 
-                                    ui.label(RichText::new(format!("{temp:.0}")).color(Color32::from_white_alpha(155)));
+                                    ui.label(RichText::new(format!("{temp:.0}")).color(
+                                        if i == nth_cell_to_highlight && upper_day {
+                                            Color32::WHITE
+                                        } else {
+                                            Color32::from_white_alpha(120)
+                                        }   ));
                                 });
 
                                 ui.add_space(-5.0);
 
                                 let time_text = RichText::new(time)
-                                    .color(Color32::from_white_alpha(120))
+                                    .color(
+                                        if i == nth_cell_to_highlight && upper_day {
+                                            Color32::WHITE
+                                        } else {
+                                            Color32::from_white_alpha(120)
+                                        }   
+                                )
                                     .size(14.0)
                                     .font(FontId { size:13.5, family: FontFamily::Name("space".into()) });
 
@@ -510,7 +541,7 @@ impl TaskApp {
                 ui.add_space(75.0);
 
                 let day_1 = &self.weather_data_cache[0];
-                self.display_stuff(day_1, ui, "firstweathergrid".to_string());
+                self.display_stuff(day_1, ui, "firstweathergrid".to_string(), true);
 
                 ui.add_space(5.0);
 
@@ -521,7 +552,7 @@ impl TaskApp {
                 ui.add_space(75.0);
 
                 let day_2 = &self.weather_data_cache[1];
-                self.display_stuff(day_2, ui, "secondweathergrid".to_string());
+                self.display_stuff(day_2, ui, "secondweathergrid".to_string(), false);
 
                 if self.three_day_weather {
                     ui.add_space(5.0);
@@ -533,7 +564,7 @@ impl TaskApp {
                     ui.add_space(75.0);
 
                     let day_3 = &self.weather_data_cache[2];
-                    self.display_stuff(day_3, ui, "thirdweathergrid".to_string());
+                    self.display_stuff(day_3, ui, "thirdweathergrid".to_string(), false);
                 }
             }
 
@@ -544,14 +575,22 @@ impl TaskApp {
             if !self.three_day_weather {
                 ui.add_space(15.0);
                 ui.horizontal(|ui| {
-                    ui.add_space(5.0);
+                    ui.add_space(7.0);
 
-                    if ui.add(egui::TextEdit::multiline(&mut self.textbox_text)
-                        .background_color(Color32::from_black_alpha(40))
-                    ).changed() {
-                        self.should_save_textbox_text = true;
-                        self.last_textbox_edit_time = Some(Instant::now());
-                    }
+                    egui::ScrollArea::vertical()
+                        .min_scrolled_height(390.0)
+                        .max_height(390.0)
+                        .show(ui, |ui| {
+                            if ui.add(egui::TextEdit::multiline(&mut self.textbox_text)
+                                .desired_width(340.0)
+                                .code_editor()
+                                .font(FontId { size: 19.0, family: FontFamily::Monospace })
+                                .background_color(Color32::from_black_alpha(40))
+                            ).changed() {
+                                self.should_save_textbox_text = true;
+                                self.last_textbox_edit_time = Some(Instant::now());
+                            }
+                        });
                 });
             }
         });
