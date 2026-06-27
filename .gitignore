@@ -11,3 +11,4 @@
 # (`TaskDeck`), so a locked, reproducible dependency set is wanted.
 
 /taskdeck_data
+/TODO.md

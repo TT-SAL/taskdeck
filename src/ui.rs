@@ -394,6 +394,10 @@ impl TaskApp {
 
     fn show_tasks(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical()
+        // egui 0.34+ changed the ScrollArea drag default to `DragScroll::OnTouch` (mouse drag no
+        // longer scrolls). `ScrollSource::ALL` restores the 0.33 default (scrollbar + wheel +
+        // mouse-drag) so click-drag scrolling works as before.
+        .scroll_source(egui::scroll_area::ScrollSource::ALL)
         .wheel_scroll_multiplier(vec2(1.0, 1.5))
         .show(ui, |ui| {
             ui.set_min_size(egui::Vec2 { x: 290.0, y: 50.0 });
@@ -650,6 +654,9 @@ impl TaskApp {
             // Scroll area
             egui::ScrollArea::vertical()
                 .id_salt("calendar_scrollage_row_scale")
+                // Restore mouse click-drag scrolling, lost when egui 0.34+ changed the ScrollArea
+                // drag default to `DragScroll::OnTouch`. `ScrollSource::ALL` == the old 0.33 default.
+                .scroll_source(egui::scroll_area::ScrollSource::ALL)
                 .wheel_scroll_multiplier(Vec2::new(1.0, 2.0))
                 .show(ui, |ui| {
                     ui.set_min_width(total_width + 20.0);
@@ -1485,7 +1492,13 @@ impl TaskApp {
 }
 
 impl TaskApp {
-    pub fn ui(&mut self, ctx: &egui::Context) {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // egui 0.35 is Ui-centric: the frame hands us a root `&mut Ui` (via `Context::run_ui`)
+        // instead of a `&Context`. Bind an owned clone of the context to a local and reference it,
+        // so every existing `ctx.*` / `Window::show(ctx, …)` call below stays unchanged while the
+        // top-level panels can still borrow the root `ui` mutably (the clone doesn't borrow `ui`).
+        let ctx_owned = ui.ctx().clone();
+        let ctx = &ctx_owned;
         if self.background_image_texture.is_none() {
             if let Some(name) = self.pending_initial_background.take() {
                 self.background_image_texture = Some(set_background(ctx, name.clone()));
@@ -1532,7 +1545,7 @@ impl TaskApp {
             }
         }
 
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+        egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 if ui.button("New Task").clicked() {
                     self.new_task_flag = true;
@@ -1582,10 +1595,13 @@ impl TaskApp {
 
         //PUT THE BACKGROUND COLOR INSIDE THE DEFAULT IN A FRAME
         //THIS IS WHERE YOU CONTROL THE OVERALL PANEL VISUALS
+        // `available_rect_before_wrap()` on the root ui — after the menu bar panel above has
+        // reserved its space — is the central region: the exact value the removed
+        // `ctx.available_rect()` returned (before the CentralPanel's own inner margin).
+        let screen_rect = ui.available_rect_before_wrap();
         egui::CentralPanel::default()
-        .show(ctx, |ui| {
-            
-            let screen_rect = ctx.available_rect();
+        .show(ui, |ui| {
+
             // Skip the background draw if the texture hasn't been initialized yet
             // rather than unwrapping. In practice it's set from
             // `pending_initial_background` at the top of `ui()`, but guarding here
@@ -1808,6 +1824,7 @@ impl TaskApp {
                             ui.separator();
                             ui.add_space(2.0);
                             egui::ScrollArea::vertical()
+                            .scroll_source(egui::scroll_area::ScrollSource::ALL)
                             .auto_shrink([true, true])
                             .max_height(280.0)
                             .show(ui, |ui| {
@@ -1864,7 +1881,7 @@ impl TaskApp {
                             });
                         });
 
-                            egui::TopBottomPanel::bottom("bottompanel").show_inside(ui, |ui| {
+                            egui::Panel::bottom("bottompanel").show(ui, |ui| {
                                 ui.add_space(8.0);
                                         ui.horizontal_centered(|ui| {
                                             ui.add_space(65.0);
@@ -1913,7 +1930,7 @@ impl TaskApp {
                         .outer_margin(5)
                         .corner_radius(egui::CornerRadius::same(14))
                         .show(ui, |ui| {
-                                egui::ScrollArea::vertical().show(ui, |ui| {
+                                egui::ScrollArea::vertical().scroll_source(egui::scroll_area::ScrollSource::ALL).show(ui, |ui| {
                                     egui::Grid::new("archive_grid")
                                         .spacing([0.0, 30.0])
                                         .striped(true)
@@ -2386,6 +2403,7 @@ impl TaskApp {
                                 let previous_id = self.selected_colorscheme_id;
 
                                 egui::ScrollArea::vertical()
+                                    .scroll_source(egui::scroll_area::ScrollSource::ALL)
                                     .max_height(300.0)
                                     .max_width(300.0)
                                     .id_salt("scroll_area_1")
@@ -2406,6 +2424,7 @@ impl TaskApp {
                                 ui.add_space(5.0);
 
                                 egui::ScrollArea::vertical()
+                                    .scroll_source(egui::scroll_area::ScrollSource::ALL)
                                     .max_height(300.0)
                                     .max_width(300.0)
                                     .id_salt("scroll_area_2")
@@ -2666,7 +2685,7 @@ impl TaskApp {
 }
 
 pub fn set_styles(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
+    let mut style = (*ctx.global_style()).clone();
     style.text_styles = [
         (egui::TextStyle::Heading, egui::FontId::new(30.0, egui::FontFamily::Monospace)),
         (egui::TextStyle::Body, egui::FontId::new(18.0, egui::FontFamily::Monospace)),
@@ -2675,7 +2694,7 @@ pub fn set_styles(ctx: &egui::Context) {
         (egui::TextStyle::Monospace, egui::FontId::new(11.0, egui::FontFamily::Monospace)),
     ]
     .into();
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }
 
 pub fn load_fonts(ctx: &egui::Context) {

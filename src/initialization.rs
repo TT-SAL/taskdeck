@@ -8,7 +8,7 @@ use wgpu::{Color, ExperimentalFeatures, LoadOp};
 use winit::event::WindowEvent;
 use winit::platform::windows::{WindowAttributesExtWindows};
 use winit::window::{Window, WindowId};
-use egui_wgpu::wgpu::SurfaceError;
+use egui_wgpu::wgpu::CurrentSurfaceTexture;
 use std::collections::HashMap;
 use std::{fs, time};
 use std::path::PathBuf;
@@ -306,6 +306,13 @@ impl AppState<'_> {
 
         let egui_context = Context::default();
 
+        // Pin egui to a single pass per frame. 0.35's `run_ui` defaults to `max_passes = 2`
+        // (a second pass on `request_discard`, e.g. first-frame Grid/window sizing), whereas
+        // 0.33's begin_pass/end_pass loop was always single-pass. Staying single-pass preserves
+        // behaviour and avoids re-running this app's non-idempotent click handlers (add task,
+        // toggle archive, "show more") twice within one frame.
+        egui_context.options_mut(|o| o.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+
         let max_texture_side = device.limits().max_texture_dimension_2d as usize;
 
         #[cfg(debug_assertions)] {
@@ -383,7 +390,10 @@ pub struct App<'a> {
 
 impl<'a> App<'a> {
     pub fn new(task_app: TaskApp, window_size_startup: [f32; 2], selected_monitor_name: String) -> Self {
-        let instance = egui_wgpu::wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        // wgpu 29 takes `InstanceDescriptor` by value and dropped its `Default` impl;
+        // `new_without_display_handle()` is the documented default-options constructor (no display
+        // handle is needed on Windows, where the surface is created from the window handle).
+        let instance = egui_wgpu::wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         Self {
             cursor_inside_window: false,
             window_is_focused: false,
@@ -474,30 +484,31 @@ impl<'a> App<'a> {
 
         // --- Acquire next surface texture ---
         let surface_texture = match state.surface.get_current_texture() {
-            Ok(tex) => tex,
-            Err(SurfaceError::Outdated | SurfaceError::Lost) => {
+            // wgpu 29 returns a `CurrentSurfaceTexture` enum instead of `Result`. A suboptimal
+            // texture is still rendered, matching the old code which used `Ok(tex)` without
+            // checking the `suboptimal` flag.
+            CurrentSurfaceTexture::Success(tex) | CurrentSurfaceTexture::Suboptimal(tex) => tex,
+            CurrentSurfaceTexture::Outdated | CurrentSurfaceTexture::Lost => {
                 state.surface.configure(&state.device, &state.surface_config);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
-            Err(SurfaceError::Timeout) => {
+            CurrentSurfaceTexture::Timeout => {
                 eprintln!("Surface timed out!");
                 return;
             }
-            Err(SurfaceError::OutOfMemory) => {
-                eprintln!("Out of memory!");
-                std::process::exit(1);
-            }
-            Err(_) => return,
+            // `Occluded` (window hidden) and `Validation` are new variants; skip the frame.
+            // The old `OutOfMemory => exit(1)` arm is gone — OOM is no longer a surface-acquire
+            // variant in wgpu 29.
+            CurrentSurfaceTexture::Occluded | CurrentSurfaceTexture::Validation => return,
         };
 
         let surface_view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        // --- Begin egui frame ---
-
-        state.context().begin_pass(raw_input);
-
+        // --- Run one egui frame ---
+        // Set the viewport's fullscreen flag before the pass runs (unchanged behaviour: this
+        // mutates the persisted winit input, taking effect on the next input take).
         let is_fullscreen = self
             .window
             .as_ref()
@@ -508,11 +519,16 @@ impl<'a> App<'a> {
         let info = state.egui_winit_state.egui_input_mut().viewports.entry(root_id).or_default();
         info.fullscreen = Some(is_fullscreen);
 
-        let ctx = state.context();
-        self.task_app.ui(ctx);
-
-        // --- End frame, get full output ---
-        let full_output = state.context().end_pass();
+        // egui 0.35 replaces the `begin_pass` + `end_pass` pair with `run_ui`, which builds the
+        // root `&mut Ui` the panels now attach to (and does the panel/hit-test bookkeeping the old
+        // path did). `max_passes` is pinned to 1 in `AppState::new`, so this stays single-pass like
+        // the old loop. The context is an `Arc` handle; cloning it frees the borrow of `state` so
+        // the closure can take `&mut self.task_app`.
+        let egui_ctx = state.context().clone();
+        let task_app = &mut self.task_app;
+        let full_output = egui_ctx.run_ui(raw_input, |ui| {
+            task_app.ui(ui);
+        });
 
         let mut actions_requested: Vec<ActionRequested> = vec![];
         let egui_ctx = state.context().clone();
@@ -572,6 +588,7 @@ impl<'a> App<'a> {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             state.egui_wgpu_renderer.render(&mut rpass.forget_lifetime(), &paint_jobs, &screen_descriptor);
