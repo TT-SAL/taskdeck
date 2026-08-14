@@ -22,11 +22,13 @@ The calendar tells you what a day holds. The **Planner** — the menu button, or
 
 It opens a timeline for one day, with everything still waiting for a slot in a tray down the left. Drag on the timeline to block out time; the block is created where you dragged and you name it right there. Drag a task in from the tray to decide when you will actually do it. Drag blocks to move them, drag their bottom edge to make them longer. Overlapping blocks sit side by side so a double-booking is obvious, and a red line shows where you are in the day.
 
+Select anything on the timeline and a row appears under the header with its times, its importance, and buttons to complete, delete, or send it back to the unplanned tray.
+
 The important part is what it records. A deadline is when something is **due**; a planned block is when you will **work on** it. Those are different, so TaskDeck stores them separately: a report due Friday that you plan to write on Tuesday shows as a block on Tuesday and still shows as due on Friday. Nothing you do on the planner moves a deadline you set — a due date is a fact about the task, so due markers are shown but not draggable.
 
 A few details worth pointing out:
 
-- Drop any image into the `images` folder and pick it as your background from Settings. TaskDeck can also read that image and build a colour palette from it, which it uses to tint the items on the calendar.
+- Drop any image into the `images` folder and pick it as your background from Settings. TaskDeck can also read that image and build a colour palette from it, which it uses to tint the items on the calendar. It ships with a few palettes to start from — `EMBER`, `TIDE`, `MOSS` and `DUSK` — alongside the untinted `COLORSCHEME ZERO` it opens on.
 - Set your weather location by clicking it on a world map instead of typing in coordinates. Around two hundred cities are marked to get you close.
 - Completed and deleted items are not thrown away. They go to an archive you can page back through.
 

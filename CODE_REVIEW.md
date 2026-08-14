@@ -140,6 +140,31 @@ _(B4 is deferred pending the archive redesign — see B4. E8 and E10 are resolve
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **Fixedsys rendered at fractional pixel sizes (long-standing "crisp here, broken there").**
+  Fixedsys Excelsior's outlines trace a bitmap font's pixel grid, so it is sharp only when a
+  glyph's em box lands on whole pixels — sharpest at multiples of 16px. A ruler rendering one
+  string at every size confirmed it: 16.00px and 32.00px crisp, 17.19px and 18.75px smeared. Two
+  changes: the **automatic** UI scale is now rounded *down* to a step that makes points-per-pixel a
+  multiple of `PPP_QUANTUM` (0.25) — 1.5625 became 1.5, at which every even point size is a whole
+  pixel — and `set_styles` runs each named size through `snap_font_points`, which snaps to the
+  16px grid when close and to the nearest whole pixel otherwise. `apply_ui_scale` re-runs
+  `set_styles` when the scale changes, since the snapped sizes depend on it. An explicit
+  `ui_scale_percent` is left alone. Unit-tested (4 tests); details in `DOCUMENTATION.md` §14.5.
+  _Note: inline `FontId::new(…)` call sites are not snapped — only the named text styles are. The
+  scale quantization helps them all, but exact sizes are only guaranteed for the styles._
+- **Planner buttons were unclickable, and planner-created tasks had no importance.**
+  The ✓/✗/↩ strip was drawn *inside* the block, and the block's own click-and-drag target is
+  registered over the same pixels — egui hit-tests the most recently added widget first, so the
+  buttons lost every click. `planner_timeline` now registers all interactions **before** painting,
+  so anything drawn afterwards (the in-place title editor) wins its clicks, and the controls moved
+  to a `planner_inspector` row under the header, which a 15-minute block had no room for anyway.
+  The inspector is also where **importance** (or urgency) is now editable, which a task dragged out
+  on the timeline previously had no way to set.
+- **A fresh install had no usable colour schemes.** `colorschemes.json` starting empty meant the
+  manager opened on `COLORSCHEME ZERO` alone — six fully transparent entries, so it looked broken
+  rather than empty. `ColorScheme::builtin_schemes()` adds `EMBER`, `TIDE`, `MOSS` and `DUSK`
+  behind it (ZERO stays id 0, so nobody's existing appearance changes). See `DOCUMENTATION.md` §10
+  for how the ramps are laid out.
 - **Day planner added** (`planner.rs` + `TaskApp::show_planner`). A timeline view of one day with a
   backlog tray, drag-to-create, drag-to-plan, move and resize. Documented in
   [`DOCUMENTATION.md` §16](DOCUMENTATION.md); the notes here are the review-relevant ones.

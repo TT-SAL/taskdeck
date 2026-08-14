@@ -28,6 +28,64 @@ impl ColorScheme {
 
         Self { name: "COLORSCHEME ZERO".to_string(), colors, is_user_configurable: true }
     }
+
+    /// The schemes a fresh install starts with.
+    ///
+    /// Previously a first run got only `default_scheme` — six fully transparent
+    /// entries — so the colour-scheme manager opened on a single palette that
+    /// tinted nothing, and looked broken rather than empty. `COLORSCHEME ZERO`
+    /// stays first (id 0) so the untinted look remains the default and nobody's
+    /// existing appearance changes; the rest are there to pick from.
+    ///
+    /// Indices are the palette slots `Active::calendar_item_color` selects:
+    /// 0–4 run from least to most important, and 5 is events. Each ramp goes
+    /// quiet→loud in that order so a glance at the calendar reads as urgency,
+    /// and events sit clearly apart from the ramp. Alphas stay in the 70–110
+    /// range: these tint items over a background photo, so they have to colour
+    /// without hiding it.
+    pub fn builtin_schemes() -> Vec<Self> {
+        let scheme = |name: &str, colors: [[u8; 4]; 6]| Self {
+            name: name.to_string(),
+            colors,
+            is_user_configurable: true,
+        };
+
+        vec![
+            Self::default_scheme(),
+            scheme("EMBER", [
+                [ 96, 108, 122,  75],   // slate
+                [126, 122,  96,  80],   // ochre
+                [176, 132,  62,  90],   // amber
+                [196,  92,  46, 100],   // burnt orange
+                [188,  56,  50, 110],   // ember red
+                [ 92, 132, 168,  90],   // events: cool blue against the warm ramp
+            ]),
+            scheme("TIDE", [
+                [ 74, 110, 118,  75],   // deep teal
+                [ 78, 132, 128,  80],   // sea green
+                [ 96, 152, 152,  90],   // shallow water
+                [150, 160, 116, 100],   // kelp
+                [206, 158,  86, 110],   // sand, the loudest thing on a coast
+                [116,  96, 156,  90],   // events: violet
+            ]),
+            scheme("MOSS", [
+                [ 88, 100,  84,  75],
+                [104, 124,  88,  80],
+                [128, 148,  92,  90],
+                [166, 158,  84, 100],
+                [188, 124,  64, 110],
+                [ 96, 124, 156,  90],
+            ]),
+            scheme("DUSK", [
+                [ 84,  92, 124,  75],
+                [104,  98, 140,  80],
+                [134, 104, 152,  90],
+                [168, 108, 148, 100],
+                [198, 104, 122, 110],
+                [ 96, 152, 160,  90],
+            ]),
+        ]
+    }
     pub fn duplicate(&self) -> Self {
         Self {
             name: format!("DUPLICATE - '{}'", self.name),

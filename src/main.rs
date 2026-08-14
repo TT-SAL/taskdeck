@@ -61,8 +61,13 @@ async fn run() {
         }
     };
 
+    // A fresh install (or a wiped colorschemes.json) starts with the built-in
+    // palettes rather than a single transparent one. Id 0 is COLORSCHEME ZERO,
+    // so the untinted default look is unchanged and the rest are there to pick.
     if colorschemes.is_empty() {
-        colorschemes.insert(0, ColorScheme::default_scheme());
+        for (id, scheme) in ColorScheme::builtin_schemes().into_iter().enumerate() {
+            colorschemes.insert(id as u32, scheme);
+        }
         selected_colorscheme_id = 0;
     }
 

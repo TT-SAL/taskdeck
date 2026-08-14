@@ -406,6 +406,13 @@ pre-fill the date fields from the selected day).
   deterministic seed 42), sorts clusters by a visual-significance heuristic
   (`population*0.6 + saturation*0.2 + |L-50|*0.2`), and emits 6 colors at fixed alpha 80.
   Requires ≥500 usable pixels, else returns `None`.
+- **`builtin_schemes()`**: what a fresh install starts with. `COLORSCHEME ZERO` (six fully
+  transparent entries) stays id 0, so the untinted default look is unchanged, followed by
+  `EMBER`, `TIDE`, `MOSS` and `DUSK`. Each ramps quiet→loud across palette slots 0–4 (least to
+  most important) with slot 5 — events — deliberately outside the ramp, so a glance at the
+  calendar reads as urgency and events stand apart. Alphas stay in the 70–110 range: these tint
+  items *over a background photo*, so they must colour without hiding it. Previously a first run
+  got only the transparent scheme, so the manager opened on a single palette that tinted nothing.
 - Persistence mirrors tasks: atomic temp-file write to `colorschemes.json`.
 - The **editor** (in `ui.rs`) lets the user color-pick each of the six swatches and **drag to
   reorder** them; Save commits the edited scheme back into the map.
@@ -587,6 +594,28 @@ The computation is a fixed point, not a feedback loop: the window's physical wid
 scale factor are both independent of the zoom, so `points × zoom` is constant and re-running it on
 the next frame gives the same answer.
 
+**The scale is quantized, and that is about the font.** TaskDeck is set in Fixedsys Excelsior,
+whose outlines trace a bitmap font's pixel grid: it is sharp when a glyph's em box lands on whole
+pixels — sharpest at a multiple of 16px — and visibly smeared when it doesn't. Rendering one string
+at 16.00px and 17.19px side by side settles the question immediately. An unconstrained fit produced
+scales like 0.78125, i.e. 1.5625 points-per-pixel, at which almost no size in the app is a whole
+number of pixels; that is the long-standing "crisp in some places, broken-ish in others" look.
+
+Two things address it:
+
+- `apply_ui_scale` rounds the automatic scale **down** to whatever step makes points-per-pixel a
+  multiple of `PPP_QUANTUM` (0.25). Rounding down only ever makes the UI smaller than strictly
+  required, so the layout still fits. On a 2× display the earlier 1.5625 becomes 1.5, at which
+  every even point size is a whole pixel.
+- `set_styles` runs each named text size through `snap_font_points`, which returns the point size
+  whose *pixel* height is a whole number — preferring a multiple of the 16px grid when one is
+  within `FIXEDSYS_GRID_TOLERANCE`, else the nearest whole pixel. Because the answer depends on
+  the scale, `apply_ui_scale` re-runs `set_styles` whenever points-per-pixel actually changes.
+
+An explicit `ui_scale_percent` is **not** quantized: a number the user typed is a number they meant.
+At 1× — a Windows display at 100% — the common sizes are already whole pixels and nothing moves
+except `Heading`, which takes 32px over 30px because it is within tolerance of the grid.
+
 ---
 
 ## 15. Platform Notes
@@ -661,12 +690,21 @@ planner existed shows up as a marker, and dragging its bottom edge gives it a le
 | Drag a backlog card onto the timeline | Sets `planned_start`; the deadline is untouched. |
 | Drag a block | Moves it, keeping the grab point under the pointer. |
 | Drag a block's bottom edge | Resizes it. |
-| Click | Selects, revealing ✓ complete / ✗ delete / ↩ back-to-unplanned. |
+| Click | Selects it. The **inspector** row under the header then shows what it is, when it runs, its importance, and ✓ complete / ✗ delete / ↩ back-to-unplanned. |
 | Double-click | Re-opens the title for editing. |
 | `Esc` | Leaves the title editor; a second press closes the planner. |
 
 Everything snaps to `SNAP_MINUTES` (15) and is clamped inside the day by `clamp_block`, which is
 shared by create, move, and resize so all three agree on what a legal block is.
+
+The controls live in an inspector row rather than inside the block, for two reasons: a
+15-minute block has no room for three buttons, and — more subtly — the block's own drag target
+is registered over the same pixels, so buttons drawn inside it were unclickable. egui hit-tests
+the *most recently added* widget first, so anything that must win a click has to be added after
+the block-sized drag target. `planner_timeline` therefore registers all interactions **before**
+painting; the in-place title editor, drawn afterwards, gets its clicks. The inspector is also
+where a planner-created task's **importance** is set — without it, dragging out a task left it
+stuck on the default.
 
 **Due markers are deliberately not draggable.** A deadline is a fact about the task; dragging it
 on a planner would silently rewrite it while the user thought they were planning. Clicking one

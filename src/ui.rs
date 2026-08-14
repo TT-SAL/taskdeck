@@ -29,6 +29,14 @@ const PLANNER_DEFAULT_SCROLL_HOUR: f32 = 7.0;
 /// Vertical space the planner's header row and separator take, subtracted from
 /// the window height to size the tray and timeline beneath them.
 const PLANNER_HEADER_HEIGHT: f32 = 46.0;
+/// Height of the selection inspector row. Reserved whether or not anything is
+/// selected, so selecting doesn't shift the timeline under the pointer.
+const PLANNER_INSPECTOR_HEIGHT: f32 = 26.0;
+/// Step the automatic UI scale quantizes points-per-pixel to. See
+/// `apply_ui_scale` — a quarter step keeps the layout close to the size that
+/// fits while giving text a much better chance of a whole-pixel height.
+const PPP_QUANTUM: f32 = 0.25;
+
 /// Importance given to a task created straight on the timeline. Mid-scale: the
 /// user is planning their day, not triaging, and can adjust it later.
 const PLANNER_NEW_TASK_IMPORTANCE: u8 = 2;
@@ -44,7 +52,6 @@ struct PlannerEntry {
     id: u64,
     name: String,
     color_id: usize,
-    is_event: bool,
     placement: planner::Placement,
 }
 
@@ -279,6 +286,9 @@ pub struct TaskApp {
     /// fit-to-window default. See `apply_ui_scale`.
     ui_scale_percent: u32,
     ui_scale_input: String,
+    /// Points-per-pixel the text styles were last snapped for. See
+    /// `apply_ui_scale` and `snap_font_points`.
+    last_font_ppp: f32,
 
     /* ───────────────────────── Errors & Confirmations ───────────────────────── */
     /// Id of the item awaiting a complete/delete confirmation. The dialog looks
@@ -433,6 +443,7 @@ impl TaskApp {
             background_tint_input: config.background_image_tint_percent.to_string(),
             ui_scale_percent: config.ui_scale_percent,
             ui_scale_input: config.ui_scale_percent.to_string(),
+            last_font_ppp: 0.0,
 
             /* Errors */
             confirm_complete_task: None,
@@ -1354,7 +1365,6 @@ impl TaskApp {
                     id: item.id,
                     name: item.name.clone(),
                     color_id: item.calendar_item_color(),
-                    is_event: item.is_event,
                     placement,
                 })
             })
@@ -1501,9 +1511,9 @@ impl TaskApp {
         // the day on screen at once as it can get, and the viewport is a
         // different number of points on every machine (see `apply_ui_scale`).
         let viewport = ctx.viewport_rect();
-        let width = (viewport.width() - 140.0).clamp(640.0, 1240.0);
-        let height = (viewport.height() - 120.0).clamp(380.0, 980.0);
-        let body_height = height - PLANNER_HEADER_HEIGHT;
+        let width = (viewport.width() - 140.0).clamp(640.0, 1600.0);
+        let height = (viewport.height() - 110.0).clamp(380.0, 1180.0);
+        let body_height = height - PLANNER_HEADER_HEIGHT - PLANNER_INSPECTOR_HEIGHT;
 
         let mut open = true;
         egui::Window::new(RichText::new("Day planner").size(18.0))
@@ -1517,6 +1527,7 @@ impl TaskApp {
                 ui.set_height(height);
 
                 self.planner_header(ui);
+                self.planner_inspector(ui);
                 ui.separator();
 
                 ui.horizontal_top(|ui| {
@@ -1600,6 +1611,135 @@ impl TaskApp {
                 ui.label(RichText::new(parts.join(" · ")).size(13.0).color(Color32::from_white_alpha(190)));
             });
         });
+    }
+
+    /// Controls for whatever is selected on the timeline.
+    ///
+    /// These used to be a button strip drawn inside the block itself, which was
+    /// wrong twice over: a 15-minute block has no room for three buttons, and
+    /// the block's own drag target is registered over the same pixels and ate
+    /// the clicks. A row of its own also gives importance somewhere to live —
+    /// a task created by dragging on the timeline was previously stuck at the
+    /// default with no way to change it without going through the task list.
+    fn planner_inspector(&mut self, ui: &mut Ui) {
+        let Some(id) = self.planner_selection else {
+            // Reserve the row so selecting something doesn't shove the timeline
+            // down and move what the user is aiming at.
+            ui.add_space(PLANNER_INSPECTOR_HEIGHT);
+            return;
+        };
+
+        let Some(item) = self.active_things.iter().find(|item| item.id == id) else {
+            self.planner_selection = None;
+            ui.add_space(PLANNER_INSPECTOR_HEIGHT);
+            return;
+        };
+
+        // Copy out what the row needs; the closure below takes `&mut self`.
+        let name = item.name.clone();
+        let is_event = item.is_event;
+        let is_planned = item.is_planned();
+        let anchor = item.planner_anchor();
+        let duration = item.duration_minutes;
+        let mut importance = item.importance;
+        let mut time_importance = item.time_importance;
+
+        let mut complete = false;
+        let mut delete = false;
+        let mut unplan = false;
+        let mut rename = false;
+        let mut changed = false;
+
+        ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            ui.label(RichText::new(if is_event { "Event" } else { "Task" }).size(12.0).color(Color32::from_white_alpha(140)));
+            ui.label(RichText::new(&name).size(14.0).strong());
+
+            if let Some(anchor) = anchor {
+                let when = match duration {
+                    Some(minutes) => format!(
+                        "{}–{} · {}",
+                        anchor.format("%H:%M"),
+                        (anchor + Duration::minutes(minutes as i64)).format("%H:%M"),
+                        planner::format_duration(minutes)
+                    ),
+                    None => anchor.format("%H:%M").to_string(),
+                };
+                ui.label(RichText::new(when).size(12.0).color(Color32::from_white_alpha(170)));
+            }
+
+            if ui.small_button("✎").on_hover_text("Rename").clicked() {
+                rename = true;
+            }
+
+            // Events take their colour from being events (palette index 5) and
+            // are ordered by time, so importance would mean nothing for them.
+            if !is_event {
+                ui.add_space(10.0);
+                if let Some(level) = time_importance.as_mut() {
+                    ui.label(RichText::new("Urgency:").size(12.0));
+                    ComboBox::from_id_salt("planner_urgency")
+                        .selected_text(URGENCY[(*level as usize).min(URGENCY.len() - 1)])
+                        .show_ui(ui, |ui| {
+                            for (index, label) in URGENCY.iter().enumerate() {
+                                if ui.selectable_value(level, index as u8, *label).clicked() {
+                                    changed = true;
+                                }
+                            }
+                        });
+                } else {
+                    let level = importance.get_or_insert(PLANNER_NEW_TASK_IMPORTANCE);
+                    ui.label(RichText::new("Importance:").size(12.0));
+                    ComboBox::from_id_salt("planner_importance")
+                        .selected_text(IMPORTANCE[(*level as usize).min(IMPORTANCE.len() - 1)])
+                        .show_ui(ui, |ui| {
+                            for (index, label) in IMPORTANCE.iter().enumerate() {
+                                if ui.selectable_value(level, index as u8, *label).clicked() {
+                                    changed = true;
+                                }
+                            }
+                        });
+                }
+            }
+
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(4.0);
+                if ui.button("✗ Delete").clicked() {
+                    delete = true;
+                }
+                if ui.button("✓ Complete").clicked() {
+                    complete = true;
+                }
+                if !is_event && is_planned && ui.button("↩ Unplan").on_hover_text("Back to the unplanned tray").clicked() {
+                    unplan = true;
+                }
+            });
+        });
+
+        if changed {
+            if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
+                item.importance = importance;
+                item.time_importance = time_importance;
+            }
+            // Importance drives both the task order and the palette colour, so
+            // the calendar and task list have to be rebuilt, not just saved.
+            self.summarize_calendar();
+            self.save_active_things();
+        }
+        if rename {
+            self.begin_planner_naming(id);
+        }
+        if unplan {
+            self.unplan_item(id);
+        }
+        if complete {
+            self.confirm_complete_task = Some(id);
+            self.user_wants_to_complete_task_flag = true;
+        }
+        if delete {
+            self.confirm_delete_task = Some(id);
+            self.user_wants_to_delete_task_flag = true;
+        }
     }
 
     /// The backlog: every task with no time set aside for it. Cards are draggable
@@ -1725,7 +1865,6 @@ impl TaskApp {
                         id,
                         name: String::new(),
                         color_id: if self.planner_creates_event { 5 } else { PLANNER_NEW_TASK_IMPORTANCE as usize },
-                        is_event: self.planner_creates_event,
                         placement: planner::Placement::Block { start, minutes },
                     }),
                 }
@@ -1734,14 +1873,22 @@ impl TaskApp {
             let placements: Vec<_> = entries.iter().map(|e| e.placement).collect();
             let lanes = planner::lay_out(&placements);
 
-            let mut block_rects: Vec<(u64, Rect)> = Vec::new();
-            for (entry, lane) in entries.iter().zip(lanes.iter()) {
-                let block_rect = planner_entry_rect(entry.placement, *lane, lane_area, &geometry);
-                block_rects.push((entry.id, block_rect));
-                self.paint_planner_entry(ui, entry, block_rect);
-            }
+            let block_rects: Vec<(u64, Rect)> = entries
+                .iter()
+                .zip(lanes.iter())
+                .map(|(entry, lane)| (entry.id, planner_entry_rect(entry.placement, *lane, lane_area, &geometry)))
+                .collect();
 
+            // Interactions are registered *before* anything is drawn on top of
+            // them. egui hit-tests the most recently added widget first, so a
+            // control painted afterwards — the in-place title editor — wins the
+            // click, instead of being swallowed by the block-sized drag target
+            // covering it.
             self.handle_planner_gestures(ui, &background, &block_rects, &entries, pointer, &geometry, lane_area);
+
+            for (entry, (_, block_rect)) in entries.iter().zip(block_rects.iter()) {
+                self.paint_planner_entry(ui, entry, *block_rect);
+            }
         });
     }
 
@@ -1855,7 +2002,7 @@ impl TaskApp {
                     pos2(rect.left() + 8.0, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     label,
-                    FontId::proportional(12.0),
+                    FontId::new(12.0, FontFamily::Monospace),
                     Color32::from_white_alpha(220),
                 );
             }
@@ -1887,7 +2034,7 @@ impl TaskApp {
                         planner::format_minutes(start + minutes as i32),
                         planner::format_duration(minutes)
                     ),
-                    FontId::proportional(11.0),
+                    FontId::new(11.0, FontFamily::Monospace),
                     Color32::from_white_alpha(200),
                 );
 
@@ -1917,7 +2064,7 @@ impl TaskApp {
                         pos2(text_rect.left(), text_rect.top() + 14.0),
                         egui::Align2::LEFT_TOP,
                         &entry.name,
-                        FontId::proportional(14.0),
+                        FontId::new(14.0, FontFamily::Monospace),
                         Color32::WHITE,
                     );
                 } else {
@@ -1926,7 +2073,7 @@ impl TaskApp {
                         pos2(text_rect.right(), text_rect.center().y),
                         egui::Align2::RIGHT_CENTER,
                         &entry.name,
-                        FontId::proportional(12.0),
+                        FontId::new(12.0, FontFamily::Monospace),
                         Color32::WHITE,
                     );
                 }
@@ -1942,40 +2089,6 @@ impl TaskApp {
             }
         }
 
-        if selected && !naming {
-            self.planner_entry_controls(ui, entry, rect);
-        }
-    }
-
-    /// Complete / delete / unplan buttons for the selected block, following the
-    /// same hover-reveal idiom as the task cards.
-    fn planner_entry_controls(&mut self, ui: &mut Ui, entry: &PlannerEntry, rect: Rect) {
-        let can_unplan = !entry.is_event && matches!(entry.placement, planner::Placement::Block { .. });
-        let button_count = if can_unplan { 3 } else { 2 };
-        let bar = Rect::from_min_max(
-            pos2(rect.right() - 30.0 * button_count as f32 - 6.0, rect.top() + 3.0),
-            pos2(rect.right() - 4.0, (rect.top() + 27.0).min(rect.bottom())),
-        );
-        if bar.height() < 14.0 {
-            return;
-        }
-
-        let id = entry.id;
-        ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
-            ui.horizontal(|ui| {
-                if ui.small_button("✓").on_hover_text("Complete").clicked() {
-                    self.confirm_complete_task = Some(id);
-                    self.user_wants_to_complete_task_flag = true;
-                }
-                if ui.small_button("✗").on_hover_text("Delete").clicked() {
-                    self.confirm_delete_task = Some(id);
-                    self.user_wants_to_delete_task_flag = true;
-                }
-                if can_unplan && ui.small_button("↩").on_hover_text("Back to unplanned").clicked() {
-                    self.unplan_item(id);
-                }
-            });
-        });
     }
 
     /// Start, track, and commit the timeline gestures.
@@ -2374,7 +2487,22 @@ impl TaskApp {
             // width_in_points * current_zoom is the window's width in
             // native-scale points, which is what the design width is expressed in.
             let fits_at = width_in_points * current_zoom / DESIGN_WIDTH_POINTS;
-            fits_at.clamp(UI_SCALE_MIN as f32 / 100.0, UI_SCALE_MAX as f32 / 100.0)
+
+            // Quantize so the resulting points-per-pixel lands on a quarter
+            // step. The app is set in Fixedsys, a pixel font (see
+            // `snap_font_points`): an arbitrary scale like 0.78125 gives a
+            // points-per-pixel of 1.5625, at which almost no text size is a
+            // whole number of pixels and everything looks slightly melted.
+            // Rounding *down* to a step keeps the layout fitting — it only ever
+            // makes the UI smaller than strictly required.
+            let native = ctx
+                .input(|i| i.viewport().native_pixels_per_point)
+                .unwrap_or(1.0)
+                .max(0.1);
+            let step = PPP_QUANTUM / native;
+            let quantized = (fits_at / step).floor() * step;
+
+            quantized.clamp(UI_SCALE_MIN as f32 / 100.0, UI_SCALE_MAX as f32 / 100.0)
         } else {
             self.ui_scale_percent as f32 / 100.0
         };
@@ -2384,6 +2512,15 @@ impl TaskApp {
         // automatic value from re-laying out the UI every frame.
         if (ctx.zoom_factor() - target).abs() > 0.001 {
             ctx.set_zoom_factor(target);
+        }
+
+        // The text sizes are snapped to whole pixels *at the current scale*, so
+        // they have to be recomputed whenever the scale actually changes —
+        // otherwise they stay snapped to the scale the app started at.
+        let pixels_per_point = ctx.pixels_per_point();
+        if (pixels_per_point - self.last_font_ppp).abs() > 0.001 {
+            self.last_font_ppp = pixels_per_point;
+            set_styles(ctx);
         }
     }
 
@@ -3832,14 +3969,53 @@ impl TaskApp {
     }
 }
 
+/// The pixel grid Fixedsys Excelsior is drawn on. Its outlines trace a bitmap
+/// font's pixels, so a glyph is sharp when its em box lands on a whole number of
+/// pixels — and sharpest at a multiple of this — and smeared across two pixels
+/// when it doesn't. Rendering the same string at 16.00px and 17.19px side by
+/// side makes the difference obvious.
+const FIXEDSYS_GRID_PX: f32 = 16.0;
+/// How far a requested size may be nudged to land on the grid. Beyond this the
+/// size change would be more noticeable than the blur it fixes, so the size
+/// settles for the nearest whole pixel instead.
+const FIXEDSYS_GRID_TOLERANCE: f32 = 0.09;
+
+/// Adjust a point size so Fixedsys renders on pixel boundaries at the current
+/// scale.
+///
+/// Returns a *point* size, because that is what egui takes; the value is chosen
+/// so `size × pixels_per_point` is a whole number of pixels, and a multiple of
+/// [`FIXEDSYS_GRID_PX`] when one is close enough to be worth taking.
+fn snap_font_points(points: f32, pixels_per_point: f32) -> f32 {
+    if pixels_per_point <= 0.0 || points <= 0.0 {
+        return points;
+    }
+
+    let requested_px = points * pixels_per_point;
+    let nearest_grid_px = (requested_px / FIXEDSYS_GRID_PX).round().max(1.0) * FIXEDSYS_GRID_PX;
+
+    let snapped_px = if (nearest_grid_px - requested_px).abs() / requested_px <= FIXEDSYS_GRID_TOLERANCE {
+        nearest_grid_px
+    } else {
+        requested_px.round().max(1.0)
+    };
+
+    snapped_px / pixels_per_point
+}
+
 pub fn set_styles(ctx: &egui::Context) {
+    let pixels_per_point = ctx.pixels_per_point();
+    let font = |points: f32| {
+        egui::FontId::new(snap_font_points(points, pixels_per_point), egui::FontFamily::Monospace)
+    };
+
     let mut style = (*ctx.global_style()).clone();
     style.text_styles = [
-        (egui::TextStyle::Heading, egui::FontId::new(30.0, egui::FontFamily::Monospace)),
-        (egui::TextStyle::Body, egui::FontId::new(18.0, egui::FontFamily::Monospace)),
-        (egui::TextStyle::Button, egui::FontId::new(22.0, egui::FontFamily::Monospace)),
-        (egui::TextStyle::Small, egui::FontId::new(11.0, egui::FontFamily::Monospace)),
-        (egui::TextStyle::Monospace, egui::FontId::new(11.0, egui::FontFamily::Monospace)),
+        (egui::TextStyle::Heading, font(30.0)),
+        (egui::TextStyle::Body, font(18.0)),
+        (egui::TextStyle::Button, font(22.0)),
+        (egui::TextStyle::Small, font(11.0)),
+        (egui::TextStyle::Monospace, font(11.0)),
     ]
     .into();
     ctx.set_global_style(style);
@@ -3964,4 +4140,58 @@ fn set_world_map(ctx: &Context) -> TextureHandle {
     let texture = ColorImage::from_rgba_unmultiplied(size, &bytes.as_flat_samples().as_slice());
 
     ctx.load_texture("world_map", texture, Default::default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{snap_font_points, FIXEDSYS_GRID_PX};
+
+    /// The whole point of the snap: whatever comes back must land on a whole
+    /// number of pixels at the scale it was snapped for.
+    fn assert_whole_pixels(points: f32, ppp: f32) {
+        let px = snap_font_points(points, ppp) * ppp;
+        assert!(
+            (px - px.round()).abs() < 0.01,
+            "{points}pt at ppp {ppp} gave {px}px, which is not a whole pixel"
+        );
+    }
+
+    #[test]
+    fn snaps_to_whole_pixels_at_any_scale() {
+        for ppp in [1.0, 1.25, 1.5, 1.5625, 1.75, 2.0] {
+            for points in [8.0, 11.0, 12.0, 14.0, 18.0, 22.0, 30.0] {
+                assert_whole_pixels(points, ppp);
+            }
+        }
+    }
+
+    #[test]
+    fn prefers_the_16px_grid_when_it_is_close() {
+        // 11pt at 1.5625 is 17.19px — within tolerance of 16, the size Fixedsys
+        // is actually drawn at, so it takes it.
+        let px = snap_font_points(11.0, 1.5625) * 1.5625;
+        assert!((px - FIXEDSYS_GRID_PX).abs() < 0.01, "got {px}px");
+
+        // 30pt at 1x is 30px, near enough to 32 to be worth taking.
+        assert!((snap_font_points(30.0, 1.0) - 32.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn leaves_sizes_alone_when_the_grid_is_far_away() {
+        // 18pt at 1.5625 is 28.12px; the nearest grid multiple is 32, a 14%
+        // jump — too big a change to make for sharpness, so it settles for the
+        // nearest whole pixel instead.
+        let px = snap_font_points(18.0, 1.5625) * 1.5625;
+        assert!((px - 28.0).abs() < 0.01, "got {px}px");
+
+        // At 1x the common sizes are already whole pixels and stay put.
+        assert_eq!(snap_font_points(18.0, 1.0), 18.0);
+        assert_eq!(snap_font_points(11.0, 1.0), 11.0);
+    }
+
+    #[test]
+    fn degenerate_inputs_are_returned_unchanged() {
+        assert_eq!(snap_font_points(12.0, 0.0), 12.0);
+        assert_eq!(snap_font_points(0.0, 2.0), 0.0);
+    }
 }
