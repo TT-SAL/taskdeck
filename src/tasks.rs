@@ -18,6 +18,24 @@ pub struct Active {
     pub created: DateTime<Local>,
     pub deadline: Option<DateTime<Local>>,
     pub is_event: bool,
+    /// When the user set aside time to **work on** this item, as opposed to
+    /// `deadline`, which is when it is **due**. Those are genuinely different
+    /// facts — a report due Friday can be written on Tuesday morning — so the
+    /// planner gets its own field rather than overloading the deadline and
+    /// changing what the task list and calendar mean.
+    ///
+    /// Only tasks use this. An event's `deadline` already *is* when it happens,
+    /// so events are planned by moving their deadline.
+    ///
+    /// `#[serde(default)]`: absent in pre-planner save files, and serde_json
+    /// ignores unknown fields, so saves round-trip through either version.
+    #[serde(default)]
+    pub planned_start: Option<DateTime<Local>>,
+    /// How long the planned block runs, in minutes. `None` means the item has no
+    /// extent: an event not yet given a length, or a task's due time. See
+    /// `planner::Placement`.
+    #[serde(default)]
+    pub duration_minutes: Option<u32>,
 }
 
 /// Upper bound on the exponent fed to the importance-score exponentials, chosen
@@ -86,6 +104,29 @@ impl Active {
             time_importance as usize
         } else {
             0
+        }
+    }
+
+    /// The instant this item occupies on the planner's timeline, if any: an
+    /// event sits at its `deadline`, a task at the time set aside for it.
+    /// `None` for an unplanned, deadline-less task — those live in the planner's
+    /// backlog tray instead.
+    pub fn planner_anchor(&self) -> Option<DateTime<Local>> {
+        if self.is_event {
+            self.deadline
+        } else {
+            self.planned_start.or(self.deadline)
+        }
+    }
+
+    /// True when the item has been given time on the planner, as opposed to
+    /// merely having a due date. Events count as planned once they have a
+    /// length; a task counts once it has a `planned_start`.
+    pub fn is_planned(&self) -> bool {
+        if self.is_event {
+            self.deadline.is_some() && self.duration_minutes.is_some()
+        } else {
+            self.planned_start.is_some()
         }
     }
 }
@@ -257,6 +298,8 @@ mod tests {
             created: Local.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             deadline,
             is_event,
+            planned_start: None,
+            duration_minutes: None,
         }
     }
 

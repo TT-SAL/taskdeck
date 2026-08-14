@@ -5,13 +5,80 @@ use egui::{self, Align, Button, Color32, ColorImage, ComboBox, Context, CornerRa
 use image::{ImageBuffer, Rgba};
 use toml_edit::{DocumentMut};
 
-use crate::{calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, InActive}, weather::{self, WeatherService}};
+use crate::{calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, InActive}, weather::{self, WeatherService}};
 
 const WEEK_DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const URGENCY: [&str; 3] = ["Time-independence", "Normal urgency", "High urgency"];
 
 const IMPORTANCE: [&str; 5] = ["Not important", "Mildly important", "Important", "Highly important", "Lethally important"];
+
+/* ─────────────────────────── Day planner layout ─────────────────────────── */
+
+/// Height of one hour on the planner timeline. Sized so a 15-minute block — the
+/// snap step — is still a comfortable click target.
+const PLANNER_HOUR_HEIGHT: f32 = 52.0;
+/// Width of the hour-label gutter down the left of the timeline.
+const PLANNER_GUTTER_WIDTH: f32 = 52.0;
+/// Width of the backlog tray.
+const PLANNER_TRAY_WIDTH: f32 = 250.0;
+/// Grab area at the bottom of a block for resizing it.
+const PLANNER_RESIZE_HANDLE: f32 = 8.0;
+/// Hour brought into view when opening a day that isn't today.
+const PLANNER_DEFAULT_SCROLL_HOUR: f32 = 7.0;
+/// Vertical space the planner's header row and separator take, subtracted from
+/// the window height to size the tray and timeline beneath them.
+const PLANNER_HEADER_HEIGHT: f32 = 46.0;
+/// Importance given to a task created straight on the timeline. Mid-scale: the
+/// user is planning their day, not triaging, and can adjust it later.
+const PLANNER_NEW_TASK_IMPORTANCE: u8 = 2;
+
+/// The timeline gesture and the maths that interprets it live in `planner`;
+/// this alias keeps the call sites here short.
+use planner::Drag as PlannerDrag;
+
+/// One row on the planner timeline: an item, and where it sits on the day being
+/// shown. Rebuilt each frame from `active_things` — the planner has no cached
+/// model of its own, so it can't drift out of sync with the calendar.
+struct PlannerEntry {
+    id: u64,
+    name: String,
+    color_id: usize,
+    is_event: bool,
+    placement: planner::Placement,
+}
+
+/// Screen rectangle for a placement in its lane.
+///
+/// Blocks share the lane width with whatever overlaps them; due markers are
+/// drawn full-width and short, because a deadline is a line in the day rather
+/// than a claim on it.
+fn planner_entry_rect(
+    placement: planner::Placement,
+    lane: planner::Lane,
+    lane_area: Rect,
+    geometry: &planner::TimelineGeometry,
+) -> Rect {
+    match placement {
+        planner::Placement::Marker { at, .. } => {
+            let top = geometry.y_for(at as f32);
+            Rect::from_min_max(
+                pos2(lane_area.left() + 4.0, top),
+                pos2(lane_area.right() - 4.0, top + 18.0),
+            )
+        }
+        planner::Placement::Block { start, minutes } => {
+            let column_width = (lane_area.width() - 8.0) / lane.columns.max(1) as f32;
+            let left = lane_area.left() + 4.0 + column_width * lane.column as f32;
+            let top = geometry.y_for(start as f32);
+            let bottom = geometry.y_for((start + minutes as i32) as f32);
+            Rect::from_min_max(
+                pos2(left + 1.0, top + 1.0),
+                pos2(left + column_width - 2.0, (bottom - 1.0).max(top + 12.0)),
+            )
+        }
+    }
+}
 
 struct FpsCounter {
     last_update: Instant,
@@ -177,6 +244,28 @@ pub struct TaskApp {
     user_wants_to_complete_task_flag: bool,
     user_wants_to_delete_task_flag: bool,
 
+    /* ───────────────────────── Day planner ───────────────────────── */
+    /// Whether the planner window is open, and the day it is showing. The day is
+    /// kept separately from `expanded_day` (a calendar cell index) so the
+    /// planner can step forward past the end of the calendar's range.
+    planner_flag: bool,
+    planner_day: NaiveDate,
+    /// Item the user last clicked on the timeline; its card shows the controls.
+    planner_selection: Option<u64>,
+    /// The pointer gesture in progress, if any. One field, because the gestures
+    /// are mutually exclusive — you can't resize one block while moving another.
+    planner_drag: Option<PlannerDrag>,
+    /// Item whose title is being typed. Set right after a create so the block
+    /// can be named without leaving the timeline.
+    planner_naming: Option<u64>,
+    planner_name_input: String,
+    /// What a drag on empty timeline creates. Events are the common case, so
+    /// they are the default.
+    planner_creates_event: bool,
+    /// Set for one frame after the planner opens or changes day, to scroll the
+    /// timeline to a useful hour rather than to midnight.
+    planner_scroll_to_hour: Option<f32>,
+
     /* ───────────────────────── Settings ───────────────────────── */
     start_in_fullscreen: bool,
     enable_fps_counter: bool,
@@ -321,6 +410,16 @@ impl TaskApp {
             settings_flag: false,
             user_wants_to_complete_task_flag: false,
             user_wants_to_delete_task_flag: false,
+
+            /* Day planner */
+            planner_flag: false,
+            planner_day: now.date_naive(),
+            planner_selection: None,
+            planner_drag: None,
+            planner_naming: None,
+            planner_name_input: String::new(),
+            planner_creates_event: true,
+            planner_scroll_to_hour: None,
             should_save_textbox_text: false,
 
             /* Settings */
@@ -1009,10 +1108,33 @@ impl TaskApp {
         });
     }
 
-    fn add_active_thing(&mut self, name: String, deadline: Option<DateTime<Local>>, importance: Option<u8>, is_event: bool, time_importance: Option<u8>) {
+    /// Hand out the next stable item id. See `tasks::assign_missing_ids`.
+    fn next_item_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        self.active_things.push(Active {
+        id
+    }
+
+    /// Add a fully-formed item, then rebuild the calendar and persist. Every
+    /// creation path — the New Task/New Event modals and the planner — funnels
+    /// through here, so "add" means the same thing (and saves once) everywhere.
+    fn push_active_thing(&mut self, item: Active) {
+        self.active_things.push(item);
+        self.summarize_calendar();
+        self.save_active_things();
+    }
+
+    /// Persist the active set, routing a failure to the error window. Shared by
+    /// every mutation so none of them can quietly skip the save.
+    fn save_active_things(&mut self) {
+        if let Err(text) = tasks::oversafe_activesave(&self.active_things, &self.dirs.data) {
+            self.show_error(format!("Saving error:\n{}", text.to_string()));
+        }
+    }
+
+    fn add_active_thing(&mut self, name: String, deadline: Option<DateTime<Local>>, importance: Option<u8>, is_event: bool, time_importance: Option<u8>) {
+        let id = self.next_item_id();
+        self.push_active_thing(Active {
             id,
             name,
             deadline,
@@ -1020,22 +1142,23 @@ impl TaskApp {
             time_importance,
             is_event,
             created: chrono::Local::now(),
+            // Nothing created through the modals is placed on the planner yet;
+            // the planner sets these when the user gives the item a slot.
+            planned_start: None,
+            duration_minutes: None,
         });
-        self.summarize_calendar();
-        if let Err(text) = tasks::oversafe_activesave(&self.active_things, &self.dirs.data) {
-            self.show_error(format!("Saving error:\n{}", text.to_string()));
-        }
     }
 
     fn delete_active_thing(&mut self, id: u64) {
         self.user_wants_to_delete_task_flag = false;
         self.active_things.retain(|task| task.id != id);
         self.confirm_delete_task = None;
+        // A deleted item must not stay selected on the planner.
+        if self.planner_selection == Some(id) {
+            self.planner_selection = None;
+        }
         self.summarize_calendar();
-
-        if let Err(text) = tasks::oversafe_activesave(&self.active_things, &self.dirs.data) {
-            self.show_error(format!("Saving error:\n{}", text.to_string()));
-        };
+        self.save_active_things();
     }
 
     pub fn summarize_calendar(&mut self) {
@@ -1177,6 +1300,850 @@ impl TaskApp {
         self.refilter_tasks();
     }
 
+    /* ─────────────────────────── Day planner ─────────────────────────── */
+
+    /// Open the planner on `day`, scrolled to something useful: the current hour
+    /// when planning today, the start of the working day otherwise.
+    fn open_planner(&mut self, day: NaiveDate) {
+        self.planner_flag = true;
+        self.planner_day = day;
+        self.planner_selection = None;
+        self.planner_drag = None;
+        self.cancel_planner_naming();
+        self.planner_scroll_to_hour = Some(self.planner_default_scroll_hour());
+    }
+
+    /// Hour to bring into view when the day changes. Today opens an hour before
+    /// now so what's next is on screen with a little context above it.
+    fn planner_default_scroll_hour(&self) -> f32 {
+        if self.planner_day == self.date.date_naive() {
+            (self.date.hour() as f32 - 1.0).max(0.0)
+        } else {
+            PLANNER_DEFAULT_SCROLL_HOUR
+        }
+    }
+
+    fn planner_go_to_day(&mut self, day: NaiveDate) {
+        self.planner_day = day;
+        self.planner_selection = None;
+        self.planner_drag = None;
+        self.cancel_planner_naming();
+        self.planner_scroll_to_hour = Some(self.planner_default_scroll_hour());
+    }
+
+    fn close_planner(&mut self) {
+        // Committing first means a half-typed title isn't silently thrown away
+        // by closing the window.
+        self.commit_planner_naming();
+        self.planner_flag = false;
+        self.planner_drag = None;
+        self.planner_selection = None;
+    }
+
+    /// The items that appear on `planner_day`'s timeline, in a stable order.
+    ///
+    /// One item can produce two entries across different days (a work block and
+    /// a due marker), but never two on the same day — `placement_for` picks the
+    /// block when both fall on the day being shown.
+    fn planner_entries(&self) -> Vec<PlannerEntry> {
+        let mut entries: Vec<PlannerEntry> = self
+            .active_things
+            .iter()
+            .filter_map(|item| {
+                planner::placement_for(item, self.planner_day).map(|placement| PlannerEntry {
+                    id: item.id,
+                    name: item.name.clone(),
+                    color_id: item.calendar_item_color(),
+                    is_event: item.is_event,
+                    placement,
+                })
+            })
+            .collect();
+        // Stable, time-ordered: the lane packer sorts its own copy, but a stable
+        // input order keeps egui widget ids from shuffling between frames.
+        entries.sort_by_key(|e| (e.placement.start(), e.id));
+        entries
+    }
+
+    /// Tasks with no time set aside for them yet — the planner's backlog tray.
+    /// Ordered by the same urgency score as the main task list, so the most
+    /// pressing thing to schedule is at the top.
+    fn planner_backlog_items(&self) -> Vec<(u64, String, usize, Option<DateTime<Local>>)> {
+        let now = Local::now();
+        let mut items: Vec<(f32, &Active)> = self
+            .active_things
+            .iter()
+            .filter(|item| !item.is_event && item.planned_start.is_none())
+            .map(|item| (item.importance_score(now), item))
+            .collect();
+        items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        items
+            .into_iter()
+            .map(|(_, item)| (item.id, item.name.clone(), item.calendar_item_color(), item.deadline))
+            .collect()
+    }
+
+    /// Give an item a slot on the planner's current day.
+    ///
+    /// An event *is* its time, so this moves its deadline. A task's deadline is
+    /// when it is **due**, which planning must not touch — it gets a
+    /// `planned_start` instead, and keeps showing a due marker on its own day.
+    fn plan_item(&mut self, id: u64, start_minutes: i32, minutes: u32) {
+        let Some(when) = planner::resolve_on_day(self.planner_day, start_minutes) else {
+            self.show_error("That time doesn't exist on this day (daylight saving).".to_string());
+            return;
+        };
+
+        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
+            return;
+        };
+
+        if item.is_event {
+            item.deadline = Some(when);
+        } else {
+            item.planned_start = Some(when);
+        }
+        item.duration_minutes = Some(minutes.max(planner::MIN_BLOCK_MINUTES));
+
+        self.summarize_calendar();
+        self.save_active_things();
+    }
+
+    /// Return a task to the backlog, keeping the task itself (and its deadline)
+    /// intact. Only tasks can be unplanned — an event with no time isn't an
+    /// event, so its block offers delete instead.
+    fn unplan_item(&mut self, id: u64) {
+        if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
+            if item.is_event {
+                return;
+            }
+            item.planned_start = None;
+            item.duration_minutes = None;
+        }
+        if self.planner_selection == Some(id) {
+            self.planner_selection = None;
+        }
+        self.summarize_calendar();
+        self.save_active_things();
+    }
+
+    /// Create an item directly on the timeline and put its title into edit mode,
+    /// so blocking out time is one drag and a few keystrokes rather than a trip
+    /// through the New Event dialog's date fields.
+    fn create_planned_item(&mut self, start_minutes: i32, minutes: u32, is_event: bool) {
+        let Some(when) = planner::resolve_on_day(self.planner_day, start_minutes) else {
+            self.show_error("That time doesn't exist on this day (daylight saving).".to_string());
+            return;
+        };
+
+        let id = self.next_item_id();
+        self.push_active_thing(Active {
+            id,
+            name: String::new(),
+            // An event lives at its deadline; a planned task is placed by
+            // `planned_start` and starts life with no due date of its own.
+            deadline: if is_event { Some(when) } else { None },
+            planned_start: if is_event { None } else { Some(when) },
+            duration_minutes: Some(minutes),
+            importance: if is_event { None } else { Some(PLANNER_NEW_TASK_IMPORTANCE) },
+            time_importance: None,
+            is_event,
+            created: Local::now(),
+        });
+
+        self.planner_selection = Some(id);
+        self.begin_planner_naming(id);
+    }
+
+    fn begin_planner_naming(&mut self, id: u64) {
+        self.planner_naming = Some(id);
+        self.planner_name_input = self
+            .active_things
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.name.clone())
+            .unwrap_or_default();
+    }
+
+    /// Commit the in-place title edit. An untitled *new* block would be a
+    /// mystery rectangle, so an empty name falls back to a placeholder rather
+    /// than being stored blank.
+    fn commit_planner_naming(&mut self) {
+        let Some(id) = self.planner_naming.take() else { return };
+        let typed = self.planner_name_input.trim().to_string();
+        self.planner_name_input.clear();
+
+        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
+            return;
+        };
+        let placeholder = if item.is_event { "New event" } else { "New task" };
+        item.name = if typed.is_empty() { placeholder.to_string() } else { typed };
+
+        self.summarize_calendar();
+        self.save_active_things();
+    }
+
+    /// Abandon a title edit without saving. Used when the planner closes or the
+    /// day changes underneath the editor.
+    fn cancel_planner_naming(&mut self) {
+        self.planner_naming = None;
+        self.planner_name_input.clear();
+    }
+
+    /// The planner window: a backlog tray on the left, a scrollable day timeline
+    /// on the right, and a header that navigates days and reports the load.
+    fn show_planner(&mut self, ctx: &Context) {
+        if !self.planner_flag {
+            return;
+        }
+
+        // Sized from the viewport rather than fixed: the planner wants as much of
+        // the day on screen at once as it can get, and the viewport is a
+        // different number of points on every machine (see `apply_ui_scale`).
+        let viewport = ctx.viewport_rect();
+        let width = (viewport.width() - 140.0).clamp(640.0, 1240.0);
+        let height = (viewport.height() - 120.0).clamp(380.0, 980.0);
+        let body_height = height - PLANNER_HEADER_HEIGHT;
+
+        let mut open = true;
+        egui::Window::new(RichText::new("Day planner").size(18.0))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .default_size(vec2(width, height))
+            .show(ctx, |ui| {
+                ui.set_width(width);
+                ui.set_height(height);
+
+                self.planner_header(ui);
+                ui.separator();
+
+                ui.horizontal_top(|ui| {
+                    self.planner_backlog(ui, body_height);
+                    ui.add_space(8.0);
+                    self.planner_timeline(ui, body_height);
+                });
+            });
+
+        // The window's own ✕ has to go through `close_planner` so a pending
+        // title edit is committed and any in-flight drag is dropped.
+        if !open {
+            self.close_planner();
+        }
+
+        // Escape backs out one level at a time: first out of a title edit, then
+        // out of the planner. Closing straight from the editor would be a
+        // surprise mid-sentence.
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            if self.planner_naming.is_some() {
+                self.commit_planner_naming();
+            } else {
+                self.close_planner();
+            }
+        }
+
+        // A drag released outside the timeline (or outside the window entirely)
+        // must not leave a gesture stuck to the pointer.
+        if self.planner_drag.is_some() && !ctx.input(|i| i.pointer.any_down()) {
+            self.planner_drag = None;
+        }
+    }
+
+    fn planner_header(&mut self, ui: &mut Ui) {
+        let today = self.date.date_naive();
+
+        ui.horizontal(|ui| {
+            if ui.button(RichText::new("◀").size(16.0)).on_hover_text("Previous day").clicked() {
+                let day = self.planner_day.pred_opt().unwrap_or(self.planner_day);
+                self.planner_go_to_day(day);
+            }
+            if ui.button("Today").clicked() {
+                self.planner_go_to_day(today);
+            }
+            if ui.button(RichText::new("▶").size(16.0)).on_hover_text("Next day").clicked() {
+                let day = self.planner_day.succ_opt().unwrap_or(self.planner_day);
+                self.planner_go_to_day(day);
+            }
+
+            ui.add_space(12.0);
+
+            let (weekday, full_date) = utilities::format_date(self.planner_day);
+            ui.label(RichText::new(weekday).size(18.0).strong());
+            ui.label(RichText::new(full_date).size(15.0));
+            if self.planner_day == today {
+                ui.label(RichText::new("· today").size(13.0).color(Color32::from_white_alpha(140)));
+            }
+
+            // Summary and the create-type toggle sit at the far right, so the
+            // eye lands on the date first.
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.selectable_value(&mut self.planner_creates_event, false, "Task");
+                ui.selectable_value(&mut self.planner_creates_event, true, "Event");
+                ui.label(RichText::new("Drag creates:").size(13.0).color(Color32::from_white_alpha(150)));
+
+                ui.add_space(16.0);
+
+                let entries = self.planner_entries();
+                let placements: Vec<_> = entries.iter().map(|e| e.placement).collect();
+                let summary = planner::summarize(&placements);
+                let mut parts = vec![format!(
+                    "{} planned",
+                    planner::format_duration(summary.planned_minutes.max(0) as u32)
+                )];
+                if summary.blocks > 0 {
+                    parts.push(format!("{} block{}", summary.blocks, if summary.blocks == 1 { "" } else { "s" }));
+                }
+                if summary.due > 0 {
+                    parts.push(format!("{} due", summary.due));
+                }
+                ui.label(RichText::new(parts.join(" · ")).size(13.0).color(Color32::from_white_alpha(190)));
+            });
+        });
+    }
+
+    /// The backlog: every task with no time set aside for it. Cards are draggable
+    /// onto the timeline, which is the whole point — planning a day should be
+    /// moving things into it, not retyping them.
+    fn planner_backlog(&mut self, ui: &mut Ui, body_height: f32) {
+        ui.vertical(|ui| {
+            ui.set_width(PLANNER_TRAY_WIDTH);
+
+            ui.label(RichText::new("Unplanned tasks").size(14.0).strong());
+            ui.label(
+                RichText::new("drag onto the timeline")
+                    .size(12.0)
+                    .color(Color32::from_white_alpha(130)),
+            );
+            ui.add_space(6.0);
+
+            let backlog = self.planner_backlog_items();
+            if backlog.is_empty() {
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new("Nothing waiting.\nEverything with a task card has a slot.")
+                        .size(13.0)
+                        .color(Color32::from_white_alpha(120)),
+                );
+                return;
+            }
+
+            let now = Local::now();
+            egui::ScrollArea::vertical()
+                .id_salt("planner_backlog")
+                .max_height((body_height - 52.0).max(120.0))
+                .show(ui, |ui| {
+                    for (id, name, color_id, deadline) in backlog {
+                        let being_dragged = matches!(
+                            self.planner_drag,
+                            Some(PlannerDrag::FromBacklog { id: dragged }) if dragged == id
+                        );
+
+                        let accent = self.planner_accent(color_id);
+                        let frame = egui::Frame::new()
+                            .fill(if being_dragged {
+                                Color32::from_white_alpha(30)
+                            } else {
+                                Color32::from_black_alpha(60)
+                            })
+                            .stroke(Stroke::new(1.5, accent))
+                            .corner_radius(CornerRadius::same(10))
+                            .inner_margin(Margin::symmetric(10, 8));
+
+                        let response = frame
+                            .show(ui, |ui| {
+                                ui.set_width(PLANNER_TRAY_WIDTH - 40.0);
+                                ui.label(RichText::new(&name).size(14.0));
+                                if let Some(deadline) = deadline {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "due {} · {}",
+                                            deadline.format("%a %H:%M"),
+                                            planner::relative_due(deadline, now)
+                                        ))
+                                        .size(11.0)
+                                        .color(Color32::from_white_alpha(150)),
+                                    );
+                                }
+                            })
+                            .response
+                            .interact(egui::Sense::click_and_drag());
+
+                        if response.drag_started() {
+                            self.planner_drag = Some(PlannerDrag::FromBacklog { id });
+                        }
+                        if response.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                        }
+
+                        ui.add_space(6.0);
+                    }
+                });
+        });
+    }
+
+    /// The timeline: hour grid, blocks, and every pointer gesture that edits the
+    /// day. Rebuilt from `active_things` each frame; the only persistent state is
+    /// the in-flight drag.
+    fn planner_timeline(&mut self, ui: &mut Ui, body_height: f32) {
+        let mut scroll = egui::ScrollArea::vertical()
+            .id_salt("planner_timeline")
+            .max_height(body_height);
+        if let Some(hour) = self.planner_scroll_to_hour.take() {
+            scroll = scroll.vertical_scroll_offset(hour * PLANNER_HOUR_HEIGHT);
+        }
+
+        scroll.show(ui, |ui| {
+            let width = ui.available_width().max(320.0);
+            let geometry = planner::TimelineGeometry::new(0.0, PLANNER_HOUR_HEIGHT);
+
+            // One allocation for the whole day. Sensing drags here (rather than
+            // per-hour) is what makes "press on empty space and pull" work.
+            let (rect, background) =
+                ui.allocate_exact_size(vec2(width, geometry.full_height()), egui::Sense::click_and_drag());
+            let geometry = planner::TimelineGeometry::new(rect.top(), PLANNER_HOUR_HEIGHT);
+            let lane_area = Rect::from_min_max(
+                pos2(rect.left() + PLANNER_GUTTER_WIDTH, rect.top()),
+                rect.max,
+            );
+
+            self.paint_planner_grid(ui, rect, lane_area, &geometry);
+
+            // Apply the in-flight gesture to the model *before* laying out, so
+            // neighbours re-flow around the block being dragged as it moves.
+            let pointer = ui.input(|i| i.pointer.interact_pos());
+            let mut entries = self.planner_entries();
+            let preview = self
+                .planner_drag
+                .clone()
+                .and_then(|drag| self.planner_drag_preview_for(&drag, &entries, pointer, &geometry));
+            if let Some((id, start, minutes)) = preview {
+                match entries.iter_mut().find(|e| e.id == id) {
+                    Some(entry) => entry.placement = planner::Placement::Block { start, minutes },
+                    // A brand-new block (create drag) has no entry yet.
+                    None => entries.push(PlannerEntry {
+                        id,
+                        name: String::new(),
+                        color_id: if self.planner_creates_event { 5 } else { PLANNER_NEW_TASK_IMPORTANCE as usize },
+                        is_event: self.planner_creates_event,
+                        placement: planner::Placement::Block { start, minutes },
+                    }),
+                }
+            }
+
+            let placements: Vec<_> = entries.iter().map(|e| e.placement).collect();
+            let lanes = planner::lay_out(&placements);
+
+            let mut block_rects: Vec<(u64, Rect)> = Vec::new();
+            for (entry, lane) in entries.iter().zip(lanes.iter()) {
+                let block_rect = planner_entry_rect(entry.placement, *lane, lane_area, &geometry);
+                block_rects.push((entry.id, block_rect));
+                self.paint_planner_entry(ui, entry, block_rect);
+            }
+
+            self.handle_planner_gestures(ui, &background, &block_rects, &entries, pointer, &geometry, lane_area);
+        });
+    }
+
+    /// Hour lines, hour labels, the shaded night hours, and the now-line.
+    fn paint_planner_grid(
+        &self,
+        ui: &Ui,
+        rect: Rect,
+        lane_area: Rect,
+        geometry: &planner::TimelineGeometry,
+    ) {
+        let painter = ui.painter_at(rect);
+
+        painter.rect_filled(rect, CornerRadius::same(8), Color32::from_black_alpha(70));
+
+        // Shade the hours most people aren't planning into, so the working day
+        // reads as the foreground without hiding anything.
+        for (from_hour, to_hour) in [(0.0, PLANNER_DEFAULT_SCROLL_HOUR), (22.0, 24.0)] {
+            let shade = Rect::from_min_max(
+                pos2(lane_area.left(), geometry.y_for(from_hour * 60.0)),
+                pos2(lane_area.right(), geometry.y_for(to_hour * 60.0)),
+            );
+            painter.rect_filled(shade, CornerRadius::ZERO, Color32::from_black_alpha(45));
+        }
+
+        for hour in 0..=24 {
+            let y = geometry.y_for(hour as f32 * 60.0);
+            let on_the_hour = hour % 6 == 0;
+            painter.line_segment(
+                [pos2(lane_area.left(), y), pos2(lane_area.right(), y)],
+                Stroke::new(
+                    if on_the_hour { 1.2 } else { 0.6 },
+                    Color32::from_white_alpha(if on_the_hour { 60 } else { 26 }),
+                ),
+            );
+
+            if hour < 24 {
+                painter.text(
+                    pos2(rect.left() + PLANNER_GUTTER_WIDTH - 10.0, y + 2.0),
+                    egui::Align2::RIGHT_TOP,
+                    format!("{hour:02}"),
+                    FontId::new(12.0, FontFamily::Monospace),
+                    Color32::from_white_alpha(if on_the_hour { 190 } else { 110 }),
+                );
+                // Half-hour tick, to make a 30-minute block easy to read off.
+                let half = geometry.y_for(hour as f32 * 60.0 + 30.0);
+                painter.line_segment(
+                    [pos2(lane_area.left(), half), pos2(lane_area.left() + 12.0, half)],
+                    Stroke::new(0.6, Color32::from_white_alpha(40)),
+                );
+            }
+        }
+
+        if let Some(minutes) = planner::now_marker(self.planner_day, self.date) {
+            let y = geometry.y_for(minutes as f32);
+            let now_color = Color32::from_rgb(255, 120, 90);
+            painter.line_segment(
+                [pos2(lane_area.left(), y), pos2(lane_area.right(), y)],
+                Stroke::new(1.6, now_color),
+            );
+            painter.circle_filled(pos2(lane_area.left(), y), 4.0, now_color);
+        }
+    }
+
+    /// Accent colour for a planner item.
+    ///
+    /// The palette drives it, exactly as on the calendar — but the default
+    /// scheme is six fully transparent entries (see `ColorScheme::default_scheme`),
+    /// because on the calendar the background photo is meant to show through. A
+    /// planner block has to read as a solid object you can grab, so a
+    /// transparent palette entry falls back to a neutral highlight instead of
+    /// disappearing.
+    fn planner_accent(&self, color_id: usize) -> Color32 {
+        let color = self.active_colorscheme[color_id.min(5)];
+        if color.a() < 24 {
+            Color32::from_white_alpha(85)
+        } else {
+            color
+        }
+    }
+
+    /// Draw one block or due marker, plus the controls it reveals on hover.
+    fn paint_planner_entry(&mut self, ui: &mut Ui, entry: &PlannerEntry, rect: Rect) {
+        let palette = self.active_colorscheme[entry.color_id.min(5)];
+        let accent = self.planner_accent(entry.color_id);
+        let selected = self.planner_selection == Some(entry.id);
+        let naming = self.planner_naming == Some(entry.id);
+
+        match entry.placement {
+            planner::Placement::Marker { at, due } => {
+                let painter = ui.painter();
+                // A due marker is deliberately flatter than a block: it marks a
+                // line in the day rather than claiming time in it.
+                painter.rect_filled(rect, CornerRadius::same(6), Color32::from_black_alpha(150));
+                if !due {
+                    painter.rect_filled(rect, CornerRadius::same(6), palette);
+                }
+                painter.rect_stroke(
+                    rect,
+                    CornerRadius::same(6),
+                    Stroke::new(if selected { 2.0 } else { 1.0 }, accent),
+                    StrokeKind::Inside,
+                );
+                let label = format!(
+                    "{}  {}{}",
+                    planner::format_minutes(at),
+                    if due { "due · " } else { "" },
+                    entry.name
+                );
+                painter.text(
+                    pos2(rect.left() + 8.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    label,
+                    FontId::proportional(12.0),
+                    Color32::from_white_alpha(220),
+                );
+            }
+            planner::Placement::Block { start, minutes } => {
+                let painter = ui.painter();
+                // Base first, palette over it: the base guarantees the block is
+                // legible under any scheme (including the transparent default),
+                // and the palette still tints it the same colour the calendar
+                // uses for this item.
+                painter.rect_filled(rect, CornerRadius::same(8), Color32::from_black_alpha(170));
+                painter.rect_filled(rect, CornerRadius::same(8), palette);
+                painter.rect_stroke(
+                    rect,
+                    CornerRadius::same(8),
+                    Stroke::new(
+                        if selected { 2.2 } else { 1.2 },
+                        if selected { Color32::WHITE } else { accent },
+                    ),
+                    StrokeKind::Inside,
+                );
+
+                let text_rect = rect.shrink2(vec2(8.0, 5.0));
+                painter.text(
+                    text_rect.left_top(),
+                    egui::Align2::LEFT_TOP,
+                    format!(
+                        "{}–{}  ·  {}",
+                        planner::format_minutes(start),
+                        planner::format_minutes(start + minutes as i32),
+                        planner::format_duration(minutes)
+                    ),
+                    FontId::proportional(11.0),
+                    Color32::from_white_alpha(200),
+                );
+
+                if naming {
+                    // Type the title straight into the block.
+                    let field = Rect::from_min_max(
+                        pos2(text_rect.left(), text_rect.top() + 15.0),
+                        pos2(text_rect.right(), (text_rect.top() + 41.0).min(text_rect.bottom())),
+                    );
+                    let mut committed = false;
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.planner_name_input)
+                                .hint_text("name it")
+                                .desired_width(field.width()),
+                        );
+                        response.request_focus();
+                        if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                            committed = true;
+                        }
+                    });
+                    if committed {
+                        self.commit_planner_naming();
+                    }
+                } else if rect.height() > 26.0 {
+                    painter.text(
+                        pos2(text_rect.left(), text_rect.top() + 14.0),
+                        egui::Align2::LEFT_TOP,
+                        &entry.name,
+                        FontId::proportional(14.0),
+                        Color32::WHITE,
+                    );
+                } else {
+                    // Too short for two lines: title only, on the same row.
+                    painter.text(
+                        pos2(text_rect.right(), text_rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        &entry.name,
+                        FontId::proportional(12.0),
+                        Color32::WHITE,
+                    );
+                }
+
+                // The resize grip, hinted with a pair of lines along the bottom.
+                if rect.height() >= 24.0 {
+                    let grip_y = rect.bottom() - 4.0;
+                    ui.painter().line_segment(
+                        [pos2(rect.center().x - 12.0, grip_y), pos2(rect.center().x + 12.0, grip_y)],
+                        Stroke::new(1.5, Color32::from_white_alpha(150)),
+                    );
+                }
+            }
+        }
+
+        if selected && !naming {
+            self.planner_entry_controls(ui, entry, rect);
+        }
+    }
+
+    /// Complete / delete / unplan buttons for the selected block, following the
+    /// same hover-reveal idiom as the task cards.
+    fn planner_entry_controls(&mut self, ui: &mut Ui, entry: &PlannerEntry, rect: Rect) {
+        let can_unplan = !entry.is_event && matches!(entry.placement, planner::Placement::Block { .. });
+        let button_count = if can_unplan { 3 } else { 2 };
+        let bar = Rect::from_min_max(
+            pos2(rect.right() - 30.0 * button_count as f32 - 6.0, rect.top() + 3.0),
+            pos2(rect.right() - 4.0, (rect.top() + 27.0).min(rect.bottom())),
+        );
+        if bar.height() < 14.0 {
+            return;
+        }
+
+        let id = entry.id;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
+            ui.horizontal(|ui| {
+                if ui.small_button("✓").on_hover_text("Complete").clicked() {
+                    self.confirm_complete_task = Some(id);
+                    self.user_wants_to_complete_task_flag = true;
+                }
+                if ui.small_button("✗").on_hover_text("Delete").clicked() {
+                    self.confirm_delete_task = Some(id);
+                    self.user_wants_to_delete_task_flag = true;
+                }
+                if can_unplan && ui.small_button("↩").on_hover_text("Back to unplanned").clicked() {
+                    self.unplan_item(id);
+                }
+            });
+        });
+    }
+
+    /// Start, track, and commit the timeline gestures.
+    fn handle_planner_gestures(
+        &mut self,
+        ui: &mut Ui,
+        background: &egui::Response,
+        block_rects: &[(u64, Rect)],
+        entries: &[PlannerEntry],
+        pointer: Option<Pos2>,
+        geometry: &planner::TimelineGeometry,
+        lane_area: Rect,
+    ) {
+        // --- start a gesture -------------------------------------------------
+        if self.planner_drag.is_none() {
+            for (entry, (id, rect)) in entries.iter().zip(block_rects.iter()) {
+                // The block being named has a text field inside it. These
+                // interaction rects are registered after the field is drawn, so
+                // they sit on top of it and would swallow every click meant for
+                // the cursor — leave the block alone until the title is done.
+                if self.planner_naming == Some(*id) {
+                    continue;
+                }
+
+                let planner::Placement::Block { start, minutes } = entry.placement else {
+                    // Due markers are not draggable: a deadline is a fact about
+                    // the task, not a plan, and moving it here would silently
+                    // rewrite it. Click still selects.
+                    let response = ui.interact(*rect, egui::Id::new(("planner_marker", *id)), egui::Sense::click());
+                    if response.clicked() {
+                        self.planner_selection = Some(*id);
+                    }
+                    continue;
+                };
+
+                let handle = Rect::from_min_max(
+                    pos2(rect.left(), rect.bottom() - PLANNER_RESIZE_HANDLE),
+                    rect.max,
+                );
+                let handle_response =
+                    ui.interact(handle, egui::Id::new(("planner_resize", *id)), egui::Sense::click_and_drag());
+                if handle_response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                }
+                if handle_response.drag_started() {
+                    self.planner_drag = Some(PlannerDrag::Resize { id: *id, start });
+                    self.planner_selection = Some(*id);
+                    continue;
+                }
+
+                let body_response =
+                    ui.interact(*rect, egui::Id::new(("planner_block", *id)), egui::Sense::click_and_drag());
+                if body_response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                }
+                if body_response.clicked() {
+                    self.planner_selection = Some(*id);
+                }
+                if body_response.double_clicked() {
+                    self.planner_selection = Some(*id);
+                    self.begin_planner_naming(*id);
+                }
+                if body_response.drag_started() {
+                    let grab = pointer
+                        .map(|p| (geometry.minutes_at(p.y) - start as f32).round() as i32)
+                        .unwrap_or(0)
+                        .clamp(0, minutes as i32);
+                    self.planner_drag = Some(PlannerDrag::Move { id: *id, grab_offset: grab, minutes });
+                    self.planner_selection = Some(*id);
+                }
+            }
+
+            // Empty timeline: pressing and pulling blocks out new time.
+            if self.planner_drag.is_none() && background.drag_started() {
+                if let Some(pos) = pointer {
+                    let on_a_block = block_rects.iter().any(|(_, rect)| rect.contains(pos));
+                    if !on_a_block && pos.x >= lane_area.left() {
+                        self.commit_planner_naming();
+                        self.planner_drag = Some(PlannerDrag::Create {
+                            anchor: planner::snap(geometry.minutes_at(pos.y)),
+                        });
+                    }
+                }
+            }
+
+            // A click on bare timeline clears the selection and any title edit.
+            if background.clicked() {
+                if let Some(pos) = pointer {
+                    if !block_rects.iter().any(|(_, rect)| rect.contains(pos)) {
+                        self.commit_planner_naming();
+                        self.planner_selection = None;
+                    }
+                }
+            }
+        }
+
+        // --- commit on release ----------------------------------------------
+        let released = !ui.input(|i| i.pointer.any_down());
+        if !released {
+            return;
+        }
+        let Some(drag) = self.planner_drag.take() else { return };
+        let Some(preview) = self.planner_drag_preview_for(&drag, entries, pointer, geometry) else {
+            return;
+        };
+        let (_, start, minutes) = preview;
+
+        // Dropping outside the lanes (on the hour gutter, or off the window) is
+        // a cancel, not a plan at 00:00.
+        let dropped_in_lanes = pointer.is_some_and(|p| {
+            p.x >= lane_area.left() && p.x <= lane_area.right() && lane_area.y_range().contains(p.y)
+        });
+
+        match drag {
+            PlannerDrag::Create { .. } => {
+                if dropped_in_lanes {
+                    let is_event = self.planner_creates_event;
+                    self.create_planned_item(start, minutes, is_event);
+                }
+            }
+            PlannerDrag::Move { id, .. } | PlannerDrag::Resize { id, .. } => {
+                self.plan_item(id, start, minutes);
+            }
+            PlannerDrag::FromBacklog { id } => {
+                if dropped_in_lanes {
+                    self.plan_item(id, start, minutes);
+                    self.planner_selection = Some(id);
+                }
+            }
+        }
+    }
+
+    /// Where the in-flight gesture is currently placing a block, as
+    /// `(id, start, minutes)`.
+    ///
+    /// The arithmetic lives in `planner::preview`, which is unit-tested; this
+    /// only supplies the two things it can't know: the pointer's position in
+    /// minutes, and the length to give a backlog card being dropped (its own, if
+    /// it has been planned before, else the default).
+    ///
+    /// Taking the gesture as an argument rather than reading `self.planner_drag`
+    /// lets the commit path call this *after* `take()`ing the gesture, so the
+    /// live preview and the committed value come from one place and cannot
+    /// disagree about where the block landed.
+    fn planner_drag_preview_for(
+        &self,
+        drag: &PlannerDrag,
+        entries: &[PlannerEntry],
+        pointer: Option<Pos2>,
+        geometry: &planner::TimelineGeometry,
+    ) -> Option<(u64, i32, u32)> {
+        let minutes_at_pointer = geometry.minutes_at(pointer?.y);
+
+        let default_minutes = match drag {
+            PlannerDrag::FromBacklog { id } => entries
+                .iter()
+                .find(|entry| entry.id == *id)
+                .and_then(|entry| match entry.placement {
+                    planner::Placement::Block { minutes, .. } => Some(minutes),
+                    planner::Placement::Marker { .. } => None,
+                })
+                .unwrap_or(planner::DEFAULT_BLOCK_MINUTES),
+            _ => planner::DEFAULT_BLOCK_MINUTES,
+        };
+
+        Some(planner::preview(drag, minutes_at_pointer, default_minutes))
+    }
+
     fn show_error(&mut self, errortext: String) {
         self.error_flag = true;
         self.error_text = errortext;
@@ -1194,6 +2161,7 @@ impl TaskApp {
             || self.settings_flag
             || self.display_archive_flag
             || self.expand_calendar_day_flag
+            || self.planner_flag
             || self.error_flag
             || self.user_wants_to_complete_task_flag
             || self.user_wants_to_delete_task_flag
@@ -1665,6 +2633,20 @@ impl TaskApp {
                 }
                 ui.add_space(12.0);
 
+                // Opens on today; the day popup's own button opens it on the day
+                // you clicked.
+                if self.planner_flag {
+                    if ui.button("Planner").highlight().clicked() {
+                        self.close_planner();
+                    }
+                } else {
+                    if ui.button("Planner").clicked() {
+                        let today = self.date.date_naive();
+                        self.open_planner(today);
+                    }
+                }
+                ui.add_space(12.0);
+
                 if self.display_archive_flag {
                     if ui.button("Archived").highlight().clicked() {
                         self.toggle_archive();
@@ -1912,12 +2894,18 @@ impl TaskApp {
                 });
         }
         
+        // Drawn before the day popup so the confirmation dialogs the planner
+        // raises (complete / delete) land on top of it, matching how the popup's
+        // own confirmations stack.
+        self.show_planner(ctx);
+
         if self.expand_calendar_day_flag {
             if let Some(index) = self.expanded_day {
                 if let Some(day) = self.calendar_elements.get(index) {
                 let selected_date = day.date;
 
                 let (weekday_str, formatted_date) = utilities::format_date(selected_date);
+                let mut plan_day_requested = false;
 
                 egui::Window::new("calendar_day_popup")
                     .title_bar(false)
@@ -2000,6 +2988,22 @@ impl TaskApp {
                                                 self.expanded_day = None;
                                             }
                                             ui.add_space(5.0);
+                                            // The popup answers "what's on this
+                                            // day"; the planner answers "how does
+                                            // this day fit together". Hand off
+                                            // rather than duplicating the second
+                                            // question here.
+                                            if ui.button("Plan day").on_hover_text("Lay this day out on a timeline").clicked() {
+                                                self.expand_calendar_day_flag = false;
+                                                self.expanded_day = None;
+                                                // Deferred: `day` borrows
+                                                // `self.calendar_elements` for the
+                                                // length of this closure, so the
+                                                // `&mut self` call happens once
+                                                // that borrow has ended.
+                                                plan_day_requested = true;
+                                            }
+                                            ui.add_space(5.0);
                                             if ui.button("Event+").clicked() {
                                                 self.day_input = day.day_number as i32;
                                                 self.month_input = (day.date.month0() + 1) as i32;
@@ -2015,6 +3019,10 @@ impl TaskApp {
                                         });
                             });
                     });
+
+                if plan_day_requested {
+                    self.open_planner(selected_date);
+                }
                 } else {
                     // The calendar was rebuilt smaller (e.g. a midnight date
                     // rollover or a reduced week count) while this popup was open,

@@ -56,8 +56,8 @@ _All items in this section are resolved — see the changelog._
 > **not** require splitting the file or touching the animation/widget tuning.
 
 ### D6. Modal state as parallel `*_flag` booleans  *(partially resolved)*
-`TaskApp` tracks modal state as ~13 independent booleans. The "any modal open" disjunctions are now
-centralized (see changelog), but the booleans themselves remain.
+`TaskApp` tracks modal state as ~14 independent booleans (the day planner added one). The "any modal
+open" disjunctions are now centralized (see changelog), but the booleans themselves remain.
 - **Reframed — a flat `enum Modal` is *not* a faithful fix.** Inspecting the render gates shows the
   modals intentionally **nest/stack**: the colour-scheme manager is a stack
   (`color_picker → edit_colorscheme → rename|delete-confirm`, each gated on its child not being open),
@@ -139,6 +139,32 @@ _(B4 is deferred pending the archive redesign — see B4. E8 and E10 are resolve
 ## Changelog — Resolved
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
+
+- **Day planner added** (`planner.rs` + `TaskApp::show_planner`). A timeline view of one day with a
+  backlog tray, drag-to-create, drag-to-plan, move and resize. Documented in
+  [`DOCUMENTATION.md` §16](DOCUMENTATION.md); the notes here are the review-relevant ones.
+  - **Model.** `Active` gains `planned_start` and `duration_minutes`, both `#[serde(default)]` so
+    save files round-trip through a pre-planner build. `planned_start` is deliberately *not* the
+    deadline: due and planned are different facts, and overloading `deadline` would have changed
+    what the priority score and calendar mean. Events keep using `deadline` (an event's deadline
+    *is* when it happens); the asymmetry is encapsulated in `planner_anchor` / `is_planned`.
+  - **Pure core.** Everything easy to get wrong and hard to see in a screenshot — time↔pixel
+    mapping, snapping, clamping, the gesture→block arithmetic, overlap packing, the day summary —
+    lives in `planner.rs` with no egui dependency and is unit-tested (21 new tests; 42 total).
+    `ui.rs` only decides which gesture a press begins.
+  - **One source of truth for a drag.** `planner::preview` serves both the live preview and the
+    commit-on-release (the commit calls it after `take()`ing the gesture), so what the user sees
+    under the pointer cannot disagree with what is saved.
+  - **No cached model.** `planner_entries()` rebuilds from `active_things` every frame, so the
+    planner cannot drift out of sync with the calendar the way a second copy would. At realistic
+    item counts this is free; if the active set ever grows large it is the obvious first thing to
+    memoize (it is called twice per frame — once for the header summary, once for the timeline).
+  - **Known gap: the gestures are not covered end-to-end.** The arithmetic behind them is, but
+    "press here, drag there, release" is only verifiable by hand — synthetic input needs macOS
+    Accessibility permission, which the dev environment doesn't have. Worth re-checking by hand
+    after any change to `handle_planner_gestures`.
+  - **Deliberate: due markers don't drag.** A deadline is a fact about the task; letting a planner
+    gesture rewrite it would be a silent data change while the user thought they were planning.
 
 - **E8 — cross-platform build (Windows / macOS / Linux), plus the bugs that hid behind it.**
   Gating the Windows-only calls was a two-line fix; running the result on macOS surfaced five real

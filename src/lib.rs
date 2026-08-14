@@ -6,3 +6,4 @@ pub mod calendarwidgets;
 pub mod initialization;
 pub mod color;
 pub mod paths;
+pub mod planner;

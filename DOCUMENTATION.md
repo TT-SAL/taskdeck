@@ -33,6 +33,7 @@
 13. Glossary of state flags
 14. Design decisions & deliberate trade-offs
 15. Platform notes (Windows / macOS / Linux)
+16. The day planner
 
 ---
 
@@ -47,7 +48,9 @@ left-to-right as three regions:
 | **Center** | `show_calendar` | A virtualized, weeks-long calendar grid (7 columns). Each day cell shows up to 3 items with times. Rows animate (scale + fade) based on scroll velocity. Clicking a day opens a day-detail popup. |
 | **Right** | `show_weather_forecast` | A 2- or 3-day weather forecast (12 two-hour slots/day) with SVG icons, **or** a free-text notepad when 3-day mode is off. |
 
-Top menu bar: **New Task**, **New Event**, **Archived**, **Settings**, **Quit** (+ optional FPS readout).
+Top menu bar: **New Task**, **New Event**, **Planner**, **Archived**, **Settings**, **Quit**
+(+ optional FPS readout). The **day planner** (§16) is a second view of a single day — a
+timeline you block time out on, and a tray of everything still waiting for a slot.
 
 Additional features:
 - **Events vs Tasks:** events are pinned to a date/time; tasks may have a deadline+importance, or no deadline and an "urgency" (time-importance) that grows over time.
@@ -55,6 +58,7 @@ Additional features:
 - **Weather coordinate picker:** an interactive Blue-Marble world map with zoom/pan, click-to-pick, and ~200 labeled city markers.
 - **Color schemes:** user-editable 6-color palettes used to tint calendar items; palettes can be **auto-generated from the current background image** via k-means clustering in CIE-Lab space.
 - **Settings:** background image, startup monitor, fullscreen, FPS counter, number of weeks, background tint %, weather coordinates, 3-day weather toggle.
+- **Day planner:** drag on a day's timeline to block out time, drag unplanned tasks in from a backlog tray, and move/resize blocks. Records *when you will do* something separately from *when it is due* — see §16.
 - **Idle sleep:** when unfocused and idle for 10 s, the redraw loop stops to save power.
 
 ---
@@ -257,10 +261,16 @@ struct Active {
     time_importance: Option<u8>,  // 0..=2 (urgency); Some only for deadline-less tasks
     name: String,                 // cosmetic only — may repeat and be edited freely
     created: DateTime<Local>,
-    deadline: Option<DateTime<Local>>,
+    deadline: Option<DateTime<Local>>,   // when it is DUE
     is_event: bool,               // events render with a distinct palette color (index 5)
+    planned_start: Option<DateTime<Local>>,  // when it will be WORKED ON (planner; tasks only)
+    duration_minutes: Option<u32>,           // how long that block runs
 }
 ```
+
+The last two are the day planner's, and are covered in §16 — including why "due" and "planned"
+are separate fields rather than one. Both are `#[serde(default)]`, so pre-planner save files
+load unchanged.
 
 **Identity.** Items are keyed by `id`, not `name`: delete/complete/lookup and the calendar day
 popup all operate on the id, so duplicate or renamed names are harmless. `id` is a monotonic `u64`
@@ -474,6 +484,8 @@ visual language: a rounded "notch" around the day number, two-line wrapped item 
 | `error_flag` + `error_text` | Show the (top-most) error modal. |
 | `display_archive_flag` | Show the Archive window (paginated). |
 | `expand_calendar_day_flag` + `expanded_day` | Show the day-detail popup for a cell index. |
+| `planner_flag` + `planner_day` | Show the day planner, and which day it is on. The day is separate from `expanded_day` (a cell index) so the planner can step past the end of the calendar's range. |
+| `planner_drag` / `planner_selection` / `planner_naming` | In-flight timeline gesture, selected block, and the block whose title is being typed. |
 | `settings_flag` | Show Settings. |
 | `color_picker_flag` / `edit_colorscheme_flag` / `rename_colorscheme_flag` | Color-scheme manager sub-modals. |
 | `user_wants_to_complete_task_flag` + `confirm_complete_task` | Pending "mark complete?" confirmation. |
@@ -593,6 +605,103 @@ Behaviour that differs per OS, and why.
 | **TLS** | `rustls`, so no system OpenSSL is needed to build on Linux. |
 | **Monitor names** | winit reports e.g. `Monitor #41057` on macOS rather than a friendly name. The Settings dropdown shows whatever winit gives it, and copes with an empty list (see `CODE_REVIEW.md` A9). |
 | **Not addressed** | No `.app` bundle, `.dmg`, or Linux packaging is produced by the build; `cargo build --release` yields a plain executable on every platform. |
+
+---
+
+## 16. The Day Planner
+
+A second view of a single day: a timeline you lay time out on, plus a tray of everything
+waiting to be given a slot. Opened from the **Planner** menu button (today) or the day popup's
+**Plan day** button (that day). `planner.rs` holds the model and geometry; `ui.rs` draws it.
+
+### 16.1 The central idea: due ≠ planned
+
+A calendar answers *when is this due*. A planner answers *when will I do it*. Those are
+different facts about the same task — a report due Friday can be written on Tuesday morning —
+and conflating them is what makes most task apps annoying to plan with.
+
+So `Active` gained a second time field:
+
+| Field | Meaning |
+|-------|---------|
+| `deadline` | when the item is **due** (unchanged; still what the calendar and the priority score use) |
+| `planned_start` | when the user set aside time to **work on** it |
+| `duration_minutes` | how long that block runs |
+
+All three are `#[serde(default)]`, and `serde_json` ignores unknown fields, so save files
+round-trip through a pre-planner build unchanged.
+
+**Events are the exception.** An event's `deadline` *is* when it happens, so events are planned
+by moving that; `planned_start` stays `None` for them. `Active::planner_anchor` and
+`Active::is_planned` encapsulate that asymmetry so callers don't re-derive it.
+
+The visible consequence: a task planned for Tuesday and due Friday appears **twice in the
+week** — as a work block on Tuesday and as a due marker on Friday. That is the point, not a
+bug. `planner::placement_for` is asked per-day rather than answering once, which is what makes
+it possible.
+
+### 16.2 Placement
+
+`planner::Placement` is what an item looks like on a given day:
+
+| Variant | Drawn as | Produced by |
+|---------|----------|-------------|
+| `Block { start, minutes }` | filled rectangle spanning its time | a task's `planned_start`, or an event with a `duration_minutes` |
+| `Marker { at, due }` | thin pill | an event with no length yet (`due: false`), or a task's due time (`due: true`) |
+
+An item with no placement on any day (an unplanned, deadline-less task) is what the backlog tray
+shows. Note that the marker/block split is also the migration path: every event from before the
+planner existed shows up as a marker, and dragging its bottom edge gives it a length.
+
+### 16.3 Interaction
+
+| Gesture | Result |
+|---------|--------|
+| Drag on empty timeline | Creates a block and opens its title for typing. The header's **Drag creates** toggle picks event or task. |
+| Drag a backlog card onto the timeline | Sets `planned_start`; the deadline is untouched. |
+| Drag a block | Moves it, keeping the grab point under the pointer. |
+| Drag a block's bottom edge | Resizes it. |
+| Click | Selects, revealing ✓ complete / ✗ delete / ↩ back-to-unplanned. |
+| Double-click | Re-opens the title for editing. |
+| `Esc` | Leaves the title editor; a second press closes the planner. |
+
+Everything snaps to `SNAP_MINUTES` (15) and is clamped inside the day by `clamp_block`, which is
+shared by create, move, and resize so all three agree on what a legal block is.
+
+**Due markers are deliberately not draggable.** A deadline is a fact about the task; dragging it
+on a planner would silently rewrite it while the user thought they were planning. Clicking one
+still selects it, and the task can be dragged in from the tray to give it a *planned* time.
+
+### 16.4 Structure
+
+`planner.rs` is pure — no egui, no `TaskApp`. It owns the parts that are easy to get subtly
+wrong and hard to see in a screenshot: time↔pixel mapping (`TimelineGeometry`), snapping and
+clamping, the gesture→block arithmetic (`Drag` + `preview`), the side-by-side packing of
+overlapping blocks (`lay_out`), and the day summary (`summarize`). All of it is unit-tested;
+`ui.rs` decides only *which* gesture a press begins and draws the result.
+
+Two consequences worth keeping:
+
+- **`preview` serves both the live preview and the commit.** The commit path calls it *after*
+  taking the gesture out of state, so what the user sees under the pointer and what gets saved
+  cannot disagree.
+- **The preview flows through `lay_out` like a real block**, so neighbours move aside live while
+  a block is dragged over them.
+
+`lay_out` groups placements into clusters of transitively-overlapping items and gives each the
+first column free at its start time; every member of a cluster reports the same column count so
+they line up. A block only costs a column while it actually overlaps — two back-to-back
+half-hours share one.
+
+`summarize` **unions** overlapping blocks rather than summing them, so the header's "planned"
+figure answers "how much of my day is committed", not "how many block-hours exist".
+
+### 16.5 State
+
+The planner keeps no cached model: `planner_entries()` rebuilds from `active_things` every
+frame, so it cannot drift out of sync with the calendar the way a second copy would. The only
+persistent state is the flag, the day being shown, the selection, the in-flight gesture
+(`planner_drag`), and the title being typed. `planner_flag` is listed in `any_modal_open()`.
 
 ---
 
