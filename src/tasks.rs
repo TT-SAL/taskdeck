@@ -1,5 +1,5 @@
 use std::{collections::HashMap, error::Error, fs::{self, File, OpenOptions}, io::{BufReader, BufWriter, Write}, path::Path};
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, Duration, Local, NaiveDate};
 use rev_lines::RevLines;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
@@ -38,51 +38,188 @@ pub struct Active {
     pub duration_minutes: Option<u32>,
 }
 
-/// Upper bound on the exponent fed to the importance-score exponentials, chosen
-/// so even the steepest base (`1.2^x`) stays a finite `f32` (comfortably under
-/// `f32::MAX`) instead of overflowing to `+inf` for far-future deadlines.
-const MAX_SCORE_EXPONENT: f32 = 480.0;
+/* ─────────────────────────── Priority scoring ───────────────────────────
+ *
+ * Every task gets one number, and the task list is sorted by it, highest
+ * first. The number is always
+ *
+ *     score = weight × pressure
+ *
+ * `weight` is how much the task matters — fixed, chosen by the user.
+ * `pressure` is how much it matters *right now* — it moves with the clock.
+ *
+ * Splitting the two is what makes the scale mean something. Both factors are
+ * bounded, so scores from different kinds of task are directly comparable, a
+ * far-off deadline can't drown out an imminent one, and nothing can overflow.
+ *
+ * Two kinds of task, two kinds of pressure:
+ *
+ *   Dated task    pressure doubles as the deadline nears, reaching 1.0 exactly
+ *                 at the deadline and continuing to climb — capped — once late.
+ *   Undated task  pressure ripens with age towards 1.0 and stops there, so a
+ *                 task nobody dated can rise into view but never shout down
+ *                 something that is actually due.
+ *
+ * The tables below are the whole policy. They are meant to be edited: to make
+ * "Highly important" start nagging a week earlier, change one number.
+ */
+
+/// How much each importance level counts for, indexed by `Active::importance`.
+/// Doubling per level means one step of importance is worth exactly one
+/// doubling of time pressure, which is what makes the two comparable.
+const WEIGHT_BY_IMPORTANCE: [f32; 5] = [1.0, 2.0, 4.0, 8.0, 16.0];
+
+/// How far ahead of its deadline each importance level starts to feel urgent:
+/// the task is at half pressure this far out, and full pressure at the deadline.
+/// More important work is noticed earlier, which is the real difference between
+/// "lethally important" and "not important" — both are equally due on the day.
+///
+/// These also bound how long importance out-argues urgency. A task out-ranks a
+/// trivial one sitting at *its* deadline for `lead × log2(weight)` days —
+/// about a month for the top level, which is roughly how far ahead a big piece
+/// of work is worth thinking about. Lengthening a lead time lengthens that
+/// dominance too.
+const LEAD_DAYS_BY_IMPORTANCE: [f32; 5] = [0.5, 1.0, 2.0, 4.0, 8.0];
+
+/// How much each urgency level counts for, indexed by `Active::time_importance`.
+const WEIGHT_BY_URGENCY: [f32; 3] = [1.0, 2.0, 4.0];
+
+/// How long an undated task takes to ripen: it reaches half its weight this
+/// long after being created, and approaches full weight from there.
+const RIPEN_DAYS_BY_URGENCY: [f32; 3] = [30.0, 10.0, 3.0];
+
+/// Once a deadline is missed, pressure keeps doubling this often. It is the
+/// same for every importance level: being late is late, and the weight already
+/// says how much this particular lateness matters.
+const OVERDUE_DOUBLING_DAYS: f32 = 1.0;
+
+/// Ceiling on overdue pressure, reached two days late.
+///
+/// Without it a task forgotten for a year would out-score everything else by
+/// astronomical margins and the list below it would be meaningless. The value
+/// also sets a deliberate boundary: being maximally late is worth two steps of
+/// importance, no more. So a trivial task a week overdue reads as about as
+/// pressing as an important one due today — a nag, not an emergency — and
+/// "lethally important" still beats it from a fortnight out.
+const OVERDUE_PRESSURE_CAP: f32 = 4.0;
+
+/// Importance assumed for a dated task that has none. Not reachable from the
+/// UI, but a hand-edited or partially-written save can produce it, and treating
+/// it as the middle of the scale is far better than treating it as broken.
+const ASSUMED_IMPORTANCE: u8 = 2;
+
+/// Score for an item with nothing to go on: no deadline, no importance, no
+/// urgency. Deliberately far above any real score (the maximum is
+/// `16 × 4 = 64`) so a corrupt entry surfaces at the top of the list where it
+/// will be noticed and fixed, rather than hiding at the bottom.
+const MALFORMED_SCORE: f32 = 1.0e6;
+
+/// Size of the tie-break jitter: each score is multiplied by a factor in
+/// `[1.0, 1.0 + JITTER)`. See `Active::tie_break_jitter`.
+const JITTER: f32 = 0.08;
+
+/// Pressure from a deadline. `1.0` exactly at the deadline, halving for every
+/// `lead_days` of remaining time, and climbing past `1.0` once overdue.
+///
+/// Continuous at the deadline and monotonically increasing as time passes,
+/// which is the property the whole list ordering rests on.
+fn deadline_pressure(days_left: f32, lead_days: f32) -> f32 {
+    let lead_days = lead_days.max(0.01);
+    if days_left >= 0.0 {
+        // Underflows to 0 for absurdly distant deadlines, which is the right
+        // answer — such a task has no bearing on today.
+        (-days_left / lead_days).exp2()
+    } else {
+        // `exp2` of a large number is +inf; `min` collapses that to the cap, so
+        // no infinity ever reaches the comparator.
+        (-days_left / OVERDUE_DOUBLING_DAYS).exp2().min(OVERDUE_PRESSURE_CAP)
+    }
+}
+
+/// Pressure from age alone, for a task with no deadline. Rises from 0 towards
+/// (but never reaching) 1.0, at half after `ripen_days`.
+fn ripeness(age_days: f32, ripen_days: f32) -> f32 {
+    let ripen_days = ripen_days.max(0.01);
+    1.0 - (-age_days.max(0.0) / ripen_days).exp2()
+}
+
+fn weight_for(table: &[f32], level: u8) -> f32 {
+    table[(level as usize).min(table.len() - 1)]
+}
 
 impl Active {
+    /// Priority of this task right now. Higher sorts first.
+    ///
+    /// See the module-level notes above for the model. In short:
+    /// `weight × pressure`, where a dated task's pressure doubles as its
+    /// deadline approaches and an undated task's ripens with age.
     pub fn importance_score(&self, time_now: DateTime<Local>) -> f32 {
-        let  score = match (self.importance, self.time_importance, self.deadline) {
-            (Some(importance), _, Some(deadline)) => {
-                let days_since_creation = (deadline - time_now).num_hours() as f32 / 24.0;
+        self.base_score(time_now) * self.tie_break_jitter(time_now)
+    }
 
-                // Clamp the exponent so the exponential curves saturate to a large
-                // *finite* value rather than overflowing f32 to +inf for far-future
-                // deadlines — `+inf` would make all such tasks compare exactly
-                // equal (see CODE_REVIEW E9).
-                let exp = (0.5 * days_since_creation + 20.0).min(MAX_SCORE_EXPONENT);
+    /// The score without the tie-break jitter — the part that is a pure
+    /// function of the task and the time, and so the part worth testing.
+    fn base_score(&self, time_now: DateTime<Local>) -> f32 {
+        // A deadline is the strongest thing a task can tell us, so it decides
+        // the model whenever there is one. An importance is used if set, and
+        // assumed otherwise; a `time_importance` alongside a deadline is
+        // ignored rather than given its own precedence puzzle.
+        if let Some(deadline) = self.deadline {
+            let importance = self.importance.unwrap_or(ASSUMED_IMPORTANCE);
+            let days_left = duration_in_days(deadline - time_now);
+            return weight_for(&WEIGHT_BY_IMPORTANCE, importance)
+                * deadline_pressure(days_left, weight_for(&LEAD_DAYS_BY_IMPORTANCE, importance));
+        }
 
-                match importance {
-                    4 => 1.2_f32.powf(exp) + 5.0,
-                    3 => 1.17_f32.powf(exp) + 5.0,
-                    2 => 0.1747502645671 * days_since_creation + 11.3587671968606,
-                    1 => 0.0965675735297 * days_since_creation + 6.276892278847,
-                    _ => 0.0402194752135 * days_since_creation + 2.6142658953751,
-                }
-            },
-            (_, Some(time_importance), _) => {
-                let days_since_creation = (time_now - self.created).num_hours() as f32 / 24.0;
+        let age_days = duration_in_days(time_now - self.created);
 
-                match time_importance {
-                    2 => 1.15_f32.powf((0.4 * days_since_creation + 20.0).min(MAX_SCORE_EXPONENT)) - 5.0,
-                    1 => 0.5403960772338 * days_since_creation + 8.3798162245677,
-                    _ => 0.0440665332331 * days_since_creation + 0.6833311078751,
-                }
-            },
-            (None, None, Some(deadline)) => {
-                let time_until_event = (deadline - time_now).abs().num_hours() as f32 / 24.0 + 1.0;
-                1000000000.0 / time_until_event
-            }
-            _ => 1000000000.0, //highlight broken entries
-        };
+        // No deadline, but the user said how urgent it is: ripen at that rate.
+        if let Some(urgency) = self.time_importance {
+            return weight_for(&WEIGHT_BY_URGENCY, urgency)
+                * ripeness(age_days, weight_for(&RIPEN_DAYS_BY_URGENCY, urgency));
+        }
 
-        let random_time = chrono::Local::now();
-        let random_variation = (random_time.timestamp_subsec_millis() as f32 / 10000.0) + 1.0;
+        // No deadline, but an importance — a shape the UI doesn't produce, but a
+        // reasonable one. Carry the importance weight and ripen at the middle
+        // rate rather than calling it broken.
+        if let Some(importance) = self.importance {
+            return weight_for(&WEIGHT_BY_IMPORTANCE, importance)
+                * ripeness(age_days, RIPEN_DAYS_BY_URGENCY[1]);
+        }
 
-        return score * random_variation;
+        MALFORMED_SCORE
+    }
+
+    /// A small per-task, per-rebuild multiplier in `[1.0, 1.0 + JITTER)`.
+    ///
+    /// This keeps the intentional gentle shuffle described in
+    /// `DOCUMENTATION.md` §14.4 — the list shouldn't look frozen — while
+    /// actually delivering one. The old version read the current millisecond
+    /// *at the moment of the call*, so every task scored in the same
+    /// millisecond got the identical multiplier and nothing was shuffled at
+    /// all; when a rebuild happened to straddle a millisecond boundary, an
+    /// arbitrary subset jumped by up to 10% instead. Hashing the task's id with
+    /// the rebuild's timestamp gives each task its own factor, stable within a
+    /// rebuild and different in the next one.
+    ///
+    /// It is deliberately small: enough to keep near-ties moving, never enough
+    /// to reorder tasks that genuinely differ in priority.
+    fn tie_break_jitter(&self, time_now: DateTime<Local>) -> f32 {
+        // splitmix64, so the id and the timestamp are properly mixed rather
+        // than merely added — adjacent ids must not produce adjacent factors.
+        let mut mixed = self
+            .id
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ (time_now.timestamp() as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        mixed ^= mixed >> 30;
+        mixed = mixed.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        mixed ^= mixed >> 27;
+        mixed = mixed.wrapping_mul(0x94D0_49BB_1331_11EB);
+        mixed ^= mixed >> 31;
+
+        // Top 24 bits, scaled into [0, 1).
+        let unit = (mixed >> 40) as f32 / (1u64 << 24) as f32;
+        1.0 + unit * JITTER
     }
     pub fn to_inactive(self) -> InActive {
         InActive {
@@ -129,6 +266,14 @@ impl Active {
             self.planned_start.is_some()
         }
     }
+}
+
+/// A `Duration` as fractional days.
+///
+/// Minutes rather than the old `num_hours()`, which truncated: a task due in 90
+/// minutes and one due in 110 scored identically for the whole hour between.
+fn duration_in_days(duration: Duration) -> f32 {
+    duration.num_minutes() as f32 / (24.0 * 60.0)
 }
 
 /// Group dated items by their deadline day, preserving input order within each
@@ -316,37 +461,241 @@ mod tests {
         assert_eq!(active(None, None, false, None).calendar_item_color(), 0);
     }
 
-    #[test]
-    fn importance_score_malformed_is_huge_despite_jitter() {
-        // No importance, no time_importance, no deadline hits the "broken entry"
-        // branch (1e9), times the <=10% random tie-break multiplier in [1.0, 1.1).
-        let now = Local.with_ymd_and_hms(2025, 6, 1, 12, 0, 0).unwrap();
-        let score = active(None, None, false, None).importance_score(now);
-        assert!(score >= 1_000_000_000.0, "score was {score}");
-        assert!(score < 1_100_000_000.0, "score was {score}");
+    /// A dated task, `days` from its deadline (negative = overdue).
+    fn dated(importance: u8, days: f64, now: DateTime<Local>) -> Active {
+        Active {
+            deadline: Some(now + Duration::minutes((days * 1440.0) as i64)),
+            ..active(Some(importance), None, false, None)
+        }
+    }
+
+    /// An undated task of the given urgency, created `age` days ago.
+    fn undated(urgency: u8, age: f64, now: DateTime<Local>) -> Active {
+        Active {
+            created: now - Duration::minutes((age * 1440.0) as i64),
+            ..active(None, Some(urgency), false, None)
+        }
+    }
+
+    fn noon() -> DateTime<Local> {
+        Local.with_ymd_and_hms(2026, 8, 14, 12, 0, 0).unwrap()
     }
 
     #[test]
-    fn importance_score_stays_finite_for_far_future_deadline() {
-        let now = Local.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
-        // Importance 4, deadline ~100 years out: without the exponent clamp the
-        // 1.2^x curve overflows f32 to +inf (flattening all such tasks to equal).
-        let far = active(Some(4), None, false, Some(now + chrono::Duration::days(36500)));
-        let score = far.importance_score(now);
-        assert!(score.is_finite(), "score should be finite, got {score}");
+    fn score_rises_as_a_deadline_approaches() {
+        let now = noon();
+        // The property the whole list rests on, and the one the previous model
+        // had backwards: it scored a task *higher* the further away its deadline
+        // was, so deadlines sank as they approached and overdue work ended up at
+        // the bottom of the list.
+        for importance in 0..=4 {
+            let far = dated(importance, 30.0, now).base_score(now);
+            let near = dated(importance, 1.0, now).base_score(now);
+            let due = dated(importance, 0.0, now).base_score(now);
+            let late = dated(importance, -2.0, now).base_score(now);
+
+            assert!(far < near, "importance {importance}: {far} !< {near}");
+            assert!(near < due, "importance {importance}: {near} !< {due}");
+            assert!(due < late, "importance {importance}: {due} !< {late}");
+        }
     }
 
     #[test]
-    fn importance_score_event_closer_scores_higher() {
-        // Event-like items (deadline only) score 1e9 / (|days_to_event| + 1), so a
-        // nearer event must outrank a farther one even after the <=10% jitter.
-        let now = Local.with_ymd_and_hms(2025, 6, 1, 12, 0, 0).unwrap();
-        let soon = active(None, None, true, Some(now + chrono::Duration::days(1)));
-        let later = active(None, None, true, Some(now + chrono::Duration::days(10)));
+    fn pressure_is_exactly_one_at_the_deadline() {
+        let now = noon();
+        // At the deadline a task is worth precisely its weight, which is what
+        // makes weights comparable across the two models.
+        for importance in 0..=4u8 {
+            let score = dated(importance, 0.0, now).base_score(now);
+            assert!(
+                (score - WEIGHT_BY_IMPORTANCE[importance as usize]).abs() < 0.001,
+                "importance {importance} scored {score}"
+            );
+        }
+    }
+
+    #[test]
+    fn importance_separates_tasks_sharing_a_deadline() {
+        let now = noon();
+        let scores: Vec<f32> = (0..=4).map(|i| dated(i, 3.0, now).base_score(now)).collect();
+        for pair in scores.windows(2) {
+            assert!(pair[0] < pair[1], "importance should break the tie: {scores:?}");
+        }
+    }
+
+    #[test]
+    fn importance_stops_out_arguing_urgency_eventually() {
+        let now = noon();
+        // Importance wins near-term: a lethally important task a fortnight out
+        // is above a trivial one due today, which is what lets big work surface
+        // early enough to plan.
+        let trivial_due_now = dated(0, 0.0, now).base_score(now);
+        assert!(dated(4, 14.0, now).base_score(now) > trivial_due_now);
+
+        // But its reach is bounded. Far enough out, the thing actually due today
+        // takes the top — the old model had no such crossover at all, and ranked
+        // the distant task higher no matter how far away it was.
+        assert!(dated(4, 45.0, now).base_score(now) < trivial_due_now);
+    }
+
+    #[test]
+    fn a_distant_deadline_still_ranks_by_importance() {
+        let now = noon();
+        // ...but at the same distance, the big thing is still the bigger thing.
+        assert!(dated(4, 30.0, now).base_score(now) > dated(0, 30.0, now).base_score(now));
+    }
+
+    #[test]
+    fn overdue_pressure_levels_off_at_the_cap() {
+        let now = noon();
+        // A task forgotten for a year must not out-score everything else by an
+        // astronomical margin — past the cap, lateness stops adding.
+        for importance in 0..=4u8 {
+            let capped = WEIGHT_BY_IMPORTANCE[importance as usize] * OVERDUE_PRESSURE_CAP;
+            let a_week = dated(importance, -7.0, now).base_score(now);
+            let a_year = dated(importance, -365.0, now).base_score(now);
+            assert!((a_week - capped).abs() < 0.001, "{a_week} != {capped}");
+            assert_eq!(a_week, a_year, "lateness past the cap should stop counting");
+        }
+    }
+
+    #[test]
+    fn a_late_trivial_task_does_not_bury_important_upcoming_work() {
+        let now = noon();
+        // The cap is chosen so this holds: the most overdue a trivial task can
+        // be still sits below a lethally important one due in a fortnight.
+        let maximally_late_trivial = dated(0, -365.0, now).base_score(now);
+        let important_upcoming = dated(4, 14.0, now).base_score(now);
+        assert!(
+            important_upcoming > maximally_late_trivial,
+            "{important_upcoming} should beat {maximally_late_trivial}"
+        );
+    }
+
+    #[test]
+    fn undated_tasks_ripen_towards_their_weight_and_stop() {
+        let now = noon();
+        for urgency in 0..=2u8 {
+            let weight = WEIGHT_BY_URGENCY[urgency as usize];
+            let fresh = undated(urgency, 0.0, now).base_score(now);
+            let ripening = undated(urgency, RIPEN_DAYS_BY_URGENCY[urgency as usize] as f64, now).base_score(now);
+            let ancient = undated(urgency, 3650.0, now).base_score(now);
+
+            assert!(fresh < ripening && ripening < ancient, "urgency {urgency} should ripen");
+            // Half weight at the ripening time, by construction.
+            assert!((ripening - weight / 2.0).abs() < 0.01, "{ripening} != half of {weight}");
+            // And never past its weight, however long it sits.
+            assert!(ancient <= weight, "{ancient} exceeded its weight {weight}");
+        }
+    }
+
+    #[test]
+    fn a_ripe_undated_task_never_outranks_comparable_overdue_work() {
+        let now = noon();
+        // An undated task can rise into view — that is the point of urgency —
+        // but "I keep meaning to" must not outrank a missed deadline of the same
+        // standing. (A *heavier* undated task outranking a trivial overdue one is
+        // correct: that is what the weights are for.)
+        let ripest = undated(2, 3650.0, now).base_score(now);
+        let ripest_weight = WEIGHT_BY_URGENCY[2];
+        for importance in 0..=4u8 {
+            if WEIGHT_BY_IMPORTANCE[importance as usize] < ripest_weight {
+                continue;
+            }
+            let overdue = dated(importance, -1.0, now).base_score(now);
+            assert!(overdue > ripest, "overdue {overdue} should beat ripe {ripest}");
+        }
+    }
+
+    #[test]
+    fn scores_stay_finite_at_absurd_distances() {
+        let now = noon();
+        // Far-future deadlines used to overflow to +inf, which made every such
+        // task compare exactly equal (CODE_REVIEW E9). Now they underflow
+        // towards zero instead, which orders correctly and can't produce NaN.
+        for importance in 0..=4 {
+            let far = dated(importance, 365.0 * 200.0, now).base_score(now);
+            let late = dated(importance, -365.0 * 200.0, now).base_score(now);
+            assert!(far.is_finite() && far >= 0.0, "far score was {far}");
+            assert!(late.is_finite(), "late score was {late}");
+        }
+    }
+
+    #[test]
+    fn a_dated_task_missing_its_importance_is_scored_as_middling() {
+        let now = noon();
+        // Not a shape the UI makes, but a hand-edited save can. Treating it as
+        // the middle of the scale beats treating it as broken.
+        let no_importance = Active {
+            deadline: Some(now),
+            ..active(None, None, false, None)
+        };
+        let middling = dated(ASSUMED_IMPORTANCE, 0.0, now).base_score(now);
+        assert!((no_importance.base_score(now) - middling).abs() < 0.001);
+    }
+
+    #[test]
+    fn an_item_with_nothing_to_go_on_is_surfaced_at_the_top() {
+        let now = noon();
+        let nothing = active(None, None, false, None).base_score(now);
+        // Above every reachable real score, so a corrupt entry gets noticed.
+        let highest_real = WEIGHT_BY_IMPORTANCE[4] * OVERDUE_PRESSURE_CAP;
+        assert!(nothing > highest_real, "{nothing} should stand out from {highest_real}");
+    }
+
+    #[test]
+    fn an_event_closer_in_time_scores_higher() {
+        let now = noon();
+        let soon = active(None, None, true, Some(now + Duration::days(1)));
+        let later = active(None, None, true, Some(now + Duration::days(10)));
         assert!(
             soon.importance_score(now) > later.importance_score(now),
             "nearer event should score higher"
         );
+    }
+
+    #[test]
+    fn jitter_is_small_bounded_and_actually_varies_per_task() {
+        let now = noon();
+        let factors: Vec<f32> = (1..=64u64)
+            .map(|id| Active { id, ..active(Some(2), None, false, None) }.tie_break_jitter(now))
+            .collect();
+
+        for factor in &factors {
+            assert!((1.0..1.0 + JITTER).contains(factor), "factor {factor} out of range");
+        }
+
+        // The point of the rewrite: the old version read the clock at call time,
+        // so every task scored in the same millisecond got an identical factor
+        // and nothing was shuffled at all. Distinct ids must give distinct
+        // factors.
+        let distinct = factors
+            .iter()
+            .map(|f| f.to_bits())
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert!(distinct > 60, "only {distinct} distinct factors out of 64");
+    }
+
+    #[test]
+    fn jitter_is_stable_within_a_rebuild_and_moves_between_them() {
+        let now = noon();
+        let task = Active { id: 7, ..active(Some(2), None, false, None) };
+
+        // Stable for a given instant, so one sort is self-consistent.
+        assert_eq!(task.tie_break_jitter(now), task.tie_break_jitter(now));
+        // ...and different a moment later, which is the gentle shuffle.
+        assert_ne!(task.tie_break_jitter(now), task.tie_break_jitter(now + Duration::seconds(1)));
+    }
+
+    #[test]
+    fn jitter_cannot_reorder_tasks_that_genuinely_differ() {
+        let now = noon();
+        // One importance step is a factor of two; the jitter is 8%. It should
+        // never be able to flip a real difference in priority.
+        let lower = dated(2, 0.0, now);
+        let higher = dated(3, 0.0, now);
+        assert!(higher.importance_score(now) > lower.importance_score(now));
     }
 
     #[test]

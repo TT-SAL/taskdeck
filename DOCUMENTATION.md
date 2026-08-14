@@ -304,26 +304,94 @@ task is completed.
 
 ## 7. Importance / Priority Scoring (`Active::importance_score`)
 
-Tasks in the left list are sorted by a numeric score that grows as a deadline approaches (or as
-an undated task ages). The branch chosen depends on which fields are populated:
+Tasks in the left list are sorted by one number, highest first. That number is always
 
-- **Deadline task** (`importance` + `deadline`): `score = f(importance, days_until_deadline)`.
-  Importance 3–4 use exponential curves (`1.2^…`, `1.17^…`); 0–2 use linear curves. Higher
-  importance ⇒ steeper growth.
-- **Urgency task** (`time_importance`, no deadline): `score = g(time_importance, days_since_creation)`.
-  Urgency 2 is exponential; 0–1 linear. Score grows with age.
-- **Event-like** (`deadline` only, both importances `None`): `score = 1e9 / (hours_to_event+1)`.
-- **Malformed** (none of the above): `score = 1e9` (intended to surface broken entries).
+```
+score = weight × pressure
+```
 
-A small random multiplier derived from the current millisecond is applied as a tie-breaker, giving
-the list a gentle intentional shuffle between rebuilds.
+**`weight`** is how much the task matters — fixed, chosen by the user. **`pressure`** is how much
+it matters *right now* — it moves with the clock. Separating the two is what makes the scale mean
+anything: both factors are bounded, so scores from different kinds of task are directly
+comparable, a far-off deadline cannot drown out an imminent one, and nothing can overflow.
 
-`summarize_calendar` sorts tasks by their `importance_score(...)` as an `f32` (highest first),
-evaluating the score once per task per rebuild and comparing with `partial_cmp`. (It previously
-cast the score to `u16`, which saturated large scores — see `CODE_REVIEW.md` B3.)
+### 7.1 The two models
+
+| Kind | Pressure |
+|------|----------|
+| **Dated task** (`deadline` set) | `2^(-days_left / lead)` — halves for every `lead` days of remaining time, is exactly `1.0` **at** the deadline, and keeps doubling once overdue (`OVERDUE_DOUBLING_DAYS`, capped at `OVERDUE_PRESSURE_CAP`). |
+| **Undated task** (`time_importance`, no deadline) | `1 - 2^(-age / ripen)` — rises from 0 towards 1 as the task sits, reaching half at `ripen` days. It approaches the task's weight and stops, so an undated task can rise into view but never shouts down something that is actually due. |
+
+Both are continuous and monotonically increasing with the passage of time, which is the property
+the list ordering rests on.
+
+### 7.2 The tables (this is the whole policy)
+
+| `importance` | Label | weight | lead |
+|---|---|---|---|
+| 0 | Not important | 1 | 0.5 d |
+| 1 | Mildly important | 2 | 1 d |
+| 2 | Important | 4 | 2 d |
+| 3 | Highly important | 8 | 4 d |
+| 4 | Lethally important | 16 | 8 d |
+
+| `time_importance` | Label | weight | ripen |
+|---|---|---|---|
+| 0 | Time-independence | 1 | 30 d |
+| 1 | Normal urgency | 2 | 10 d |
+| 2 | High urgency | 4 | 3 d |
+
+Weights double per level, so **one step of importance is worth exactly one doubling of time
+pressure** — that is what makes the two commensurable. Lead times set how early a task starts to
+be felt, and with the weights they also bound how long importance out-argues urgency: a task
+out-ranks a trivial one sitting at *its own* deadline for `lead × log2(weight)` days — about a
+month at the top level. Lengthening a lead time lengthens that dominance too.
+
+What the numbers come out as:
+
+| days to deadline | imp 0 | imp 1 | imp 2 | imp 3 | imp 4 |
+|---|---|---|---|---|---|
+| 30 | 0.00 | 0.00 | 0.00 | 0.04 | 1.19 |
+| 14 | 0.00 | 0.00 | 0.03 | 0.71 | 4.76 |
+| 3 | 0.02 | 0.25 | 1.41 | 4.76 | 12.34 |
+| 0 (due) | 1.00 | 2.00 | 4.00 | 8.00 | 16.00 |
+| −2 (late) | 4.00 | 8.00 | 16.00 | 32.00 | 64.00 |
+
+Being maximally late is worth two steps of importance and no more, so a trivial task a week
+overdue reads as about as pressing as an important one due today — a nag, not an emergency.
+
+### 7.3 Which model applies
+
+1. **A deadline decides**, whenever there is one. `importance` is used if set and
+   `ASSUMED_IMPORTANCE` (2) assumed otherwise — a shape the UI can't produce but a hand-edited
+   save can, and middling beats broken. A `time_importance` alongside a deadline is ignored rather
+   than given its own precedence rule.
+2. Else **`time_importance`** → the ripening model.
+3. Else **`importance` with no deadline** → the ripening model at the middle rate, carrying the
+   importance weight.
+4. Else nothing to go on → `MALFORMED_SCORE` (1e6), far above any reachable real score (the
+   maximum is 16 × 4 = 64), so a corrupt entry surfaces at the top where it gets noticed.
+
+### 7.4 What this replaced
+
+The previous model was **inverted**: `days_since_creation` in the deadline branches was actually
+*days remaining*, and every curve grew with it. Measured, a "lethally important" task scored 633
+thirty days out and 26.8 when a week overdue — so deadlines **sank as they approached** and the
+most overdue task in the list sat at the bottom, the exact opposite of what the README describes.
+The branches were also mutually incommensurable (linear curves topping out near 17 against
+exponentials reaching 1e38 and 1e9 sentinels), so importance 3–4 buried everything else regardless
+of timing, and an undated task's score grew without bound — 2659 after 90 days.
+
+`summarize_calendar` sorts by the `f32` directly (highest first), evaluating the score once per
+task per rebuild so the comparator stays consistent. (It once cast to `u16`, which saturated large
+scores — `CODE_REVIEW.md` B3.)
 
 `Active::calendar_item_color()` maps an item to a palette index 0–5: events → 5, else
 `importance` → 0–4, else `time_importance` → 0–2, else 0.
+
+> **The planner does not affect the score.** `planned_start` says when you intend to do something,
+> not how much it matters; a task you have scheduled is still as due as it was. The planner's
+> backlog tray filters planned tasks out of its own list instead (§16).
 
 ---
 
@@ -565,13 +633,25 @@ fullscreen on a chosen monitor, and even then the animation/widget code stays un
 
 ### 14.4 Random tie-break shuffle in `importance_score`
 
-`Active::importance_score` multiplies the final score by a small random factor in `[1.0, 1.1)`
-derived from the current millisecond. This is **intentional**: it gives the task list a gentle
-shuffle between rebuilds rather than a frozen order, and is not a bug to remove.
+`Active::importance_score` multiplies the final score by a small random factor. This is
+**intentional**: it gives the task list a gentle shuffle between rebuilds rather than a frozen
+order, and is not a bug to remove.
 
-When the priority sort was changed to compare `f32` directly (see §7 and `CODE_REVIEW.md` B3), the
-score is now evaluated **once per task per rebuild** and stored, so the shuffle is preserved while
-the comparator stays consistent within a single sort.
+The score is evaluated **once per task per rebuild** and stored, so the shuffle is captured a
+single time and the comparator stays consistent within a sort (see §7 and `CODE_REVIEW.md` B3).
+
+**The implementation was rewritten because it never actually shuffled.** It read the current
+millisecond *at the moment of the call*, so every task scored within the same millisecond — which,
+at these list sizes, is all of them — got an identical multiplier, and multiplying every score by
+the same number changes no ordering whatsoever. The only time it did anything was when a rebuild
+happened to straddle a millisecond boundary, at which point an arbitrary subset of the list jumped
+by up to 10% relative to the rest. So the effect was "nothing, occasionally something arbitrary".
+
+`tie_break_jitter` now hashes the task's **id** with the rebuild's timestamp (splitmix64), giving
+each task its own factor in `[1.0, 1.08)`, stable within a rebuild and different in the next one.
+The magnitude is deliberately below one importance step (a factor of two), so it can shuffle
+near-ties without ever reordering tasks that genuinely differ in priority — which is asserted by
+a test.
 
 ### 14.5 UI scale instead of a responsive layout
 

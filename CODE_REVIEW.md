@@ -140,6 +140,40 @@ _(B4 is deferred pending the archive redesign — see B4. E8 and E10 are resolve
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **Priority scoring was inverted, and the branches weren't comparable.** Rebuilt as
+  `weight × pressure`; the model, the tables and the resulting numbers are in
+  `DOCUMENTATION.md` §7.
+  - **The bug.** In the deadline branches, the variable named `days_since_creation` was actually
+    days *remaining*, and every curve grew with it. Measured: a "lethally important" task scored
+    **633 thirty days out and 26.8 when a week overdue**. Sorted highest-first, that means
+    deadlines **sank as they approached** and the most overdue task in the list sat at the bottom —
+    the exact opposite of what the README promises. This had presumably been true for a long time
+    and is invisible unless you tabulate the curves, which is what caught it.
+  - **The scales.** The four branches were mutually incommensurable: linear curves topping out near
+    17, exponentials reaching 1e38, and two 1e9 sentinels. Importance 3–4 buried every other task
+    regardless of timing, and an undated task's score grew without bound (2659 after 90 days).
+  - **The replacement.** One bounded formula for every task. Weights double per importance level, so
+    one step of importance is exactly one doubling of time pressure — that is what makes them
+    comparable. Dated pressure halves per `lead` days of remaining time, is exactly 1.0 at the
+    deadline, and doubles daily once overdue up to a cap; undated pressure ripens towards the weight
+    and stops. Maximum real score is 64. Continuous, monotone in time, and it cannot overflow —
+    far-future deadlines underflow towards zero instead of saturating to `+inf` (which is what E9
+    was patching around; `MAX_SCORE_EXPONENT` is gone).
+  - **Constants are the policy**, in two small tables meant to be edited. The lead times also bound
+    how long importance out-argues urgency (`lead × log2(weight)`, about a month at the top level);
+    if the list ever feels too importance-driven or too deadline-driven, that is the knob.
+  - **Tie-break jitter rewritten** — it never shuffled anything. See `DOCUMENTATION.md` §14.4.
+  - **Resolution order simplified**: a deadline decides the model whenever there is one, with a
+    middling importance assumed if absent. Two previously-`1e9` shapes (dated-without-importance,
+    important-without-deadline) are now scored sensibly instead of being pinned to the top as
+    "broken"; only a task with no deadline, no importance and no urgency is treated as corrupt.
+  - 16 tests cover the invariants — rises toward the deadline, exact weight at the deadline, the
+    overdue cap, ripening, cross-model comparisons, finiteness at absurd distances, and that the
+    jitter varies per task but can't reorder genuine differences.
+  - _Not done: `planned_start` deliberately does not affect the score — when you intend to do
+    something isn't how much it matters. If a planned task should rest until its slot, that's a
+    policy change to make explicitly._
+
 - **Fixedsys rendered at fractional pixel sizes (long-standing "crisp here, broken there").**
   Fixedsys Excelsior's outlines trace a bitmap font's pixel grid, so it is sharp only when a
   glyph's em box lands on whole pixels — sharpest at multiples of 16px. A ruler rendering one
@@ -268,7 +302,8 @@ Fixes already landed (newest first). Kept here as history so the open list above
   - **E6:** cleared the unused-binding warnings (the `device_id`/`position` `WindowEvent` destructures
     → `{ .. }`) and did the trivial `ComboBox::from_id_source` → `from_id_salt` rename. Build warnings
     15 → 6; the remaining 6 are egui layout-API deprecations, now tracked as **E10**.
-  - **E9:** `importance_score` clamps the exponential exponent to a shared `MAX_SCORE_EXPONENT`, so the
+  - **E9:** _(superseded — the exponential curves it clamped no longer exist; see the scoring rebuild
+    at the top of this changelog.)_ `importance_score` clamps the exponential exponent to a shared `MAX_SCORE_EXPONENT`, so the
     `1.2^…`/`1.17^…`/`1.15^…` curves saturate to a large **finite** `f32` instead of overflowing to
     `+inf` for far-future deadlines. Unit-tested (`…_stays_finite_for_far_future_deadline`).
 - **D6 (partial) — one `any_modal_open()` predicate.** The two hand-maintained "is any modal open"
