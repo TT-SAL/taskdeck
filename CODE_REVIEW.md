@@ -73,7 +73,7 @@ The side panels and dialogs are laid out with absolute `add_space` spacers, whic
 non-100% DPI scaling or arbitrary window sizes.
 
 - **Mitigated:** the *global* consequence — the layout not fitting the window at all — is handled by
-  the UI-scale fit (`TaskApp::apply_ui_scale`, `DOCUMENTATION.md` §14.5), which scales the whole UI
+  the UI-scale fit (`TaskApp::apply_ui_scale`, `DOCUMENTATION.md` §14.6), which scales the whole UI
   so the fixed design width always fits. That was load-bearing for the macOS port, where no Retina
   display offers 1920 points.
 - **Remaining:** the spacers are still absolute, so individual dialogs can't reflow *within* a
@@ -204,7 +204,7 @@ Fixes already landed (newest first). Kept here as history so the open list above
   pixel — and `set_styles` runs each named size through `snap_font_points`, which snaps to the
   16px grid when close and to the nearest whole pixel otherwise. `apply_ui_scale` re-runs
   `set_styles` when the scale changes, since the snapped sizes depend on it. An explicit
-  `ui_scale_percent` is left alone. Unit-tested (4 tests); details in `DOCUMENTATION.md` §14.5.
+  `ui_scale_percent` is left alone. Unit-tested (4 tests); details in `DOCUMENTATION.md` §14.6.
   _Note: inline `FontId::new(…)` call sites are not snapped — only the named text styles are. The
   scale quantization helps them all, but exact sizes are only guaranteed for the styles._
 - **Planner buttons were unclickable, and planner-created tasks had no importance.**
@@ -276,7 +276,7 @@ Fixes already landed (newest first). Kept here as history so the open list above
     instead of `available_monitors().nth(0).unwrap()`.
   - **Layout wider than any Retina display.** The fixed three-column layout needs 1920 points; a
     3024px Mac panel is 1512. Handled by scaling the UI to fit rather than re-tuning the widget
-    geometry — see `DOCUMENTATION.md` §14.5 and the new `ui_scale_percent` setting (`0` =
+    geometry — see `DOCUMENTATION.md` §14.6 and the new `ui_scale_percent` setting (`0` =
     automatic). A 1920×1080/100% Windows setup computes a zoom of exactly 1.0, so it is unchanged.
   - **Also:** `Bgra8Unorm` is now preferred-with-fallbacks rather than `expect`ed (some Linux GL and
     software adapters don't offer it); the wgpu instance is built with the window's display handle

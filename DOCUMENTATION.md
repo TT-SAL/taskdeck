@@ -667,7 +667,18 @@ second — and the planner's backlog tray re-sorts *every frame*, so its cards c
 the pointer as you reached for one. A counter shuffles exactly when §14.4 says it should: when the
 list is actually rebuilt.
 
-### 14.5 UI scale instead of a responsive layout
+### 14.5 Plans stay out of the calendar grid
+
+A day cell shows at most three items (§12) and is read from across the room. That budget belongs to
+what is **due**; filling it with what you *intend to do* would crowd out the thing the calendar
+exists to tell you. So `summarize_calendar` buckets on `deadline` alone and the planner keeps plans
+on its own timeline, where there is room for them.
+
+The follow-on — a task dragged out in the planner has no deadline and therefore never appears in
+the calendar — is accepted, not overlooked. It is still visible in the task list, and its slot
+drives its priority there (§7). See §16.4.
+
+### 14.6 UI scale instead of a responsive layout
 
 The three columns are laid out at fixed point sizes summing to
 `initialization::DESIGN_WIDTH_POINTS` (1920) — 300 for the task list, 1224 for the 7×160 calendar
@@ -721,7 +732,7 @@ Behaviour that differs per OS, and why.
 | **Windows-only code** | `windows_subsystem = "windows"` (release), `embed-resource` compiling `resources.rc` (a no-op elsewhere), and `with_taskbar_icon` — all `cfg`-gated. Other platforms take the window icon, or, on macOS, the bundle icon. |
 | **Data location** | Portable next to the executable where that is writable, else the platform's per-user data directory. See §4. |
 | **macOS `.app` bundles** | Detected via the `Contents/MacOS` layout; data then always goes to `~/Library/Application Support/TaskDeck` rather than inside the (signed, possibly read-only) bundle. |
-| **HiDPI** | See §5.3, §5.4 and §14.5 — window placement, the points-per-pixel path, and the UI scale. Effectively macOS-only in practice, but Windows at >100% scaling exercises the same code. |
+| **HiDPI** | See §5.3, §5.4 and §14.6 — window placement, the points-per-pixel path, and the UI scale. Effectively macOS-only in practice, but Windows at >100% scaling exercises the same code. |
 | **Fullscreen key** | `F11` everywhere; additionally `Ctrl`+`Cmd`+`F` on macOS, where the system keeps `F11` for Mission Control and never delivers it to the app. |
 | **Surface format** | `Bgra8Unorm` preferred, with fallbacks — see §5.3. |
 | **wgpu backend** | Instance built with the window's display handle so Linux GL/EGL can enumerate adapters. |
@@ -804,7 +815,34 @@ stuck on the default.
 on a planner would silently rewrite it while the user thought they were planning. Clicking one
 still selects it, and the task can be dragged in from the tray to give it a *planned* time.
 
-### 16.4 Structure
+### 16.4 "Plan" is an adjective, not a noun
+
+There is no plan *object*. A plan is `planned_start` + `duration_minutes` on the task itself, so a
+task is never split into two records and there is never a second thing to complete, delete, or keep
+in sync. Homework due Thursday and blocked out on Wednesday is **one** `Active`: one card in the
+task list, one ✓ to finish it, appearing on the planner's Wednesday as a work block and on its
+Thursday as a due marker.
+
+Which fields get filled in is the only difference between how a task was made:
+
+| Created via | `deadline` | `planned_start` |
+|---|---|---|
+| New Task dialog | set by the user | empty (drag it in from the backlog later) |
+| Planner drag, **Task** | empty — a plan is not a due date | the slot |
+| Planner drag, **Event** | the slot (an event's deadline *is* when it happens) | unused by events |
+
+**Plans deliberately do not appear in the calendar grid.** `summarize_calendar` buckets on
+`deadline` alone, so a task shows in the grid on the day it is *owed* and nowhere else. A day cell
+holds at most three items (§12) and is the always-on view read from across the room; filling that
+budget with "what I intend to do" would crowd out "what is actually due". Plans belong to the
+planner, which has a whole timeline for them.
+
+The consequence, which is intended and not an oversight: a task dragged out on the planner has no
+deadline, so it **does not appear in the calendar at all**. It lives in the task list — where its
+slot drives its priority (§7) — and on the planner's timeline. A dragged-out *event* does appear
+in the calendar, because its slot is its deadline.
+
+### 16.5 Structure
 
 `planner.rs` is pure — no egui, no `TaskApp`. It owns the parts that are easy to get subtly
 wrong and hard to see in a screenshot: time↔pixel mapping (`TimelineGeometry`), snapping and
@@ -828,7 +866,7 @@ half-hours share one.
 `summarize` **unions** overlapping blocks rather than summing them, so the header's "planned"
 figure answers "how much of my day is committed", not "how many block-hours exist".
 
-### 16.5 State
+### 16.6 State
 
 The planner keeps no cached model: `planner_entries()` rebuilds from `active_things` every
 frame, so it cannot drift out of sync with the calendar the way a second copy would. The only
