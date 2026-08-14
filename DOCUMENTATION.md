@@ -321,6 +321,7 @@ comparable, a far-off deadline cannot drown out an imminent one, and nothing can
 |------|----------|
 | **Dated task** (`deadline` set) | `2^(-days_left / lead)` — halves for every `lead` days of remaining time, is exactly `1.0` **at** the deadline, and keeps doubling once overdue (`OVERDUE_DOUBLING_DAYS`, capped at `OVERDUE_PRESSURE_CAP`). |
 | **Undated task** (`time_importance`, no deadline) | `1 - 2^(-age / ripen)` — rises from 0 towards 1 as the task sits, reaching half at `ripen` days. It approaches the task's weight and stops, so an undated task can rise into view but never shouts down something that is actually due. |
+| **Planned task** (`planned_start` set, §16) | Same curve as a deadline but on the slot and with a short `PLANNED_LEAD_DAYS` (0.5), **capped at 1.0**. A plan says "do it at this time", so the task climbs over the hours before its slot; a plan that came and went is a plan you didn't keep, which is not a missed deadline and doesn't escalate like one. |
 
 Both are continuous and monotonically increasing with the passage of time, which is the property
 the list ordering rests on.
@@ -362,14 +363,18 @@ overdue reads as about as pressing as an important one due today — a nag, not 
 
 ### 7.3 Which model applies
 
-1. **A deadline decides**, whenever there is one. `importance` is used if set and
-   `ASSUMED_IMPORTANCE` (2) assumed otherwise — a shape the UI can't produce but a hand-edited
-   save can, and middling beats broken. A `time_importance` alongside a deadline is ignored rather
-   than given its own precedence rule.
-2. Else **`time_importance`** → the ripening model.
-3. Else **`importance` with no deadline** → the ripening model at the middle rate, carrying the
+1. **A deadline decides**, whenever there is one — but pressure is the **greater** of the deadline's
+   and the planned slot's, so a task due Friday that you set aside Tuesday morning for rises on
+   Tuesday morning: that is when you decided to do it. A plan never *lowers* a task.
+   `importance` is used if set and `ASSUMED_IMPORTANCE` (2) assumed otherwise — a shape the UI
+   can't produce but a hand-edited save can, and middling beats broken. A `time_importance`
+   alongside a deadline is ignored rather than given its own precedence rule.
+2. Else, if there is a **planned slot**, it supplies the pressure. The weight comes from
+   `importance`, else `time_importance`, else `ASSUMED_IMPORTANCE`.
+3. Else **`time_importance`** → the ripening model.
+4. Else **`importance` with no deadline** → the ripening model at the middle rate, carrying the
    importance weight.
-4. Else nothing to go on → `MALFORMED_SCORE` (1e6), far above any reachable real score (the
+5. Else nothing to go on → `MALFORMED_SCORE` (1e6), far above any reachable real score (the
    maximum is 16 × 4 = 64), so a corrupt entry surfaces at the top where it gets noticed.
 
 ### 7.4 What this replaced
@@ -389,9 +394,14 @@ scores — `CODE_REVIEW.md` B3.)
 `Active::calendar_item_color()` maps an item to a palette index 0–5: events → 5, else
 `importance` → 0–4, else `time_importance` → 0–2, else 0.
 
-> **The planner does not affect the score.** `planned_start` says when you intend to do something,
-> not how much it matters; a task you have scheduled is still as due as it was. The planner's
-> backlog tray filters planned tasks out of its own list instead (§16).
+> **A plan changes *when* a task is pressing, never *how much* it matters.** `planned_start` feeds
+> pressure, never weight, and only ever raises a score (the deadline and the slot are combined with
+> `max`). Scheduling something cannot make it more important than the user said it was — but on the
+> afternoon you set aside for it, it will be at the top of the list, which is the point.
+>
+> This matters most for a task dragged out on the planner: it has a slot and **no deadline**, so the
+> slot is the only timing it has. Without this term such a task scored purely on age and sat at the
+> bottom of the list on the very day time was set aside for it.
 
 ---
 
@@ -647,11 +657,15 @@ the same number changes no ordering whatsoever. The only time it did anything wa
 happened to straddle a millisecond boundary, at which point an arbitrary subset of the list jumped
 by up to 10% relative to the rest. So the effect was "nothing, occasionally something arbitrary".
 
-`tie_break_jitter` now hashes the task's **id** with the rebuild's timestamp (splitmix64), giving
-each task its own factor in `[1.0, 1.08)`, stable within a rebuild and different in the next one.
-The magnitude is deliberately below one importance step (a factor of two), so it can shuffle
-near-ties without ever reordering tasks that genuinely differ in priority — which is asserted by
-a test.
+`tie_break_jitter` now hashes the task's **id** with a **rebuild counter** (`TaskApp::shuffle_seed`,
+bumped once per `summarize_calendar`), giving each task its own factor in `[1.0, 1.08)`. The
+magnitude is deliberately below one importance step (a factor of two), so it can shuffle near-ties
+without ever reordering tasks that genuinely differ in priority — which is asserted by a test.
+
+**The seed is a counter and not the clock, deliberately.** Keyed on the time, it reshuffled once a
+second — and the planner's backlog tray re-sorts *every frame*, so its cards crawled out from under
+the pointer as you reached for one. A counter shuffles exactly when §14.4 says it should: when the
+list is actually rebuilt.
 
 ### 14.5 UI scale instead of a responsive layout
 
@@ -766,7 +780,7 @@ planner existed shows up as a marker, and dragging its bottom edge gives it a le
 
 | Gesture | Result |
 |---------|--------|
-| Drag on empty timeline | Creates a block and opens its title for typing. The header's **Drag creates** toggle picks event or task. |
+| Drag on empty timeline | Creates a block and opens its title for typing. The header's **Drag creates** toggle picks event or task. A task made this way gets the slot and **no deadline** — it is a plan, not a due date — and the inspector says so in as many words. Its slot drives its priority (§7). |
 | Drag a backlog card onto the timeline | Sets `planned_start`; the deadline is untouched. |
 | Drag a block | Moves it, keeping the grab point under the pointer. |
 | Drag a block's bottom edge | Resizes it. |

@@ -140,6 +140,27 @@ _(B4 is deferred pending the archive redesign — see B4. E8 and E10 are resolve
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **The task list reordered under the pointer, and a planned task scored as if it were new.**
+  Both fell out of the scoring rebuild below.
+  - **The shuffle was keyed on the clock.** Making the tie-break jitter actually work (see below)
+    meant it re-rolled every second — and `planner_backlog_items` re-sorts **every frame**, so the
+    tray's cards crawled out from under the pointer while you reached for one. The jitter now takes
+    an explicit `TaskApp::shuffle_seed`, a counter bumped once per `summarize_calendar`, so the
+    order changes when the list is genuinely rebuilt and holds still otherwise — which is what
+    `DOCUMENTATION.md` §14.4 meant all along.
+  - **A planned slot now carries pressure.** A task dragged out on the planner gets a slot and no
+    deadline, so under the previous model it scored purely on age: blocked out for this afternoon,
+    and sitting at the bottom of the list on the very day time had been set aside for it. Pressure
+    now also comes from `planned_start` — same curve, short lead (`PLANNED_LEAD_DAYS`), capped at
+    1.0 because a plan you didn't keep is not a missed deadline. A dated task takes the **greater**
+    of its deadline's and its slot's pressure, so planning something for this morning lifts it this
+    morning and a plan can never lower a task. This reverses the "the planner does not affect the
+    score" note added a commit earlier; the reasoning is in `DOCUMENTATION.md` §7.
+  - **The planner now says what it did.** The inspector spells out `due <when>` or `no deadline`
+    for tasks, with a hover explaining that a slot is when you will work on something and a
+    deadline is when it is owed. Nothing in the block itself conveyed that, and it was a fair thing
+    to be confused by.
+
 - **Priority scoring was inverted, and the branches weren't comparable.** Rebuilt as
   `weight × pressure`; the model, the tables and the resulting numbers are in
   `DOCUMENTATION.md` §7.

@@ -22,7 +22,9 @@ The calendar tells you what a day holds. The **Planner** — the menu button, or
 
 It opens a timeline for one day, with everything still waiting for a slot in a tray down the left. Drag on the timeline to block out time; the block is created where you dragged and you name it right there. Drag a task in from the tray to decide when you will actually do it. Drag blocks to move them, drag their bottom edge to make them longer. Overlapping blocks sit side by side so a double-booking is obvious, and a red line shows where you are in the day.
 
-Select anything on the timeline and a row appears under the header with its times, its importance, and buttons to complete, delete, or send it back to the unplanned tray.
+Select anything on the timeline and a row appears under the header with its times, whether it has a deadline, its importance, and buttons to complete, delete, or send it back to the unplanned tray.
+
+A task you drag out on the timeline gets that slot and **no deadline** — you have said when you will do it, not when it is owed. It still rises to the top of the task list as its slot comes round, so blocking out time is enough to make something show up when it should.
 
 The important part is what it records. A deadline is when something is **due**; a planned block is when you will **work on** it. Those are different, so TaskDeck stores them separately: a report due Friday that you plan to write on Tuesday shows as a block on Tuesday and still shows as due on Friday. Nothing you do on the planner moves a deadline you set — a due date is a fact about the task, so due markers are shown but not draggable.
 

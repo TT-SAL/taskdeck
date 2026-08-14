@@ -289,6 +289,11 @@ pub struct TaskApp {
     /// Points-per-pixel the text styles were last snapped for. See
     /// `apply_ui_scale` and `snap_font_points`.
     last_font_ppp: f32,
+    /// Bumped once per `summarize_calendar`, and fed to the priority score's
+    /// tie-break jitter. Keying the shuffle to rebuilds rather than to the
+    /// clock is what keeps the planner's backlog — which re-sorts every frame —
+    /// from reordering under the pointer. See `Active::tie_break_jitter`.
+    shuffle_seed: u64,
 
     /* ───────────────────────── Errors & Confirmations ───────────────────────── */
     /// Id of the item awaiting a complete/delete confirmation. The dialog looks
@@ -444,6 +449,7 @@ impl TaskApp {
             ui_scale_percent: config.ui_scale_percent,
             ui_scale_input: config.ui_scale_percent.to_string(),
             last_font_ppp: 0.0,
+            shuffle_seed: 0,
 
             /* Errors */
             confirm_complete_task: None,
@@ -1173,6 +1179,10 @@ impl TaskApp {
     }
 
     pub fn summarize_calendar(&mut self) {
+        // Each rebuild gets a new shuffle seed, which is the whole extent of the
+        // intentional gentle reshuffle (DOCUMENTATION §14.4).
+        self.shuffle_seed = self.shuffle_seed.wrapping_add(1);
+
         // 1) Sort and separate active things
         let (mut events, tasks): (Vec<_>, Vec<_>) = self.active_things
             .drain(..)
@@ -1195,7 +1205,7 @@ impl TaskApp {
         let now = self.date;
         let mut scored_tasks: Vec<(f32, Active)> = tasks
             .into_iter()
-            .map(|t| (t.importance_score(now), t))
+            .map(|t| (t.importance_score(now, self.shuffle_seed), t))
             .collect();
         scored_tasks.sort_by(|(a, _), (b, _)| {
             b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
@@ -1384,7 +1394,7 @@ impl TaskApp {
             .active_things
             .iter()
             .filter(|item| !item.is_event && item.planned_start.is_none())
-            .map(|item| (item.importance_score(now), item))
+            .map(|item| (item.importance_score(now, self.shuffle_seed), item))
             .collect();
         items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         items
@@ -1641,6 +1651,7 @@ impl TaskApp {
         let is_planned = item.is_planned();
         let anchor = item.planner_anchor();
         let duration = item.duration_minutes;
+        let deadline = item.deadline;
         let mut importance = item.importance;
         let mut time_importance = item.time_importance;
 
@@ -1666,6 +1677,30 @@ impl TaskApp {
                     None => anchor.format("%H:%M").to_string(),
                 };
                 ui.label(RichText::new(when).size(12.0).color(Color32::from_white_alpha(170)));
+            }
+
+            // Spell out the deadline for tasks. Blocking out time on the planner
+            // sets *when you will do it*, never a due date, and there is no way
+            // to tell that from the block alone — so say it here rather than
+            // leaving people to guess what a dragged-out task is due.
+            if !is_event {
+                let due = match deadline {
+                    Some(deadline) => format!("due {}", deadline.format("%a %d %b %H:%M")),
+                    None => "no deadline".to_string(),
+                };
+                ui.label(
+                    RichText::new(due)
+                        .size(12.0)
+                        .color(if deadline.is_some() {
+                            Color32::from_white_alpha(190)
+                        } else {
+                            Color32::from_white_alpha(120)
+                        }),
+                )
+                .on_hover_text(
+                    "A planned slot is when you will work on this; a deadline is when it is due. \
+                     Dragging on the timeline sets the slot and leaves the deadline alone.",
+                );
             }
 
             if ui.small_button("✎").on_hover_text("Rename").clicked() {

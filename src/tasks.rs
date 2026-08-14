@@ -88,6 +88,11 @@ const WEIGHT_BY_URGENCY: [f32; 3] = [1.0, 2.0, 4.0];
 /// long after being created, and approaches full weight from there.
 const RIPEN_DAYS_BY_URGENCY: [f32; 3] = [30.0, 10.0, 3.0];
 
+/// How far ahead of a *planned* slot a task starts to feel pressing. Short by
+/// design: a plan says "do it at this time", so it should climb into view over
+/// the hours before its slot rather than days ahead the way a deadline does.
+const PLANNED_LEAD_DAYS: f32 = 0.5;
+
 /// Once a deadline is missed, pressure keeps doubling this often. It is the
 /// same for every importance level: being late is late, and the weight already
 /// says how much this particular lateness matters.
@@ -153,13 +158,22 @@ impl Active {
     /// See the module-level notes above for the model. In short:
     /// `weight × pressure`, where a dated task's pressure doubles as its
     /// deadline approaches and an undated task's ripens with age.
-    pub fn importance_score(&self, time_now: DateTime<Local>) -> f32 {
-        self.base_score(time_now) * self.tie_break_jitter(time_now)
+    /// `shuffle_seed` changes once per list rebuild, not with the clock — see
+    /// `tie_break_jitter`.
+    pub fn importance_score(&self, time_now: DateTime<Local>, shuffle_seed: u64) -> f32 {
+        self.base_score(time_now) * self.tie_break_jitter(shuffle_seed)
     }
 
     /// The score without the tie-break jitter — the part that is a pure
     /// function of the task and the time, and so the part worth testing.
     fn base_score(&self, time_now: DateTime<Local>) -> f32 {
+        // Pressure from a planned slot, if the task has one. Capped at 1.0: a
+        // plan that has come and gone is a plan you didn't keep, which is not
+        // the same thing as a missed deadline and shouldn't escalate like one.
+        let planned_pressure = self.planned_start.map(|start| {
+            deadline_pressure(duration_in_days(start - time_now), PLANNED_LEAD_DAYS).min(1.0)
+        });
+
         // A deadline is the strongest thing a task can tell us, so it decides
         // the model whenever there is one. An importance is used if set, and
         // assumed otherwise; a `time_importance` alongside a deadline is
@@ -167,50 +181,69 @@ impl Active {
         if let Some(deadline) = self.deadline {
             let importance = self.importance.unwrap_or(ASSUMED_IMPORTANCE);
             let days_left = duration_in_days(deadline - time_now);
-            return weight_for(&WEIGHT_BY_IMPORTANCE, importance)
-                * deadline_pressure(days_left, weight_for(&LEAD_DAYS_BY_IMPORTANCE, importance));
+            let from_deadline =
+                deadline_pressure(days_left, weight_for(&LEAD_DAYS_BY_IMPORTANCE, importance));
+            // Whichever reason is more pressing wins. A report due Friday that
+            // you set aside Tuesday morning for should rise on Tuesday morning:
+            // that is when you decided to do it.
+            let pressure = from_deadline.max(planned_pressure.unwrap_or(0.0));
+            return weight_for(&WEIGHT_BY_IMPORTANCE, importance) * pressure;
         }
 
         let age_days = duration_in_days(time_now - self.created);
+        let weight = match (self.importance, self.time_importance) {
+            (Some(importance), _) => weight_for(&WEIGHT_BY_IMPORTANCE, importance),
+            (None, Some(urgency)) => weight_for(&WEIGHT_BY_URGENCY, urgency),
+            (None, None) if self.planned_start.is_some() => {
+                weight_for(&WEIGHT_BY_IMPORTANCE, ASSUMED_IMPORTANCE)
+            }
+            (None, None) => return MALFORMED_SCORE,
+        };
 
-        // No deadline, but the user said how urgent it is: ripen at that rate.
-        if let Some(urgency) = self.time_importance {
-            return weight_for(&WEIGHT_BY_URGENCY, urgency)
-                * ripeness(age_days, weight_for(&RIPEN_DAYS_BY_URGENCY, urgency));
+        // Undated but planned: the slot is the only timing the task has, so it
+        // drives the pressure. Without this a task blocked out for this
+        // afternoon scored as if it were brand new — bottom of the list, on the
+        // very day you set time aside for it.
+        if let Some(pressure) = planned_pressure {
+            return weight * pressure;
         }
 
-        // No deadline, but an importance — a shape the UI doesn't produce, but a
-        // reasonable one. Carry the importance weight and ripen at the middle
-        // rate rather than calling it broken.
-        if let Some(importance) = self.importance {
-            return weight_for(&WEIGHT_BY_IMPORTANCE, importance)
-                * ripeness(age_days, RIPEN_DAYS_BY_URGENCY[1]);
-        }
-
-        MALFORMED_SCORE
+        // Undated and unplanned: ripen with age, at the rate the urgency asks
+        // for, or the middle rate for a task that only carries an importance
+        // (a shape the UI doesn't produce, but a reasonable one).
+        let ripen_days = match self.time_importance {
+            Some(urgency) => weight_for(&RIPEN_DAYS_BY_URGENCY, urgency),
+            None => RIPEN_DAYS_BY_URGENCY[1],
+        };
+        weight * ripeness(age_days, ripen_days)
     }
 
-    /// A small per-task, per-rebuild multiplier in `[1.0, 1.0 + JITTER)`.
+    /// A small per-task multiplier in `[1.0, 1.0 + JITTER)`, constant for a
+    /// given `shuffle_seed`.
     ///
     /// This keeps the intentional gentle shuffle described in
     /// `DOCUMENTATION.md` §14.4 — the list shouldn't look frozen — while
-    /// actually delivering one. The old version read the current millisecond
-    /// *at the moment of the call*, so every task scored in the same
-    /// millisecond got the identical multiplier and nothing was shuffled at
-    /// all; when a rebuild happened to straddle a millisecond boundary, an
-    /// arbitrary subset jumped by up to 10% instead. Hashing the task's id with
-    /// the rebuild's timestamp gives each task its own factor, stable within a
-    /// rebuild and different in the next one.
+    /// actually delivering one. The original read the current millisecond *at
+    /// the moment of the call*, so every task scored in the same millisecond
+    /// got the identical multiplier and nothing was shuffled at all; when a
+    /// rebuild straddled a millisecond boundary, an arbitrary subset jumped by
+    /// up to 10% instead.
+    ///
+    /// The seed is a **rebuild counter**, deliberately not the clock. Keyed on
+    /// the time, any list that re-sorts every frame — the planner's backlog
+    /// tray does — reshuffled once a second, so cards crawled out from under
+    /// the pointer as you reached for one. A counter shuffles exactly when
+    /// §14.4 says it should: when the list is actually rebuilt.
     ///
     /// It is deliberately small: enough to keep near-ties moving, never enough
     /// to reorder tasks that genuinely differ in priority.
-    fn tie_break_jitter(&self, time_now: DateTime<Local>) -> f32 {
-        // splitmix64, so the id and the timestamp are properly mixed rather
-        // than merely added — adjacent ids must not produce adjacent factors.
+    fn tie_break_jitter(&self, shuffle_seed: u64) -> f32 {
+        // splitmix64, so the id and the seed are properly mixed rather than
+        // merely added — adjacent ids must not produce adjacent factors.
         let mut mixed = self
             .id
             .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            ^ (time_now.timestamp() as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            ^ shuffle_seed.wrapping_mul(0xBF58_476D_1CE4_E5B9);
         mixed ^= mixed >> 30;
         mixed = mixed.wrapping_mul(0xBF58_476D_1CE4_E5B9);
         mixed ^= mixed >> 27;
@@ -622,6 +655,85 @@ mod tests {
     }
 
     #[test]
+    fn a_planned_task_rises_as_its_slot_approaches() {
+        let now = noon();
+        // A task dragged out on the planner gets a slot but no deadline — a plan
+        // is not a due date. Without the planned-slot term it scored purely on
+        // age, so a task blocked out for this afternoon sat at the bottom of the
+        // list on the very day time was set aside for it.
+        let planned_at = |hours_ahead: i64| Active {
+            planned_start: Some(now + Duration::hours(hours_ahead)),
+            ..active(Some(2), None, false, None)
+        };
+
+        let tomorrow = planned_at(24).base_score(now);
+        let this_evening = planned_at(6).base_score(now);
+        let imminent = planned_at(1).base_score(now);
+
+        assert!(tomorrow < this_evening, "{tomorrow} !< {this_evening}");
+        assert!(this_evening < imminent, "{this_evening} !< {imminent}");
+    }
+
+    #[test]
+    fn a_slipped_plan_does_not_escalate_like_a_missed_deadline() {
+        let now = noon();
+        let slipped = |days_ago: i64| Active {
+            planned_start: Some(now - Duration::days(days_ago)),
+            ..active(Some(2), None, false, None)
+        };
+
+        // A plan you didn't keep tops out at the task's weight and stays there.
+        // A missed *deadline* keeps climbing past it — the difference between
+        // "I meant to do that" and "that was due".
+        let weight = WEIGHT_BY_IMPORTANCE[2];
+        assert!((slipped(1).base_score(now) - weight).abs() < 0.001);
+        assert_eq!(slipped(1).base_score(now), slipped(100).base_score(now));
+        assert!(dated(2, -1.0, now).base_score(now) > slipped(100).base_score(now));
+    }
+
+    #[test]
+    fn planning_a_dated_task_lifts_it_on_the_day() {
+        let now = noon();
+        // Due in three days, and set aside for right now. The plan is the more
+        // pressing of the two reasons, so it wins — that is when you decided to
+        // do it.
+        let due_friday = dated(3, 3.0, now);
+        let due_friday_planned_now = Active {
+            planned_start: Some(now + Duration::minutes(30)),
+            ..due_friday.clone()
+        };
+        assert!(
+            due_friday_planned_now.base_score(now) > due_friday.base_score(now),
+            "planning a task for now should lift it"
+        );
+
+        // But a plan never *lowers* a task: the deadline still applies if it is
+        // the more pressing of the two.
+        let due_today_planned_next_week = Active {
+            planned_start: Some(now + Duration::days(7)),
+            ..dated(3, 0.0, now)
+        };
+        assert!(
+            (due_today_planned_next_week.base_score(now) - dated(3, 0.0, now).base_score(now)).abs()
+                < 0.001
+        );
+    }
+
+    #[test]
+    fn a_planned_task_with_no_importance_is_still_scored() {
+        let now = noon();
+        // Nothing but a slot: weight falls back to the middle of the scale
+        // rather than the task being treated as corrupt.
+        let bare = Active {
+            planned_start: Some(now),
+            ..active(None, None, false, None)
+        };
+        let score = bare.base_score(now);
+        assert!((score - WEIGHT_BY_IMPORTANCE[ASSUMED_IMPORTANCE as usize]).abs() < 0.001);
+        assert!(score < MALFORMED_SCORE);
+    }
+
+    #[test]
     fn a_dated_task_missing_its_importance_is_scored_as_middling() {
         let now = noon();
         // Not a shape the UI makes, but a hand-edited save can. Treating it as
@@ -649,7 +761,7 @@ mod tests {
         let soon = active(None, None, true, Some(now + Duration::days(1)));
         let later = active(None, None, true, Some(now + Duration::days(10)));
         assert!(
-            soon.importance_score(now) > later.importance_score(now),
+            soon.importance_score(now, 0) > later.importance_score(now, 0),
             "nearer event should score higher"
         );
     }
@@ -658,7 +770,7 @@ mod tests {
     fn jitter_is_small_bounded_and_actually_varies_per_task() {
         let now = noon();
         let factors: Vec<f32> = (1..=64u64)
-            .map(|id| Active { id, ..active(Some(2), None, false, None) }.tie_break_jitter(now))
+            .map(|id| Active { id, ..active(Some(2), None, false, None) }.tie_break_jitter(7))
             .collect();
 
         for factor in &factors {
@@ -679,13 +791,14 @@ mod tests {
 
     #[test]
     fn jitter_is_stable_within_a_rebuild_and_moves_between_them() {
-        let now = noon();
         let task = Active { id: 7, ..active(Some(2), None, false, None) };
 
-        // Stable for a given instant, so one sort is self-consistent.
-        assert_eq!(task.tie_break_jitter(now), task.tie_break_jitter(now));
-        // ...and different a moment later, which is the gentle shuffle.
-        assert_ne!(task.tie_break_jitter(now), task.tie_break_jitter(now + Duration::seconds(1)));
+        // Constant for a given seed, so a list that re-sorts every frame — the
+        // planner's backlog tray — holds still between rebuilds instead of
+        // crawling out from under the pointer.
+        assert_eq!(task.tie_break_jitter(4), task.tie_break_jitter(4));
+        // ...and different in the next rebuild, which is the gentle shuffle.
+        assert_ne!(task.tie_break_jitter(4), task.tie_break_jitter(5));
     }
 
     #[test]
@@ -695,7 +808,9 @@ mod tests {
         // never be able to flip a real difference in priority.
         let lower = dated(2, 0.0, now);
         let higher = dated(3, 0.0, now);
-        assert!(higher.importance_score(now) > lower.importance_score(now));
+        for seed in 0..64 {
+            assert!(higher.importance_score(now, seed) > lower.importance_score(now, seed));
+        }
     }
 
     #[test]
