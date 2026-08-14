@@ -5,7 +5,7 @@ use egui::{self, Align, Button, Color32, ColorImage, ComboBox, Context, CornerRa
 use image::{ImageBuffer, Rgba};
 use toml_edit::{DocumentMut};
 
-use crate::{calendarwidgets, color::{self, ColorScheme}, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, InActive}, weather::{self, WeatherService}};
+use crate::{calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, InActive}, weather::{self, WeatherService}};
 
 const WEEK_DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -84,7 +84,7 @@ pub struct TaskAppConfig {
     pub colorschemes: HashMap<u32, ColorScheme>,
     pub selected_colorscheme_id: u32,
     pub active_items: Vec<Active>,
-    pub exe_file_path: PathBuf,
+    pub dirs: AppDirs,
     pub background: String,
     pub background_options: Vec<String>,
     pub coordinates: [f32; 2],
@@ -95,6 +95,7 @@ pub struct TaskAppConfig {
     pub textbox_text: String,
     pub three_day_weather: bool,
     pub background_image_tint_percent: u32,
+    pub ui_scale_percent: u32,
     pub weather_service: WeatherService,
     /// Message describing any non-fatal startup recovery (e.g. a corrupt data
     /// file that was quarantined), to surface in the error window once the UI is
@@ -116,7 +117,7 @@ pub struct TaskApp {
     /* ───────────────────────── UI / Context ───────────────────────── */
     background_image_texture: Option<TextureHandle>,
     pending_initial_background: Option<String>,
-    exe_file_path: PathBuf,
+    dirs: AppDirs,
 
     hovered_calendar_cell: Option<usize>,
     expanded_day: Option<usize>,
@@ -185,6 +186,10 @@ pub struct TaskApp {
     background_options: Vec<String>,
     background_image_tint_percent: u32,
     background_tint_input: String,
+    /// Percentage the whole UI is scaled by, or `UI_SCALE_AUTO` for the
+    /// fit-to-window default. See `apply_ui_scale`.
+    ui_scale_percent: u32,
+    ui_scale_input: String,
 
     /* ───────────────────────── Errors & Confirmations ───────────────────────── */
     /// Id of the item awaiting a complete/delete confirmation. The dialog looks
@@ -247,6 +252,8 @@ impl TaskApp {
         let mut active_items = config.active_items;
         let next_id = tasks::assign_missing_ids(&mut active_items);
 
+        let userconfig_path = config.dirs.config_file();
+
         Self {
             /* Animation */
             row_anim: Vec::new(),
@@ -260,12 +267,12 @@ impl TaskApp {
             /* UI */
             background_image_texture: None,
             pending_initial_background: Some(config.background),
-            exe_file_path: config.exe_file_path,
+            dirs: config.dirs,
             hovered_calendar_cell: None,
             expanded_day: None,
             offset: 0,
             press_origin: None,
-            userconfig_path: PathBuf::from("taskdeck_data").join(PathBuf::from("userconfig.toml")),
+            userconfig_path,
 
             /* Time */
             date: now,
@@ -325,6 +332,8 @@ impl TaskApp {
             background_options: config.background_options,
             background_image_tint_percent: config.background_image_tint_percent,
             background_tint_input: config.background_image_tint_percent.to_string(),
+            ui_scale_percent: config.ui_scale_percent,
+            ui_scale_input: config.ui_scale_percent.to_string(),
 
             /* Errors */
             confirm_complete_task: None,
@@ -1013,7 +1022,7 @@ impl TaskApp {
             created: chrono::Local::now(),
         });
         self.summarize_calendar();
-        if let Err(text) = tasks::oversafe_activesave(&self.active_things, &self.exe_file_path) {
+        if let Err(text) = tasks::oversafe_activesave(&self.active_things, &self.dirs.data) {
             self.show_error(format!("Saving error:\n{}", text.to_string()));
         }
     }
@@ -1024,7 +1033,7 @@ impl TaskApp {
         self.confirm_delete_task = None;
         self.summarize_calendar();
 
-        if let Err(text) = tasks::oversafe_activesave(&self.active_things, &self.exe_file_path) {
+        if let Err(text) = tasks::oversafe_activesave(&self.active_things, &self.dirs.data) {
             self.show_error(format!("Saving error:\n{}", text.to_string()));
         };
     }
@@ -1199,7 +1208,7 @@ impl TaskApp {
         if let Some(thing) = self.active_things.iter().find(|x| x.id == id) {
             let found_inactive: InActive = thing.clone().to_inactive();
 
-            if let Err(text) = tasks::save_inactive(&found_inactive, &self.exe_file_path) {
+            if let Err(text) = tasks::save_inactive(&found_inactive, &self.dirs.data) {
                 self.show_error(format!("Error archiving:\n{}", text.to_string()));
             };
 
@@ -1222,7 +1231,7 @@ impl TaskApp {
     }
 
     fn load_more_archives(&mut self) {
-        let new_items = tasks::read_lines_range(self.offset, 15, &self.exe_file_path).unwrap_or_else(|_| Vec::new());
+        let new_items = tasks::read_lines_range(self.offset, 15, &self.dirs.data).unwrap_or_else(|_| Vec::new());
         self.offset += 15;
 
         if let Some(archive) = self.archive.as_mut() {
@@ -1369,6 +1378,58 @@ impl TaskApp {
             Err(_) => self.week_number_input = self.calendar_weeks_to_show.to_string(),
         }
     }
+    /// Keep the whole layout inside the window by scaling the UI.
+    ///
+    /// The three columns are laid out at fixed point sizes adding up to
+    /// [`DESIGN_WIDTH_POINTS`], which fits a 1920×1080 monitor at 100% display
+    /// scaling — the setup this was built on — and nothing narrower. A HiDPI
+    /// display reports *half* as many points as pixels, so a 3024px Retina screen
+    /// is 1512 points and silently pushed the weather/notepad column off the right
+    /// edge; Windows at 125% or 150% scaling does the same thing.
+    ///
+    /// Rather than re-tuning the hand-fitted widget geometry, this adjusts egui's
+    /// zoom factor, which changes how many points the window is worth. The
+    /// automatic value is the largest scale (never above 100%) at which the design
+    /// width still fits.
+    ///
+    /// The computation is a fixed point, not a feedback loop: the window's
+    /// physical width and native scale factor are both independent of the zoom, so
+    /// `points × zoom` is a constant and re-running this on the next frame yields
+    /// the same answer.
+    fn apply_ui_scale(&mut self, ctx: &Context) {
+        let target = if self.ui_scale_percent == UI_SCALE_AUTO {
+            let current_zoom = ctx.zoom_factor();
+            let width_in_points = ctx.viewport_rect().width();
+            if width_in_points <= 0.0 {
+                return;
+            }
+            // width_in_points * current_zoom is the window's width in
+            // native-scale points, which is what the design width is expressed in.
+            let fits_at = width_in_points * current_zoom / DESIGN_WIDTH_POINTS;
+            fits_at.clamp(UI_SCALE_MIN as f32 / 100.0, UI_SCALE_MAX as f32 / 100.0)
+        } else {
+            self.ui_scale_percent as f32 / 100.0
+        };
+
+        // egui rebuilds every cached galley when the zoom changes, so only write
+        // when it actually moved. The epsilon also stops sub-pixel jitter in the
+        // automatic value from re-laying out the UI every frame.
+        if (ctx.zoom_factor() - target).abs() > 0.001 {
+            ctx.set_zoom_factor(target);
+        }
+    }
+
+    fn set_ui_scale(&mut self) {
+        let filtered: String = self.ui_scale_input.chars().take(3).collect();
+        // An empty field, or anything unparseable, is read as "automatic" — the
+        // same thing `0` means in the config file.
+        let requested = filtered.trim().parse::<u32>().unwrap_or(UI_SCALE_AUTO);
+        let clamped = clamp_ui_scale_percent(requested);
+        self.ui_scale_percent = clamped;
+        self.ui_scale_input = clamped.to_string();
+        self.persist_config_value("ui_scale_percent", clamped as i64);
+    }
+
     fn set_background_tint(&mut self) {
         let filtered: String = self.background_tint_input.chars().take(3).collect();
         if let Ok(number) = filtered.parse::<u32>() {
@@ -1454,7 +1515,7 @@ impl TaskApp {
     fn save_textbox_text(&mut self) {
         if self.should_save_textbox_text {
             // A silent failure here loses the user's notes; surface it instead.
-            if let Err(e) = utilities::save_notepad_text(self.textbox_text.clone(), &self.exe_file_path) {
+            if let Err(e) = utilities::save_notepad_text(self.textbox_text.clone(), &self.dirs.data) {
                 self.show_error(format!("Could not save notepad text:\n{}", e));
             }
             self.should_save_textbox_text = false;
@@ -1510,7 +1571,7 @@ impl TaskApp {
         }
     }
     fn add_schemes_2_doc(&self) {
-        let _ = color::save_colorschemes(&self.colorschemes, &self.exe_file_path);
+        let _ = color::save_colorschemes(&self.colorschemes, &self.dirs.data);
     }
     fn save_colorscheme_edits(&mut self) {
         if let Some(scheme) = self.colorscheme_being_edited.take() {
@@ -1520,7 +1581,7 @@ impl TaskApp {
     fn try_to_generate_colorscheme(&mut self) {
         let name = self.background_options[self.selected_background_index].clone();
 
-        if let Some(scheme) = color::generate_colorscheme(name) {
+        if let Some(scheme) = color::generate_colorscheme(&self.dirs, name) {
             let new_id = self.colorschemes.keys().max().unwrap_or(&0) + 1;
 
             self.colorschemes.insert(new_id, scheme);
@@ -1538,24 +1599,33 @@ impl TaskApp {
         // top-level panels can still borrow the root `ui` mutably (the clone doesn't borrow `ui`).
         let ctx_owned = ui.ctx().clone();
         let ctx = &ctx_owned;
+
+        // Fit the fixed-width layout to whatever window we were given. Runs before
+        // anything is drawn so the whole frame uses one consistent scale.
+        self.apply_ui_scale(ctx);
+
         if self.background_image_texture.is_none() {
             if let Some(name) = self.pending_initial_background.take() {
-                self.background_image_texture = Some(set_background(ctx, name.clone()));
+                self.background_image_texture = Some(set_background(ctx, &self.dirs, name.clone()));
             }
         }
 
         if self.enable_fps_counter {
             self.fps_counter.update();
         }
-        if let Some(old_fullscreen) = ctx.input(|i| {
-            if i.key_pressed(Key::F11) {
-                i.viewport().fullscreen
-            } else {
-                None
-            }
-        }) {
-            let new_fullscreen = !old_fullscreen;
-            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(new_fullscreen));
+        // F11 is the fullscreen key on Windows and Linux. macOS reserves it for
+        // Mission Control's "show desktop" and never delivers it to the app, so
+        // accept the platform's own Ctrl+Cmd+F there too.
+        let toggle_fullscreen = ctx.input(|i| {
+            i.key_pressed(Key::F11)
+                || (cfg!(target_os = "macos")
+                    && i.modifiers.mac_cmd
+                    && i.modifiers.ctrl
+                    && i.key_pressed(Key::F))
+        });
+        if toggle_fullscreen {
+            let old_fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+            ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!old_fullscreen));
         }
 
         let current_weather = self.weather_service.version.load(Ordering::Relaxed);
@@ -2050,7 +2120,7 @@ impl TaskApp {
                                 // the `&mut self` persist call.
                                 let new_background = self.background_options[self.selected_background_index].clone();
 
-                                self.background_image_texture = Some(set_background(ctx, new_background.clone()));
+                                self.background_image_texture = Some(set_background(ctx, &self.dirs, new_background.clone()));
 
                                 self.persist_config_value("background", new_background);
                             }
@@ -2058,7 +2128,7 @@ impl TaskApp {
                             if ui.button("♲").clicked() {
                                 let available_background_name_to_refresh_into = self.background_options[self.selected_background_index].to_string();
                                 self.persist_config_value("background", available_background_name_to_refresh_into.clone());
-                                self.background_image_texture = Some(set_background(ctx, available_background_name_to_refresh_into));
+                                self.background_image_texture = Some(set_background(ctx, &self.dirs, available_background_name_to_refresh_into));
                             }
                         });
                         ui.end_row();
@@ -2166,6 +2236,37 @@ impl TaskApp {
                             ui.label("Background tint percent: ");
                             if ui.text_edit_singleline(&mut self.background_tint_input).changed() {
                                 self.set_background_tint();
+                            }
+                        });
+                        ui.end_row();
+                        ui.end_row();
+                        ui.horizontal_centered(|ui| {
+                            ui.label("UI scale percent: ");
+                            ui.scope(|ui| {
+                                ui.set_max_width(60.0);
+                                // Committed on Enter / focus-loss rather than per
+                                // keystroke: every apply re-lays out the whole UI,
+                                // and a half-typed "5" would briefly clamp to the
+                                // minimum.
+                                if ui.text_edit_singleline(&mut self.ui_scale_input).lost_focus() {
+                                    self.set_ui_scale();
+                                }
+                            });
+                            if self.ui_scale_percent == UI_SCALE_AUTO {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "(0 = fit to window, now {}%)",
+                                        (ctx.zoom_factor() * 100.0).round() as u32
+                                    ))
+                                    .weak(),
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "({UI_SCALE_MIN}–{UI_SCALE_MAX}, or 0 to fit to window)"
+                                    ))
+                                    .weak(),
+                                );
                             }
                         });
                         ui.end_row();
@@ -2808,16 +2909,37 @@ fn attempt_background(path: PathBuf) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, B
     Ok(image)
 }
 
-fn set_background(ctx: &Context, name: String) -> TextureHandle {
+fn set_background(ctx: &Context, dirs: &AppDirs, name: String) -> TextureHandle {
     // Fall back to the bundled placeholder if the name is unusable or the file
-    // can't be loaded. `safe_image_path` keeps this confined to `images/`.
-    let image = utilities::safe_image_path(&name)
+    // can't be loaded. `image_path` keeps this confined to `images/`.
+    let image = dirs.image_path(&name)
         .and_then(|path| attempt_background(path).ok())
         .unwrap_or_else(|| {
             image::load_from_memory(include_bytes!("../noback.png"))
                 .expect("Did not get access to fallback background")
                 .to_rgba8()
         });
+
+    // `Context::load_texture` *panics* on an image wider or taller than the GPU's
+    // limit, so an oversized picture dropped into `images/` would take the whole
+    // app down. Shrink it to fit instead — this is a full-window backdrop, so
+    // anything past the limit is detail nobody can see anyway. The limit comes
+    // from the adapter (commonly 8192 or 16384), so this only bites on genuinely
+    // huge photographs.
+    let max_side = ctx.input(|i| i.max_texture_side) as u32;
+    let longest_side = image.width().max(image.height());
+    let image = if longest_side > max_side {
+        // Scale both axes by the same factor so the picture isn't stretched.
+        let scale = max_side as f32 / longest_side as f32;
+        image::imageops::resize(
+            &image,
+            ((image.width() as f32 * scale) as u32).max(1),
+            ((image.height() as f32 * scale) as u32).max(1),
+            image::imageops::FilterType::Triangle,
+        )
+    } else {
+        image
+    };
 
     let size = [image.width() as usize, image.height() as usize];
 

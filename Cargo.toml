@@ -24,7 +24,9 @@ egui_extras = { version = "0.35.0", features = ["svg"] }
 epaint = "0.35.0"
 emath = "0.35.0"
 
-reqwest = { version = "0.11", features = ["blocking"] }
+# rustls rather than the default native-tls: it needs no system OpenSSL, so a
+# Linux build works from a bare toolchain like the Windows and macOS ones do.
+reqwest = { version = "0.11", default-features = false, features = ["blocking", "rustls-tls"] }
 image = "0.25"
 tempfile = "3.20.0"
 rev_lines = "0.3.0"

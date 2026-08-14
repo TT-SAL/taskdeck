@@ -26,12 +26,20 @@ A few details worth pointing out:
 
 If there is a prebuilt release on the Releases tab, download and extract it. Otherwise build it yourself (below).
 
-Keep the executable next to its two folders:
+TaskDeck keeps two folders:
 
 - `images/` holds the background pictures you can choose from.
 - `taskdeck_data/` holds your tasks, notes, colour schemes, and settings.
 
-TaskDeck will create these folders when it can, but it needs somewhere it is allowed to write. Running it from a read-only or restricted location, or removing the folders while it is open, can stop it from working.
+Both are created on first run, next to the executable — so keeping the executable in its own folder gives you a self-contained, portable install you can move around. If the executable lives somewhere you are not allowed to write (`/Applications`, `/usr/local/bin`, `C:\Program Files`), TaskDeck falls back to the usual per-user location instead:
+
+| Platform | Fallback location |
+|----------|-------------------|
+| Windows | `%APPDATA%\TaskDeck` |
+| macOS | `~/Library/Application Support/TaskDeck` |
+| Linux | `$XDG_DATA_HOME/taskdeck`, or `~/.local/share/taskdeck` |
+
+Set `TASKDECK_HOME` to put the two folders wherever you like instead. Note that they are found relative to the executable, not to the directory you happen to launch from, so starting TaskDeck from a shortcut, the Dock, or another folder all behave the same.
 
 ## Building from source
 
@@ -41,15 +49,21 @@ TaskDeck is written in Rust, with egui and wgpu doing the drawing. With a curren
 cargo build --release
 ```
 
-The executable is written to `target/release`. Move it next to the `images` and `taskdeck_data` folders before running it.
+The executable is written to `target/release`. No system libraries are needed beyond a working graphics driver.
 
 ## Settings
 
-Almost everything is adjustable from the in-app Settings panel: the background image and how strongly it is tinted, which monitor the window opens on, fullscreen on or off, how many weeks the calendar covers, your weather location, the two or three day forecast toggle, and an optional frame-rate readout. Your choices are saved to `taskdeck_data/userconfig.toml`.
+Almost everything is adjustable from the in-app Settings panel: the background image and how strongly it is tinted, which monitor the window opens on, fullscreen on or off, how many weeks the calendar covers, the UI scale, your weather location, the two or three day forecast toggle, and an optional frame-rate readout. Your choices are saved to `taskdeck_data/userconfig.toml`.
+
+The layout wants about 1920 points of width, which is what a 1920×1080 monitor gives you at 100% display scaling. On a display that offers less — a HiDPI Mac screen, or Windows at 125% or 150% scaling — the UI scale setting shrinks everything to fit rather than letting the weather column fall off the edge. Left at `0` it works this out for itself; set it to a percentage to pin it.
+
+Fullscreen toggles with `F11`, or `Ctrl`+`Cmd`+`F` on macOS (where the system keeps `F11` for itself).
 
 ## Operating system support
 
-TaskDeck is developed and tested on Windows 11, and the releases target Windows. Most of the code is not tied to any one platform, so a port elsewhere probably would not take much, but it is not something I have done or tested yet.
+TaskDeck runs on Windows, macOS, and Linux from the same source, with no platform-specific build steps. It is developed on Windows 11 and has been built and run on macOS (Apple silicon); the Linux paths are written to the same conventions but have had less exercise, so bug reports are welcome.
+
+On macOS the binary runs as-is. Bundling it as a `TaskDeck.app` also works — TaskDeck detects that it is inside a bundle and keeps your data in `~/Library/Application Support/TaskDeck` rather than writing inside the (possibly signed, possibly read-only) bundle.
 
 ## Roadmap
 

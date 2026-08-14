@@ -6,22 +6,24 @@ use serde::{Deserialize, Serialize};
 use crate::ui::TaskApp;
 use wgpu::{Color, ExperimentalFeatures, LoadOp};
 use winit::event::WindowEvent;
-use winit::platform::windows::{WindowAttributesExtWindows};
+// The taskbar-icon extension trait only exists on Windows; see `window_attributes`.
+#[cfg(windows)]
+use winit::platform::windows::WindowAttributesExtWindows;
 use winit::window::{Window, WindowId};
 use egui_wgpu::wgpu::CurrentSurfaceTexture;
 use std::collections::HashMap;
 use std::{fs, time};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalPosition, LogicalSize, PhysicalSize};
+use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event_loop::ActiveEventLoop;
 use toml::Value;
 
 /// Reads a TOML config file and extracts all valid values, including arrays.
 /// If parsing fails, falls back to line-by-line extraction.
-fn read_config(path: &PathBuf) -> HashMap<String, String> {
+fn read_config(path: &Path) -> HashMap<String, String> {
     let contents = match fs::read_to_string(path) {
         Ok(thing) => thing,
         Err(_) => {
@@ -119,9 +121,33 @@ fn parse_config_bool(text: &str) -> bool {
 pub const CALENDAR_WEEKS_MIN: usize = 6;
 pub const CALENDAR_WEEKS_MAX: usize = 520;
 
-pub fn get_check_and_set_config() -> Config {
-    let config_path = PathBuf::from("taskdeck_data").join(PathBuf::from("userconfig.toml"));
-    let extracted = read_config(&config_path);
+/// Width, in egui points, that the three-column layout needs to show all of
+/// itself: the 300pt task list, the 7×160pt calendar grid with its 14pt gutters,
+/// and the weather/notepad column. `TaskApp::apply_ui_scale` keeps the window at
+/// least this wide in points by scaling the UI down when it isn't.
+pub const DESIGN_WIDTH_POINTS: f32 = 1920.0;
+
+/// `ui_scale_percent = 0` means "fit the layout to the window automatically".
+/// Any other value is an explicit scale the user picked.
+pub const UI_SCALE_AUTO: u32 = 0;
+/// Bounds for an explicit `ui_scale_percent`, and for the automatic fit. The
+/// lower bound keeps text legible in a small window; the upper bound is 100%
+/// because the layout is tuned at that size and nothing is gained by magnifying
+/// it past the design width.
+pub const UI_SCALE_MIN: u32 = 40;
+pub const UI_SCALE_MAX: u32 = 100;
+
+/// Clamp a configured UI scale, preserving the `0` = automatic sentinel.
+pub fn clamp_ui_scale_percent(percent: u32) -> u32 {
+    if percent == UI_SCALE_AUTO {
+        UI_SCALE_AUTO
+    } else {
+        percent.clamp(UI_SCALE_MIN, UI_SCALE_MAX)
+    }
+}
+
+pub fn get_check_and_set_config(config_path: &Path) -> Config {
+    let extracted = read_config(config_path);
 
     let config = Config {
         window_size_startup: extracted
@@ -180,6 +206,11 @@ pub fn get_check_and_set_config() -> Config {
             .get("background_image_tint_percent")
             .and_then(|n| n.parse::<u32>().ok().and_then(|x| Some(x.clamp(1, 100))))
             .unwrap_or(30),
+        ui_scale_percent: extracted
+            .get("ui_scale_percent")
+            .and_then(|n| n.parse::<u32>().ok())
+            .map(clamp_ui_scale_percent)
+            .unwrap_or(UI_SCALE_AUTO),
         selected_monitor_name: extracted
             .get("selected_monitor_name")
             .unwrap_or(&"".to_string()).to_string(),
@@ -189,7 +220,7 @@ pub fn get_check_and_set_config() -> Config {
             .unwrap_or(0),
     };
 
-    write_normalized_config(&config_path, &config);
+    write_normalized_config(config_path, &config);
 
     config
 }
@@ -201,7 +232,7 @@ pub fn get_check_and_set_config() -> Config {
 /// in the file; it only updates the keys we own, and writes numbers as real
 /// integers/float-arrays rather than strings. A missing or unparseable file
 /// falls back to a fresh document (the same self-healing the old code did).
-fn write_normalized_config(path: &PathBuf, config: &Config) {
+fn write_normalized_config(path: &Path, config: &Config) {
     use toml_edit::{value, DocumentMut};
 
     let mut doc = fs::read_to_string(path)
@@ -219,6 +250,7 @@ fn write_normalized_config(path: &PathBuf, config: &Config) {
     doc["selected_colorscheme_id"] = value(config.selected_colorscheme_id as i64);
     doc["three_day_weather"] = value(config.three_day_weather);
     doc["background_image_tint_percent"] = value(config.background_image_tint_percent as i64);
+    doc["ui_scale_percent"] = value(config.ui_scale_percent as i64);
 
     let _ = fs::write(path, doc.to_string());
 }
@@ -235,6 +267,9 @@ pub struct Config {
     pub selected_colorscheme_id: u32,
     pub three_day_weather: bool,
     pub background_image_tint_percent: u32,
+    /// Percentage the whole UI is scaled by, or `UI_SCALE_AUTO` (0) to fit the
+    /// layout to the window automatically.
+    pub ui_scale_percent: u32,
 }
 
 pub struct AppState<'a> {
@@ -242,14 +277,16 @@ pub struct AppState<'a> {
     pub queue: wgpu::Queue,
     pub surface_config: wgpu::SurfaceConfiguration,
     pub surface: wgpu::Surface<'a>,
-    pub scale_factor: f32,
     pub egui_winit_state: State,
     pub egui_wgpu_renderer: Renderer,
+    /// Kept alive for as long as the surface it created. Declared last so it is
+    /// dropped after the surface.
+    _instance: wgpu::Instance,
 }
 
 impl AppState<'_> {
     async fn new(
-        instance: &wgpu::Instance,
+        instance: wgpu::Instance,
         surface: wgpu::Surface<'static>,
         window: &Window,
         width: u32,
@@ -283,17 +320,28 @@ impl AppState<'_> {
 
         let swapchain_capabilities = surface.get_capabilities(&adapter);
 
-        let selected_format = wgpu::TextureFormat::Bgra8Unorm;
-
-        let swapchain_format = swapchain_capabilities
-            .formats
-            .iter()
-            .find(|d| **d == selected_format)
-            .expect("failed to select proper surface texture format!");
+        // `Bgra8Unorm` is the format this app was tuned against and is what
+        // Windows/DX12, macOS/Metal and most Vulkan drivers offer, so it stays the
+        // first choice. It is not, however, guaranteed anywhere — some Linux GL
+        // and software adapters expose only RGBA or only the sRGB variants — and
+        // the old `expect` turned that into a startup panic. Fall back through the
+        // near-equivalents and finally to whatever the surface does support;
+        // `egui-wgpu` picks its sRGB-aware shader from the format we pass it, so
+        // the colours stay right either way.
+        let swapchain_format = [
+            wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ]
+        .into_iter()
+        .find(|preferred| swapchain_capabilities.formats.contains(preferred))
+        .or_else(|| swapchain_capabilities.formats.first().copied())
+        .expect("the surface reported no supported texture formats");
 
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: *swapchain_format,
+            format: swapchain_format,
             width,
             height,
             present_mode: wgpu::PresentMode::AutoNoVsync,       //Should work on different devices
@@ -349,16 +397,14 @@ impl AppState<'_> {
             renderer_options,
         );
 
-        let scale_factor = window.scale_factor() as f32;
-
         Self {
             device,
             queue,
             surface,
             surface_config,
-            scale_factor,
             egui_wgpu_renderer,
             egui_winit_state,
+            _instance: instance,
         }
     }
 
@@ -376,7 +422,6 @@ impl AppState<'_> {
 pub struct App<'a> {
     cursor_inside_window: bool,
     window_is_focused: bool,
-    instance: wgpu::Instance,
     state: Option<AppState<'a>>,
     window: Option<Arc<Window>>,
     task_app: TaskApp,
@@ -390,14 +435,9 @@ pub struct App<'a> {
 
 impl<'a> App<'a> {
     pub fn new(task_app: TaskApp, window_size_startup: [f32; 2], selected_monitor_name: String) -> Self {
-        // wgpu 29 takes `InstanceDescriptor` by value and dropped its `Default` impl;
-        // `new_without_display_handle()` is the documented default-options constructor (no display
-        // handle is needed on Windows, where the surface is created from the window handle).
-        let instance = egui_wgpu::wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         Self {
             cursor_inside_window: false,
             window_is_focused: false,
-            instance,
             state: None,
             window: None,
             task_app,
@@ -412,18 +452,33 @@ impl<'a> App<'a> {
 
     async fn set_window(&mut self, window: Window) {
         let window = Arc::new(window);
-        let initial_width = self.window_size_startup[0] as u32;
-        let initial_height = self.window_size_startup[1] as u32;
 
-        let _ = window.request_inner_size(PhysicalSize::new(initial_width, initial_height));
+        // The surface must be sized in *physical* pixels. Take the size the
+        // platform actually gave the window rather than re-deriving it from the
+        // (logical) configured size — on a HiDPI display those differ by the
+        // scale factor, and a mismatched surface renders blurry/stretched until
+        // the first resize event happens to correct it.
+        let inner_size = window.inner_size();
+        let initial_width = inner_size.width.max(1);
+        let initial_height = inner_size.height.max(1);
 
-        let surface = self
-            .instance
+        // wgpu 29 takes `InstanceDescriptor` by value and dropped its `Default` impl.
+        // Building it from the window's *display* handle (rather than
+        // `new_without_display_handle()`) is what lets the GL/EGL backend come up on
+        // Linux, where enumerating adapters needs the X11 or Wayland display — that
+        // is the fallback path on machines with no working Vulkan driver. On Windows
+        // and macOS the backends work from the window handle alone, so this is
+        // simply the same instance as before.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
+            Box::new(window.clone()),
+        ));
+
+        let surface = instance
             .create_surface(window.clone())
             .expect("Failed to create surface!");
 
         let state = AppState::new(
-            &self.instance,
+            instance,
             surface,
             &window,
             initial_width,
@@ -461,28 +516,17 @@ impl<'a> App<'a> {
             None => return,
         };
 
-        let raw_input = state.egui_winit_state.take_egui_input(window);
-        //When the window is both not active and not being interacted with for 10 seconds put the app into sleep
-        if raw_input.events.is_empty() && !state.context().has_requested_repaint() &&!self.window_is_focused && !self.cursor_inside_window {
-            match self.last_active {
-                Some(time) => {
-                    let elapsed = time.elapsed();
-                    if elapsed > time::Duration::from_secs(10) {
-                        self.in_sleep = true;
-                    }
-                }
-                None => self.last_active = Some(Instant::now()),
-            }
-        } else {
-            self.last_active = Some(Instant::now());
-        }
-
-        let screen_descriptor = ScreenDescriptor {
-            size_in_pixels: [state.surface_config.width, state.surface_config.height],
-            pixels_per_point: state.scale_factor,
-        };
-
         // --- Acquire next surface texture ---
+        // This happens *before* the input is taken, and deliberately so: every arm
+        // below abandons the frame, and `take_egui_input` is destructive — it hands
+        // over the accumulated input and clears it. Taking input first meant an
+        // abandoned frame silently swallowed whatever had accumulated: the user's
+        // clicks and keystrokes, and — because it is delivered exactly once, on the
+        // first take — the `max_texture_side` the GPU actually supports. egui then
+        // kept its conservative 2048 default forever, and loading any background
+        // image wider than that panicked. macOS reports `Outdated` on the first
+        // acquire almost every launch, which is why this bit here and not on
+        // Windows.
         let surface_texture = match state.surface.get_current_texture() {
             // wgpu 29 returns a `CurrentSurfaceTexture` enum instead of `Result`. A suboptimal
             // texture is still rendered, matching the old code which used `Ok(tex)` without
@@ -502,6 +546,22 @@ impl<'a> App<'a> {
             // variant in wgpu 29.
             CurrentSurfaceTexture::Occluded | CurrentSurfaceTexture::Validation => return,
         };
+
+        let raw_input = state.egui_winit_state.take_egui_input(window);
+        //When the window is both not active and not being interacted with for 10 seconds put the app into sleep
+        if raw_input.events.is_empty() && !state.context().has_requested_repaint() &&!self.window_is_focused && !self.cursor_inside_window {
+            match self.last_active {
+                Some(time) => {
+                    let elapsed = time.elapsed();
+                    if elapsed > time::Duration::from_secs(10) {
+                        self.in_sleep = true;
+                    }
+                }
+                None => self.last_active = Some(Instant::now()),
+            }
+        } else {
+            self.last_active = Some(Instant::now());
+        }
 
         let surface_view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -530,6 +590,15 @@ impl<'a> App<'a> {
             task_app.ui(ui);
         });
 
+        // egui reports the points-per-pixel it actually laid the frame out with
+        // (window scale factor × egui's zoom factor). Feeding that same value to
+        // the renderer is what keeps the drawn size matched to the surface on a
+        // HiDPI display; deriving it separately lets the two drift apart.
+        let screen_descriptor = ScreenDescriptor {
+            size_in_pixels: [state.surface_config.width, state.surface_config.height],
+            pixels_per_point: full_output.pixels_per_point,
+        };
+
         let mut actions_requested: Vec<ActionRequested> = vec![];
         let egui_ctx = state.context().clone();
         let window = &self.window.as_ref().unwrap();
@@ -553,9 +622,11 @@ impl<'a> App<'a> {
         // Handle platform output first (mutable borrow)
         state.egui_winit_state.handle_platform_output(window, full_output.platform_output);
 
-        // Tessellate shapes (immutable borrow)
+        // Tessellate shapes (immutable borrow). Tessellating at the same
+        // points-per-pixel the frame was laid out with keeps glyph rasterization
+        // and anti-aliasing sharp at any DPI.
         let ctx = state.context();
-        let paint_jobs = ctx.tessellate(full_output.shapes, ctx.pixels_per_point());
+        let paint_jobs = ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
 
         #[cfg(debug_assertions)]
         let repaint_reasons = {
@@ -613,60 +684,89 @@ impl<'a> App<'a> {
             }
         }
     }
+
+    /// Build the window attributes: title, icon, size, and the position that
+    /// centres the window on the configured monitor.
+    ///
+    /// All the geometry here is done in **physical** pixels. `window_size_startup`
+    /// is a logical size (that's what the Settings UI shows), so it is scaled by
+    /// the target monitor's scale factor before being compared against the
+    /// monitor's physical rect. Mixing the two — as the earlier version did —
+    /// pushed the window off-screen on any HiDPI display (a 2× Retina monitor
+    /// made the window twice as wide as the centring maths assumed).
+    fn window_attributes(&mut self, event_loop: &ActiveEventLoop) -> winit::window::WindowAttributes {
+        self.task_app.monitor_options = event_loop
+            .available_monitors()
+            .flat_map(|m| m.name())
+            .collect();
+
+        // Prefer the configured monitor, else the primary, else the first one
+        // winit reports. All three can be absent (headless / Wayland without the
+        // right protocol), in which case we simply don't set a position and let
+        // the compositor place the window.
+        let target_monitor = event_loop
+            .available_monitors()
+            .find(|m| m.name().as_deref() == Some(self.selected_monitor_name.as_str()))
+            .or_else(|| event_loop.primary_monitor())
+            .or_else(|| event_loop.available_monitors().next());
+
+        let window_title = format!("TaskDeck    -   Ver.{}", env!("BUILD_DATE"));
+
+        let icon_data = window_icon();
+
+        let mut attributes = Window::default_attributes()
+            .with_title(window_title)
+            .with_window_icon(icon_data.clone())
+            .with_inner_size(LogicalSize::new(
+                self.window_size_startup[0],
+                self.window_size_startup[1],
+            ))
+            .with_min_inner_size(LogicalSize::new(200.0, 200.0))
+            .with_active(false);
+
+        // Windows keeps a separate taskbar icon; every other platform takes the
+        // window icon (or, on macOS, the bundle icon) and has no such setter.
+        #[cfg(windows)]
+        {
+            attributes = attributes.with_taskbar_icon(icon_data);
+        }
+
+        if let Some(monitor) = target_monitor {
+            let scale = monitor.scale_factor();
+            let monitor_position = monitor.position();
+            let monitor_size = monitor.size();
+
+            let window_width = (self.window_size_startup[0] as f64 * scale) as i32;
+            let window_height = (self.window_size_startup[1] as f64 * scale) as i32;
+
+            attributes = attributes.with_position(PhysicalPosition::new(
+                monitor_position.x + (monitor_size.width as i32 - window_width) / 2,
+                monitor_position.y + (monitor_size.height as i32 - window_height) / 2,
+            ));
+        }
+
+        attributes
+    }
+}
+
+/// Decode the embedded PNG into a winit icon. A failure here is cosmetic — the
+/// window just gets the platform default — so it must not abort startup the way
+/// the old `unwrap()` pair did.
+fn window_icon() -> Option<winit::window::Icon> {
+    let image = image::load_from_memory_with_format(
+        include_bytes!("../icon.png"),
+        image::ImageFormat::Png,
+    )
+    .ok()?
+    .into_rgba8();
+    let (width, height) = image.dimensions();
+    winit::window::Icon::from_rgba(image.into_raw(), width, height).ok()
 }
 
 impl ApplicationHandler for App<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window = event_loop
-            .create_window({
-                let available_monitors: Vec<String> = event_loop
-                    .available_monitors()
-                    .flat_map(|m| m.name())
-                    .collect();
-
-                self.task_app.monitor_options = available_monitors;
-
-                let target_monitor = match event_loop
-                    .available_monitors()
-                    .find(|m| {
-                        if let Some(name) = m.name() {
-                            name == self.selected_monitor_name
-                        } else { false }
-                    }) {
-                        None => event_loop.available_monitors().nth(0).unwrap(),
-                        Some(monitor) => monitor,
-                    };
-
-                let monitor_position = target_monitor.position();
-                let monitor_size = target_monitor.size();
-                let window_size = LogicalSize::new(self.window_size_startup[0], self.window_size_startup[1]);
-
-                let window_position = LogicalPosition::new(
-                    monitor_position.x + (monitor_size.width as i32 - window_size.width as i32)/2,
-                    monitor_position.y + (monitor_size.height as i32 - window_size.height as i32)/2,
-                );
-
-                let window_title = format!("TaskDeck    -   Ver.{}", env!("BUILD_DATE"));
-
-                let embedded_icon_png = image::load_from_memory_with_format(include_bytes!("../icon.png"), image::ImageFormat::Png);
-                let (icon_rgba, width, height) = {
-                    let image = embedded_icon_png.unwrap().into_rgba8();
-                    let (w, h) = image.dimensions();
-                    (image.into_raw(), w, h)
-                };
-                let icon_data = winit::window::Icon::from_rgba(icon_rgba, width, height).unwrap();
-
-                let minimum_size = LogicalSize::new(200.0, 200.0);
-
-                Window::default_attributes()
-                    .with_title(window_title)
-                    .with_window_icon(Some(icon_data.clone()))
-                    .with_taskbar_icon(Some(icon_data))
-                    .with_position(window_position)
-                    .with_min_inner_size(minimum_size)
-                    .with_active(false)
-            })
-            .unwrap();
+        let attributes = self.window_attributes(event_loop);
+        let window = event_loop.create_window(attributes).unwrap();
         pollster::block_on(self.set_window(window));
     }
 
@@ -692,15 +792,20 @@ impl ApplicationHandler for App<'_> {
             WindowEvent::Resized(new_size) => {
                 self.handle_resized(new_size.width, new_size.height);
             }
-            WindowEvent::ScaleFactorChanged { scale_factor, mut inner_size_writer } => {
+            // Moving the window to a monitor with a different DPI (or changing the
+            // display scale) only requires reconfiguring the surface to the new
+            // physical size. egui's own points-per-pixel is re-read from the window
+            // by `egui-winit` every frame, so it must *not* be pushed back into the
+            // context here: `set_pixels_per_point` sets egui's zoom factor, which is
+            // then multiplied by the native scale factor again — on a 2× display
+            // that squared to 4×, and the UI was laid out for a quarter of the
+            // window. (Invisible on a 1× Windows display, where the factor is 1 and
+            // this event never fires.)
+            WindowEvent::ScaleFactorChanged { mut inner_size_writer, .. } => {
                 let physical_size = self.window.as_ref().unwrap().inner_size();
 
                 if let Some(state) = self.state.as_mut() {
-                    state.scale_factor = scale_factor as f32;
                     state.resize_surface(physical_size.width, physical_size.height);
-
-                    let ctx = state.context();
-                    ctx.set_pixels_per_point(state.scale_factor);
                 }
 
                 // Optionally, request the inner size (to affirm this size)
@@ -779,6 +884,7 @@ mod tests {
             selected_colorscheme_id: 3,
             three_day_weather: true,
             background_image_tint_percent: 30,
+            ui_scale_percent: UI_SCALE_AUTO,
         }
     }
 

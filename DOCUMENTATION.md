@@ -7,9 +7,12 @@
 - **Crate name:** `task_deck`
 - **Binary name:** `TaskDeck`
 - **Edition:** Rust 2024
-- **Platform:** Windows-first (uses `winit::platform::windows`, embeds an `.ico`, hides the
-  console with `windows_subsystem = "windows"` in release). Most logic is cross-platform,
-  but it is not currently built/tested for other OSes.
+- **Platform:** Cross-platform (Windows, macOS, Linux) from one source tree, with no
+  platform-specific build steps. The three Windows-only touches are `cfg`-gated and
+  inert elsewhere: the `.ico` resource (`embed-resource` no-ops off Windows), the
+  console-hiding `windows_subsystem = "windows"` in release, and the taskbar icon
+  (`WindowAttributesExtWindows::with_taskbar_icon`). Developed on Windows 11; built and
+  run on macOS (Apple silicon). See §15 for the platform-specific notes.
 
 ---
 
@@ -29,6 +32,7 @@
 12. Custom calendar widgets reference
 13. Glossary of state flags
 14. Design decisions & deliberate trade-offs
+15. Platform notes (Windows / macOS / Linux)
 
 ---
 
@@ -65,7 +69,7 @@ Additional features:
 | Async bootstrap | `pollster` (blocks on the async adapter/device setup) |
 | Dates / times | `chrono` (with `serde`) |
 | Serialization | `serde`, `serde_json` (tasks, schemes, notepad), `toml` + `toml_edit` (config) |
-| HTTP (weather) | `reqwest` (blocking) |
+| HTTP (weather) | `reqwest` (blocking, `rustls-tls`; `default-features = false` keeps system OpenSSL out of the Linux build) |
 | Images | `image` (backgrounds, world map, icon) |
 | Palette generation | `kmeans_colors`, `palette` (Lab/sRGB conversion) |
 | Reverse file reading | `rev_lines` (archive pagination) |
@@ -91,23 +95,43 @@ cargo build --release
 - injects `BUILD_DATE` (UTC `YYYY-MM-DD`) as a compile-time env var, used in the window title
   (`TaskDeck    -   Ver.<BUILD_DATE>`).
 
-### Asset layout (relative to the working directory at runtime)
+### Asset layout
 
 | Path | Purpose |
 |------|---------|
-| `images/` | User background images (`*.jpg/png`); the Settings dropdown lists this directory. Names are resolved through `utilities::safe_image_path` (final component only — no traversal out of `images/`). |
+| `<root>/images/` | User background images (`*.jpg/png`); the Settings dropdown lists this directory. Names are resolved through `AppDirs::image_path` (final component only — no traversal out of `images/`). |
+| `<root>/taskdeck_data/` | Tasks, archive, notepad, colour schemes, config (see below). |
 | `weather_svgs_2/` | Weather icon SVGs, **embedded at compile time** via `include_image!`. |
 | `fonts/` | TTF fonts, **embedded at compile time** (`FSEX300`, `DejaVuSans`, `Anton`, `SpaceMono`, `LexendGiga`, `FacultyGlyphic`). |
 | `1920px-Blue_Marble_2002.png`, `icon.png`, `noback.png` | Embedded at compile time. |
 
-> ⚠️ Backgrounds in `images/` and the config/data files are loaded **relative to the current
-> working directory**, not the executable path. See §5 for the asymmetry with `taskdeck_data`.
+Only the first two exist at runtime; everything else is baked into the binary, so the
+executable plus those two folders is the whole install.
 
-### Data directory resolution (`tasks::get_data_dir`)
+### Directory resolution (`paths::AppDirs`)
 
-Data is stored under a `taskdeck_data/` folder, resolved by:
-1. `<exe_dir>/taskdeck_data` if it exists (production layout); else
-2. `<exe_dir>/../../taskdeck_data` (the dev layout, i.e. project root when running from `target/debug/`).
+`AppDirs::resolve()` runs **once**, first thing in `main`, and every later read or write
+goes through the `AppDirs` it returns (threaded explicitly — no globals, no re-derivation
+per save). Both folders are created if missing. The `<root>` is:
+
+1. `$TASKDECK_HOME`, if set.
+2. The project root, when running from `target/{debug,release}` — detected by the parent
+   being named `target` **and** containing a `Cargo.toml`, so an installed binary that
+   happens to sit two levels deep doesn't adopt an unrelated folder.
+3. `<exe_dir>`, if it already contains `taskdeck_data/` or `images/` (an existing install).
+4. `<exe_dir>`, if it is writable and not inside a macOS `.app` bundle — the portable
+   layout, created on first run. Writability is probed by actually creating a temp file,
+   since permission bits alone miss read-only mounts, sandboxes and ACLs.
+5. Otherwise `paths::user_data_dir()`: `%APPDATA%\TaskDeck`,
+   `~/Library/Application Support/TaskDeck`, or `$XDG_DATA_HOME/taskdeck`
+   (`~/.local/share/taskdeck`).
+
+> **Why not the working directory?** It used to be a mix: `taskdeck_data` was resolved from
+> the executable, but `images/` and `userconfig.toml` were resolved from the **working
+> directory**. Those coincide when you double-click an executable on Windows and nowhere
+> else — the working directory is `/` when launched from Finder or the Dock on macOS, and
+> the shell's directory when started from a terminal. The config and the backgrounds could
+> therefore land somewhere other than the tasks, or nowhere at all.
 
 Files inside `taskdeck_data/`:
 
@@ -129,9 +153,10 @@ Files inside `taskdeck_data/`:
 main → pollster::block_on(run())
 run():
   1. EventLoop::new(); create an EventLoopProxy (used to wake UI from the weather thread)
-  2. get_check_and_set_config()  → Config (reads + normalizes userconfig.toml)
+  1b. paths::AppDirs::resolve()  → data/images dirs (created if missing), see §4
+  2. get_check_and_set_config(&dirs.config_file()) → Config (reads + normalizes userconfig.toml)
   3. tasks::read_at_startup()    → Vec<Active>   (corrupt file → quarantine + empty set, see below)
-  4. enumerate images/ dir       → background_options
+  4. dirs.background_options()   → names in images/
   5. color::read_colorschemes()  → HashMap<u32, ColorScheme> (inserts default if empty;
                                     corrupt file → quarantine + default scheme)
   6. utilities::read_notepad_text()
@@ -159,19 +184,48 @@ load already degrades gracefully via `unwrap_or`.
 ### 5.3 `AppState` (`initialization.rs`)
 
 Created in `App::set_window` (called from `resumed`). Sets up:
+- the wgpu `Instance`, built from the **window's display handle**
+  (`InstanceDescriptor::new_with_display_handle`) — needed for the GL/EGL backend on Linux,
+  which enumerates adapters via the X11/Wayland display; Windows and macOS work from the
+  window handle alone. The instance is owned by `AppState` so it outlives its surface.
 - a `HighPerformance` wgpu adapter + device,
-- a `Bgra8Unorm` surface with `present_mode = AutoNoVsync`,
+- a surface preferring `Bgra8Unorm`, falling back through `Rgba8Unorm` and the sRGB variants
+  to whatever the surface reports (some Linux GL / software adapters offer no `Bgra8Unorm`;
+  `egui-wgpu` selects an sRGB-aware shader from the format it is given). `present_mode =
+  AutoNoVsync` — see §14.1.
 - the `egui_winit::State` and `egui-wgpu::Renderer`.
+
+The window is sized in **logical** units (`with_inner_size(LogicalSize)`), and centred on the
+target monitor using **physical** arithmetic — the logical size scaled by the monitor's scale
+factor, compared against the monitor's physical rect. The surface is then sized from
+`window.inner_size()` (physical) rather than re-deriving it. Mixing the two spaces is what
+put the window half off-screen on HiDPI displays.
 
 ### 5.4 The frame (`App::handle_redraw`)
 
-1. Take egui input from winit.
-2. **Idle detection:** if there were no input events, no repaint requested, the window is
+1. **Acquire the surface texture** (handling `Outdated/Lost/Timeout/Occluded/Validation`).
+2. Take egui input from winit.
+3. **Idle detection:** if there were no input events, no repaint requested, the window is
    unfocused and the cursor is outside, and ≥10 s have elapsed → set `in_sleep = true`.
-3. Acquire the surface texture (handling `Outdated/Lost/Timeout/OutOfMemory`).
-4. `begin_pass` → `task_app.ui(ctx)` → `end_pass`.
+4. `Context::run_ui` → `task_app.ui(ui)`.
 5. Process viewport commands (incl. `Close`), tessellate, upload textures, encode the render
    pass (clears to white), submit, present, free freed textures.
+
+> **Order matters in steps 1–2.** Every failure arm in the acquire abandons the frame, and
+> `take_egui_input` is destructive: it hands over the accumulated input and clears it. With
+> the take first, an abandoned frame silently swallowed whatever had accumulated — pending
+> clicks and keystrokes, and `max_texture_side`, which `egui-winit` delivers exactly once on
+> the first take. Losing the latter left egui on its conservative 2048 default forever, so
+> loading any background image wider than that panicked. macOS reports `Outdated` on the
+> first acquire almost every launch; Windows generally does not, which is why it only
+> showed up in the port.
+
+Points-per-pixel comes from `full_output.pixels_per_point` — the value egui actually laid the
+frame out with — and is used for both `tessellate` and the `ScreenDescriptor`. It is
+deliberately **not** pushed back into the context: `Context::set_pixels_per_point` sets egui's
+*zoom factor*, which `egui-winit` then multiplies by the native scale factor again. The old
+`ScaleFactorChanged` handler did exactly that, squaring a 2× display into 4× so the UI drew
+into a quarter of the window. `ScaleFactorChanged` now only reconfigures the surface.
 
 ### 5.5 Event handling (`App::window_event`)
 
@@ -336,7 +390,7 @@ pre-fill the date fields from the selected day).
 
 - **`ColorScheme`**: `{ name, colors: [[u8;4];6], is_user_configurable }`. Six RGBA colors index
   the calendar item tints by `calendar_item_color()`.
-- **`generate_colorscheme(image_name)`**: resolves the name with `utilities::safe_image_path` (keeps
+- **`generate_colorscheme(dirs, image_name)`**: resolves the name with `AppDirs::image_path` (keeps
   only the final path component, so the load can't escape `images/`), loads it, downsamples to 200×200,
   drops near-transparent pixels, converts to CIE-Lab, runs **k-means** (`get_kmeans_hamerly`, k=6,
   deterministic seed 42), sorts clusters by a visual-significance heuristic
@@ -345,6 +399,10 @@ pre-fill the date fields from the selected day).
 - Persistence mirrors tasks: atomic temp-file write to `colorschemes.json`.
 - The **editor** (in `ui.rs`) lets the user color-pick each of the six swatches and **drag to
   reorder** them; Save commits the edited scheme back into the map.
+- **`set_background`** (in `ui.rs`) shrinks a picture whose longest side exceeds
+  `max_texture_side` (uniformly, so it isn't stretched) before uploading it.
+  `Context::load_texture` *panics* on an oversized image, and this is a full-window backdrop —
+  detail beyond the GPU limit isn't visible anyway.
 
 ---
 
@@ -368,6 +426,7 @@ strings). A missing or unparseable file falls back to a fresh document (same sel
 | `selected_monitor_name` | string | `""` | matched against `available_monitors()`; Settings shows "No monitors detected" (no crash) if the list is empty |
 | `selected_colorscheme_id` | u32 | `0` | clamped `0..=200000` |
 | `three_day_weather` | bool | `false` | |
+| `ui_scale_percent` | u32 | `0` (automatic) | `0` = fit to window, else clamped `UI_SCALE_MIN..=MAX` (`40..=100`) |
 
 Runtime setting changes go through one shared helper, `TaskApp::write_config_value(key, value)`
 (read → parse → set typed value → write), wrapped by `persist_config_value(key, value)` which routes
@@ -494,6 +553,46 @@ shuffle between rebuilds rather than a frozen order, and is not a bug to remove.
 When the priority sort was changed to compare `f32` directly (see §7 and `CODE_REVIEW.md` B3), the
 score is now evaluated **once per task per rebuild** and stored, so the shuffle is preserved while
 the comparator stays consistent within a single sort.
+
+### 14.5 UI scale instead of a responsive layout
+
+The three columns are laid out at fixed point sizes summing to
+`initialization::DESIGN_WIDTH_POINTS` (1920) — 300 for the task list, 1224 for the 7×160 calendar
+grid with its 14pt gutters, and the rest for weather/notepad. That is exactly a 1920×1080 monitor
+at 100% display scaling.
+
+Anything narrower in *points* pushed the weather column off the right edge. That includes every
+HiDPI Mac display (a 3024px Retina panel is 1512 points) and Windows at 125% or 150% scaling.
+
+`TaskApp::apply_ui_scale` handles this by adjusting egui's **zoom factor**, which changes how many
+points the window is worth, rather than by making the layout responsive. This is deliberate, and
+follows §14.3: the widget geometry stays exactly as hand-tuned, and one scalar makes it fit any
+window. The automatic value is the largest scale ≤ 100% at which the design width still fits, so on
+a 1920×1080/100% setup the zoom is exactly 1.0 and **nothing changes**. `ui_scale_percent` in the
+config pins it manually; `0` means automatic.
+
+The computation is a fixed point, not a feedback loop: the window's physical width and its native
+scale factor are both independent of the zoom, so `points × zoom` is constant and re-running it on
+the next frame gives the same answer.
+
+---
+
+## 15. Platform Notes
+
+Behaviour that differs per OS, and why.
+
+| Area | Note |
+|------|------|
+| **Windows-only code** | `windows_subsystem = "windows"` (release), `embed-resource` compiling `resources.rc` (a no-op elsewhere), and `with_taskbar_icon` — all `cfg`-gated. Other platforms take the window icon, or, on macOS, the bundle icon. |
+| **Data location** | Portable next to the executable where that is writable, else the platform's per-user data directory. See §4. |
+| **macOS `.app` bundles** | Detected via the `Contents/MacOS` layout; data then always goes to `~/Library/Application Support/TaskDeck` rather than inside the (signed, possibly read-only) bundle. |
+| **HiDPI** | See §5.3, §5.4 and §14.5 — window placement, the points-per-pixel path, and the UI scale. Effectively macOS-only in practice, but Windows at >100% scaling exercises the same code. |
+| **Fullscreen key** | `F11` everywhere; additionally `Ctrl`+`Cmd`+`F` on macOS, where the system keeps `F11` for Mission Control and never delivers it to the app. |
+| **Surface format** | `Bgra8Unorm` preferred, with fallbacks — see §5.3. |
+| **wgpu backend** | Instance built with the window's display handle so Linux GL/EGL can enumerate adapters. |
+| **TLS** | `rustls`, so no system OpenSSL is needed to build on Linux. |
+| **Monitor names** | winit reports e.g. `Monitor #41057` on macOS rather than a friendly name. The Settings dropdown shows whatever winit gives it, and copes with an empty list (see `CODE_REVIEW.md` A9). |
+| **Not addressed** | No `.app` bundle, `.dmg`, or Linux packaging is produced by the build; `cargo build --release` yields a plain executable on every platform. |
 
 ---
 

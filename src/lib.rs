@@ -5,3 +5,4 @@ pub mod weather;
 pub mod calendarwidgets;
 pub mod initialization;
 pub mod color;
+pub mod paths;

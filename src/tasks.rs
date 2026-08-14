@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, fs::{self, File, OpenOptions}, io::{BufReader, BufWriter, Write}, path::PathBuf};
+use std::{collections::HashMap, error::Error, fs::{self, File, OpenOptions}, io::{BufReader, BufWriter, Write}, path::Path};
 use chrono::{DateTime, Local, NaiveDate};
 use rev_lines::RevLines;
 use serde::{Deserialize, Serialize};
@@ -120,38 +120,14 @@ pub struct InActive {
 }
 
 
-pub fn get_data_dir(exe_path: &PathBuf) -> Result<PathBuf, Box<dyn Error>> {
-    let exe_dir = exe_path.parent().ok_or("Could not find exe directory")?;
-    let data_in_exe_dir = exe_dir.join("taskdeck_data");
+pub fn read_at_startup(data_dir: &Path) -> Result<Vec<Active>, Box<dyn Error>> {
+    let file_path = data_dir.join("read_at_startup.json");
 
-    if data_in_exe_dir.exists() {
-        return Ok(data_in_exe_dir);
-    }
-
-    // Fallback for development (e.g., target/debug/app)
-    let maybe_project_root = exe_dir
-        .parent() // target/
-        .and_then(|p| p.parent()); // project root
-
-    let dev_data_path = maybe_project_root
-        .ok_or("Could not determine project root for dev mode")?
-        .join("taskdeck_data");
-
-    if dev_data_path.exists() {
-        Ok(dev_data_path)
-    } else {
-        Err("Could not locate 'data' directory".into())
-    }
-}
-
-pub fn read_at_startup(exe_path: &PathBuf) -> Result<Vec<Active>, Box<dyn Error>> {
-    let dir_path: PathBuf = get_data_dir(exe_path)?;
-    
-    let file_path = dir_path.join("read_at_startup.json");
-    
     if !file_path.exists() {
-        let mut file = File::create(&file_path).expect("failed to create active save JSON file");
-        file.write_all(b"[]").expect("failed to write to JSON file");
+        // An empty JSON array is what an "no tasks yet" save looks like; a
+        // failure to seed it is reported like any other read failure rather
+        // than aborting the boot.
+        fs::write(&file_path, b"[]")?;
     }
 
     let file = File::open(&file_path)?;
@@ -181,14 +157,7 @@ pub fn assign_missing_ids(items: &mut [Active]) -> u64 {
 /// a clean default instead of panicking. The bad file is renamed to
 /// `<file_name>.corrupt-<timestamp>` (preserved for manual recovery), and a
 /// human-readable description is returned for display in the error window.
-pub fn quarantine_corrupt_file(exe_path: &PathBuf, file_name: &str, cause: &dyn Error) -> String {
-    let data_dir = match get_data_dir(exe_path) {
-        Ok(dir) => dir,
-        // No data directory to quarantine within (e.g. first run / missing dir);
-        // there is nothing to move aside, so just report and start from defaults.
-        Err(_) => return format!("Could not read {file_name} ({cause}). Started from defaults."),
-    };
-
+pub fn quarantine_corrupt_file(data_dir: &Path, file_name: &str, cause: &dyn Error) -> String {
     let file_path = data_dir.join(file_name);
     if !file_path.exists() {
         return format!("Could not read {file_name} ({cause}). Started from defaults.");
@@ -208,20 +177,17 @@ pub fn quarantine_corrupt_file(exe_path: &PathBuf, file_name: &str, cause: &dyn 
     }
 }
 
-pub fn oversafe_activesave(payload: &Vec<Active>, exe_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    // Determine the path to the target JSON file
-    let data_dir = get_data_dir(exe_path)?;
-
+pub fn oversafe_activesave(payload: &Vec<Active>, data_dir: &Path) -> Result<(), Box<dyn Error>> {
     let final_path = data_dir.join("read_at_startup.json");
 
-    // Ensure the directory exists
-    fs::create_dir_all(&data_dir)?;
+    // Ensure the directory exists (it may have been removed while running)
+    fs::create_dir_all(data_dir)?;
 
     // Serialize first to avoid writing an invalid file
     let json = serde_json::to_string_pretty(payload)?;
 
     // Write to a temporary file first
-    let mut temp_file = NamedTempFile::new_in(&data_dir)?;
+    let mut temp_file = NamedTempFile::new_in(data_dir)?;
     {
         let mut writer = BufWriter::new(&mut temp_file);
         writer.write_all(json.as_bytes())?;
@@ -237,12 +203,11 @@ pub fn oversafe_activesave(payload: &Vec<Active>, exe_path: &PathBuf) -> Result<
     Ok(())
 }
 
-pub fn save_inactive(payload: &InActive, exe_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    let data_dir = get_data_dir(exe_path)?;
+pub fn save_inactive(payload: &InActive, data_dir: &Path) -> Result<(), Box<dyn Error>> {
     let final_path = data_dir.join("archived.jsonl");
 
-    // Ensure the directory exists
-    fs::create_dir_all(&data_dir)?;
+    // Ensure the directory exists (it may have been removed while running)
+    fs::create_dir_all(data_dir)?;
 
     let mut json = serde_json::to_string(payload)?;
     json.push_str("\n");
@@ -258,8 +223,7 @@ pub fn save_inactive(payload: &InActive, exe_path: &PathBuf) -> Result<(), Box<d
     Ok(file.sync_all()?)
 }
 
-pub fn read_lines_range(offset: usize, limit: usize, exe_path: &PathBuf) -> Result<Vec<InActive>, Box<dyn Error>> {
-    let data_dir = get_data_dir(exe_path)?;
+pub fn read_lines_range(offset: usize, limit: usize, data_dir: &Path) -> Result<Vec<InActive>, Box<dyn Error>> {
     let path = data_dir.join("archived.jsonl");
 
     let file = File::open(path)?;
@@ -344,8 +308,6 @@ mod tests {
 
     #[test]
     fn quarantine_moves_corrupt_file_aside() {
-        // A fake exe living directly in a dir that contains taskdeck_data/, so
-        // get_data_dir resolves to <tmp>/taskdeck_data.
         let tmp = tempfile::tempdir().unwrap();
         let data_dir = tmp.path().join("taskdeck_data");
         fs::create_dir_all(&data_dir).unwrap();
@@ -353,10 +315,9 @@ mod tests {
         let bad_file = data_dir.join("read_at_startup.json");
         fs::write(&bad_file, b"{ this is not valid json").unwrap();
 
-        let fake_exe = tmp.path().join("app.exe");
         let cause = std::io::Error::new(std::io::ErrorKind::InvalidData, "bad json");
 
-        let msg = quarantine_corrupt_file(&fake_exe, "read_at_startup.json", &cause);
+        let msg = quarantine_corrupt_file(&data_dir, "read_at_startup.json", &cause);
 
         // The corrupt file is moved aside, not left in place...
         assert!(!bad_file.exists(), "corrupt file should have been renamed away");
@@ -377,13 +338,12 @@ mod tests {
 
     #[test]
     fn quarantine_reports_when_no_file_present() {
-        // No taskdeck_data dir at all: nothing to move, but we still get a
-        // human-readable message rather than panicking.
+        // An empty data dir: nothing to move, but we still get a human-readable
+        // message rather than panicking.
         let tmp = tempfile::tempdir().unwrap();
-        let fake_exe = tmp.path().join("app.exe");
         let cause = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
 
-        let msg = quarantine_corrupt_file(&fake_exe, "colorschemes.json", &cause);
+        let msg = quarantine_corrupt_file(tmp.path(), "colorschemes.json", &cause);
         assert!(msg.contains("colorschemes.json"), "message was {msg}");
     }
 

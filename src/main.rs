@@ -1,8 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-use std::{fs, path::PathBuf};
 use mimalloc::MiMalloc;
-use task_deck::{color::{self, ColorScheme}, initialization::{App, Config, get_check_and_set_config}, utilities, tasks::{self, Active}, ui::{TaskApp, TaskAppConfig}, weather::get_weather};
+use task_deck::{color::{self, ColorScheme}, initialization::{App, Config, get_check_and_set_config}, paths::AppDirs, utilities, tasks::{self, Active}, ui::{TaskApp, TaskAppConfig}, weather::get_weather};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 #[global_allocator]
@@ -21,10 +20,12 @@ async fn run() {
 
     event_loop.set_control_flow(ControlFlow::Wait);
 
-    let Config { start_in_fullscreen, coordinates, background, enable_fps_counter, window_size_startup, calendar_weeks_to_show, selected_monitor_name, mut selected_colorscheme_id, three_day_weather, background_image_tint_percent } = get_check_and_set_config();
+    // Every file the app touches hangs off these two folders, resolved once here
+    // rather than from the working directory (which the launcher controls, and
+    // which differs per platform — see `paths`).
+    let dirs = AppDirs::resolve();
 
-    //this allows us to use the debug exe as though it was located in the final folder structure
-    let exe_file_path = std::env::current_exe().expect("error finding exe path");
+    let Config { start_in_fullscreen, coordinates, background, enable_fps_counter, window_size_startup, calendar_weeks_to_show, selected_monitor_name, mut selected_colorscheme_id, three_day_weather, background_image_tint_percent, ui_scale_percent } = get_check_and_set_config(&dirs.config_file());
 
     // Collected non-fatal startup recovery messages (e.g. quarantined corrupt
     // files), surfaced in the error window once the UI is up.
@@ -32,11 +33,11 @@ async fn run() {
 
     // A corrupt/unreadable active set must not abort the boot; quarantine the
     // bad file and start from an empty set instead.
-    let active_items: Vec<Active> = match tasks::read_at_startup(&exe_file_path) {
+    let active_items: Vec<Active> = match tasks::read_at_startup(&dirs.data) {
         Ok(items) => items,
         Err(e) => {
             startup_errors.push(tasks::quarantine_corrupt_file(
-                &exe_file_path,
+                &dirs.data,
                 "read_at_startup.json",
                 e.as_ref(),
             ));
@@ -44,23 +45,15 @@ async fn run() {
         }
     };
 
-    let images_path = PathBuf::from("images");
-    // Try reading the directory, if it fails, return an empty vector
-    let background_options: Vec<String> = match fs::read_dir(&images_path) {
-        Ok(entries) => entries
-            .filter_map(|entry| entry.ok()) // ignore entries that caused errors
-            .filter_map(|entry| entry.file_name().into_string().ok()) // convert OsString to String
-            .collect(),
-        Err(_) => vec![],
-    };
-    
+    let background_options = dirs.background_options();
+
     // Same treatment for the colour schemes: a corrupt file falls back to the
     // default scheme (inserted below) rather than panicking at boot.
-    let mut colorschemes = match color::read_colorschemes(&exe_file_path) {
+    let mut colorschemes = match color::read_colorschemes(&dirs.data) {
         Ok(schemes) => schemes,
         Err(e) => {
             startup_errors.push(tasks::quarantine_corrupt_file(
-                &exe_file_path,
+                &dirs.data,
                 "colorschemes.json",
                 e.as_ref(),
             ));
@@ -73,13 +66,13 @@ async fn run() {
         selected_colorscheme_id = 0;
     }
 
-    let textbox_text = utilities::read_notepad_text(&exe_file_path).unwrap_or("There was something wrong with data/notepad_text.json!".to_string());
+    let textbox_text = utilities::read_notepad_text(&dirs.data).unwrap_or("There was something wrong with taskdeck_data/notepad_text.json!".to_string());
 
     let setup_config = TaskAppConfig {
         colorschemes,
         selected_colorscheme_id,
         active_items,
-        exe_file_path,
+        dirs,
         background,
         background_options,
         coordinates,
@@ -90,6 +83,7 @@ async fn run() {
         textbox_text,
         three_day_weather,
         background_image_tint_percent,
+        ui_scale_percent,
         weather_service: get_weather(coordinates, proxy),
         startup_error: if startup_errors.is_empty() {
             None

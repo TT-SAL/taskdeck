@@ -1,7 +1,9 @@
 use palette::{Srgb};
-use std::{collections::HashMap, error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::PathBuf};
+use std::{collections::HashMap, error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::Path};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
+
+use crate::paths::AppDirs;
 use image::{GenericImageView, Pixel};
 use kmeans_colors::{get_kmeans_hamerly};
 use palette::{FromColor, Lab};
@@ -38,20 +40,17 @@ impl ColorScheme {
     }
 }
 
-pub fn save_colorschemes(payload: &HashMap<u32, ColorScheme>, exe_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    // Determine the path to the target JSON file
-    let data_dir = crate::tasks::get_data_dir(exe_path)?;
-
+pub fn save_colorschemes(payload: &HashMap<u32, ColorScheme>, data_dir: &Path) -> Result<(), Box<dyn Error>> {
     let final_path = data_dir.join("colorschemes.json");
 
-    // Ensure the directory exists
-    fs::create_dir_all(&data_dir)?;
+    // Ensure the directory exists (it may have been removed while running)
+    fs::create_dir_all(data_dir)?;
 
     // Serialize first to avoid writing an invalid file
     let json = serde_json::to_string_pretty(payload)?;
 
     // Write to a temporary file first
-    let mut temp_file = NamedTempFile::new_in(&data_dir)?;
+    let mut temp_file = NamedTempFile::new_in(data_dir)?;
     {
         let mut writer = BufWriter::new(&mut temp_file);
         writer.write_all(json.as_bytes())?;
@@ -67,14 +66,14 @@ pub fn save_colorschemes(payload: &HashMap<u32, ColorScheme>, exe_path: &PathBuf
     Ok(())
 }
 
-pub fn read_colorschemes(exe_path: &PathBuf) -> Result<HashMap<u32, ColorScheme>, Box<dyn Error>> {
-    let dir_path: PathBuf = crate::tasks::get_data_dir(exe_path)?;
-    
-    let file_path = dir_path.join("colorschemes.json");
-    
+pub fn read_colorschemes(data_dir: &Path) -> Result<HashMap<u32, ColorScheme>, Box<dyn Error>> {
+    let file_path = data_dir.join("colorschemes.json");
+
     if !file_path.exists() {
-        let mut file = File::create(&file_path).expect("failed to create colorschemes JSON file");
-        file.write_all(b"{}").expect("failed to write to colorschemes JSON file");
+        // An empty JSON object is what a "no saved schemes" file looks like; a
+        // failure to seed it is reported like any other read failure rather than
+        // aborting the boot.
+        fs::write(&file_path, b"{}")?;
     }
 
     let file = File::open(&file_path)?;
@@ -85,9 +84,9 @@ pub fn read_colorschemes(exe_path: &PathBuf) -> Result<HashMap<u32, ColorScheme>
     return Ok(schemes);
 }
 
-pub fn generate_colorscheme(name: String) -> Option<ColorScheme> {
+pub fn generate_colorscheme(dirs: &AppDirs, name: String) -> Option<ColorScheme> {
     // Confine the lookup to `images/` (defends against path traversal).
-    let path = crate::utilities::safe_image_path(&name)?;
+    let path = dirs.image_path(&name)?;
 
     let image_bytes = fs::read(&path).ok()?;
     let image = image::load_from_memory(&image_bytes).ok()?;

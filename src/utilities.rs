@@ -1,20 +1,9 @@
-use std::{collections::HashMap, error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::PathBuf};
+use std::{collections::HashMap, error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::Path};
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone};
 use egui::Color32;
 use tempfile::NamedTempFile;
 
 use crate::color::ColorScheme;
-
-/// Resolve a user-supplied image name to a path inside `images/`, defending
-/// against path traversal. Only the final path component is kept, so `..`,
-/// absolute paths, drive prefixes, and embedded separators can't escape the
-/// directory. Returns `None` when `name` has no usable file-name component
-/// (e.g. `""`, `".."`, `"sub/"`). This is the single source of truth for that
-/// check — both the background loader and the colour-scheme generator use it.
-pub fn safe_image_path(name: &str) -> Option<PathBuf> {
-    let file_name = std::path::Path::new(name).file_name()?;
-    Some(PathBuf::from("images").join(file_name))
-}
 
 /// Build a TOML array `[a, b]` of two floats for the config file. Used for the
 /// `coordinates` and `window_size_startup` pairs so both the startup writer and
@@ -106,20 +95,17 @@ pub fn resolve_colorscheme(
 }
 
 
-pub fn save_notepad_text(payload: String, exe_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    // Determine the path to the target JSON file
-    let data_dir = crate::tasks::get_data_dir(exe_path)?;
-
+pub fn save_notepad_text(payload: String, data_dir: &Path) -> Result<(), Box<dyn Error>> {
     let final_path = data_dir.join("notepad_text.json");
 
-    // Ensure the directory exists
-    fs::create_dir_all(&data_dir)?;
+    // Ensure the directory exists (it may have been removed while running)
+    fs::create_dir_all(data_dir)?;
 
     // Serialize first to avoid writing an invalid file
     let json = serde_json::to_string_pretty(&payload)?;
 
     // Write to a temporary file first
-    let mut temp_file = NamedTempFile::new_in(&data_dir)?;
+    let mut temp_file = NamedTempFile::new_in(data_dir)?;
     {
         let mut writer = BufWriter::new(&mut temp_file);
         writer.write_all(json.as_bytes())?;
@@ -135,14 +121,15 @@ pub fn save_notepad_text(payload: String, exe_path: &PathBuf) -> Result<(), Box<
     Ok(())
 }
 
-pub fn read_notepad_text(exe_path: &PathBuf) -> Result<String, Box<dyn Error>> {
-    let dir_path: PathBuf = crate::tasks::get_data_dir(exe_path)?;
-    
-    let file_path = dir_path.join("notepad_text.json");
-    
+pub fn read_notepad_text(data_dir: &Path) -> Result<String, Box<dyn Error>> {
+    let file_path = data_dir.join("notepad_text.json");
+
     if !file_path.exists() {
-        let mut file = File::create(&file_path).expect("failed to create notepad_text JSON file");
-        file.write_all(b"{}").expect("failed to write to notepad_text JSON file");
+        // The file holds a JSON *string*, so an empty notepad is `""` — not the
+        // `{}` this used to seed it with, which failed to parse on the very next
+        // line and greeted every first run with the "something wrong with
+        // notepad_text.json" placeholder instead of an empty notepad.
+        fs::write(&file_path, b"\"\"")?;
     }
 
     let file = File::open(&file_path)?;
@@ -156,28 +143,6 @@ pub fn read_notepad_text(exe_path: &PathBuf) -> Result<String, Box<dyn Error>> {
 mod tests {
     use super::*;
     use chrono::Timelike;
-
-    #[test]
-    fn safe_image_path_confines_to_images_dir() {
-        let images = PathBuf::from("images");
-
-        // Ordinary names resolve directly under images/.
-        assert_eq!(safe_image_path("pic.png"), Some(images.join("pic.png")));
-
-        // Traversal and absolute paths are reduced to their final component, so
-        // they can't escape images/.
-        assert_eq!(safe_image_path("../../etc/passwd"), Some(images.join("passwd")));
-        assert_eq!(safe_image_path("/etc/passwd"), Some(images.join("passwd")));
-        assert_eq!(safe_image_path("sub/dir/p.png"), Some(images.join("p.png")));
-        // A trailing separator is ignored — the final named component is kept.
-        assert_eq!(safe_image_path("sub/"), Some(images.join("sub")));
-        // Windows-style separators are handled too.
-        assert_eq!(safe_image_path(r"..\..\win.png"), Some(images.join("win.png")));
-
-        // Names with no usable file component are rejected.
-        assert_eq!(safe_image_path(""), None);
-        assert_eq!(safe_image_path(".."), None);
-    }
 
     #[test]
     fn float_pair_array_emits_numeric_toml_array() {

@@ -68,22 +68,24 @@ centralized (see changelog), but the booleans themselves remain.
   modal model is designed against the new screens rather than retrofitted. Until then, `any_modal_open()`
   is the single place that knows the full set.
 
-### D7. Static side-panel/dialog spacers assume a fixed DPI / window size
+### D7. Static side-panel/dialog spacers assume a fixed DPI / window size  *(mitigated, not removed)*
 The side panels and dialogs are laid out with absolute `add_space` spacers, which won't adapt to
-non-100% DPI scaling or arbitrary window sizes. Largely moot while the app runs fullscreen on a
-chosen monitor.
-- **Fix:** only worth revisiting if multi-DPI or freely-resizable use becomes a goal — and even then,
-  leave the calendar **animation/widget** magic numbers alone (§14.3); this is about the static
-  dialog layout only.
+non-100% DPI scaling or arbitrary window sizes.
+
+- **Mitigated:** the *global* consequence — the layout not fitting the window at all — is handled by
+  the UI-scale fit (`TaskApp::apply_ui_scale`, `DOCUMENTATION.md` §14.5), which scales the whole UI
+  so the fixed design width always fits. That was load-bearing for the macOS port, where no Retina
+  display offers 1920 points.
+- **Remaining:** the spacers are still absolute, so individual dialogs can't reflow *within* a
+  column, and a very small window scales down rather than rearranging. Only worth revisiting if
+  freely-resizable use becomes a goal — and even then, leave the calendar **animation/widget** magic
+  numbers alone (§14.3); this is about the static dialog layout only.
 
 ---
 
 ## E. Smaller issues & polish (low)
 
-- **E8. Windows-only assumptions** (`winit::platform::windows`, `with_taskbar_icon`,
-  `windows_subsystem`) aren't feature-gated; the crate won't compile on other platforms despite
-  mostly-portable logic. Gate the Windows-specific calls behind `#[cfg(windows)]` if cross-platform
-  builds ever matter.
+- **E8. ✅ FIXED — Windows-only assumptions.** See the changelog (and the platform work it pulled in).
 - **E10. ✅ FIXED — Deprecated egui layout APIs.** See the changelog.
 
 ---
@@ -111,13 +113,26 @@ Worth preserving — don't regress these while hardening:
 
 The app is a working, complete product; these are hardening steps, ordered by payoff-to-risk.
 
-1. **E8** — Windows `cfg`-gating (only if cross-platform becomes a goal). _(E10, the egui layout-API
-   deprecation migration, is resolved — see the changelog.)_
+1. **Linux verification** — the code is written to Linux conventions (XDG data dir, GL/EGL display
+   handle, surface-format fallback, rustls so no system OpenSSL) but has not been built or run
+   there. Nothing in it is expected to fail; it simply hasn't been exercised.
 2. **D6 (remainder)** — model a modal **stack** to replace the `*_flag` booleans; deferred to the
    UI/archive redesign (a flat enum isn't faithful — see D6).
-3. **D7** — DPI-aware dialog layout (largely moot while fullscreen; lowest priority).
+3. **D7 (remainder)** — reflow within dialogs; the global fit problem is solved by the UI scale.
 
-_(B4 is deferred pending the archive redesign — see B4.)_
+_(B4 is deferred pending the archive redesign — see B4. E8 and E10 are resolved.)_
+
+### Not problems, but worth a decision some day
+
+- **Uncapped render loop on a laptop.** §14.1 records the uncapped, forced-repaint loop as
+  deliberate, and the reasoning holds for a desktop with a spare monitor. On battery the same loop
+  renders flat-out whenever the window is focused — measured at ~140–190 fps on an M4 MacBook. The
+  10 s idle sleep still covers the common "leave it open on a second screen" case. If macOS use on
+  battery becomes normal, an *optional* frame cap (config value, uncapped by default) would fit
+  without touching the animation model.
+- **Packaging.** `cargo build --release` produces a bare executable on all three platforms. A macOS
+  `.app`, a `.dmg`, or a Linux desktop entry are all outside the build; `paths` already handles the
+  bundle case if one is ever made.
 
 ---
 
@@ -125,6 +140,63 @@ _(B4 is deferred pending the archive redesign — see B4.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **E8 — cross-platform build (Windows / macOS / Linux), plus the bugs that hid behind it.**
+  Gating the Windows-only calls was a two-line fix; running the result on macOS surfaced five real
+  defects, three of which are latent on Windows too. New `DOCUMENTATION.md` §15 collects the
+  platform-specific behaviour.
+  - **The `cfg` gate itself.** `winit::platform::windows::WindowAttributesExtWindows` and
+    `with_taskbar_icon` are now `#[cfg(windows)]`. `embed-resource` and `windows_subsystem` already
+    no-op'd elsewhere. `cargo build` and `cargo build --release` are clean on macOS.
+  - **DPI applied twice (macOS/HiDPI crash-free but unusable).** `ScaleFactorChanged` called
+    `ctx.set_pixels_per_point(scale_factor)`, but that sets egui's *zoom factor*, which `egui-winit`
+    multiplies by the native scale factor again — 2× became 4×, and the UI was laid out for a
+    quarter of the window. The handler now only reconfigures the surface, and the frame takes its
+    points-per-pixel from `full_output.pixels_per_point` for both `tessellate` and the
+    `ScreenDescriptor`. `AppState::scale_factor` is gone (it existed only to feed that path).
+  - **Input dropped on an abandoned frame → oversized-background panic.** `handle_redraw` took the
+    egui input *before* acquiring the surface texture, and every failure arm of the acquire returns.
+    Since `take_egui_input` clears what it hands over, an abandoned frame swallowed pending clicks
+    and keystrokes — and `max_texture_side`, which is delivered exactly once, on the first take.
+    egui therefore kept its 2048 default forever and **panicked on any background image wider than
+    2048px** (the repo's own sample image is 3000×2000). macOS reports `Outdated` on the first
+    acquire almost every launch; Windows usually doesn't, which is why only images >2048 wide broke
+    there. The acquire now happens first. Belt-and-braces, `set_background` downscales anything past
+    the limit instead of trusting it.
+  - **Window geometry mixed logical and physical units.** The centring maths compared a *logical*
+    window size against a *physical* monitor rect, putting the window partly off-screen on any
+    HiDPI display, and the surface was sized from the configured (logical) numbers rather than the
+    window's actual physical size. Both now work in one space. `window_icon()` also replaces two
+    `unwrap()`s on a cosmetic decode, and the monitor lookup falls back primary → first → none
+    instead of `available_monitors().nth(0).unwrap()`.
+  - **Layout wider than any Retina display.** The fixed three-column layout needs 1920 points; a
+    3024px Mac panel is 1512. Handled by scaling the UI to fit rather than re-tuning the widget
+    geometry — see `DOCUMENTATION.md` §14.5 and the new `ui_scale_percent` setting (`0` =
+    automatic). A 1920×1080/100% Windows setup computes a zoom of exactly 1.0, so it is unchanged.
+  - **Also:** `Bgra8Unorm` is now preferred-with-fallbacks rather than `expect`ed (some Linux GL and
+    software adapters don't offer it); the wgpu instance is built with the window's display handle
+    so Linux GL/EGL can enumerate adapters; `reqwest` uses `rustls-tls` with
+    `default-features = false`, so a Linux build needs no system OpenSSL; and `F11` is joined by
+    `Ctrl`+`Cmd`+`F` on macOS, which never delivers `F11` to the app.
+- **Paths: one resolved root instead of a working-directory/executable mix.** `taskdeck_data` was
+  resolved from the executable while `images/` and `userconfig.toml` were resolved from the
+  **working directory** — which is the executable's folder only when you double-click on Windows.
+  Launched from Finder, the Dock, or a terminal in another folder, the config and backgrounds went
+  somewhere else than the tasks. New `paths::AppDirs` resolves one root **once** in `main`
+  (`$TASKDECK_HOME` → cargo project root → existing install → writable exe dir → per-user data
+  directory), creates both folders, and is threaded explicitly through every reader and writer:
+  `read_at_startup`, `oversafe_activesave`, `save_inactive`, `read_lines_range`,
+  `quarantine_corrupt_file`, `save_colorschemes`/`read_colorschemes`,
+  `save_notepad_text`/`read_notepad_text`, `get_check_and_set_config`, `generate_colorscheme`, and
+  `set_background` now take the directory rather than re-deriving it from an exe path. `AppDirs`
+  replaces `TaskApp::exe_file_path`, and `AppDirs::image_path` replaces `utilities::safe_image_path`
+  (same traversal defence, tests moved with it). `tasks::get_data_dir` is gone. The writability
+  probe creates a real temp file, and a macOS `.app` bundle is never written into.
+  6 new unit tests (`paths::tests`); 21 pass in total.
+- **First-run notepad seeded with invalid JSON.** `read_notepad_text` created a missing
+  `notepad_text.json` containing `{}`, then immediately failed to parse it as a `String` — so every
+  fresh install opened with "There was something wrong with …notepad_text.json!" as the notepad's
+  contents. It now seeds `""`. (The three seed-a-missing-file paths also stopped `expect`-ing on the
+  write, which turned an unwritable data directory into a panic.)
 - **E10 — deprecated egui layout APIs migrated (no visual/behaviour change).** The 6 remaining build
   warnings are cleared by moving off the deprecated `Ui` methods to the `UiBuilder` API:
   - the 5 `Ui::allocate_ui_at_rect(rect, add)` calls (calendar cell in `show_calendar`, the map area
