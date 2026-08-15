@@ -48,6 +48,10 @@ const PLANNER_INSPECTOR_HEIGHT: f32 = 46.0;
 /// Point size of the weekday in the masthead — the day popup's headline size,
 /// kept because it is the one thing worth carrying over from that window.
 const PLANNER_WEEKDAY_SIZE: f32 = 50.0;
+/// Gap between the masthead's outermost controls and the window edge. The
+/// window frame's own margin is small enough that the day stepper and the ✕ sat
+/// in the corners; this is what keeps them off it.
+const PLANNER_EDGE_MARGIN: f32 = 14.0;
 
 /* ─────────────────────────── Planner type scale ───────────────────────────
  *
@@ -2000,8 +2004,13 @@ impl TaskApp {
         // three different heights — the arrows near the top, "Today" floating in
         // the middle of nothing, and the right-hand column lower than the date
         // it was supposed to sit beside.
+        // The window frame's own margin is a few points, which put the stepper
+        // and the ✕ hard into the corners of the window — a button whose edge
+        // is the window's edge reads as an accident. The masthead pays for its
+        // own margin instead, top and both sides.
+        ui.add_space(PLANNER_EDGE_MARGIN * 0.5);
         ui.horizontal(|ui| {
-            ui.add_space(4.0);
+            ui.add_space(PLANNER_EDGE_MARGIN);
 
             // The stepper stacks so it stands beside the two-line day text
             // rather than stretching the masthead.
@@ -2060,9 +2069,16 @@ impl TaskApp {
             // sit beside. All three fit on a line at any width the planner
             // opens at, so there is nothing to stack.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // Space first: in a right-to-left row this is the gap between
+                // the button and the window edge.
+                ui.add_space(PLANNER_EDGE_MARGIN);
                 if ui
-                    .button(RichText::new("✕").size(PLANNER_META_SIZE))
-                    .on_hover_text("Close the planner  (Esc)")
+                    .add(
+                        Button::new(RichText::new("✕").size(PLANNER_META_SIZE))
+                            .min_size(vec2(30.0, 30.0))
+                            .corner_radius(CornerRadius::same(8)),
+                    )
+                    .on_hover_text("Close  (Esc)")
                     .clicked()
                 {
                     self.close_planner();
@@ -2346,7 +2362,18 @@ impl TaskApp {
                 {
                     delete = true;
                 }
-                if ui.button(RichText::new("✓ Complete").size(PLANNER_META_SIZE)).clicked() {
+                // Only a task can be completed. Completing means "this is done,
+                // file it in the archive", and an event is not work you finish
+                // — it is a time that arrives and passes on its own. Offering
+                // the ✓ on one asked a question with no answer, and made the
+                // archive read as if the user had *done* their dentist
+                // appointment. An event that shouldn't be there is deleted.
+                if !is_event
+                    && ui
+                        .button(RichText::new("✓ Complete").size(PLANNER_META_SIZE))
+                        .on_hover_text("Finish it and file it in the archive")
+                        .clicked()
+                {
                     complete = true;
                 }
                 // One un-book button that names what it will actually do: the
@@ -3231,7 +3258,23 @@ impl TaskApp {
         // too but means the opposite, and `handle_planner_keys` has it; this
         // must not race it to the commit.
         if response.lost_focus() && !ui.input(|i| i.key_pressed(Key::Escape)) {
+            let by_enter = ui.input(|i| i.key_pressed(Key::Enter));
+            let created = self.planner_naming_created;
             self.commit_planner_naming();
+
+            // Enter on a *just-made* item ends the whole gesture — drag it out,
+            // name it, done — so the selection is dropped with the editor and
+            // the footer goes back to the day. Leaving it selected left a block
+            // lit up and a row of controls aimed at it that nobody asked for.
+            //
+            // Only for Enter, and only for a new item. A rename keeps its
+            // selection (you picked that item deliberately), and losing focus by
+            // *clicking* must not clear it: the click has already chosen what to
+            // select, and this runs afterwards.
+            if by_enter && created {
+                self.planner_selection = None;
+                self.planner_selected_session = None;
+            }
         }
     }
 

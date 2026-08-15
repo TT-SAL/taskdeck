@@ -841,7 +841,7 @@ The window is a masthead, a body, and a footer:
 
 ```
  ◀ ▶     August 15th, 2026 · today
- Today   SATURDAY       3h 30m planned · 4 blocks · 2 due   New: [Task] Event Deadline  ✕
+ Today   SATURDAY       3h 30m planned · 4 blocks · 2 due   New: [Task] Event   ✕
  ─────────────────────────────────────────────────────────────────────────────────────
   Unplanned        │  06 ───────────────────────────────────────────────────────
   + add a task     │  07 ───────────────────────────────────────────────────────
@@ -857,6 +857,12 @@ The three groups share one row and one centre line. An earlier version stacked t
 pair into a column, which does not centre as a block inside a centred row — egui aligns it from
 the row's middle and it grows downwards from there, so the toggle sat below the bottom of the
 50-point weekday it was meant to sit beside.
+
+The masthead pays for its own margin (`PLANNER_EDGE_MARGIN`) at the top and down both sides. The
+window frame's inner margin alone is a few points, which put the day stepper and the ✕ hard into
+the corners of the window; a button whose edge *is* the window's edge reads as an accident. In
+the right-hand group the space is added **first**, because that row is laid out right-to-left, so
+the first thing added is the gap against the edge.
 
 The date-over-weekday block is the calendar day popup's headline, carried over unchanged —
 `format_date`'s two strings, the second in 50-point Anton, with the same `add_space(-9.0)`
@@ -876,7 +882,7 @@ window caption would have done, so the planner has no title bar.
 | `↩ Remove block` / `↩ Unplan` | One adaptive un-book button: frees the clicked block when one is selected, the whole plan otherwise. Cheap and unconfirmed either way — the time goes back onto the card. |
 | Click anything (timeline or tray) | Selects it; the **footer** shows what it is, when it runs, how long it takes, its deadline, and its severity or horizon. |
 | Double-click a block | Re-opens the title for editing. |
-| `Enter` in the title editor | Keeps the typed name and closes the editor. So does clicking anything else, or leaving the day — everything except Escape. |
+| `Enter` in the title editor | Keeps the typed name and closes the editor. So does clicking anything else, or leaving the day — everything except Escape. On a **just-created** item it also clears the selection, because that Enter ends the whole drag-name-done gesture (§16.3.5). |
 | `Esc` in the title editor | Throws the edit away. On a **just-created** item that removes the item too, unconfirmed — the undo for a block dragged out by accident. On a rename it only puts the old name back. |
 | Type in the tray's quick-add | Enter makes an undated, unplanned task and keeps the field focused — a brain-dump is several tasks, not one. |
 | `←` `→` `T` | Previous day, next day, today. |
@@ -918,6 +924,13 @@ where a task's **severity or horizon** is set — one combo, asking whichever qu
 datedness makes meaningful (§7.1). It sits *below* the timeline because the row is only occupied some of the
 time: at the bottom, an empty one costs nothing and a full one doesn't push the day the user is
 aiming at. With nothing selected it carries the gesture hints, none of which announce themselves.
+
+**Only tasks can be completed.** The footer's ✓ is hidden for events. Completing means "this is
+done, file it in the archive", and an event is not work you finish — it is a time that arrives
+and passes whether or not you were there. Offering the ✓ on one asked a question with no answer,
+and filed dentist appointments in the archive as things the user had *done*. An event that
+shouldn't be there is deleted; the task list never offered the ✓ on one, because it never shows
+events (`refilter_tasks`), so the footer was the only place this was reachable.
 
 **Due markers are deliberately not draggable.** A deadline is a fact about the task; dragging it
 on a planner would silently rewrite it while the user thought they were planning. Clicking one
@@ -1006,6 +1019,13 @@ opposite things:
 |---|---|---|
 | `Enter` (or clicking away, or leaving the day) | keeps it, placeholder name if you typed none | keeps the new name |
 | `Esc` | **removes the item** | puts the old name back |
+
+**Enter on a just-created item also deselects it.** Drag, name, Enter is one gesture and Enter is
+its end; leaving the new block lit up with a row of controls aimed at it answers a question
+nobody asked. Two conditions, both necessary: only for `Enter` (losing focus by *clicking* must
+not clear a selection the click has just made — the commit runs after the click is handled), and
+only when `planner_naming_created` says the item is new (a rename keeps the selection you chose
+deliberately).
 
 Escape deleting outright is deliberate and unconfirmed. The item is seconds old, the only thing
 in it is the slot an accidental drag gave it, and Escape is the key everyone reaches for to undo
