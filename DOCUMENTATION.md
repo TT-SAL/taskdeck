@@ -45,7 +45,7 @@ left-to-right as three regions:
 | Region | Source | Description |
 |--------|--------|-------------|
 | **Left** | `show_tasks` | Scrollable list of deadline-less / prioritized **tasks**, sorted by an importance score. Hovering a card reveals ✓ (complete) and ✗ (delete) buttons. |
-| **Center** | `show_calendar` | A virtualized, weeks-long calendar grid (7 columns). Each day cell shows up to 3 items with times. Rows animate (scale + fade) based on scroll velocity. Clicking a day opens a day-detail popup. |
+| **Center** | `show_calendar` | A virtualized, weeks-long calendar grid (7 columns). Each day cell shows up to 3 items with times. Rows animate (scale + fade) based on scroll velocity. Clicking a day opens the planner on it (§16). |
 | **Right** | `show_weather_forecast` | A 2- or 3-day weather forecast (12 two-hour slots/day) with SVG icons, **or** a free-text notepad when 3-day mode is off. |
 
 Top menu bar: **New Task**, **New Event**, **Planner**, **Archived**, **Settings**, **Quit**
@@ -58,7 +58,7 @@ Additional features:
 - **Weather coordinate picker:** an interactive Blue-Marble world map with zoom/pan, click-to-pick, and ~200 labeled city markers.
 - **Color schemes:** user-editable 6-color palettes used to tint calendar items; palettes can be **auto-generated from the current background image** via k-means clustering in CIE-Lab space.
 - **Settings:** background image, startup monitor, fullscreen, FPS counter, number of weeks, background tint %, weather coordinates, 3-day weather toggle.
-- **Day planner:** drag on a day's timeline to block out time, drag unplanned tasks in from a backlog tray, and move/resize blocks. Records *when you will do* something separately from *when it is due* — see §16.
+- **Day planner:** clicking any calendar day opens it. Drag on the day's timeline to block out time, drag unplanned tasks in from the tray, move/resize blocks, and set a due time without leaving the day. Records *when you will do* something separately from *when it is due* — see §16.
 - **Idle sleep:** when unfocused and idle for 10 s, the redraw loop stops to save power.
 
 ---
@@ -421,12 +421,14 @@ Runs at startup and after any add/delete/complete and on date rollover. Steps:
 4. Find the Monday of the current week; iterate `calendar_weeks_to_show × 7` days.
 5. For each day, look up that day's events and deadline-tasks; choose up to **3** (events first),
    sorted by exact time → the cell `preview: Vec<PreviewItem { name, time, color_id }>`.
-6. Also build the **full** day list (`items: Vec<DayItem { id, name, time, is_event }>`) for the day
-   popup — the `id` lets the popup's complete/delete buttons act on the right item.
+6. Record `item_count`, the day's total. The cell's layout is chosen by it (0/1/2/3/4+), and the
+   4+ case draws an overflow marker. This used to be a second, fully-cloned `Vec<DayItem>` of every
+   dated item, built so the day popup could list it; the planner that replaced the popup reads
+   `active_things` directly, so only the count is still owed.
 7. Record per-row month-boundary labels in `row_contains_month_switch`.
 
 Output is cached in `self.calendar_elements: Vec<DayCell>`, where
-`DayCell { day_number, preview, items, is_today, date, label }` — named fields replacing the former
+`DayCell { preview, item_count, is_today, date, label }` — named fields replacing the former
 opaque positional 6-tuple.
 
 ### 8.2 `show_calendar` (view + virtualization + animation)
@@ -440,15 +442,17 @@ opaque positional 6-tuple.
 - **Cell content** dispatches on item count (0→`DayNumber`, 1→`DayHeader`, 2→`+MiddleHeader`,
   3→`+BottomHeaderRotated`, 4+→`+ButtonHeaderRotated` with an overflow "…" button).
 - **Click vs drag:** a manual press/drag state machine (`PressState`, `DRAG_THRESHOLD_POINTS`)
-  distinguishes a tap (opens the day popup) from a scroll-drag (ignored). It is disabled while any
-  modal flag is set. The events are inspected in place inside `ctx.input(|i| …)` (not cloned per
-  frame).
+  distinguishes a tap (opens the planner on that day) from a scroll-drag (ignored). It is disabled
+  while any modal flag is set. The events are inspected in place inside `ctx.input(|i| …)` (not
+  cloned per frame). The tap reads the *date* out of the cell rather than remembering its index, so
+  a rebuild underneath the planner can't leave it showing the wrong day.
 
-### 8.3 Day popup
+### 8.3 There is no day popup
 
-Opens for `expanded_day`. Lists the full day in styled "pill" frames; hovering a row reveals
-complete/delete (tasks) or delete (events). Bottom bar: Close, **Event+**, **Task+** (which
-pre-fill the date fields from the selected day).
+Clicking a day used to raise a read-only popup listing it, with a **Plan day** button that handed
+over to the planner. Two windows answered for one day and only one of them could change it, so the
+popup is gone and the tap opens the planner directly. §16.7 records what became of each of its
+parts.
 
 ---
 
@@ -568,9 +572,10 @@ visual language: a rounded "notch" around the day number, two-line wrapped item 
 | `new_task_flag` / `new_event_flag` | Show the create-task / create-event modal. |
 | `error_flag` + `error_text` | Show the (top-most) error modal. |
 | `display_archive_flag` | Show the Archive window (paginated). |
-| `expand_calendar_day_flag` + `expanded_day` | Show the day-detail popup for a cell index. |
-| `planner_flag` + `planner_day` | Show the day planner, and which day it is on. The day is separate from `expanded_day` (a cell index) so the planner can step past the end of the calendar's range. |
-| `planner_drag` / `planner_selection` / `planner_naming` | In-flight timeline gesture, selected block, and the block whose title is being typed. |
+| `planner_flag` + `planner_day` | Show the day planner, and which day it is on. The day is a date, not a calendar cell index, so the planner can step past the end of the calendar's range and a rebuild underneath it can't repoint it. |
+| `planner_drag` / `planner_selection` / `planner_naming` | In-flight timeline gesture, selected item, and the item whose title is being typed. |
+| `planner_create_kind` | What a drag or double-click on empty timeline makes: `Task`, `Event`, or `Deadline` (§16.3). |
+| `planner_quick_add_input` | The tray's quick-add field. |
 | `settings_flag` | Show Settings. |
 | `color_picker_flag` / `edit_colorscheme_flag` / `rename_colorscheme_flag` | Color-scheme manager sub-modals. |
 | `user_wants_to_complete_task_flag` + `confirm_complete_task` | Pending "mark complete?" confirmation. |
@@ -582,7 +587,9 @@ visual language: a rounded "notch" around the day number, two-line wrapped item 
 | `hovered_calendar_cell` / `press_origin` | Calendar hover + click/drag tracking. |
 
 When any modal flag is set, `hovered_calendar_cell` is cleared at the end of `ui()` so the
-calendar doesn't show a hover state behind a modal.
+calendar doesn't show a hover state behind a modal. `any_modal_open` is `planner_flag ||
+modal_over_planner()`; the second half is the same list without the planner, and is what the
+planner's own keyboard shortcuts stand down for (§16.3).
 
 ---
 
@@ -744,9 +751,13 @@ Behaviour that differs per OS, and why.
 
 ## 16. The Day Planner
 
-A second view of a single day: a timeline you lay time out on, plus a tray of everything
-waiting to be given a slot. Opened from the **Planner** menu button (today) or the day popup's
-**Plan day** button (that day). `planner.rs` holds the model and geometry; `ui.rs` draws it.
+The view of a single day: a timeline you lay time out on, plus a tray of everything waiting to
+be given a slot. Opened by **clicking any day on the calendar**, or from the **Planner** menu
+button (which opens it on today). `planner.rs` holds the model and geometry; `ui.rs` draws it.
+
+It is the *only* per-day view. A read-only popup used to open on a day click and hand over to
+the planner with a **Plan day** button; §16.7 records why that went and where each of its parts
+landed.
 
 ### 16.1 The central idea: due ≠ planned
 
@@ -789,31 +800,92 @@ planner existed shows up as a marker, and dragging its bottom edge gives it a le
 
 ### 16.3 Interaction
 
+The window is a masthead, a body, and a footer:
+
+```
+ ◀ ▶     August 15th, 2026 · today                 3h 30m planned · 4 blocks · 2 due   ✕
+ Today   SATURDAY                                        New:  [Task] Event Deadline
+ ─────────────────────────────────────────────────────────────────────────────────────
+  Unplanned        │  06 ───────────────────────────────────────────────────────
+  + add a task     │  07 ───────────────────────────────────────────────────────
+  DUE TODAY (2)    │  ...
+  ▸ card           │
+  BACKLOG (5)      │
+  ▸ card           │
+ ─────────────────────────────────────────────────────────────────────────────────────
+  Task  Write the report   13:00–15:00 · 2h   due Fri 21 Aug 17:00   ✎   Importance: …
+```
+
+The date-over-weekday block is the calendar day popup's headline, carried over unchanged —
+`format_date`'s two strings, the second in 50-point Anton, with the same `add_space(-9.0)`
+between them. It is the one thing from that window worth keeping, and it does the naming a
+window caption would have done, so the planner has no title bar.
+
 | Gesture | Result |
 |---------|--------|
-| Drag on empty timeline | Creates a block and opens its title for typing. The header's **Drag creates** toggle picks event or task. A task made this way gets the slot and **no deadline** — it is a plan, not a due date — and the inspector says so in as many words. Its slot drives its priority (§7). |
-| Drag a backlog card onto the timeline | Sets `planned_start`; the deadline is untouched. |
+| Drag on empty timeline | Creates an item of the masthead's **New** kind and opens its title for typing. |
+| Double-click empty timeline | The same, at `DEFAULT_BLOCK_MINUTES` — most of what goes on a day is half an hour of something, and aiming a precise drag for it is work the app can do instead. |
+| Drag a tray card onto the timeline | Sets `planned_start`; the deadline is untouched. |
 | Drag a block | Moves it, keeping the grab point under the pointer. |
 | Drag a block's bottom edge | Resizes it. |
-| Click | Selects it. The **inspector** row under the header then shows what it is, when it runs, its importance, and ✓ complete / ✗ delete / ↩ back-to-unplanned. |
-| Double-click | Re-opens the title for editing. |
+| Click anything (timeline or tray) | Selects it; the **footer** shows what it is, when it runs, its deadline, its importance, and ✓ complete / ✗ delete / ↩ back-to-unplanned. |
+| Double-click a block | Re-opens the title for editing. |
+| Type in the tray's quick-add | Enter makes an undated, unplanned task and keeps the field focused — a brain-dump is several tasks, not one. |
+| `←` `→` `T` | Previous day, next day, today. |
+| `Enter` `U` `Del` | Rename / unplan / delete the selection (delete still asks). |
 | `Esc` | Leaves the title editor; a second press closes the planner. |
+
+Shortcuts stand down whenever a widget has focus (`Context::egui_wants_keyboard_input`) or a
+window is stacked over the planner (`TaskApp::modal_over_planner`) — a confirmation raised from
+the footer must not have the day step out from under it when the user reaches for an arrow key.
+
+**The `New` kind is the whole due-versus-planned distinction as a gesture.** `planner::CreateKind`
+decides which time field a create fills in:
+
+| Kind | `deadline` | `planned_start` | Drawn as |
+|------|-----------|-----------------|----------|
+| `Task` | untouched — a plan is not a due date | the slot | block |
+| `Event` | the slot (an event's deadline *is* when it happens) | unused | block |
+| `Deadline` | the slot | none — nothing set aside yet | due marker |
+
+`Deadline` is what lets the planner say "this is *owed* at 17:00 today" without leaving the day;
+it is where the day popup's `Task+` button went, minus the modal with five date combo boxes. A
+deadline claims no time, so the drag's *length* means nothing to it and only the pointer does:
+`planner_drag_preview_for` returns `snap(minutes_at_pointer)` for that case, and both the live
+preview and the commit read it, so they cannot disagree. The item it creates has no slot, so it
+also lands in the tray's "due" group, ready to be dragged onto an hour.
 
 Everything snaps to `SNAP_MINUTES` (15) and is clamped inside the day by `clamp_block`, which is
 shared by create, move, and resize so all three agree on what a legal block is.
 
-The controls live in an inspector row rather than inside the block, for two reasons: a
+The controls live in a footer row rather than inside the block, for two reasons: a
 15-minute block has no room for three buttons, and — more subtly — the block's own drag target
 is registered over the same pixels, so buttons drawn inside it were unclickable. egui hit-tests
 the *most recently added* widget first, so anything that must win a click has to be added after
 the block-sized drag target. `planner_timeline` therefore registers all interactions **before**
-painting; the in-place title editor, drawn afterwards, gets its clicks. The inspector is also
+painting; the in-place title editor, drawn afterwards, gets its clicks. The footer is also
 where a planner-created task's **importance** is set — without it, dragging out a task left it
-stuck on the default.
+stuck on the default. It sits *below* the timeline because the row is only occupied some of the
+time: at the bottom, an empty one costs nothing and a full one doesn't push the day the user is
+aiming at. With nothing selected it carries the gesture hints, none of which announce themselves.
 
 **Due markers are deliberately not draggable.** A deadline is a fact about the task; dragging it
 on a planner would silently rewrite it while the user thought they were planning. Clicking one
 still selects it, and the task can be dragged in from the tray to give it a *planned* time.
+
+### 16.3.1 The tray
+
+Every task with no `planned_start`, in two groups (`planner::backlog_group`):
+
+- **Due by this day** — deadline on or before `planner_day`. "On or before", not "on": something
+  due Wednesday and still unplanned belongs at the top of Friday's tray too.
+- **Backlog** — owed later, or not owed at all.
+
+Within each group the order is the task list's own urgency score (§7), so the most pressing thing
+to schedule is at the top. The first group is the tray's reason for existing: *owed today and with
+no time set aside for it* is the one list a day planner should lead with, and it is exactly what
+the day popup used to show as a flat list you could not act on. Here every row is a card to drag
+onto an hour.
 
 ### 16.4 "Plan" is an adjective, not a noun
 
@@ -827,9 +899,11 @@ Which fields get filled in is the only difference between how a task was made:
 
 | Created via | `deadline` | `planned_start` |
 |---|---|---|
-| New Task dialog | set by the user | empty (drag it in from the backlog later) |
+| New Task dialog | set by the user | empty (drag it in from the tray later) |
+| Tray quick-add | empty | empty — a name and nothing else, ready to place |
 | Planner drag, **Task** | empty — a plan is not a due date | the slot |
 | Planner drag, **Event** | the slot (an event's deadline *is* when it happens) | unused by events |
+| Planner drag, **Deadline** | the slot — this one *is* a due date | empty, so it also shows in the tray |
 
 **Plans deliberately do not appear in the calendar grid.** `summarize_calendar` buckets on
 `deadline` alone, so a task shows in the grid on the day it is *owed* and nowhere else. A day cell
@@ -837,10 +911,11 @@ holds at most three items (§12) and is the always-on view read from across the 
 budget with "what I intend to do" would crowd out "what is actually due". Plans belong to the
 planner, which has a whole timeline for them.
 
-The consequence, which is intended and not an oversight: a task dragged out on the planner has no
-deadline, so it **does not appear in the calendar at all**. It lives in the task list — where its
-slot drives its priority (§7) — and on the planner's timeline. A dragged-out *event* does appear
-in the calendar, because its slot is its deadline.
+The consequence, which is intended and not an oversight: a task dragged out on the planner as a
+**Task** has no deadline, so it **does not appear in the calendar at all**. It lives in the task
+list — where its slot drives its priority (§7) — and on the planner's timeline. A dragged-out
+*event* does appear in the calendar, because its slot is its deadline; so does a dragged-out
+**Deadline**, for the same reason.
 
 ### 16.5 Structure
 
@@ -861,17 +936,50 @@ Two consequences worth keeping:
 `lay_out` groups placements into clusters of transitively-overlapping items and gives each the
 first column free at its start time; every member of a cluster reports the same column count so
 they line up. A block only costs a column while it actually overlaps — two back-to-back
-half-hours share one.
+half-hours share one. **Markers take a column too**, and `planner_entry_rect` honours it: it used
+to draw them full width regardless, which painted a due marker straight over the title of the
+block it happened to fall inside. Where nothing overlaps, the cluster is one column wide and a
+marker still spans the timeline. Item text is drawn through a painter clipped to its own rect, so
+a long title cannot spill into the neighbour it is sharing the hour with.
 
-`summarize` **unions** overlapping blocks rather than summing them, so the header's "planned"
+`summarize` **unions** overlapping blocks rather than summing them, so the masthead's "planned"
 figure answers "how much of my day is committed", not "how many block-hours exist".
+
+The body's height is **measured, not constant**: `ui.available_height()` after the masthead is
+drawn. The masthead's height depends on the metrics of a 50-point face and on the UI scale, and a
+constant that disagreed with either would push the footer off the bottom of the window on someone
+else's display.
 
 ### 16.6 State
 
 The planner keeps no cached model: `planner_entries()` rebuilds from `active_things` every
 frame, so it cannot drift out of sync with the calendar the way a second copy would. The only
 persistent state is the flag, the day being shown, the selection, the in-flight gesture
-(`planner_drag`), and the title being typed. `planner_flag` is listed in `any_modal_open()`.
+(`planner_drag`), the title being typed, the create kind, and the quick-add field. `planner_flag`
+is listed in `any_modal_open()`.
+
+### 16.7 What became of the day popup
+
+Clicking a calendar day used to raise `calendar_day_popup`: the day's date and weekday, a scrolled
+list of everything due on it in pill frames with hover complete/delete, and a bottom bar of
+**Close · Plan day · Event+ · Task+**. It was a second window describing a day the planner already
+drew better, and its only route to changing anything was to close itself and open the planner.
+
+| Popup part | Where it went |
+|------------|---------------|
+| The day text | The planner's masthead, unchanged (§16.3). |
+| The list of the day | The timeline. Everything the list held has a `Placement` on that day, so nothing is lost — and the timeline adds *when you will do it*, which the list could not show. |
+| Per-row ✓ / ✗ | The footer, on the selection. |
+| **Plan day** | Gone: the day click *is* the plan-day click. |
+| **Event+** | Drag with **New: Event**. |
+| **Task+** | Drag with **New: Deadline** for a task due on this day, or the tray's quick-add for one with no deadline. |
+
+Two things fell out of removing it. `DayCell` no longer carries `items: Vec<DayItem>` — a second,
+fully-cloned copy of every dated item, rebuilt on every `summarize_calendar` for the popup to
+read — only the `item_count` the cell layout actually dispatches on. And the open day is a
+`NaiveDate` rather than the popup's `expanded_day` cell index, so a calendar rebuild underneath it
+(a midnight rollover, a reduced week count) can no longer leave it pointing at a different day;
+the popup needed an explicit bounds check and closed itself when that happened.
 
 ---
 

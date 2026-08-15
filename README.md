@@ -12,21 +12,23 @@ The window is laid out in three columns.
 
 **Tasks** sit on the left, ordered by how much they need your attention. A task can carry a deadline and an importance level, and it works its way up the list as the deadline gets closer. Tasks without a deadline instead build urgency the longer they go unfinished, so things do not quietly settle to the bottom and get forgotten.
 
-**The calendar** runs down the middle. It scrolls through as many weeks as you ask it to (a handful, or years of them) and animates as you move. Each day shows the events and deadlines that land on it; click a day to open it, read everything that is on it, and add new events or tasks for that date.
+**The calendar** runs down the middle. It scrolls through as many weeks as you ask it to (a handful, or years of them) and animates as you move. Each day shows the events and deadlines that land on it. Click a day and it opens in the planner, where you can see the whole of it and change it.
 
 **Weather and notes** share the right column. You get a two or three day forecast from Open-Meteo, and when you switch the third day off, that space turns into a notepad for whatever you want kept in front of you.
 
-## Planning a day
+## Opening a day
 
-The calendar tells you what a day holds. The **Planner** — the menu button, or "Plan day" in any day's popup — is where you decide how it goes.
+Click any day on the calendar — or the **Planner** button in the menu, which opens today. Either way you get the same window, which is the only view of a day there is: the date and weekday across the top, everything still waiting for a slot in a tray down the left, and the day itself as a timeline.
 
-It opens a timeline for one day, with everything still waiting for a slot in a tray down the left. Drag on the timeline to block out time; the block is created where you dragged and you name it right there. Drag a task in from the tray to decide when you will actually do it. Drag blocks to move them, drag their bottom edge to make them longer. Overlapping blocks sit side by side so a double-booking is obvious, and a red line shows where you are in the day.
+Drag on the timeline to block out time; the block appears where you dragged and you name it right there. Double-click instead if half an hour is what you meant. Drag a task in from the tray to decide when you will actually do it. Drag blocks to move them, drag their bottom edge to make them longer. Overlapping blocks sit side by side so a double-booking is obvious, and a red line shows where you are in the day.
 
-Select anything on the timeline and a row appears under the header with its times, whether it has a deadline, its importance, and buttons to complete, delete, or send it back to the unplanned tray.
+The tray leads with what is **due by this day and has no time set aside for it** — the things a day plan should start from — and the rest of the backlog follows underneath, most pressing first. There is a field at the top for adding a task without leaving the day: type a name, press Enter, and it is waiting in the tray to be dragged onto an hour.
 
-A task you drag out on the timeline gets that slot and **no deadline** — you have said when you will do it, not when it is owed. It still rises to the top of the task list as its slot comes round, so blocking out time is enough to make something show up when it should.
+Click anything, on the timeline or in the tray, and the row along the bottom shows what it is, when it runs, whether it has a deadline, its importance, and buttons to complete it, delete it, or send it back to the tray. Arrow keys step through the days, `T` goes to today, `Esc` closes.
 
-The important part is what it records. A deadline is when something is **due**; a planned block is when you will **work on** it. Those are different, so TaskDeck stores them separately: a report due Friday that you plan to write on Tuesday shows as a block on Tuesday and still shows as due on Friday. Nothing you do on the planner moves a deadline you set — a due date is a fact about the task, so due markers are shown but not draggable.
+The **New** switch at the top right decides what a drag makes. A *task* is time set aside to work on something. An *event* is something that happens at that time. A *deadline* is a time something is owed by — no time set aside for it yet, so it appears as a marker on the day and as a card in the tray, waiting to be given an hour.
+
+The important part is what it records. A deadline is when something is **due**; a planned block is when you will **work on** it. Those are different, so TaskDeck stores them separately: a report due Friday that you plan to write on Tuesday shows as a block on Tuesday and still shows as due on Friday. A task you drag out gets the slot and no deadline — you have said when you will do it, not when it is owed — and it still rises up the task list as its slot comes round. Nothing you do on the planner moves a deadline you already set: a due date is a fact about the task, so due markers are shown but not draggable.
 
 A few details worth pointing out:
 

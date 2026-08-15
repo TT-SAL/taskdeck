@@ -34,6 +34,52 @@ pub const MIN_BLOCK_MINUTES: u32 = 15;
 /// task from the backlog, or a click that didn't travel far enough to be a drag.
 pub const DEFAULT_BLOCK_MINUTES: u32 = 30;
 
+/// What a drag (or double-click) on empty timeline makes.
+///
+/// The three options are exactly the three things a day can gain, and they are
+/// distinguished by *which* time field they fill in — which is the whole
+/// due-versus-planned distinction, expressed as a gesture:
+///
+/// | Kind | `deadline` | `planned_start` |
+/// |------|-----------|-----------------|
+/// | `Task` | untouched (a plan is not a due date) | the slot |
+/// | `Event` | the slot (an event's deadline *is* when it happens) | unused |
+/// | `Deadline` | the slot | none — nothing is set aside for it yet |
+///
+/// `Deadline` is what lets the planner say "this is *owed* at 17:00 today"
+/// without leaving the day. Before the planner absorbed the day popup that was
+/// the popup's `Task+` button, which took a trip through a modal with five date
+/// combo boxes to express what a drag already knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CreateKind {
+    /// Time set aside to work on something. The default: the planner's job.
+    #[default]
+    Task,
+    /// Something that happens at a time.
+    Event,
+    /// A due time, with no time set aside for it yet.
+    Deadline,
+}
+
+impl CreateKind {
+    /// True when this kind marks a point in the day rather than claiming a span
+    /// of it — so the create gesture's length is irrelevant and only where the
+    /// pointer ended up matters.
+    pub fn is_marker(self) -> bool {
+        matches!(self, Self::Deadline)
+    }
+
+    /// How a create gesture at `(start, minutes)` should be drawn while it is
+    /// still in flight. The preview goes through the same `Placement` the
+    /// committed item will produce, so what the pointer shows is what lands.
+    pub fn preview_placement(self, start: i32, minutes: u32) -> Placement {
+        match self {
+            Self::Deadline => Placement::Marker { at: start, due: true },
+            _ => Placement::Block { start, minutes },
+        }
+    }
+}
+
 /// Where an item sits on the timeline for a given day.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Placement {
@@ -382,6 +428,33 @@ pub fn default_length_for(item: &Active) -> u32 {
     item.duration_minutes.unwrap_or(DEFAULT_BLOCK_MINUTES).max(MIN_BLOCK_MINUTES)
 }
 
+/// Which tray section an unplanned task belongs to on the day being planned.
+///
+/// This is the seam where the old day popup's question ("what is on this day?")
+/// turns into the planner's ("when will I do it?"). A task owed today with no
+/// time set aside for it is the single most useful thing a day planner can point
+/// at, so it gets its own group at the top of the tray rather than being ranked
+/// in amongst everything else by score.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BacklogGroup {
+    /// Owed on or before the day being planned — wants a slot on it.
+    Due,
+    /// Owed later, or not owed at all.
+    Later,
+}
+
+/// Group an unplanned task by its deadline relative to `day`.
+///
+/// "On or before" rather than "on": something that was due on Wednesday and is
+/// still unplanned belongs at the top of Friday's tray too. Planning is about
+/// what still needs doing, not about which day the deadline happened to fall on.
+pub fn backlog_group(deadline: Option<DateTime<Local>>, day: NaiveDate) -> BacklogGroup {
+    match deadline {
+        Some(deadline) if deadline.date_naive() <= day => BacklogGroup::Due,
+        _ => BacklogGroup::Later,
+    }
+}
+
 /// A human "in 2h 10m" / "3d" hint for a task's deadline, used on backlog cards
 /// so the tray conveys urgency without opening anything.
 pub fn relative_due(deadline: DateTime<Local>, now: DateTime<Local>) -> String {
@@ -690,6 +763,44 @@ mod tests {
         assert_eq!(resolved.date_naive(), day());
         assert_eq!(resolved.hour(), 12);
         assert_eq!(resolved.minute(), 30);
+    }
+
+    #[test]
+    fn create_kind_decides_whether_the_gesture_claims_time() {
+        // A task or an event takes the span the user dragged out...
+        assert_eq!(
+            CreateKind::Task.preview_placement(540, 90),
+            Placement::Block { start: 540, minutes: 90 }
+        );
+        assert_eq!(
+            CreateKind::Event.preview_placement(540, 90),
+            Placement::Block { start: 540, minutes: 90 }
+        );
+        // ...a deadline marks a moment, so the length is discarded and the
+        // preview is the same due marker the committed task will draw.
+        assert_eq!(
+            CreateKind::Deadline.preview_placement(540, 90),
+            Placement::Marker { at: 540, due: true }
+        );
+        assert!(CreateKind::Deadline.is_marker());
+        assert!(!CreateKind::Task.is_marker());
+        // Planning is the planner's job, so a plain drag plans.
+        assert_eq!(CreateKind::default(), CreateKind::Task);
+    }
+
+    #[test]
+    fn backlog_group_puts_everything_still_owed_at_the_top() {
+        let day = day(); // 2026-08-14
+        let due_today = at(2026, 8, 14, 17, 0);
+        let overdue = at(2026, 8, 12, 9, 0);
+        let later = at(2026, 8, 20, 9, 0);
+
+        assert_eq!(backlog_group(Some(due_today), day), BacklogGroup::Due);
+        // Still unplanned two days after it was owed: it wants a slot today.
+        assert_eq!(backlog_group(Some(overdue), day), BacklogGroup::Due);
+        assert_eq!(backlog_group(Some(later), day), BacklogGroup::Later);
+        // Nothing owed at all is ordinary backlog, not a call to action.
+        assert_eq!(backlog_group(None, day), BacklogGroup::Later);
     }
 
     #[test]
