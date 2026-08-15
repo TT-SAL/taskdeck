@@ -134,12 +134,44 @@ const WEATHER_CELL_GAP: f32 = 10.0;
 /// Columns of cells in a day's grid.
 const WEATHER_COLUMNS: f32 = 4.0;
 /// Side of the sky icon inside a cell.
-const WEATHER_ICON: f32 = 44.0;
+const WEATHER_ICON: f32 = 48.0;
 /// Width of a day's grid, and therefore of the column the notepad shares with
 /// it. Derived, so the notepad cannot drift wider than the forecast above it —
 /// which is exactly what it had done.
 const WEATHER_GRID_WIDTH: f32 =
     WEATHER_COLUMNS * WEATHER_CELL.x + (WEATHER_COLUMNS - 1.0) * WEATHER_CELL_GAP;
+
+/* The column's two vertical gaps.
+ *
+ * These were both 75 points, and looked like nothing of the sort: the old cell
+ * was a `Frame` laid out **bottom-up**, which anchored its content to the
+ * bottom of an available rect the overflowing column had already exhausted, so
+ * each grid was painted the better part of a cell-height *above* where the
+ * layout had put it and swallowed most of the space above it. The numbers were
+ * tuned against that, so making the cells honest (painting them at the rect
+ * they are allocated) left all of it showing at once and pushed every grid down
+ * the column. These are what the old arrangement actually measured. */
+
+/// Between a weekday and its grid.
+const WEATHER_LABEL_GAP: f32 = 6.0;
+/// Between one day's grid and the next day's weekday.
+const WEATHER_DAY_GAP: f32 = 16.0;
+
+/// The weekday over a day's grid, centred on the grid rather than pushed into
+/// place by an `add_space` guessed per call site — there were two different
+/// guesses for what was supposed to be the same position.
+fn weather_day_label(ui: &mut Ui, text: &str) {
+    ui.scope(|ui| {
+        ui.set_width(WEATHER_GRID_WIDTH);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                RichText::new(text)
+                    .size(14.0)
+                    .color(Color32::from_white_alpha(165)),
+            );
+        });
+    });
+}
 
 /* ─────────────────────────── The notepad ─────────────────────────── */
 
@@ -980,24 +1012,27 @@ impl TaskApp {
                         ink,
                     );
 
-                    // The sky, in the bottom-left corner.
+                    // The sky, filling the bottom of the cell: centred, and
+                    // sitting on the floor of it. The readings are laid over its
+                    // top corners, which have very little sky in them — that
+                    // overlap is the arrangement, not an accident of it.
                     egui::Image::new(weather::icon_for_wmo(*wmo_code, *is_day).clone()).paint_at(
                         ui,
-                        Rect::from_min_size(
-                            pos2(rect.left() + 3.0, rect.bottom() - WEATHER_ICON - 3.0),
+                        Rect::from_center_size(
+                            pos2(rect.center().x, rect.bottom() - WEATHER_ICON * 0.5 - 2.0),
                             Vec2::splat(WEATHER_ICON),
                         ),
                     );
 
-                    // The temperature beside it, growing leftwards from a fixed
-                    // right edge — it is the one thing in the cell whose width
-                    // isn't known in advance, so it must grow towards an edge
-                    // rather than push one.
+                    // The temperature under the hour and against the right edge:
+                    // it is the one thing in the cell whose width isn't known in
+                    // advance, so it grows towards a fixed edge rather than
+                    // pushing one.
                     ui.painter().text(
-                        pos2(rect.right() - 8.0, rect.bottom() - WEATHER_ICON * 0.5 - 3.0),
-                        egui::Align2::RIGHT_CENTER,
+                        pos2(rect.right() - 9.0, rect.top() + 20.0),
+                        egui::Align2::RIGHT_TOP,
                         format!("{temp:.0}"),
-                        FontId::new(17.0, FontFamily::Monospace),
+                        FontId::new(18.0, FontFamily::Monospace),
                         ink,
                     );
 
@@ -1014,40 +1049,26 @@ impl TaskApp {
                 // No usable forecast yet — either the first fetch hasn't completed
                 // or the data arrived in an unexpected shape. Show a small notice in
                 // place of the grids; the notepad below stays reachable regardless.
-                ui.add_space(75.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(120.0);
-                    ui.label(RichText::new("WEATHER IS BROKEN").size(14.0).color(Color32::from_white_alpha(165)));
-                });
+                ui.add_space(WEATHER_DAY_GAP);
+                weather_day_label(ui, "WEATHER IS BROKEN");
             } else {
-                ui.horizontal(|ui| {
-                    ui.add_space(147.0);
-                    ui.label(RichText::new(&self.next_three_weekdays.0).size(14.0).color(Color32::from_white_alpha(165)));
-                });
-                ui.add_space(75.0);
+                weather_day_label(ui, &self.next_three_weekdays.0.clone());
+                ui.add_space(WEATHER_LABEL_GAP);
 
                 let day_1 = &self.weather_data_cache[0];
                 self.display_stuff(day_1, ui, "firstweathergrid".to_string(), true);
 
-                ui.add_space(5.0);
-
-                ui.horizontal(|ui| {
-                    ui.add_space(150.0);
-                    ui.label(RichText::new(&self.next_three_weekdays.1).size(14.0).color(Color32::from_white_alpha(165)));
-                });
-                ui.add_space(75.0);
+                ui.add_space(WEATHER_DAY_GAP);
+                weather_day_label(ui, &self.next_three_weekdays.1.clone());
+                ui.add_space(WEATHER_LABEL_GAP);
 
                 let day_2 = &self.weather_data_cache[1];
                 self.display_stuff(day_2, ui, "secondweathergrid".to_string(), false);
 
                 if self.three_day_weather {
-                    ui.add_space(5.0);
-
-                    ui.horizontal(|ui| {
-                        ui.add_space(150.0);
-                        ui.label(RichText::new(&self.next_three_weekdays.2).size(14.0).color(Color32::from_white_alpha(165)));
-                    });
-                    ui.add_space(75.0);
+                    ui.add_space(WEATHER_DAY_GAP);
+                    weather_day_label(ui, &self.next_three_weekdays.2.clone());
+                    ui.add_space(WEATHER_LABEL_GAP);
 
                     let day_3 = &self.weather_data_cache[2];
                     self.display_stuff(day_3, ui, "thirdweathergrid".to_string(), false);

@@ -506,8 +506,20 @@ parts.
   than one reading `7`, its column grew to fit, and **the grid changed shape when the weather did**.
   The temperature is right-aligned against a fixed edge for the same reason: it is the one thing in
   the cell whose width isn't known in advance, so it grows towards an edge rather than pushing one.
-  `WEATHER_GRID_WIDTH` is derived from the cell size and is what the notepad below measures itself
-  against.
+  Within the cell: the hour top-left, the temperature under it against the right edge, and the sky
+  centred on the floor of the cell with the two readings laid over its top corners — that overlap
+  is the arrangement, not an accident of it. `WEATHER_GRID_WIDTH` is derived from the cell size and
+  is what the notepad below measures itself against.
+- **The column's vertical gaps were hiding inside the old cell.** `WEATHER_LABEL_GAP` (weekday to
+  its grid) and `WEATHER_DAY_GAP` (grid to the next weekday) were both a single `add_space(75.0)`,
+  and looked like nothing of the sort on screen: the old cell was a `Frame` laid out **bottom-up**,
+  which anchors its content to the bottom of an available rect that the (overflowing) column had
+  already exhausted, so each grid was painted the better part of a cell-height *above* where the
+  layout had placed it and swallowed most of the space above it. The 75s were tuned against that.
+  Painting each cell honestly at the rect it is allocated left all of it showing at once and pushed
+  every grid far down the column — so the gaps are now the numbers the old arrangement actually
+  measured. The weekday itself is centred on `WEATHER_GRID_WIDTH` rather than pushed into place by
+  a per-call-site `add_space`; there had been two different guesses at the same position.
 - **`CITIES`**: a static list (~200 entries) of `name/lat/lon` used as map markers.
 
 ### 9.1 The notepad (`show_notepad`)
