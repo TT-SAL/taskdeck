@@ -15,6 +15,15 @@ pub struct ColorScheme {
     pub is_user_configurable: bool,
 }
 
+/// Alpha of each step of an urgency ramp, least to most pressing, and of the
+/// events slot.
+///
+/// These tint items drawn over a background photo, so opacity is half of what
+/// makes a step read as louder than the one below it — the other half is the
+/// colour. The top step is deliberately the most solid thing on the calendar.
+const RAMP_ALPHA: [u8; 5] = [74, 88, 104, 120, 136];
+const EVENT_ALPHA: u8 = 104;
+
 impl ColorScheme {
     pub fn default_scheme() -> Self {
         let colors: [[u8; 4]; 6] = [
@@ -26,69 +35,105 @@ impl ColorScheme {
             [0, 0, 0, 0],
         ];
 
-        Self { name: "COLORSCHEME ZERO".to_string(), colors, is_user_configurable: true }
+        Self { name: "COLORSCHEME ZERO".to_string(), colors, is_user_configurable: false }
     }
 
-    /// The schemes a fresh install starts with.
+    /// The schemes every install has, reinstalled at every startup by
+    /// [`install_builtins`].
     ///
-    /// Previously a first run got only `default_scheme` — six fully transparent
-    /// entries — so the colour-scheme manager opened on a single palette that
-    /// tinted nothing, and looked broken rather than empty. `COLORSCHEME ZERO`
-    /// stays first (id 0) so the untinted look remains the default and nobody's
-    /// existing appearance changes; the rest are there to pick from.
+    /// `COLORSCHEME ZERO` stays first (id 0) so the untinted look remains the
+    /// default and nobody's existing appearance changes; the rest are there to
+    /// pick from. None of them is user-configurable: they are the floor you can
+    /// always get back to, so they are duplicated rather than edited, and the
+    /// manager lists them apart from the schemes you made.
     ///
     /// Indices are the palette slots `Active::calendar_item_color` selects:
-    /// 0–4 run from least to most important, and 5 is events. Each ramp goes
-    /// quiet→loud in that order so a glance at the calendar reads as urgency,
-    /// and events sit clearly apart from the ramp. Alphas stay in the 70–110
-    /// range: these tint items over a background photo, so they have to colour
-    /// without hiding it.
+    /// 0–4 run from least to most important, and 5 is events.
+    ///
+    /// **Each step has to be tellable from its neighbours at a glance**, which
+    /// is the whole job of the ramp and what the first version of these got
+    /// wrong: EMBER's amber and burnt orange differed by a hue nudge at nearly
+    /// the same lightness, and on a small calendar pill over a photo they were
+    /// one colour. Every step now moves on three axes at once — hue, lightness
+    /// and alpha (`RAMP_ALPHA`) — so no two adjacent steps rely on any single
+    /// one of them being noticed. Events sit off the ramp entirely, in the
+    /// complementary direction, because an event is not a degree of urgency.
     pub fn builtin_schemes() -> Vec<Self> {
-        let scheme = |name: &str, colors: [[u8; 4]; 6]| Self {
-            name: name.to_string(),
-            colors,
-            is_user_configurable: true,
+        // Takes the ramp as plain RGB and applies the shared alpha curve, so a
+        // palette is edited as five colours rather than as twenty numbers, and
+        // no scheme can quietly disagree with the others about opacity.
+        let scheme = |name: &str, ramp: [[u8; 3]; 5], event: [u8; 3]| {
+            let mut colors = [[0u8; 4]; 6];
+            for (index, rgb) in ramp.iter().enumerate() {
+                colors[index] = [rgb[0], rgb[1], rgb[2], RAMP_ALPHA[index]];
+            }
+            colors[5] = [event[0], event[1], event[2], EVENT_ALPHA];
+            Self { name: name.to_string(), colors, is_user_configurable: false }
         };
 
         vec![
             Self::default_scheme(),
-            scheme("EMBER", [
-                [ 96, 108, 122,  75],   // slate
-                [126, 122,  96,  80],   // ochre
-                [176, 132,  62,  90],   // amber
-                [196,  92,  46, 100],   // burnt orange
-                [188,  56,  50, 110],   // ember red
-                [ 92, 132, 168,  90],   // events: cool blue against the warm ramp
-            ]),
-            scheme("TIDE", [
-                [ 74, 110, 118,  75],   // deep teal
-                [ 78, 132, 128,  80],   // sea green
-                [ 96, 152, 152,  90],   // shallow water
-                [150, 160, 116, 100],   // kelp
-                [206, 158,  86, 110],   // sand, the loudest thing on a coast
-                [116,  96, 156,  90],   // events: violet
-            ]),
-            scheme("MOSS", [
-                [ 88, 100,  84,  75],
-                [104, 124,  88,  80],
-                [128, 148,  92,  90],
-                [166, 158,  84, 100],
-                [188, 124,  64, 110],
-                [ 96, 124, 156,  90],
-            ]),
-            scheme("DUSK", [
-                [ 84,  92, 124,  75],
-                [104,  98, 140,  80],
-                [134, 104, 152,  90],
-                [168, 108, 148, 100],
-                [198, 104, 122, 110],
-                [ 96, 152, 160,  90],
-            ]),
+            // Cold ash climbing into a fire: grey → gold → orange → red.
+            scheme(
+                "EMBER",
+                [
+                    [ 84, 100, 118],   // slate, barely warm at all
+                    [124, 124,  96],   // ochre
+                    [190, 150,  56],   // gold
+                    [212,  96,  36],   // orange
+                    [206,  44,  56],   // red
+                ],
+                [ 72, 140, 196],       // events: cold blue against the whole ramp
+            ),
+            // Out at sea and coming ashore: deep water → shallows → sand → coral.
+            scheme(
+                "TIDE",
+                [
+                    [ 58,  86, 116],
+                    [ 56, 128, 132],
+                    [ 92, 170, 142],
+                    [198, 176,  94],
+                    [222,  92,  76],
+                ],
+                [124,  96, 190],       // events: violet
+            ),
+            // Forest floor to autumn: moss → lichen → gorse → rowan.
+            scheme(
+                "MOSS",
+                [
+                    [ 64,  82,  76],
+                    [ 98, 126,  78],
+                    [140, 166,  74],
+                    [206, 174,  62],
+                    [204,  92,  44],
+                ],
+                [ 86, 130, 178],       // events: sky
+            ),
+            // Nightfall: indigo → violet → orchid → magenta → rose.
+            scheme(
+                "DUSK",
+                [
+                    [ 70,  82, 124],
+                    [100,  88, 158],
+                    [162, 100, 172],
+                    [206,  94, 142],
+                    [228,  70,  92],
+                ],
+                [ 72, 162, 168],       // events: cyan
+            ),
         ]
     }
+
+    /// True for the schemes `builtin_schemes` ships. The stored flag is the
+    /// inverse of "the user may edit, rename or delete this", which is exactly
+    /// what being built in means here.
+    pub fn is_builtin(&self) -> bool {
+        !self.is_user_configurable
+    }
+
     pub fn duplicate(&self) -> Self {
         Self {
-            name: format!("DUPLICATE - '{}'", self.name),
+            name: format!("{} (copy)", self.name),
             colors: self.colors,
             is_user_configurable: true,
         }
@@ -96,6 +141,72 @@ impl ColorScheme {
     pub fn rename(&mut self, new_name: String) {
         self.name = new_name;
     }
+}
+
+/// Put the built-in schemes into `schemes`, at the ids reserved for them
+/// (`builtin_schemes()[i]` lives at id `i`), and report whether anything
+/// changed — the caller saves when it did.
+///
+/// Run at **every** startup, not only on a fresh install. Seeding them once
+/// into an empty map meant anyone who already had a single scheme never saw
+/// them at all, an edit to a built-in palette could never reach an existing
+/// install, and a `colorschemes.json` written before the built-ins existed
+/// stayed a one-entry file forever.
+///
+/// A user's own scheme sitting on a reserved id — which is what an install
+/// predating the built-ins looks like — is **moved**, never overwritten:
+/// nobody loses a palette to this. `selected_id` follows it, so the scheme the
+/// user is looking at is still the one selected afterwards.
+pub fn install_builtins(schemes: &mut HashMap<u32, ColorScheme>, selected_id: &mut u32) -> bool {
+    let builtins = ColorScheme::builtin_schemes();
+    let mut changed = false;
+
+    // First id no built-in claims and no existing scheme occupies.
+    let mut next_free = schemes
+        .keys()
+        .copied()
+        .max()
+        .unwrap_or(0)
+        .max(builtins.len() as u32 - 1)
+        + 1;
+
+    for (index, builtin) in builtins.into_iter().enumerate() {
+        let id = index as u32;
+
+        match schemes.get(&id) {
+            // The built-in is already there, possibly in an older definition:
+            // replace it, so palette corrections reach installs that have run
+            // before. Nothing is lost — a built-in holds no user decisions.
+            Some(existing) if existing.name == builtin.name => {
+                if existing.colors != builtin.colors
+                    || existing.is_user_configurable != builtin.is_user_configurable
+                {
+                    schemes.insert(id, builtin);
+                    changed = true;
+                }
+            }
+            // Something else is on the id. Move it out of the way and keep the
+            // selection pointing at it.
+            Some(_) => {
+                let displaced = schemes.remove(&id).expect("just matched");
+                let new_id = next_free;
+                next_free += 1;
+
+                if *selected_id == id {
+                    *selected_id = new_id;
+                }
+                schemes.insert(new_id, displaced);
+                schemes.insert(id, builtin);
+                changed = true;
+            }
+            None => {
+                schemes.insert(id, builtin);
+                changed = true;
+            }
+        }
+    }
+
+    changed
 }
 
 pub fn save_colorschemes(payload: &HashMap<u32, ColorScheme>, data_dir: &Path) -> Result<(), Box<dyn Error>> {
@@ -243,4 +354,132 @@ fn cluster_score(lab: Lab, population: usize) -> f32 {
     pop * 0.6
         + saturation * 0.2
         + (luminance - 50.0).abs() * 0.2
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// How far apart two palette entries have to be to count as different
+    /// colours, as the sum of their per-channel differences. Small pills over a
+    /// tinted photograph are a hostile place to read a colour, so the bar is
+    /// well above "a nudge of hue": at 60 the two are visibly different
+    /// swatches rather than two shades of one.
+    const MIN_STEP_DISTANCE: i32 = 60;
+
+    fn distance(a: [u8; 4], b: [u8; 4]) -> i32 {
+        (0..3)
+            .map(|channel| (a[channel] as i32 - b[channel] as i32).abs())
+            .sum()
+    }
+
+    #[test]
+    fn every_urgency_step_is_tellable_from_its_neighbour() {
+        for scheme in ColorScheme::builtin_schemes() {
+            if scheme.name == "COLORSCHEME ZERO" {
+                continue; // the untinted one is transparent by design
+            }
+            for step in 0..4 {
+                let gap = distance(scheme.colors[step], scheme.colors[step + 1]);
+                assert!(
+                    gap >= MIN_STEP_DISTANCE,
+                    "{}: steps {step} and {} are {gap} apart",
+                    scheme.name,
+                    step + 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn events_sit_off_the_urgency_ramp() {
+        for scheme in ColorScheme::builtin_schemes() {
+            if scheme.name == "COLORSCHEME ZERO" {
+                continue;
+            }
+            for step in 0..5 {
+                let gap = distance(scheme.colors[5], scheme.colors[step]);
+                assert!(
+                    gap >= MIN_STEP_DISTANCE,
+                    "{}: events read as urgency step {step} ({gap} apart)",
+                    scheme.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn urgency_gets_more_solid_as_it_rises() {
+        for scheme in ColorScheme::builtin_schemes() {
+            if scheme.name == "COLORSCHEME ZERO" {
+                continue;
+            }
+            for step in 0..4 {
+                assert!(
+                    scheme.colors[step][3] < scheme.colors[step + 1][3],
+                    "{}: step {step} is no less solid than the one above it",
+                    scheme.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn builtins_are_installed_once_and_then_left_alone() {
+        let mut schemes = HashMap::new();
+        let mut selected = 0;
+
+        assert!(install_builtins(&mut schemes, &mut selected));
+        assert_eq!(schemes.len(), ColorScheme::builtin_schemes().len());
+        assert_eq!(schemes[&0].name, "COLORSCHEME ZERO");
+        assert!(schemes.values().all(ColorScheme::is_builtin));
+
+        // Idempotent: a second run has nothing to do, so nothing is saved.
+        assert!(!install_builtins(&mut schemes, &mut selected));
+    }
+
+    #[test]
+    fn an_older_definition_of_a_builtin_is_refreshed() {
+        let mut schemes = HashMap::new();
+        let mut selected = 1;
+        install_builtins(&mut schemes, &mut selected);
+
+        // What an install that ran an earlier version holds: the right name,
+        // last version's colours, and editable.
+        let stale = ColorScheme {
+            name: "EMBER".to_string(),
+            colors: [[1, 2, 3, 4]; 6],
+            is_user_configurable: true,
+        };
+        schemes.insert(1, stale);
+
+        assert!(install_builtins(&mut schemes, &mut selected));
+        assert_eq!(schemes[&1].colors, ColorScheme::builtin_schemes()[1].colors);
+        assert!(schemes[&1].is_builtin());
+        assert_eq!(selected, 1, "refreshing in place must not move the selection");
+    }
+
+    #[test]
+    fn a_users_scheme_on_a_reserved_id_is_moved_not_overwritten() {
+        // An install from before the built-ins existed: id 0 is the untinted
+        // default, and the user's own scheme took id 1.
+        let mine = ColorScheme {
+            name: "MINE".to_string(),
+            colors: [[9, 9, 9, 90]; 6],
+            is_user_configurable: true,
+        };
+        let mut schemes = HashMap::from([
+            (0, ColorScheme::default_scheme()),
+            (1, mine.clone()),
+        ]);
+        let mut selected = 1;
+
+        assert!(install_builtins(&mut schemes, &mut selected));
+
+        assert_eq!(schemes[&1].name, "EMBER", "the built-in takes its reserved id");
+        assert_ne!(selected, 1, "the selection follows the scheme that moved");
+        let moved = &schemes[&selected];
+        assert_eq!(moved.name, "MINE");
+        assert_eq!(moved.colors, mine.colors);
+        assert!(moved.is_user_configurable);
+    }
 }

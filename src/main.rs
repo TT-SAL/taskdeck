@@ -1,7 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use mimalloc::MiMalloc;
-use task_deck::{color::{self, ColorScheme}, initialization::{App, Config, get_check_and_set_config}, paths::AppDirs, utilities, tasks::{self, Active}, ui::{TaskApp, TaskAppConfig}, weather::get_weather};
+use task_deck::{color, initialization::{self, App, Config, get_check_and_set_config}, paths::AppDirs, utilities, tasks::{self, Active}, ui::{TaskApp, TaskAppConfig}, weather::get_weather};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 #[global_allocator]
@@ -61,13 +61,29 @@ async fn run() {
         }
     };
 
-    // A fresh install (or a wiped colorschemes.json) starts with the built-in
-    // palettes rather than a single transparent one. Id 0 is COLORSCHEME ZERO,
-    // so the untinted default look is unchanged and the rest are there to pick.
-    if colorschemes.is_empty() {
-        for (id, scheme) in ColorScheme::builtin_schemes().into_iter().enumerate() {
-            colorschemes.insert(id as u32, scheme);
+    // The built-in palettes are (re)installed on every run, not seeded once into
+    // an empty map: that way they are there after a wiped file, after an upgrade
+    // from a version that didn't have them, and with the current colours rather
+    // than whatever an old install happens to hold. Id 0 is COLORSCHEME ZERO, so
+    // the untinted default look is unchanged.
+    if color::install_builtins(&mut colorschemes, &mut selected_colorscheme_id) {
+        if let Err(e) = color::save_colorschemes(&colorschemes, &dirs.data) {
+            startup_errors.push(format!("Could not save the built-in colour schemes:\n{e}"));
         }
+        // `install_builtins` may have moved a scheme off a reserved id; the
+        // config has to follow, or the next run selects the built-in that took
+        // its place.
+        let _ = initialization::write_config_value(
+            &dirs.config_file(),
+            "selected_colorscheme_id",
+            selected_colorscheme_id as i64,
+        );
+    }
+
+    // A selection pointing at a scheme that is no longer there (hand-edited
+    // file, deleted scheme) falls back to the untinted default rather than to
+    // whatever `set_colorscheme` guesses later.
+    if !colorschemes.contains_key(&selected_colorscheme_id) {
         selected_colorscheme_id = 0;
     }
 

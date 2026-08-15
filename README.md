@@ -36,7 +36,7 @@ The important part is what it records. A deadline is when something is **due**; 
 
 A few details worth pointing out:
 
-- Drop any image into the `images` folder and pick it as your background from Settings. TaskDeck can also read that image and build a colour palette from it, which it uses to tint the items on the calendar. It ships with a few palettes to start from — `EMBER`, `TIDE`, `MOSS` and `DUSK` — alongside the untinted `COLORSCHEME ZERO` it opens on.
+- Drop any image into the `images` folder and pick it as your background from Settings. TaskDeck can also read that image and build a colour palette from it, which it uses to tint the items on the calendar. It ships with a few palettes to start from — `EMBER`, `TIDE`, `MOSS` and `DUSK` — alongside the untinted `COLORSCHEME ZERO` it opens on. Those five are built in and stay as they are; duplicate one to get a copy that is yours to edit.
 - Set your weather location by clicking it on a world map instead of typing in coordinates. Around two hundred cities are marked to get you close.
 - Completed and deleted items are not thrown away. They go to an archive you can page back through.
 

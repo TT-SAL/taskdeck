@@ -225,6 +225,24 @@ pub fn get_check_and_set_config(config_path: &Path) -> Config {
     config
 }
 
+/// Write one key into the settings file, leaving everything else in it —
+/// comments, key order, keys we don't own — exactly as it was.
+///
+/// Public because startup needs it too: `main` can have to correct a setting
+/// (a selected colour scheme that had to move id) before there is any `TaskApp`
+/// to route it through, and one writer means the two paths cannot disagree
+/// about how a value is spelled in TOML.
+pub fn write_config_value(
+    path: &Path,
+    key: &str,
+    value: impl Into<toml_edit::Value>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut doc = fs::read_to_string(path)?.parse::<toml_edit::DocumentMut>()?;
+    doc[key] = toml_edit::value(value);
+    fs::write(path, doc.to_string())?;
+    Ok(())
+}
+
 /// Persist the normalized/clamped config back to disk using `toml_edit`, so the
 /// runtime setters (also `toml_edit`) and this startup writer share one
 /// mechanism and one set of value types. Unlike the old `toml::to_string`

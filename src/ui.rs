@@ -3,7 +3,6 @@ use std::{collections::HashMap, error::Error, fs, path::PathBuf, process::{Comma
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Timelike, Weekday};
 use egui::{self, Align, Button, Color32, ColorImage, ComboBox, Context, CornerRadius, Event, FontData, FontDefinitions, FontFamily, FontId, Grid, Key, Label, Layout, Margin, PointerButton, Pos2, Rect, RichText, Stroke, StrokeKind, TextureHandle, Ui, Vec2, ViewportCommand, pos2, vec2};
 use image::{ImageBuffer, Rgba};
-use toml_edit::{DocumentMut};
 
 use crate::{calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, InActive, Session}, weather::{self, WeatherService}};
 
@@ -3660,11 +3659,7 @@ impl TaskApp {
         key: &str,
         value: impl Into<toml_edit::Value>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let toml_content = fs::read_to_string(&self.userconfig_path)?;
-        let mut doc = toml_content.parse::<DocumentMut>()?;
-        doc[key] = toml_edit::value(value);
-        fs::write(&self.userconfig_path, doc.to_string())?;
-        Ok(())
+        crate::initialization::write_config_value(&self.userconfig_path, key, value)
     }
 
     /// As `write_config_value`, but routes any failure to the error window
@@ -4796,45 +4791,62 @@ impl TaskApp {
                         ui.group(|ui| {
                             ui.set_max_size(vec2(310.0, 620.0));
                             ui.vertical(|ui| {
-                                ui.heading("Schemes");
-
                                 let previous_id = self.selected_colorscheme_id;
 
+                                // Sorted, and taken as a list rather than
+                                // iterated straight off the HashMap: map order
+                                // is arbitrary *and differs between runs*, so
+                                // the schemes shuffled themselves every launch.
+                                // By id, the built-ins keep the order they are
+                                // defined in and a new scheme lands at the
+                                // bottom, where the user just made it.
+                                let mut listed: Vec<(u32, String, bool)> = self
+                                    .colorschemes
+                                    .iter()
+                                    .map(|(id, scheme)| (*id, scheme.name.clone(), scheme.is_builtin()))
+                                    .collect();
+                                listed.sort_unstable_by_key(|(id, _, _)| *id);
+
+                                let (builtin, mine): (Vec<_>, Vec<_>) =
+                                    listed.into_iter().partition(|(_, _, builtin)| *builtin);
+
+                                // Both sections are labelled. The two lists used
+                                // to be an unlabelled pair split on a flag that
+                                // nothing ever set, so every scheme landed in
+                                // the top one and the lower list was simply
+                                // always empty.
+                                ui.heading("Built in");
                                 egui::ScrollArea::vertical()
                                     .scroll_source(egui::scroll_area::ScrollSource::ALL)
-                                    .max_height(300.0)
+                                    .max_height(200.0)
                                     .max_width(300.0)
-                                    .id_salt("scroll_area_1")
+                                    .id_salt("builtin_schemes")
                                     .show(ui, |ui| {
-                                        for (id, scheme) in &self.colorschemes {
-                                            if scheme.is_user_configurable {
-                                                ui.selectable_value(
-                                                    &mut self.selected_colorscheme_id,
-                                                    *id,
-                                                    &scheme.name,
-                                                );
-                                            }
+                                        for (id, name, _) in &builtin {
+                                            ui.selectable_value(&mut self.selected_colorscheme_id, *id, name);
                                         }
                                     });
 
-                                ui.add_space(5.0);
+                                ui.add_space(8.0);
                                 ui.separator();
-                                ui.add_space(5.0);
+                                ui.add_space(8.0);
 
+                                ui.heading("Yours");
+                                if mine.is_empty() {
+                                    ui.label(
+                                        RichText::new("Duplicate one to make it yours to edit.")
+                                            .weak()
+                                            .small(),
+                                    );
+                                }
                                 egui::ScrollArea::vertical()
                                     .scroll_source(egui::scroll_area::ScrollSource::ALL)
                                     .max_height(300.0)
                                     .max_width(300.0)
-                                    .id_salt("scroll_area_2")
+                                    .id_salt("user_schemes")
                                     .show(ui, |ui| {
-                                        for (id, scheme) in &self.colorschemes {
-                                            if !scheme.is_user_configurable {
-                                                ui.selectable_value(
-                                                    &mut self.selected_colorscheme_id,
-                                                    *id,
-                                                    &scheme.name,
-                                                );
-                                            }
+                                        for (id, name, _) in &mine {
+                                            ui.selectable_value(&mut self.selected_colorscheme_id, *id, name);
                                         }
                                     });
 
@@ -4845,31 +4857,53 @@ impl TaskApp {
                         });
 
                         ui.vertical(|ui| {
-                            let duplicate_button = ui.add(Button::new("Duplicate colorscheme").min_size(Vec2::new(50.0, 30.0)));
-                            if self.currently_selected_colorscheme_is_user_configurable() {
-                                let edit_button = ui.add(Button::new("Edit colorscheme").min_size(Vec2::new(50.0, 30.0)));
-                                let rename_button = ui.add(Button::new("Rename colorscheme").min_size(Vec2::new(50.0, 30.0)));
-                                let delete_button = ui.add(Button::new("Delete colorscheme").min_size(Vec2::new(50.0, 30.0)));
+                            let mine = self.currently_selected_colorscheme_is_user_configurable();
 
-                                if rename_button.clicked() {
-                                    self.rename_colorscheme_flag = true;
-                                }
+                            let duplicate_button = ui.add(Button::new("Duplicate").min_size(Vec2::new(50.0, 30.0)));
 
-                                if delete_button.clicked() {
-                                    self.user_wants_to_delete_colorscheme_flag = true;
-                                }
+                            // The three verbs a built-in doesn't answer to are
+                            // shown disabled rather than hidden: a column that
+                            // grows and shrinks as you move down the list is
+                            // harder to aim at than one that greys out, and the
+                            // hover says why.
+                            let edit_button = ui
+                                .add_enabled(mine, Button::new("Edit").min_size(Vec2::new(50.0, 30.0)));
+                            let rename_button = ui
+                                .add_enabled(mine, Button::new("Rename").min_size(Vec2::new(50.0, 30.0)));
+                            let delete_button = ui
+                                .add_enabled(mine, Button::new("Delete").min_size(Vec2::new(50.0, 30.0)));
 
-                                if edit_button.clicked() {
-                                    self.edit_colorscheme_flag = true;
-                                    self.colorscheme_being_edited = Some(self.colorschemes.get(&self.selected_colorscheme_id).unwrap_or(&ColorScheme::default_scheme()).clone());
-                                }
+                            if !mine {
+                                ui.label(
+                                    RichText::new("Built-in schemes can't be changed.\nDuplicate to make one yours.")
+                                        .weak()
+                                        .small(),
+                                );
+                            }
+
+                            if rename_button.clicked() {
+                                self.rename_colorscheme_flag = true;
+                                self.colorscheme_rename_input = self
+                                    .colorschemes
+                                    .get(&self.selected_colorscheme_id)
+                                    .map(|scheme| scheme.name.clone())
+                                    .unwrap_or_default();
+                            }
+
+                            if delete_button.clicked() {
+                                self.user_wants_to_delete_colorscheme_flag = true;
+                            }
+
+                            if edit_button.clicked() {
+                                self.edit_colorscheme_flag = true;
+                                self.colorscheme_being_edited = Some(self.colorschemes.get(&self.selected_colorscheme_id).unwrap_or(&ColorScheme::default_scheme()).clone());
                             }
 
                             ui.add_space(5.0);
                             ui.separator();
                             ui.add_space(5.0);
 
-                            let generate_button = ui.add(Button::new("Generate new colorscheme from current background").min_size(Vec2::new(50.0, 30.0)));
+                            let generate_button = ui.add(Button::new("Generate one from the background").min_size(Vec2::new(50.0, 30.0)));
                             if generate_button.clicked() {
                                 self.try_to_generate_colorscheme();
                             }

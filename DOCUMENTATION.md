@@ -508,21 +508,45 @@ parts.
 ## 10. Color Schemes & Backgrounds (`color.rs`)
 
 - **`ColorScheme`**: `{ name, colors: [[u8;4];6], is_user_configurable }`. Six RGBA colors index
-  the calendar item tints by `calendar_item_color()`.
+  the calendar item tints by `calendar_item_color()`. `is_user_configurable` is false for exactly
+  the built-ins (`is_builtin()` is its inverse, named for what it actually means at the call
+  sites): they can be selected and duplicated, never edited, renamed, or deleted.
 - **`generate_colorscheme(dirs, image_name)`**: resolves the name with `AppDirs::image_path` (keeps
   only the final path component, so the load can't escape `images/`), loads it, downsamples to 200×200,
   drops near-transparent pixels, converts to CIE-Lab, runs **k-means** (`get_kmeans_hamerly`, k=6,
   deterministic seed 42), sorts clusters by a visual-significance heuristic
   (`population*0.6 + saturation*0.2 + |L-50|*0.2`), and emits 6 colors at fixed alpha 80.
   Requires ≥500 usable pixels, else returns `None`.
-- **`builtin_schemes()`**: what a fresh install starts with. `COLORSCHEME ZERO` (six fully
+- **`builtin_schemes()`**: the schemes every install has. `COLORSCHEME ZERO` (six fully
   transparent entries) stays id 0, so the untinted default look is unchanged, followed by
   `EMBER`, `TIDE`, `MOSS` and `DUSK`. Each ramps quiet→loud across palette slots 0–4 (least to
   most important) with slot 5 — events — deliberately outside the ramp, so a glance at the
-  calendar reads as urgency and events stand apart. Alphas stay in the 70–110 range: these tint
-  items *over a background photo*, so they must colour without hiding it. Previously a first run
-  got only the transparent scheme, so the manager opened on a single palette that tinted nothing.
+  calendar reads as urgency and events stand apart. A ramp is written as five plain RGB triples
+  and takes its alpha from the shared `RAMP_ALPHA` curve, so no scheme can disagree with the
+  others about opacity, and a palette is edited as five colours rather than twenty numbers.
+
+  **Every step has to be tellable from the one below it at a glance.** The first version of these
+  wasn't: EMBER's amber and burnt orange differed by a hue nudge at nearly the same lightness, and
+  on a small calendar pill over a photograph they were one colour — steps three and four of the
+  urgency scale were indistinguishable in practice. Each step now moves on hue, lightness *and*
+  alpha at once, so none of them depends on a single axis being noticed. Three tests hold the
+  line: adjacent steps at least `MIN_STEP_DISTANCE` (60, summed per-channel) apart, events that
+  far from every step of the ramp, and alpha strictly rising up the ramp.
+- **`install_builtins(&mut schemes, &mut selected_id) -> bool`**: puts the built-ins on their
+  reserved ids (`builtin_schemes()[i]` ⇒ id `i`) and reports whether the map changed, so `main`
+  saves only when it did. It runs on **every** startup. Seeding them once into an empty map — the
+  old behaviour — meant anyone who already had a scheme never saw them, corrections to a palette
+  could never reach an existing install, and a `colorschemes.json` written before the built-ins
+  existed stayed a one-entry file forever. A scheme of the user's own sitting on a reserved id
+  (what a pre-built-ins install looks like) is **moved to a free id, never overwritten**, and
+  `selected_id` follows it — `main` then writes that id back to the config, or the next run would
+  select the built-in that took its place.
 - Persistence mirrors tasks: atomic temp-file write to `colorschemes.json`.
+- The **manager** (in `ui.rs`) lists the schemes in two labelled sections, **Built in** and
+  **Yours**, each sorted by id — `HashMap` iteration order is arbitrary *and differs between
+  runs*, so an unsorted list reshuffled itself at every launch. Edit / Rename / Delete are shown
+  disabled rather than hidden on a built-in: a button column that grows and shrinks as the
+  selection moves is harder to aim at than one that greys out.
 - The **editor** (in `ui.rs`) lets the user color-pick each of the six swatches and **drag to
   reorder** them; Save commits the edited scheme back into the map.
 - **`set_background`** (in `ui.rs`) shrinks a picture whose longest side exceeds
