@@ -9,10 +9,11 @@
 //! ## The two kinds of time
 //!
 //! A planner has to distinguish *when something is due* from *when you will do
-//! it*. `Active::deadline` answers the first; `Active::planned_start` answers
-//! the second. That is why a task can appear twice in a week: as a due marker on
-//! Friday and as a worked-on block on Tuesday morning. Events are simpler —
-//! an event's `deadline` is when it happens — so they are planned by moving that.
+//! it*. `Active::deadline` answers the first; `Active::sessions` answers the
+//! second — a list, because the answer is not always one block. That is why a
+//! task can appear several times in a week: a worked-on block per session, plus
+//! a due marker on the day it is owed. Events are simpler — an event's
+//! `deadline` is when it happens — so they are planned by moving that.
 
 use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Timelike};
 
@@ -149,6 +150,19 @@ pub fn placements_for(item: &Active, day: NaiveDate) -> Vec<DayPlacement> {
     }
 
     placements
+}
+
+/// Whether `item` puts anything at all on `day`'s timeline.
+///
+/// The same question `placements_for` answers in detail, without building the
+/// list — used to decide whether a tray card has a block to host its title
+/// editor or has to host it itself.
+pub fn appears_on(item: &Active, day: NaiveDate) -> bool {
+    if item.is_event {
+        return item.deadline.is_some_and(|at| at.date_naive() == day);
+    }
+    item.sessions.iter().any(|session| session.start.date_naive() == day)
+        || item.deadline.is_some_and(|at| at.date_naive() == day)
 }
 
 /// Vertical geometry of the timeline: where midnight sits and how tall an hour
@@ -689,6 +703,33 @@ mod tests {
             placements_for(&with, day()),
             vec![DayPlacement { session: None, placement: Placement::Block { start: 14 * 60 + 30, minutes: 45 } }]
         );
+    }
+
+    #[test]
+    fn appears_on_agrees_with_placements_for() {
+        let day = day();
+        let elsewhere = NaiveDate::from_ymd_opt(2026, 8, 20).unwrap();
+
+        // Every shape, checked against the list it summarises: a bare task, one
+        // with only a session here, one with only its deadline here, and an
+        // event.
+        let cases = [
+            task(vec![], None, None),
+            task(vec![session(at(2026, 8, 14, 9, 0), 60)], None, Some(60)),
+            task(vec![], Some(at(2026, 8, 14, 17, 0)), None),
+            task(vec![session(at(2026, 8, 20, 9, 0), 60)], Some(at(2026, 8, 14, 17, 0)), Some(60)),
+            event(at(2026, 8, 14, 14, 0), Some(45)),
+            event(at(2026, 8, 20, 14, 0), Some(45)),
+        ];
+        for item in &cases {
+            for probe in [day, elsewhere] {
+                assert_eq!(
+                    appears_on(item, probe),
+                    !placements_for(item, probe).is_empty(),
+                    "{} on {probe}", item.name
+                );
+            }
+        }
     }
 
     #[test]

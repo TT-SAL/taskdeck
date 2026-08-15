@@ -111,6 +111,9 @@ struct BacklogCard {
     /// what the card is worth when dropped — a "2h" card with an hour planned
     /// lands the remaining hour.
     planned: u32,
+    /// This card is being renamed *and* the task has nothing on the shown day,
+    /// so the card hosts the title editor. Exactly one place ever does.
+    hosts_name_editor: bool,
 }
 
 /// Screen rectangle for a placement in its lane.
@@ -1566,6 +1569,8 @@ impl TaskApp {
                 deadline: item.deadline,
                 duration: item.duration_minutes,
                 planned: item.planned_minutes(),
+                hosts_name_editor: self.planner_naming == Some(item.id)
+                    && !planner::appears_on(item, self.planner_day),
             };
             match planner::backlog_group(item.deadline, self.planner_day) {
                 planner::BacklogGroup::Due => due.push(card),
@@ -2777,7 +2782,15 @@ impl TaskApp {
         let response = frame
             .show(ui, |ui| {
                 ui.set_width(PLANNER_TRAY_WIDTH - 40.0);
-                ui.label(RichText::new(&card.name).size(PLANNER_NAME_SIZE));
+                // A task with nothing on the shown day has no block to type
+                // into, so the card itself becomes the editor — otherwise
+                // renaming one from the footer set the naming state and then
+                // showed the field nowhere at all.
+                if card.hosts_name_editor {
+                    self.planner_name_field(ui, PLANNER_TRAY_WIDTH - 56.0);
+                } else {
+                    ui.label(RichText::new(&card.name).size(PLANNER_NAME_SIZE));
+                }
 
                 // Second line: how long it takes — and how much of that is
                 // already booked, because the card is worth the *difference*
@@ -2923,8 +2936,23 @@ impl TaskApp {
             // covering it.
             self.handle_planner_gestures(ui, &background, &block_rects, &entries, pointer, &geometry, lane_area);
 
-            for (entry, block_rect) in entries.iter().zip(block_rects.iter()) {
-                self.paint_planner_entry(ui, entry, *block_rect);
+            // Exactly one entry may host the title editor. A task can put
+            // several things on one day — a block per session, plus its due
+            // marker — and they all carry the task's id, so "is this the item
+            // being named?" does not pick one of them: every match drew its own
+            // editor, three widgets deep on the same id, and egui rightly
+            // complained. Prefer the block that is actually selected; fall back
+            // to the item's first placement on the day.
+            let naming_host = self.planner_naming.and_then(|id| {
+                let selected = self.planner_selected_session;
+                entries
+                    .iter()
+                    .position(|entry| entry.id == id && entry.session == selected)
+                    .or_else(|| entries.iter().position(|entry| entry.id == id))
+            });
+
+            for (index, (entry, block_rect)) in entries.iter().zip(block_rects.iter()).enumerate() {
+                self.paint_planner_entry(ui, entry, *block_rect, naming_host == Some(index));
             }
         });
     }
@@ -3018,7 +3046,7 @@ impl TaskApp {
     }
 
     /// Draw one block or due marker, plus the controls it reveals on hover.
-    fn paint_planner_entry(&mut self, ui: &mut Ui, entry: &PlannerEntry, rect: Rect) {
+    fn paint_planner_entry(&mut self, ui: &mut Ui, entry: &PlannerEntry, rect: Rect, naming: bool) {
         let palette = self.active_colorscheme[entry.color_id.min(5)];
         let accent = self.planner_accent(entry.color_id);
         // The strong highlight follows the *clicked block*: a task planned
@@ -3029,7 +3057,6 @@ impl TaskApp {
             && (self.planner_selected_session.is_none()
                 || self.planner_selected_session == entry.session
                 || entry.session.is_none());
-        let naming = self.planner_naming == Some(entry.id);
 
         // Text is clipped to the item it belongs to. An item only gets a share of
         // the width when something overlaps it, and a long title spilling out of
@@ -3169,44 +3196,50 @@ impl TaskApp {
     /// The in-place title editor, drawn into `field` on top of whatever it
     /// belongs to. Shared by blocks and markers so naming a deadline works the
     /// same way naming a block does, and Enter means the same thing in both.
-    fn planner_name_editor(&mut self, ui: &mut Ui, field: Rect) {
+    /// The title field itself. Both hosts use it — the block on the timeline
+    /// and, for a task with nothing on the shown day, its card in the tray — so
+    /// Enter and Escape mean the same thing wherever the editor happens to be.
+    ///
+    /// Only ever called once per frame: see `naming_host` in `planner_timeline`
+    /// for who gets to call it.
+    fn planner_name_field(&mut self, ui: &mut Ui, width: f32) {
         let Some(id) = self.planner_naming else { return };
-        let mut committed = false;
 
-        ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut self.planner_name_input)
-                    // Keyed to the item, not to where the field happens to sit.
-                    // The block moves as neighbours re-flow around it, and an
-                    // id derived from its position would change with it —
-                    // dropping focus, and with it the edit, mid-word.
-                    .id(egui::Id::new(("planner_name_editor", id)))
-                    .hint_text("name it")
-                    .desired_width(field.width()),
-            );
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut self.planner_name_input)
+                // Keyed to the item, not to where the field happens to sit.
+                // The block moves as neighbours re-flow around it, and an id
+                // derived from its position would change with it — dropping
+                // focus, and with it the edit, mid-word.
+                .id(egui::Id::new(("planner_name_editor", id)))
+                .hint_text("name it")
+                .desired_width(width),
+        );
 
-            // Claim focus once, when the editor appears. This used to run every
-            // frame, which is why Enter did nothing: `lost_focus` is a live
-            // query into egui's focus memory, so putting focus straight back
-            // after Enter made the field surrender it meant the query below
-            // always answered "no" and the edit could never be finished.
-            if self.planner_naming_focus {
-                response.request_focus();
-                self.planner_naming_focus = false;
-            }
+        // Claim focus once, when the editor appears. This used to run every
+        // frame, which is why Enter did nothing: `lost_focus` is a live query
+        // into egui's focus memory, so putting focus straight back after Enter
+        // made the field surrender it meant the query below always answered
+        // "no" and the edit could never be finished.
+        if self.planner_naming_focus {
+            response.request_focus();
+            self.planner_naming_focus = false;
+        }
 
-            // Enter ends the edit, and so does clicking anything else — both
-            // are the field losing focus, and both mean "keep this". Escape
-            // drops focus too but means the opposite, and `handle_planner_keys`
-            // has it; this must not race it to the commit.
-            if response.lost_focus() && !ui.input(|i| i.key_pressed(Key::Escape)) {
-                committed = true;
-            }
-        });
-
-        if committed {
+        // Enter ends the edit, and so does clicking anything else — both are
+        // the field losing focus, and both mean "keep this". Escape drops focus
+        // too but means the opposite, and `handle_planner_keys` has it; this
+        // must not race it to the commit.
+        if response.lost_focus() && !ui.input(|i| i.key_pressed(Key::Escape)) {
             self.commit_planner_naming();
         }
+    }
+
+    /// The title field laid over a block or marker on the timeline.
+    fn planner_name_editor(&mut self, ui: &mut Ui, field: Rect) {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
+            self.planner_name_field(ui, field.width());
+        });
     }
 
     /// Start, track, and commit the timeline gestures.

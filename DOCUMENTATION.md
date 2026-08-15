@@ -1018,6 +1018,16 @@ Committing an *unnamed* block still keeps it, under a placeholder. The block hol
 decision — the time it was dragged out on — so blurring away from it is not the same statement as
 Escape; if you meant neither, Escape says so.
 
+**Exactly one thing hosts the editor.** A task can put several things on one day — a block per
+session, plus its due marker — and they all carry the task's id, so "is this the item being
+named?" does not pick one of them: every match drew its own editor, and once they shared a stable
+widget id egui reported the clash outright. `planner_timeline` elects a single host per frame
+(`naming_host`), preferring the block actually selected and falling back to the item's first
+placement on the day. A task with *nothing* on the shown day has no block to elect, so its tray
+card hosts the field instead (`BacklogCard::hosts_name_editor`, via `planner::appears_on`) —
+before that, renaming such a task from the footer set the naming state and then showed the field
+nowhere at all.
+
 Two mechanics this rests on, both of which were bugs first:
 
 - **The editor claims focus once, not every frame.** `Response::lost_focus` is a *live query*
