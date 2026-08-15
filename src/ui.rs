@@ -111,6 +111,33 @@ const SETTINGS_FINE_SIZE: f32 = 13.0;
 /// Section headings, in the same face the planner's tray headings use.
 const SETTINGS_SECTION_SIZE: f32 = 13.0;
 
+/* ─────────────────────────── The notepad ─────────────────────────── */
+
+/// Width of the notepad card. The right column is the weather grids' width,
+/// and the notepad sits under them.
+const NOTEPAD_WIDTH: f32 = 344.0;
+/// Gap between the column's edge and the card.
+const NOTEPAD_LEFT_MARGIN: f32 = 7.0;
+/// Height of the card.
+///
+/// A constant, and it has to be. By the time the notepad is drawn the right
+/// column has already overflowed the rect it was given — the forecast grids and
+/// their hand-tuned `add_space`s see to that — so `available_height()` reads as
+/// good as nothing, and a card sized from it collapses to its heading. The rest
+/// of this layout is fixed-size for the same reason and copes by scaling the
+/// whole UI (§14.6); this is that bargain, not an exception to it. It is sized
+/// to the gap under a two-day forecast.
+const NOTEPAD_CARD_HEIGHT: f32 = 432.0;
+/// Size of the notes themselves. A note is read from the desk, not from across
+/// the room, so it sits under the 19 points this used to be — which cost two
+/// characters of line width for nothing.
+const NOTEPAD_TEXT_SIZE: f32 = 17.0;
+/// The card's own heading, and the unsaved marker beside it.
+const NOTEPAD_HEADING_SIZE: f32 = 12.0;
+/// What the card spends on its heading and margins, subtracted from the card's
+/// height to get the writing area's.
+const NOTEPAD_CHROME_HEIGHT: f32 = 46.0;
+
 /// Width of the scheme list in the colour-scheme manager.
 const SCHEME_LIST_WIDTH: f32 = 330.0;
 /// Height of one row of that list.
@@ -925,26 +952,118 @@ impl TaskApp {
             // or still-pending weather fetch can never hide the user's notes
             // (CODE_REVIEW A6).
             if !self.three_day_weather {
-                ui.add_space(15.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(7.0);
+                self.show_notepad(ui);
+            }
+        });
+    }
+
+    /// The notepad: the bottom of the right column whenever the third day of
+    /// weather is switched off.
+    ///
+    /// It sits in a card of its own, in the same language as a task card. It
+    /// used to be a bare text area with a faintly darker background floating in
+    /// the column — nothing said where the notes began or ended, and an empty
+    /// one was invisible.
+    fn show_notepad(&mut self, ui: &mut Ui) {
+        ui.add_space(14.0);
+
+        ui.horizontal(|ui| {
+            ui.add_space(NOTEPAD_LEFT_MARGIN);
+
+            egui::Frame::new()
+                .fill(Color32::from_black_alpha(70))
+                .stroke(Stroke::new(1.5, Color32::from_white_alpha(55)))
+                .corner_radius(CornerRadius::same(14))
+                .inner_margin(Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ui.set_width(NOTEPAD_WIDTH);
+
+                    // A `Frame` inherits the layout it is placed in, and this
+                    // one is placed in a row — so without this the heading and
+                    // the writing area were laid out *side by side*, and the
+                    // note wrapped at two characters in what was left over.
+                    ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("NOTES")
+                                .font(FontId::new(NOTEPAD_HEADING_SIZE, FontFamily::Name("space".into())))
+                                .color(Color32::from_white_alpha(120)),
+                        );
+                        // Quiet reassurance rather than a status bar: the
+                        // autosave is on a two-second debounce, so there is a
+                        // moment where a keystroke is only in memory, and this
+                        // is that moment made visible.
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if self.should_save_textbox_text {
+                                ui.label(
+                                    RichText::new("unsaved")
+                                        .font(FontId::new(NOTEPAD_HEADING_SIZE, FontFamily::Name("space".into())))
+                                        .color(Color32::from_white_alpha(85)),
+                                );
+                            }
+                        });
+                    });
+                    ui.add_space(8.0);
+
+                    // The writing area is given the height, not the card: a
+                    // `set_height` on the card's own ui makes the heading row
+                    // inherit it and centre itself down the middle of the note.
+                    //
+                    // Both bounds of the scroll area, so it is exactly this tall
+                    // whatever is in it — `max_height` alone lets it shrink to
+                    // the (exhausted) available height of the column and the
+                    // card closes up like a fan.
+                    //
+                    // The field then asks for as many rows as that fits, from
+                    // the real row height of the face it is set in rather than a
+                    // guessed line spacing, so the caret starts at the top of
+                    // the card and an empty note is the same rectangle as a full
+                    // one.
+                    let text_height = NOTEPAD_CARD_HEIGHT - NOTEPAD_CHROME_HEIGHT;
+                    let font = FontId::new(NOTEPAD_TEXT_SIZE, FontFamily::Monospace);
+                    let row_height = ui
+                        .ctx()
+                        .fonts_mut(|fonts| fonts.row_height(&font))
+                        .max(1.0);
+                    let rows = ((text_height / row_height).floor() as usize).max(4);
 
                     egui::ScrollArea::vertical()
-                        .min_scrolled_height(390.0)
-                        .max_height(390.0)
+                        .id_salt("notepad")
+                        .auto_shrink([false, false])
+                        .min_scrolled_height(text_height)
+                        .max_height(text_height)
+                        .max_width(NOTEPAD_WIDTH)
                         .show(ui, |ui| {
-                            if ui.add(egui::TextEdit::multiline(&mut self.textbox_text)
-                                .desired_width(340.0)
-                                .code_editor()
-                                .font(FontId { size: 19.0, family: FontFamily::Monospace })
-                                .background_color(Color32::from_black_alpha(40))
-                            ).changed() {
+                            let response = ui.add(
+                                egui::TextEdit::multiline(&mut self.textbox_text)
+                                    // The card is the frame; a second one drawn
+                                    // inside it is just a box in a box.
+                                    .frame(egui::Frame::NONE)
+                                    .margin(Margin::ZERO)
+                                    .hint_text("anything worth keeping in front of you")
+                                    // The card's width, less room for the
+                                    // scrollbar to sit beside the text rather
+                                    // than over the ends of the lines.
+                                    .desired_width(NOTEPAD_WIDTH - 10.0)
+                                    .desired_rows(rows)
+                                    .font(font.clone()),
+                            );
+
+                            if response.changed() {
+                                // Typed or pasted tabs would be painted as
+                                // missing-glyph boxes (see `utilities::detab`).
+                                // Nothing inserts one any more — the field is no
+                                // longer a code editor, so Tab leaves it — but
+                                // a paste still can.
+                                if self.textbox_text.contains('\t') {
+                                    self.textbox_text = utilities::detab(&self.textbox_text);
+                                }
                                 self.should_save_textbox_text = true;
                                 self.last_textbox_edit_time = Some(Instant::now());
                             }
                         });
+                    });
                 });
-            }
         });
     }
 

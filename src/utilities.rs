@@ -121,6 +121,22 @@ pub fn save_notepad_text(payload: String, data_dir: &Path) -> Result<(), Box<dyn
     Ok(())
 }
 
+/// What one tab becomes in the notepad.
+pub const NOTEPAD_TAB: &str = "    ";
+
+/// Replace tabs with spaces.
+///
+/// The app is set in Fixedsys, which has no tab glyph, and epaint asks the font
+/// for one rather than handling `\t` itself — so every tab in the notepad was
+/// painted as a missing-glyph box. A notepad that had only ever been tabbed
+/// into (which is what pressing Tab in the old code-editor-styled field did)
+/// showed as a row of little squares and nothing else.
+///
+/// Run on load and on every edit, so pasted text is covered too.
+pub fn detab(text: &str) -> String {
+    text.replace('\t', NOTEPAD_TAB)
+}
+
 pub fn read_notepad_text(data_dir: &Path) -> Result<String, Box<dyn Error>> {
     let file_path = data_dir.join("notepad_text.json");
 

@@ -87,7 +87,12 @@ async fn run() {
         selected_colorscheme_id = 0;
     }
 
-    let textbox_text = utilities::read_notepad_text(&dirs.data).unwrap_or("There was something wrong with taskdeck_data/notepad_text.json!".to_string());
+    // Tabs are turned into spaces on the way in: the app's font has no tab
+    // glyph, so a tab saved by an older build (where the notepad was styled as
+    // a code editor and Tab inserted one) is painted as a missing-glyph box.
+    let textbox_text = utilities::read_notepad_text(&dirs.data)
+        .map(|text| utilities::detab(&text))
+        .unwrap_or("There was something wrong with taskdeck_data/notepad_text.json!".to_string());
 
     let setup_config = TaskAppConfig {
         colorschemes,

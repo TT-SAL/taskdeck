@@ -503,6 +503,35 @@ parts.
   variants where available. The big comment block documents the `weather_svgs_2` naming scheme.
 - **`CITIES`**: a static list (~200 entries) of `name/lat/lon` used as map markers.
 
+### 9.1 The notepad (`show_notepad`)
+
+The bottom of the same column, whenever the third day of weather is off. It is a card in the task
+list's visual language — dark fill, hairline stroke, 14pt radius — with a `NOTES` heading and, while
+the two-second autosave debounce is still pending, a quiet `unsaved` beside it. Before, it was a
+bare text area with a slightly darker background floating in the column: nothing said where the
+notes began or ended, and an empty one was invisible.
+
+Three things about the right column make this harder than it looks, and all three were bugs first:
+
+- **A `Frame` inherits the layout it is placed in**, and this one is placed in a row. Without an
+  explicit `ui.vertical` inside it, the heading and the writing area were laid out *side by side* —
+  the note wrapped at two characters in what was left over and hugged the right edge of the card.
+- **The column has already overflowed its rect** by the time the notepad is drawn (the forecast
+  grids and their hand-tuned `add_space`s see to that), so `available_height()` reads as good as
+  nothing. A card sized from it collapses to its heading, which is why `NOTEPAD_CARD_HEIGHT` is a
+  constant and the scroll area pins *both* its height bounds. This is the fixed-size bargain of
+  §14.6, not an exception to it.
+- **The writing area is given the height, not the card.** `ui.set_height` on the card's own ui makes
+  the heading row inherit it and centre itself down the middle of the note. The field asks for as
+  many rows as the space fits, computed from the real row height of the face it is set in, so an
+  empty note is the same rectangle as a full one.
+
+**Tabs are turned into spaces** on load and on every edit (`utilities::detab`). The app is set in
+Fixedsys, which has no tab glyph, and epaint asks the font for one rather than handling `\t` itself
+— so every tab was painted as a missing-glyph box. The field is also no longer styled as a code
+editor, which is what used to insert them: `Tab` now leaves the field, as it does everywhere else,
+and only a paste can still bring one in.
+
 ---
 
 ## 10. Color Schemes & Backgrounds (`color.rs`)
