@@ -172,6 +172,8 @@ const MAP_WINDOW_INSET: f32 = 200.0;
 /// Ceiling on the map's width. Past this the picture (1920×960) is being
 /// magnified rather than shown.
 const MAP_MAX_WIDTH: f32 = 1500.0;
+/// Floor on it: the width the footer row needs before its two ends meet.
+const MAP_MIN_WIDTH: f32 = 720.0;
 
 /// Width of the scheme list in the colour-scheme manager.
 const SCHEME_LIST_WIDTH: f32 = 330.0;
@@ -5099,8 +5101,11 @@ impl TaskApp {
                     // rect moved, and the map was drawn somewhere slightly
                     // different — which is what the shaking was.
                     let viewport = ctx.viewport_rect();
+                    // The floor is what the footer needs — a coordinate, the
+                    // nearest city, the pointer's own reading, and the buttons —
+                    // rather than what the map could get away with.
                     let width = (viewport.width() - MAP_WINDOW_INSET)
-                        .clamp(560.0, MAP_MAX_WIDTH)
+                        .clamp(MAP_MIN_WIDTH, MAP_MAX_WIDTH)
                         .min((viewport.height() - MAP_WINDOW_INSET) * 2.0);
                     // The picture is equirectangular and 2:1; anything else
                     // stretches the world.
@@ -5255,7 +5260,12 @@ impl TaskApp {
                     );
 
                     // ── footer ───────────────────────────────────────────
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
+                    // The gestures go on their own line: in the row below they
+                    // would be drawn under the buttons on a narrow window, that
+                    // row being laid out from both ends at once.
+                    settings_note(ui, "scroll to zoom  ·  drag to pan  ·  click to pick");
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(format!(
@@ -5316,7 +5326,6 @@ impl TaskApp {
                                 self.map_zoom = 1.0;
                                 self.map_offset = Vec2::ZERO;
                             }
-                            settings_note(ui, "scroll to zoom  ·  drag to pan  ·  click to pick");
                         });
                     });
                 });
