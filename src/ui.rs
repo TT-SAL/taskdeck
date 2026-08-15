@@ -2091,15 +2091,15 @@ impl TaskApp {
                 // an attribute you set rather than a thing you draw, and the
                 // mode went with it.
                 ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Event, RichText::new("Event").size(PLANNER_META_SIZE))
-                    .on_hover_text("Something that happens at this time");
+                    .on_hover_text("Something that happens then");
                 ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Task, RichText::new("Task").size(PLANNER_META_SIZE))
-                    .on_hover_text("Time set aside to work on something — set what it's due, if anything, from the bar below");
+                    .on_hover_text("Time set aside to work on something");
                 ui.label(
                     RichText::new("New:")
                         .size(PLANNER_META_SIZE)
                         .color(Color32::from_white_alpha(150)),
                 )
-                .on_hover_text("What a drag — or a double-click — on empty timeline makes");
+                .on_hover_text("What a drag makes");
 
                 ui.add_space(24.0);
 
@@ -2108,7 +2108,7 @@ impl TaskApp {
                         .size(PLANNER_META_SIZE)
                         .color(Color32::from_white_alpha(190)),
                 )
-                .on_hover_text("Overlapping blocks are counted once: this is how much of the day is committed");
+                .on_hover_text("Overlapping blocks counted once");
             });
         });
     }
@@ -2119,7 +2119,7 @@ impl TaskApp {
         let summary = planner::summarize(&placements);
 
         if summary.blocks == 0 && summary.due == 0 {
-            return "nothing on this day yet".to_string();
+            return "nothing on this day".to_string();
         }
 
         let mut parts = vec![format!(
@@ -2156,20 +2156,20 @@ impl TaskApp {
         // meaning "discard" is not guessable, so it is spelled out.
         if self.planner_naming.is_some() {
             let escape = if self.planner_naming_created {
-                "Esc to discard it"
+                "Esc throws it away"
             } else {
-                "Esc to keep the old name"
+                "Esc keeps the old name"
             };
             ui.horizontal(|ui| {
                 ui.set_min_height(PLANNER_INSPECTOR_HEIGHT);
-                ui.add_space(6.0);
+                ui.add_space(PLANNER_EDGE_MARGIN);
                 ui.label(
                     RichText::new("Naming")
                         .size(PLANNER_FINE_SIZE)
                         .color(Color32::from_white_alpha(140)),
                 );
                 ui.label(
-                    RichText::new(format!("Enter to keep it  ·  {escape}"))
+                    RichText::new(format!("Enter keeps it  ·  {escape}"))
                         .size(PLANNER_META_SIZE)
                         .color(Color32::from_white_alpha(190)),
                 );
@@ -2220,7 +2220,7 @@ impl TaskApp {
 
         ui.horizontal(|ui| {
             ui.set_min_height(PLANNER_INSPECTOR_HEIGHT);
-            ui.add_space(6.0);
+            ui.add_space(PLANNER_EDGE_MARGIN);
             ui.label(
                 RichText::new(if is_event { "Event" } else { "Task" })
                     .size(PLANNER_FINE_SIZE)
@@ -2282,10 +2282,7 @@ impl TaskApp {
                 );
                 if ui
                     .add(due_button)
-                    .on_hover_text(
-                        "When this is owed — separate from when you plan to work on it. \
-                         Click to set, change, or clear.",
-                    )
+                    .on_hover_text("When it's due. Click to change.")
                     .clicked()
                 {
                     open_due_editor = true;
@@ -2294,7 +2291,7 @@ impl TaskApp {
 
             if ui
                 .button(RichText::new("✎").size(PLANNER_META_SIZE))
-                .on_hover_text("Rename  (Enter, or double-click the block)")
+                .on_hover_text("Rename  (Enter, or double-click)")
                 .clicked()
             {
                 rename = true;
@@ -2330,7 +2327,7 @@ impl TaskApp {
                 } else {
                     let level = time_importance.get_or_insert(PLANNER_NEW_TASK_HORIZON);
                     ui.label(RichText::new("Horizon:").size(PLANNER_META_SIZE))
-                        .on_hover_text("Roughly how soon should this happen?");
+                        .on_hover_text("How soon should this happen?");
                     ComboBox::from_id_salt("planner_horizon")
                         .selected_text(
                             RichText::new(HORIZON[(*level as usize).min(HORIZON.len() - 1)])
@@ -2354,7 +2351,7 @@ impl TaskApp {
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_space(6.0);
+                ui.add_space(PLANNER_EDGE_MARGIN);
                 if ui
                     .button(RichText::new("✗ Delete").size(PLANNER_META_SIZE))
                     .on_hover_text("Delete  (Del)")
@@ -2371,7 +2368,7 @@ impl TaskApp {
                 if !is_event
                     && ui
                         .button(RichText::new("✓ Complete").size(PLANNER_META_SIZE))
-                        .on_hover_text("Finish it and file it in the archive")
+                        .on_hover_text("Finish it; it goes to the archive")
                         .clicked()
                 {
                     complete = true;
@@ -2380,9 +2377,9 @@ impl TaskApp {
                 // clicked block when one is selected, the whole plan otherwise.
                 if !is_event && is_planned {
                     let (label, hover) = if session.is_some() {
-                        ("↩ Remove block", "Free this block; the time goes back onto the card  (U)")
+                        ("↩ Remove block", "Free this block  (U)")
                     } else {
-                        ("↩ Unplan", "Free every block, keeping the task, its deadline and its estimate  (U)")
+                        ("↩ Unplan", "Free every block  (U)")
                     };
                     if ui
                         .button(RichText::new(label).size(PLANNER_META_SIZE))
@@ -2395,7 +2392,7 @@ impl TaskApp {
                 if !is_event
                     && ui
                         .button(RichText::new("＋ Block").size(PLANNER_META_SIZE))
-                        .on_hover_text("Book another block of time for this task on the shown day")
+                        .on_hover_text("Another block on this day")
                         .clicked()
                 {
                     add_block = true;
@@ -2479,10 +2476,9 @@ impl TaskApp {
             })
             .response
             .on_hover_text(if is_event {
-                "How long this event runs. The same as dragging its bottom edge."
+                "How long it runs"
             } else {
-                "How long you think this takes, in total. The tray card is worth whatever \
-                 of it isn't booked into blocks yet."
+                "How long the whole task takes"
             });
 
         chosen
@@ -2554,17 +2550,18 @@ impl TaskApp {
     /// of drag-to-block, double-click, or drag-a-card-in announces itself.
     fn planner_idle_footer(&mut self, ui: &mut Ui) {
         let kind = match self.planner_create_kind {
-            planner::CreateKind::Task => "a task to work on",
+            planner::CreateKind::Task => "a task",
             planner::CreateKind::Event => "an event",
         };
 
         ui.horizontal(|ui| {
             ui.set_min_height(PLANNER_INSPECTOR_HEIGHT);
-            ui.add_space(4.0);
+            ui.add_space(PLANNER_EDGE_MARGIN);
             ui.label(
                 RichText::new(format!(
-                    "Drag on the timeline to add {kind}  ·  double-click for a quick one  ·  \
-                     drag a card in from the left to book its time  ·  click anything to edit it"
+                    "Drag for {kind}  ·  double-click for {}  ·  drag a card in from the tray  ·  \
+                     click anything to edit it",
+                    planner::format_duration(planner::DEFAULT_BLOCK_MINUTES)
                 ))
                 .size(PLANNER_META_SIZE)
                 .color(Color32::from_white_alpha(130)),
@@ -2636,11 +2633,6 @@ impl TaskApp {
             .show(ctx, |ui| {
                 ui.add_space(4.0);
                 ui.label(RichText::new(format!("When is \"{name}\" due?")).size(PLANNER_NAME_SIZE));
-                ui.label(
-                    RichText::new("The deadline is when it is owed — planned blocks say when you'll work on it.")
-                        .size(PLANNER_FINE_SIZE)
-                        .color(Color32::from_white_alpha(140)),
-                );
                 ui.add_space(8.0);
                 self.display_date_entering(ui);
                 ui.add_space(10.0);
@@ -2652,7 +2644,7 @@ impl TaskApp {
                     }
                     if ui
                         .add(Button::new("No deadline").min_size(CONFIRM_BUTTON))
-                        .on_hover_text("Clear the deadline; the task keeps its horizon instead")
+                        .on_hover_text("Clear the deadline")
                         .clicked()
                     {
                         clear = true;
@@ -2709,7 +2701,7 @@ impl TaskApp {
 
             ui.label(RichText::new("Unplanned").size(PLANNER_NAME_SIZE).strong());
             ui.label(
-                RichText::new("drag onto the timeline")
+                RichText::new("drag onto an hour")
                     .size(PLANNER_FINE_SIZE)
                     .color(Color32::from_white_alpha(130)),
             );
@@ -2723,7 +2715,7 @@ impl TaskApp {
             if due.is_empty() && later.is_empty() {
                 ui.add_space(12.0);
                 ui.label(
-                    RichText::new("Nothing waiting.\nEvery task has a slot.")
+                    RichText::new("Nothing waiting.")
                         .size(PLANNER_META_SIZE)
                         .color(Color32::from_white_alpha(120)),
                 );
