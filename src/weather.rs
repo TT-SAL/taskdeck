@@ -361,6 +361,32 @@ pub struct City {
     pub longitude: f32,
 }
 
+/// The marked city closest to a point, for putting a name to a coordinate
+/// picked by eye off the map.
+///
+/// Great-circle distance, not the flat difference of the two coordinates: a
+/// degree of longitude is 111km at the equator and nothing at all at the pole,
+/// so a flat comparison names a Norwegian city as the nearest thing to
+/// somewhere in Canada. The Earth's radius cancels out of the comparison, so
+/// this returns no distance — only which city won.
+pub fn nearest_city(latitude: f32, longitude: f32) -> Option<&'static City> {
+    let central_angle = |city: &City| {
+        let (lat_a, lat_b) = (latitude.to_radians(), city.latitude.to_radians());
+        let delta_lon = (city.longitude - longitude).to_radians();
+        // Clamped because rounding can push the cosine a hair outside the
+        // domain of `acos`, which would answer NaN and poison the comparison.
+        (lat_a.sin() * lat_b.sin() + lat_a.cos() * lat_b.cos() * delta_lon.cos())
+            .clamp(-1.0, 1.0)
+            .acos()
+    };
+
+    CITIES.iter().min_by(|a, b| {
+        central_angle(a)
+            .partial_cmp(&central_angle(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
 pub static CITIES: &[City] = &[
     City { name: "Mumbai", latitude: 19.0760, longitude: 72.8777 },
     City { name: "Delhi", latitude: 28.7041, longitude: 77.1025 },
@@ -692,3 +718,48 @@ pub static CITIES: &[City] = &[
     City { name: "Uppsala", latitude: 59.8586, longitude: 17.6389 },
     City { name: "Västerås", latitude: 59.6099, longitude: 16.5448 },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nearest_city_finds_the_obvious_one() {
+        let helsinki = nearest_city(60.17, 24.94).expect("the list is not empty");
+        assert_eq!(helsinki.name, "Helsinki");
+    }
+
+    #[test]
+    fn nearest_city_crosses_the_antimeridian() {
+        // A point in the Pacific just *east* of the 180th meridian. It is a few
+        // hundred kilometres from New Zealand and most of the way round the
+        // world from it in raw longitude, so comparing coordinates instead of
+        // angles answers "Tijuana".
+        let city = nearest_city(-36.8, -179.0).expect("the list is not empty");
+        assert_eq!(city.name, "Hamilton");
+        assert!(city.longitude > 170.0, "the answer came from the other side of the line");
+    }
+
+    #[test]
+    fn nearest_city_measures_along_the_globe_not_across_the_grid() {
+        // At 69°N a degree of longitude is a third of a degree of latitude, so
+        // the two ways of measuring genuinely disagree here — which is the
+        // whole reason this isn't a subtraction.
+        let point = (69.0_f32, 40.0_f32);
+
+        let flat = CITIES
+            .iter()
+            .min_by(|a, b| {
+                let distance = |city: &City| {
+                    (city.latitude - point.0).powi(2) + (city.longitude - point.1).powi(2)
+                };
+                distance(a).partial_cmp(&distance(b)).expect("no NaNs in the table")
+            })
+            .expect("the list is not empty");
+
+        let round = nearest_city(point.0, point.1).expect("the list is not empty");
+
+        assert_eq!(round.name, "Oulu");
+        assert_eq!(flat.name, "Kuopio", "the flat answer, kept here to show they differ");
+    }
+}

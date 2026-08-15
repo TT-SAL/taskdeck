@@ -167,6 +167,12 @@ const NOTEPAD_HEADING_SIZE: f32 = 12.0;
 /// height to get the writing area's.
 const NOTEPAD_CHROME_HEIGHT: f32 = 46.0;
 
+/// How much of the window the coordinate picker leaves showing around itself.
+const MAP_WINDOW_INSET: f32 = 200.0;
+/// Ceiling on the map's width. Past this the picture (1920×960) is being
+/// magnified rather than shown.
+const MAP_MAX_WIDTH: f32 = 1500.0;
+
 /// Width of the scheme list in the colour-scheme manager.
 const SCHEME_LIST_WIDTH: f32 = 330.0;
 /// Height of one row of that list.
@@ -645,6 +651,11 @@ pub struct TaskApp {
     coordinates_map_flag: bool,
     map_zoom: f32,
     map_offset: Vec2,
+    /// Where the weather was pointed when the map picker opened, so Cancel has
+    /// something to go back to. The map edits `coordinates` live — that is what
+    /// makes the crosshair follow the click — so without this there is no way
+    /// out of the window that isn't a change.
+    coordinates_before_picker: Option<[f32; 2]>,
     /// Live, editable coordinates `[lat, lon]` — the single source of truth for
     /// the map picker. Pushed to the weather service (its own thread-local copy)
     /// and persisted only on confirm, via `set_weather_coordinates`.
@@ -810,6 +821,7 @@ impl TaskApp {
             map_zoom: 1.0,
             map_offset: Vec2::ZERO,
             coordinates: config.coordinates,
+            coordinates_before_picker: None,
             map_texture: None,
 
             /* Colors */
@@ -4420,6 +4432,7 @@ impl TaskApp {
 
             settings_row(ui, "", |ui| {
                 if settings_button(ui, "Pick on a map").clicked() {
+                    self.coordinates_before_picker = Some(self.coordinates);
                     self.coordinates_map_flag = true;
                 }
                 // Fetching is a network round trip, so it is asked for rather
@@ -5071,201 +5084,239 @@ impl TaskApp {
         }
 
         if self.coordinates_map_flag {
-            egui::Window::new("Weather Coordinates Picker")
+            egui::Window::new("Pick a location")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .fixed_size(egui::Vec2::new(1500.0, 770.0))
                 .show(ctx, |ui| {
-                    // -------------------------------------------------
-                    // CONSTANTS
-                    // -------------------------------------------------
-                    let map_size = egui::Vec2::new(1440.0, 712.5);
-                    let footer_height = 40.0;
+                    // Sized from the viewport, and the window then sizes itself
+                    // to *this*. The old picker did the opposite: a window
+                    // pinned to a fixed 1500×770 holding a 1440×712 map plus a
+                    // footer laid out at absolute rects derived from
+                    // `available_rect_before_wrap()`. The content came to a few
+                    // points more than the window, so every frame the window
+                    // tried to grow, `fixed_size` pulled it back, the available
+                    // rect moved, and the map was drawn somewhere slightly
+                    // different — which is what the shaking was.
+                    let viewport = ctx.viewport_rect();
+                    let width = (viewport.width() - MAP_WINDOW_INSET)
+                        .clamp(560.0, MAP_MAX_WIDTH)
+                        .min((viewport.height() - MAP_WINDOW_INSET) * 2.0);
+                    // The picture is equirectangular and 2:1; anything else
+                    // stretches the world.
+                    let map_size = vec2(width, width * 0.5);
 
-                    // -------------------------------------------------
-                    // SPLIT WINDOW INTO MAP + FOOTER RECTS
-                    // -------------------------------------------------
-                    let available = ui.available_rect_before_wrap();
+                    let (rect, response) =
+                        ui.allocate_exact_size(map_size, egui::Sense::click_and_drag());
+                    let painter = ui.painter_at(rect);
 
-                    let map_rect = egui::Rect::from_min_size(
-                        egui::pos2(
-                            available.center().x - map_size.x * 0.5,
-                            available.min.y + 20.0,
-                        ),
-                        map_size,
+                    // ── zoom, about the pointer ──────────────────────────
+                    if response.hovered() {
+                        let scroll = ui.input(|i| i.smooth_scroll_delta.y) * 2.0;
+                        if scroll != 0.0 {
+                            let old_zoom = self.map_zoom;
+                            self.map_zoom = (self.map_zoom * (scroll * 0.001).exp()).clamp(1.0, 15.0);
+
+                            if let Some(cursor) = response.hover_pos() {
+                                let cursor_uv = egui::pos2(
+                                    (cursor.x - rect.min.x) / rect.width(),
+                                    (cursor.y - rect.min.y) / rect.height(),
+                                );
+                                let old_uv = Vec2::splat(1.0 / old_zoom);
+                                let new_uv = Vec2::splat(1.0 / self.map_zoom);
+                                self.map_offset += cursor_uv.to_vec2() * (old_uv - new_uv);
+                            }
+                        }
+                    }
+
+                    // ── pan ──────────────────────────────────────────────
+                    // Either button. Left-dragging a map moves the map
+                    // everywhere else; egui tells a drag from a click, so this
+                    // costs the click-to-pick nothing.
+                    if response.dragged() {
+                        let delta = response.drag_delta();
+                        self.map_offset.x -= delta.x / rect.width() / self.map_zoom;
+                        self.map_offset.y -= delta.y / rect.height() / self.map_zoom;
+                    }
+
+                    let uv_size = Vec2::splat(1.0 / self.map_zoom);
+                    self.map_offset.x = self.map_offset.x.clamp(0.0, 1.0 - uv_size.x);
+                    self.map_offset.y = self.map_offset.y.clamp(0.0, 1.0 - uv_size.y);
+                    let uv_min = pos2(self.map_offset.x, self.map_offset.y);
+                    let uv_max = pos2(uv_min.x + uv_size.x, uv_min.y + uv_size.y);
+
+                    // Where a point on the globe lands on screen, and back.
+                    let to_screen = |lat: f32, lon: f32| -> Pos2 {
+                        let u = ((lon + 180.0) / 360.0 - uv_min.x) / uv_size.x;
+                        let v = ((90.0 - lat) / 180.0 - uv_min.y) / uv_size.y;
+                        pos2(rect.left() + u * rect.width(), rect.top() + v * rect.height())
+                    };
+                    let to_globe = |at: Pos2| -> (f32, f32) {
+                        let u = uv_min.x + (at.x - rect.left()) / rect.width() * uv_size.x;
+                        let v = uv_min.y + (at.y - rect.top()) / rect.height() * uv_size.y;
+                        (90.0 - v * 180.0, u * 360.0 - 180.0)
+                    };
+
+                    // ── the world ────────────────────────────────────────
+                    if let Some(texture) = &self.map_texture {
+                        painter.image(
+                            texture.id(),
+                            rect,
+                            Rect::from_min_max(uv_min, uv_max),
+                            Color32::WHITE,
+                        );
+                    }
+
+                    // Graticule: every thirty degrees, with the equator and the
+                    // prime meridian a shade brighter. It is what makes a
+                    // picture of the Earth read as a map you can point at.
+                    for lon in (-180..=180).step_by(30) {
+                        let lon = lon as f32;
+                        let top = to_screen(90.0, lon);
+                        let bottom = to_screen(-90.0, lon);
+                        painter.line_segment(
+                            [pos2(top.x, rect.top()), pos2(bottom.x, rect.bottom())],
+                            Stroke::new(0.6, Color32::from_white_alpha(if lon == 0.0 { 60 } else { 26 })),
+                        );
+                    }
+                    for lat in (-90..=90).step_by(30) {
+                        let lat = lat as f32;
+                        let left = to_screen(lat, -180.0);
+                        painter.line_segment(
+                            [pos2(rect.left(), left.y), pos2(rect.right(), left.y)],
+                            Stroke::new(0.6, Color32::from_white_alpha(if lat == 0.0 { 60 } else { 26 })),
+                        );
+                    }
+
+                    // ── pick ─────────────────────────────────────────────
+                    if response.clicked() {
+                        if let Some(at) = response.interact_pointer_pos() {
+                            let (lat, lon) = to_globe(at);
+                            self.coordinates = [lat, lon];
+                        }
+                    }
+
+                    // ── the chosen point ─────────────────────────────────
+                    // A crosshair across the whole map rather than a dot: at
+                    // this scale a dot is a pixel of noise over a photograph of
+                    // a planet, and the lines say which latitude and which
+                    // longitude, which is what was actually picked.
+                    let marker = to_screen(self.coordinates[0], self.coordinates[1]);
+                    let accent = Color32::from_rgb(255, 120, 90);
+                    if rect.contains(marker) {
+                        painter.line_segment(
+                            [pos2(rect.left(), marker.y), pos2(rect.right(), marker.y)],
+                            Stroke::new(0.8, accent.gamma_multiply(0.55)),
+                        );
+                        painter.line_segment(
+                            [pos2(marker.x, rect.top()), pos2(marker.x, rect.bottom())],
+                            Stroke::new(0.8, accent.gamma_multiply(0.55)),
+                        );
+                        painter.circle_stroke(marker, 7.0, Stroke::new(1.6, accent));
+                        painter.circle_filled(marker, 2.5, accent);
+                    }
+
+                    // ── cities ───────────────────────────────────────────
+                    // Two hundred of them, so they are dim until asked about:
+                    // a dot to say a place is there, its name only under the
+                    // pointer.
+                    let hover = response.hover_pos();
+                    for city in weather::CITIES {
+                        let at = to_screen(city.latitude, city.longitude);
+                        if !rect.contains(at) {
+                            continue;
+                        }
+                        let near = hover.is_some_and(|pointer| at.distance(pointer) < 9.0);
+                        painter.circle_filled(
+                            at,
+                            if near { 4.0 } else { 2.0 },
+                            if near { Color32::WHITE } else { Color32::from_white_alpha(120) },
+                        );
+                        if near {
+                            let label = painter.layout_no_wrap(
+                                city.name.to_string(),
+                                FontId::new(SETTINGS_FINE_SIZE, FontFamily::Monospace),
+                                Color32::WHITE,
+                            );
+                            let box_rect = Rect::from_min_size(
+                                at + vec2(8.0, -label.size().y - 8.0),
+                                label.size() + vec2(10.0, 6.0),
+                            );
+                            painter.rect_filled(box_rect, CornerRadius::same(4), Color32::from_black_alpha(190));
+                            painter.galley(box_rect.min + vec2(5.0, 3.0), label, Color32::WHITE);
+                        }
+                    }
+
+                    painter.rect_stroke(
+                        rect,
+                        CornerRadius::same(6),
+                        Stroke::new(1.0, Color32::from_white_alpha(70)),
+                        StrokeKind::Inside,
                     );
 
-                    let footer_rect = egui::Rect::from_min_max(
-                        egui::pos2(available.min.x, available.max.y - footer_height),
-                        available.max,
-                    );
-
-                    // -------------------------------------------------
-                    // MAP AREA
-                    // -------------------------------------------------
-                    let _map_response = ui.scope_builder(egui::UiBuilder::new().max_rect(map_rect), |ui| {
-                        let (rect, response) = ui.allocate_exact_size(
-                            map_size,
-                            egui::Sense::click_and_drag(),
+                    // ── footer ───────────────────────────────────────────
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "{:.2}, {:.2}",
+                                self.coordinates[0], self.coordinates[1]
+                            ))
+                            .size(SETTINGS_LABEL_SIZE),
                         );
 
-                        let painter = ui.painter_at(rect);
+                        // The nearest of the two hundred marked cities — a
+                        // sanity check in words for a point picked by eye.
+                        if let Some(city) = weather::nearest_city(self.coordinates[0], self.coordinates[1]) {
+                            settings_note(ui, format!("near {}", city.name));
+                        }
 
-                        // ---------------- ZOOM ----------------
-                        if response.hovered() {
-                            let scroll = ui.input(|i| i.smooth_scroll_delta.y) * 2.0;
+                        // What the pointer is over, so a coordinate can be read
+                        // off the map without committing to it.
+                        if let Some(pointer) = hover.filter(|at| rect.contains(*at)) {
+                            let (lat, lon) = to_globe(pointer);
+                            settings_note(ui, format!("·  pointer {lat:.2}, {lon:.2}"));
+                        }
 
-                            if scroll != 0.0 {
-                                let old_zoom = self.map_zoom;
-                                let zoom_factor = (scroll * 0.001).exp();
-                                self.map_zoom = (self.map_zoom * zoom_factor).clamp(1.0, 15.0);
-
-                                if let Some(cursor) = response.hover_pos() {
-                                    let cursor_uv = egui::pos2(
-                                        (cursor.x - rect.min.x) / rect.width(),
-                                        (cursor.y - rect.min.y) / rect.height(),
-                                    );
-
-                                    let old_uv_size = egui::vec2(1.0 / old_zoom, 1.0 / old_zoom);
-                                    let new_uv_size = egui::vec2(1.0 / self.map_zoom, 1.0 / self.map_zoom);
-
-                                    self.map_offset += cursor_uv.to_vec2() * (old_uv_size - new_uv_size);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    Button::new(RichText::new("Use this").size(SETTINGS_LABEL_SIZE))
+                                        .min_size(vec2(92.0, 32.0)),
+                                )
+                                .clicked()
+                            {
+                                // Picking a place on a map *is* choosing it —
+                                // it used to leave the coordinates staged and
+                                // the forecast still on the old ones until you
+                                // found the Apply button behind this window.
+                                self.set_weather_coordinates();
+                                self.coordinates_map_flag = false;
+                            }
+                            if ui
+                                .add(
+                                    Button::new(RichText::new("Cancel").size(SETTINGS_LABEL_SIZE))
+                                        .min_size(vec2(92.0, 32.0)),
+                                )
+                                .clicked()
+                            {
+                                if let Some(previous) = self.coordinates_before_picker {
+                                    self.coordinates = previous;
                                 }
+                                self.coordinates_map_flag = false;
                             }
-                        }
-
-                        // ---------------- PAN ----------------
-                        if response.dragged_by(egui::PointerButton::Secondary) {
-                            let delta = response.drag_delta();
-                            self.map_offset.x -= delta.x / rect.width() / self.map_zoom;
-                            self.map_offset.y -= delta.y / rect.height() / self.map_zoom;
-                        }
-
-                        // ---------------- UV CLAMP ----------------
-                        let uv_size = egui::vec2(1.0 / self.map_zoom, 1.0 / self.map_zoom);
-
-                        self.map_offset.x = self.map_offset.x.clamp(0.0, 1.0 - uv_size.x);
-                        self.map_offset.y = self.map_offset.y.clamp(0.0, 1.0 - uv_size.y);
-
-                        let uv_min = egui::pos2(self.map_offset.x, self.map_offset.y);
-                        let uv_max = egui::pos2(
-                            uv_min.x + uv_size.x,
-                            uv_min.y + uv_size.y,
-                        );
-
-                        // ---------------- DRAW MAP ----------------
-                        if let Some(texture) = &self.map_texture {
-                            painter.image(
-                                texture.id(),
-                                rect,
-                                egui::Rect::from_min_max(uv_min, uv_max),
-                                egui::Color32::WHITE,
-                            );
-                        }
-
-                        // ---------------- CLICK TO SET COORDINATES ----------------
-                        if response.clicked_by(egui::PointerButton::Primary) {
-                            if let Some(pos) = response.interact_pointer_pos() {
-                                let local_uv = egui::pos2(
-                                    (pos.x - rect.min.x) / rect.width(),
-                                    (pos.y - rect.min.y) / rect.height(),
-                                );
-
-                                let world_uv = egui::pos2(
-                                    uv_min.x + local_uv.x * uv_size.x,
-                                    uv_min.y + local_uv.y * uv_size.y,
-                                );
-
-                                self.coordinates[1] = world_uv.x * 360.0 - 180.0;
-                                self.coordinates[0] = (1.0 - world_uv.y) * 180.0 - 90.0;
+                            if self.map_zoom > 1.0
+                                && ui
+                                    .add(
+                                        Button::new(RichText::new("Whole world").size(SETTINGS_LABEL_SIZE))
+                                            .min_size(vec2(0.0, 32.0)),
+                                    )
+                                    .clicked()
+                            {
+                                self.map_zoom = 1.0;
+                                self.map_offset = Vec2::ZERO;
                             }
-                        }
-
-                        // ---------------- SELECTED MARKER ----------------
-                        let world_uv = egui::pos2(
-                            (self.coordinates[1] + 180.0) / 360.0,
-                            1.0 - ((self.coordinates[0] + 90.0) / 180.0),
-                        );
-
-                        let local_uv = egui::pos2(
-                            (world_uv.x - uv_min.x) / uv_size.x,
-                            (world_uv.y - uv_min.y) / uv_size.y,
-                        );
-
-                        if (0.0..=1.0).contains(&local_uv.x) && (0.0..=1.0).contains(&local_uv.y) {
-                            let marker_pos = egui::pos2(
-                                rect.min.x + local_uv.x * rect.width(),
-                                rect.min.y + local_uv.y * rect.height(),
-                            );
-
-                            painter.circle_filled(marker_pos, 5.0, egui::Color32::RED);
-                            painter.circle_stroke(
-                                marker_pos,
-                                8.0,
-                                egui::Stroke::new(1.5, egui::Color32::WHITE),
-                            );
-                        }
-
-                        // ---------------- CITY MARKERS ----------------
-                        for city in weather::CITIES {
-                            let world_uv = egui::pos2(
-                                (city.longitude + 180.0) / 360.0,
-                                1.0 - ((city.latitude + 90.0) / 180.0),
-                            );
-
-                            let local_uv = egui::pos2(
-                                (world_uv.x - uv_min.x) / uv_size.x,
-                                (world_uv.y - uv_min.y) / uv_size.y,
-                            );
-
-                            if (0.0..=1.0).contains(&local_uv.x) && (0.0..=1.0).contains(&local_uv.y) {
-                                let pos = egui::pos2(
-                                    rect.min.x + local_uv.x * rect.width(),
-                                    rect.min.y + local_uv.y * rect.height(),
-                                );
-
-                                let city_response = ui.allocate_rect(
-                                    egui::Rect::from_center_size(pos, egui::Vec2::splat(10.0)),
-                                    egui::Sense::hover(),
-                                );
-
-                                painter.circle_filled(pos, 4.0, egui::Color32::DARK_RED);
-
-                                if city_response.hovered() {
-                                    painter.text(
-                                        pos + egui::vec2(6.0, -6.0),
-                                        egui::Align2::LEFT_TOP,
-                                        &city.name,
-                                        egui::TextStyle::Body.resolve(&ui.style()),
-                                        egui::Color32::WHITE,
-                                    );
-                                }
-                            }
-                        }
-                    });
-
-                    // -------------------------------------------------
-                    // FOOTER
-                    // -------------------------------------------------
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(footer_rect), |ui| {
-                        ui.horizontal_centered(|ui| {
-                            ui.add_space(20.0);
-                            ui.label(format!("Lat: {:.2}", self.coordinates[0]));
-                            ui.separator();
-                            ui.label(format!("Lon: {:.2}", self.coordinates[1]));
-                            ui.separator();
-                            ui.label(format!("Zoom: {:.2}x", self.map_zoom));
-
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.add_space(20.0);
-                                    if ui.button("OK").clicked() {
-                                        self.coordinates_map_flag = false;
-                                    }
-                                },
-                            );
+                            settings_note(ui, "scroll to zoom  ·  drag to pan  ·  click to pick");
                         });
                     });
                 });

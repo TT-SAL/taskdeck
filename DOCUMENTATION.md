@@ -55,7 +55,7 @@ timeline you block time out on, and a tray of everything still waiting for a slo
 Additional features:
 - **Events vs Tasks:** events are pinned to a date/time; tasks are ranked either by a deadline plus a **severity** (how bad is missing it) or, with no deadline, by a **horizon** (roughly how soon it should happen) that ripens over time.
 - **Archive:** completed/deleted items are appended to a JSONL log and viewable with pagination ("Show more").
-- **Weather coordinate picker:** an interactive Blue-Marble world map with zoom/pan, click-to-pick, and ~200 labeled city markers.
+- **Weather coordinate picker:** an interactive Blue-Marble world map with zoom/pan, click-to-pick, a graticule, ~270 city markers, and the nearest of them named for whatever you picked (§9.2).
 - **Color schemes:** user-editable 6-color palettes used to tint calendar items; palettes can be **auto-generated from the current background image** via k-means clustering in CIE-Lab space.
 - **Settings:** one sheet in four sections — appearance (background picture, its brightness, the colour scheme), window (UI scale, startup monitor, fullscreen, frame-rate readout), calendar (weeks shown), weather (coordinates, two or three day forecast). See §11.1.
 - **Day planner:** clicking any calendar day opens it. Drag on the day's timeline to block out time, drag unplanned tasks in from the tray, move/resize blocks, and set a due time without leaving the day. Records *when you will do* something separately from *when it is due* — see §16.
@@ -543,6 +543,32 @@ editor, which is what used to insert them: `Tab` now leaves the field, as it doe
 and only a paste can still bring one in.
 
 ---
+
+### 9.2 The coordinate picker
+
+An equirectangular Blue Marble (1920×960) drawn into a rect whose width comes from the viewport
+and whose height is half of it — anything else stretches the world. Scroll zooms about the
+pointer, a drag of either button pans, a click picks, and **Use this** applies the coordinates and
+closes; **Cancel** puts back what `coordinates_before_picker` remembers, because the map edits the
+live coordinates (that is what makes the crosshair follow the click) and otherwise there would be
+no way out of the window that wasn't a change.
+
+**Why it used to shake.** The window was pinned to `fixed_size(1500×770)` around a 1440×712 map
+plus a footer, both laid out at absolute rects derived from `available_rect_before_wrap()`. The
+content came to a few points more than the window: every frame the window tried to grow, the fixed
+size pulled it back, the available rect moved, and the map was drawn somewhere slightly different.
+Sizing the content from the *viewport* and letting the window size itself to the content breaks the
+loop — nothing in the chain now reads a value the chain produces.
+
+The map paints a graticule every thirty degrees (equator and prime meridian a shade brighter),
+a crosshair across the full width and height at the chosen point rather than a dot — at this scale
+a dot is a pixel of noise over a photograph of a planet, and the lines say *which latitude* and
+*which longitude* — and city markers that are dim until the pointer is near one.
+
+`weather::nearest_city` puts a name to a point picked by eye. It compares **great-circle** angles,
+not the difference of the two coordinates: a degree of longitude is 111km at the equator and
+nothing at all near the pole, and the flat comparison also breaks completely at the antimeridian
+(it answers "Tijuana" for a point beside New Zealand). Both cases are tested.
 
 ## 10. Color Schemes & Backgrounds (`color.rs`)
 
