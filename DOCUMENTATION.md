@@ -803,8 +803,8 @@ planner existed shows up as a marker, and dragging its bottom edge gives it a le
 The window is a masthead, a body, and a footer:
 
 ```
- ◀ ▶     August 15th, 2026 · today                 3h 30m planned · 4 blocks · 2 due   ✕
- Today   SATURDAY                                        New:  [Task] Event Deadline
+ ◀ ▶     August 15th, 2026 · today
+ Today   SATURDAY       3h 30m planned · 4 blocks · 2 due   New: [Task] Event Deadline  ✕
  ─────────────────────────────────────────────────────────────────────────────────────
   Unplanned        │  06 ───────────────────────────────────────────────────────
   + add a task     │  07 ───────────────────────────────────────────────────────
@@ -813,8 +813,13 @@ The window is a masthead, a body, and a footer:
   BACKLOG (5)      │
   ▸ card           │
  ─────────────────────────────────────────────────────────────────────────────────────
-  Task  Write the report   13:00–15:00 · 2h   due Fri 21 Aug 17:00   ✎   Importance: …
+  Task  Write the report  13:00–15:00  for [2h ▾]  due Fri 21 Aug 17:00  ✎  Importance: …
 ```
+
+The three groups share one row and one centre line. An earlier version stacked the right-hand
+pair into a column, which does not centre as a block inside a centred row — egui aligns it from
+the row's middle and it grows downwards from there, so the toggle sat below the bottom of the
+50-point weekday it was meant to sit beside.
 
 The date-over-weekday block is the calendar day popup's headline, carried over unchanged —
 `format_date`'s two strings, the second in 50-point Anton, with the same `add_space(-9.0)`
@@ -827,12 +832,13 @@ window caption would have done, so the planner has no title bar.
 | Double-click empty timeline | The same, at `DEFAULT_BLOCK_MINUTES` — most of what goes on a day is half an hour of something, and aiming a precise drag for it is work the app can do instead. |
 | Drag a tray card onto the timeline | Sets `planned_start`; the deadline is untouched. |
 | Drag a block | Moves it, keeping the grab point under the pointer. |
-| Drag a block's bottom edge | Resizes it. |
-| Click anything (timeline or tray) | Selects it; the **footer** shows what it is, when it runs, its deadline, its importance, and ✓ complete / ✗ delete / ↩ back-to-unplanned. |
+| Drag a block's bottom edge | Resizes it. The grip is a shaded strip with two bars, `PLANNER_RESIZE_HANDLE` tall, and brightens under the pointer. |
+| Pick a length in the footer | The same as resizing, and the only way to do it for something with no block yet (§16.3.2). |
+| Click anything (timeline or tray) | Selects it; the **footer** shows what it is, when it runs, how long it takes, its deadline, its importance, and ✓ complete / ✗ delete / ↩ back-to-unplanned. |
 | Double-click a block | Re-opens the title for editing. |
 | Type in the tray's quick-add | Enter makes an undated, unplanned task and keeps the field focused — a brain-dump is several tasks, not one. |
 | `←` `→` `T` | Previous day, next day, today. |
-| `Enter` `U` `Del` | Rename / unplan / delete the selection (delete still asks). |
+| `Enter` `U` `Del` | Rename / unplan / delete the selection (delete still asks, and the dialog answers to `Enter` / `Esc`). |
 | `Esc` | Leaves the title editor; a second press closes the planner. |
 
 Shortcuts stand down whenever a widget has focus (`Context::egui_wants_keyboard_input`) or a
@@ -863,7 +869,14 @@ The controls live in a footer row rather than inside the block, for two reasons:
 is registered over the same pixels, so buttons drawn inside it were unclickable. egui hit-tests
 the *most recently added* widget first, so anything that must win a click has to be added after
 the block-sized drag target. `planner_timeline` therefore registers all interactions **before**
-painting; the in-place title editor, drawn afterwards, gets its clicks. The footer is also
+painting; the in-place title editor, drawn afterwards, gets its clicks.
+
+The same rule caught the **resize handle**, which is worth recording because the trap is not
+obvious in the reading order. The handle is a strip inside the block's own rect, and
+`handle_planner_gestures` registered it *first* and the body second — so the body, being the more
+recent, took every press on it. Dragging the bottom edge moved the block instead of lengthening
+it, and resizing was simply unreachable. The body is now registered first and the handle second.
+When two interaction rects overlap, the one that must win goes **last**. The footer is also
 where a planner-created task's **importance** is set — without it, dragging out a task left it
 stuck on the default. It sits *below* the timeline because the row is only occupied some of the
 time: at the bottom, an empty one costs nothing and a full one doesn't push the day the user is
@@ -886,6 +899,45 @@ to schedule is at the top. The first group is the tray's reason for existing: *o
 no time set aside for it* is the one list a day planner should lead with, and it is exactly what
 the day popup used to show as a flat list you could not act on. Here every row is a card to drag
 onto an hour.
+
+### 16.3.2 How long something takes
+
+`Active::duration_minutes` answers "how long", and it means the same thing whether or not the item
+has a slot:
+
+| The item | What the field is | Where you set it |
+|---|---|---|
+| A block on the timeline | the block's length | drag its bottom edge, or the footer's picker |
+| A card in the tray | an **estimate** | the footer's picker |
+
+That the two are one field is the point. "The physics homework takes two hours" is a fact about the
+homework, not about any particular Tuesday afternoon — so it is worth saying before you know where
+the work goes, and `planner::default_length_for` spends it when you do: dragging an estimated card
+onto the timeline lands a block that long instead of the default half-hour. `unplan_item` keeps it
+for the same reason; giving up on a slot is not forgetting how long the work takes. The tray card
+shows it (`takes 2h`) because that is what the card is worth when dropped.
+
+Before this, `duration_minutes` was only ever written by the timeline, so the estimate could not be
+expressed at all: you dragged a card out, got thirty minutes, and resized — except that resizing
+was itself unreachable (§16.3). Between them, "this takes two hours" had nowhere to go.
+
+`planner::duration_options` folds the item's current length into the preset list, so a length
+dragged out by hand — 1h 05m — reads back as the selection rather than as the nearest preset that
+picking anything would round it to.
+
+### 16.3.3 Type scale
+
+`PLANNER_NAME_SIZE` / `PLANNER_META_SIZE` / `PLANNER_FINE_SIZE` (17 / 15 / 13 points) are used
+throughout the planner instead of a literal per call site. The app sets Body at 18 points and
+Button at 22 (`set_styles`) because it is meant to be read from across the room; the planner had
+drifted to 11–14, which is a different application's typography and looked it next to a 22-point
+combo box. The three sit under the body size — a timeline is denser than a task card, and a
+15-minute block has to fit its own name — without dropping into the footnote range.
+
+`PLANNER_TWO_LINE_BLOCK` is the height at which a block stops sharing one row with its name and
+puts it on a second line: the time line plus a `PLANNER_NAME_SIZE` name plus the block's margins.
+It is a constant rather than a literal because it is derived from the type scale and has to move
+when that does.
 
 ### 16.4 "Plan" is an adjective, not a noun
 
@@ -957,6 +1009,11 @@ frame, so it cannot drift out of sync with the calendar the way a second copy wo
 persistent state is the flag, the day being shown, the selection, the in-flight gesture
 (`planner_drag`), the title being typed, the create kind, and the quick-add field. `planner_flag`
 is listed in `any_modal_open()`.
+
+The body's controls read `active_things` and write it back through one setter each
+(`plan_item`, `unplan_item`, `set_item_duration`, …), every one of which ends in
+`summarize_calendar` + `save_active_things` — so there is no path that changes a task without the
+calendar and the task list agreeing about it a frame later.
 
 ### 16.7 What became of the day popup
 

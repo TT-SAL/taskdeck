@@ -31,9 +31,17 @@ pub struct Active {
     /// ignores unknown fields, so saves round-trip through either version.
     #[serde(default)]
     pub planned_start: Option<DateTime<Local>>,
-    /// How long the planned block runs, in minutes. `None` means the item has no
-    /// extent: an event not yet given a length, or a task's due time. See
-    /// `planner::Placement`.
+    /// How long this takes, in minutes.
+    ///
+    /// For an item with a slot it is the length of the block. For one still in
+    /// the planner's tray it is an **estimate** — "the physics homework takes
+    /// two hours" is a fact about the task, not about any particular slot, and
+    /// it survives being planned and unplanned. `planner::default_length_for`
+    /// is what spends it: dragging an estimated task onto the timeline lands a
+    /// block of that length rather than the default half-hour.
+    ///
+    /// `None` means no extent and no estimate: an event not yet given a length,
+    /// or a task nobody has sized. See `planner::Placement`.
     #[serde(default)]
     pub duration_minutes: Option<u32>,
 }

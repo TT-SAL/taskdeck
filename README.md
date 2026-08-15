@@ -24,7 +24,9 @@ Drag on the timeline to block out time; the block appears where you dragged and 
 
 The tray leads with what is **due by this day and has no time set aside for it** — the things a day plan should start from — and the rest of the backlog follows underneath, most pressing first. There is a field at the top for adding a task without leaving the day: type a name, press Enter, and it is waiting in the tray to be dragged onto an hour.
 
-Click anything, on the timeline or in the tray, and the row along the bottom shows what it is, when it runs, whether it has a deadline, its importance, and buttons to complete it, delete it, or send it back to the tray. Arrow keys step through the days, `T` goes to today, `Esc` closes.
+Click anything, on the timeline or in the tray, and the row along the bottom shows what it is, when it runs, how long it takes, whether it has a deadline, its importance, and buttons to complete it, delete it, or send it back to the tray. Arrow keys step through the days, `T` goes to today, `Esc` closes, and the confirmation you get before anything is deleted answers to `Enter` and `Esc` too.
+
+**How long something takes** is set in that bottom row, and it is the same thing whether or not the work has a slot yet. A block on the timeline is as long as you say — pick a length, or drag the block's bottom edge. A card still in the tray takes an estimate instead: your physics homework is due Friday and takes two hours, and you can say the second part before you have decided when to do it. Drag that card onto the timeline and it lands as a two-hour block rather than a default half-hour to be stretched by hand. Send it back to the tray and it still knows it takes two hours.
 
 The **New** switch at the top right decides what a drag makes. A *task* is time set aside to work on something. An *event* is something that happens at that time. A *deadline* is a time something is owed by — no time set aside for it yet, so it appears as a marker on the day and as a card in the tray, waiting to be given an hour.
 

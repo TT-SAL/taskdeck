@@ -424,8 +424,38 @@ pub fn now_marker(day: NaiveDate, now: DateTime<Local>) -> Option<i32> {
 
 /// How long a freshly planned item should run when the user didn't drag out a
 /// length: its own duration if it has one, else the default.
+///
+/// This is what makes an estimate worth setting. "Physics homework takes two
+/// hours" is a fact about the task, not about the slot, so it lives on the task
+/// — and dragging it out of the tray then lands a two-hour block rather than the
+/// default half-hour to be resized by hand.
 pub fn default_length_for(item: &Active) -> u32 {
     item.duration_minutes.unwrap_or(DEFAULT_BLOCK_MINUTES).max(MIN_BLOCK_MINUTES)
+}
+
+/// The lengths the duration picker offers. Quarter-hours while the numbers are
+/// small, then coarser: nobody plans a five-hour block to the nearest fifteen
+/// minutes, and a list you have to scroll is worse than one that rounds.
+const DURATION_CHOICES: [u32; 14] = [
+    15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 420, 480, 600,
+];
+
+/// Durations to offer for an item currently `minutes` long.
+///
+/// `current` is folded into the list so a length dragged out by hand — 1h 05m,
+/// say — is still shown as the selection rather than silently reading as the
+/// nearest preset, and picking something else and coming back doesn't quietly
+/// round it.
+pub fn duration_options(current: Option<u32>) -> Vec<u32> {
+    let mut options: Vec<u32> = DURATION_CHOICES.to_vec();
+    if let Some(current) = current {
+        let current = current.max(MIN_BLOCK_MINUTES);
+        if !options.contains(&current) {
+            options.push(current);
+            options.sort_unstable();
+        }
+    }
+    options
 }
 
 /// Which tray section an unplanned task belongs to on the day being planned.
@@ -786,6 +816,31 @@ mod tests {
         assert!(!CreateKind::Task.is_marker());
         // Planning is the planner's job, so a plain drag plans.
         assert_eq!(CreateKind::default(), CreateKind::Task);
+    }
+
+    #[test]
+    fn duration_options_keep_a_hand_dragged_length_selectable() {
+        // A preset length adds nothing to the list.
+        assert_eq!(duration_options(Some(120)), duration_options(None));
+        // An odd length dragged out by hand is folded in, in order, so the
+        // picker shows it as the selection instead of the nearest preset.
+        let options = duration_options(Some(65));
+        assert!(options.contains(&65), "{options:?}");
+        assert!(options.windows(2).all(|pair| pair[0] < pair[1]), "{options:?}");
+        // Nothing shorter than a legal block is ever offered.
+        assert_eq!(duration_options(Some(1)).first(), Some(&MIN_BLOCK_MINUTES));
+    }
+
+    #[test]
+    fn default_length_prefers_the_items_own_estimate() {
+        // "This takes two hours" is a fact about the task, so dropping it on the
+        // timeline lands two hours, not the default half-hour.
+        let estimated = task(None, None, Some(120));
+        assert_eq!(default_length_for(&estimated), 120);
+        // With no estimate, the default.
+        assert_eq!(default_length_for(&task(None, None, None)), DEFAULT_BLOCK_MINUTES);
+        // A nonsense estimate still yields a legal block.
+        assert_eq!(default_length_for(&task(None, None, Some(1))), MIN_BLOCK_MINUTES);
     }
 
     #[test]

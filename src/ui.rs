@@ -22,18 +22,42 @@ const PLANNER_HOUR_HEIGHT: f32 = 52.0;
 const PLANNER_GUTTER_WIDTH: f32 = 52.0;
 /// Width of the backlog tray.
 const PLANNER_TRAY_WIDTH: f32 = 268.0;
-/// Grab area at the bottom of a block for resizing it.
-const PLANNER_RESIZE_HANDLE: f32 = 8.0;
+/// Grab area at the bottom of a block for resizing it. Generous: this is the
+/// only way to change a block's length with the pointer, and at eight points it
+/// was under six pixels on a scaled-down window — a target you had to hunt for.
+const PLANNER_RESIZE_HANDLE: f32 = 14.0;
+/// A block at least this tall puts its name on a second line under the times.
+/// Below it the name shares the row, right-aligned. Sized for the time line plus
+/// a `PLANNER_NAME_SIZE` name plus the block's own vertical margins.
+const PLANNER_TWO_LINE_BLOCK: f32 = 46.0;
 /// Hour brought into view when opening a day that isn't today.
 const PLANNER_DEFAULT_SCROLL_HOUR: f32 = 7.0;
 /// Height of the footer. Reserved whether or not anything is selected, so
 /// selecting doesn't shift the timeline under the pointer; it carries the day's
-/// gesture hints when the selection is empty. Tall enough for the importance
-/// combo box, which is the deepest thing the row ever holds.
-const PLANNER_INSPECTOR_HEIGHT: f32 = 42.0;
+/// gesture hints when the selection is empty. Tall enough for the combo boxes,
+/// which are the deepest things the row ever holds.
+const PLANNER_INSPECTOR_HEIGHT: f32 = 46.0;
 /// Point size of the weekday in the masthead — the day popup's headline size,
 /// kept because it is the one thing worth carrying over from that window.
 const PLANNER_WEEKDAY_SIZE: f32 = 50.0;
+
+/* ─────────────────────────── Planner type scale ───────────────────────────
+ *
+ * Three sizes, used everywhere in the planner instead of a literal per call
+ * site. The app sets Body at 18 points and Button at 22 (see `set_styles`)
+ * because it is meant to be read from across the room; the planner had drifted
+ * to 11–14, which is a different application's typography and looked it next to
+ * a 22-point combo box. These sit under the body size — a timeline is denser
+ * than a task card, and a 15-minute block has to fit its own name — without
+ * dropping into the footnote range.
+ */
+
+/// Names: block titles, tray card titles, the selected item in the footer.
+const PLANNER_NAME_SIZE: f32 = 17.0;
+/// Everything that qualifies a name: times, deadlines, field labels, hints.
+const PLANNER_META_SIZE: f32 = 15.0;
+/// Section headings and the second line of a tray card.
+const PLANNER_FINE_SIZE: f32 = 13.0;
 /// Step the automatic UI scale quantizes points-per-pixel to. See
 /// `apply_ui_scale` — a quarter step keeps the layout close to the size that
 /// fits while giving text a much better chance of a whole-pixel height.
@@ -63,6 +87,10 @@ struct BacklogCard {
     name: String,
     color_id: usize,
     deadline: Option<DateTime<Local>>,
+    /// How long the task is estimated to take, if the user has said. This is
+    /// what the card is worth when dropped on the timeline, so the card shows
+    /// it: a "2h" card lands as a two-hour block.
+    duration: Option<u32>,
 }
 
 /// Screen rectangle for a placement in its lane.
@@ -102,6 +130,36 @@ fn planner_entry_rect(
             )
         }
     }
+}
+
+/// Whether a yes/no dialog was answered from the keyboard this frame, as
+/// `(accepted, dismissed)`.
+///
+/// A confirmation is a question with an obvious answer key: reaching for the
+/// mouse to click "Yes" on a dialog you raised with `Del` a moment ago is the
+/// kind of thing that makes a keyboard-driven view stop being one. Enter agrees,
+/// Escape backs out.
+///
+/// Dismissal wins if somehow both arrive in one frame — backing out of a
+/// destructive action is the safe reading.
+fn confirmation_keys(ctx: &Context) -> (bool, bool) {
+    let (accepted, dismissed) = ctx.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+    (accepted && !dismissed, dismissed)
+}
+
+/// Size for a yes/no button, so the pair reads as a choice rather than as two
+/// words jammed against the bottom of the window.
+const CONFIRM_BUTTON: Vec2 = Vec2::new(76.0, 32.0);
+
+/// The line that tells you the keys exist. Without it `confirmation_keys` is a
+/// shortcut nobody discovers, and the mouse trip it saves is the whole point.
+fn confirmation_key_hint(ui: &mut Ui) {
+    ui.add_space(10.0);
+    ui.label(
+        RichText::new("Enter · Esc")
+            .size(13.0)
+            .color(Color32::from_white_alpha(110)),
+    );
 }
 
 struct FpsCounter {
@@ -1433,6 +1491,7 @@ impl TaskApp {
                 name: item.name.clone(),
                 color_id: item.calendar_item_color(),
                 deadline: item.deadline,
+                duration: item.duration_minutes,
             };
             match planner::backlog_group(item.deadline, self.planner_day) {
                 planner::BacklogGroup::Due => due.push(card),
@@ -1468,16 +1527,20 @@ impl TaskApp {
         self.save_active_things();
     }
 
-    /// Return a task to the backlog, keeping the task itself (and its deadline)
-    /// intact. Only tasks can be unplanned — an event with no time isn't an
-    /// event, so its block offers delete instead.
+    /// Return a task to the tray, keeping the task itself, its deadline, and how
+    /// long it takes. Only tasks can be unplanned — an event with no time isn't
+    /// an event, so its block offers delete instead.
+    ///
+    /// `duration_minutes` used to be cleared here, back when it only meant "the
+    /// length of the block". It is also the estimate now, and giving up on a
+    /// slot is not forgetting that the homework takes two hours — so it stays,
+    /// and dropping the card back on the timeline lands the same length.
     fn unplan_item(&mut self, id: u64) {
         if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
             if item.is_event {
                 return;
             }
             item.planned_start = None;
-            item.duration_minutes = None;
         }
         if self.planner_selection == Some(id) {
             self.planner_selection = None;
@@ -1716,39 +1779,50 @@ impl TaskApp {
         let today = self.date.date_naive();
         let (weekday, full_date) = utilities::format_date(self.planner_day);
 
+        // One row, three groups, each free to be as tall as it needs: the row's
+        // `Align::Center` puts them on a shared centre line. An earlier version
+        // nudged each group down with its own `add_space` and they ended up on
+        // three different heights — the arrows near the top, "Today" floating in
+        // the middle of nothing, and the right-hand column lower than the date
+        // it was supposed to sit beside.
         ui.horizontal(|ui| {
+            ui.add_space(4.0);
+
             // The stepper stacks so it stands beside the two-line day text
             // rather than stretching the masthead.
             ui.vertical(|ui| {
-                ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui.button(RichText::new("◀").size(16.0)).on_hover_text("Previous day  (←)").clicked() {
+                    if ui.button(RichText::new("◀").size(18.0)).on_hover_text("Previous day  (←)").clicked() {
                         let day = self.planner_day.pred_opt().unwrap_or(self.planner_day);
                         self.planner_go_to_day(day);
                     }
-                    if ui.button(RichText::new("▶").size(16.0)).on_hover_text("Next day  (→)").clicked() {
+                    if ui.button(RichText::new("▶").size(18.0)).on_hover_text("Next day  (→)").clicked() {
                         let day = self.planner_day.succ_opt().unwrap_or(self.planner_day);
                         self.planner_go_to_day(day);
                     }
                 });
-                ui.add_space(2.0);
+                ui.add_space(4.0);
                 let jump = ui.add_enabled(
                     self.planner_day != today,
-                    Button::new(RichText::new("Today").size(13.0)),
+                    Button::new(RichText::new("Today").size(PLANNER_META_SIZE)).min_size(vec2(74.0, 0.0)),
                 );
                 if jump.on_hover_text("Jump to today  (T)").clicked() {
                     self.planner_go_to_day(today);
                 }
             });
 
-            ui.add_space(16.0);
+            ui.add_space(18.0);
 
             // ── The day popup's headline, kept exactly as it was ──────────
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(full_date);
                     if self.planner_day == today {
-                        ui.label(RichText::new("· today").size(13.0).color(Color32::from_white_alpha(150)));
+                        ui.label(
+                            RichText::new("· today")
+                                .size(PLANNER_META_SIZE)
+                                .color(Color32::from_white_alpha(150)),
+                        );
                     }
                 });
                 ui.add_space(-9.0);
@@ -1761,45 +1835,49 @@ impl TaskApp {
                 );
             });
 
-            // Close and the create-kind toggle sit at the far right, so the eye
-            // lands on the date first.
+            // Close, the create-kind toggle, and the day's load sit at the far
+            // right, so the eye lands on the date first.
+            //
+            // One row, not a stacked pair. A column of two nested inside a
+            // centred row does not centre as a block — egui aligns it from the
+            // row's middle and it grows downwards from there, which put the
+            // toggle below the bottom of the 50-point weekday it was supposed to
+            // sit beside. All three fit on a line at any width the planner
+            // opens at, so there is nothing to stack.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.vertical(|ui| {
-                    ui.add_space(8.0);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .button(RichText::new("✕").size(15.0))
-                            .on_hover_text("Close the planner  (Esc)")
-                            .clicked()
-                        {
-                            self.close_planner();
-                        }
-                        ui.add_space(14.0);
-                        ui.label(
-                            RichText::new(self.planner_day_summary())
-                                .size(13.0)
-                                .color(Color32::from_white_alpha(190)),
-                        )
-                        .on_hover_text("Overlapping blocks are counted once: this is how much of the day is committed");
-                    });
-                    ui.add_space(10.0);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        // Deadline last: it is the exception, and reading
-                        // right-to-left the two planning kinds come first.
-                        ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Deadline, "Deadline")
-                            .on_hover_text("A due time on this day, with no time set aside for it yet");
-                        ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Event, "Event")
-                            .on_hover_text("Something that happens at this time");
-                        ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Task, "Task")
-                            .on_hover_text("Time set aside to work on something — sets no deadline");
-                        ui.label(
-                            RichText::new("New:")
-                                .size(13.0)
-                                .color(Color32::from_white_alpha(150)),
-                        )
-                        .on_hover_text("What a drag — or a double-click — on empty timeline makes");
-                    });
-                });
+                if ui
+                    .button(RichText::new("✕").size(PLANNER_META_SIZE))
+                    .on_hover_text("Close the planner  (Esc)")
+                    .clicked()
+                {
+                    self.close_planner();
+                }
+
+                ui.add_space(18.0);
+
+                // Deadline last: it is the exception, and reading right-to-left
+                // the two planning kinds come first.
+                ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Deadline, RichText::new("Deadline").size(PLANNER_META_SIZE))
+                    .on_hover_text("A due time on this day, with no time set aside for it yet");
+                ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Event, RichText::new("Event").size(PLANNER_META_SIZE))
+                    .on_hover_text("Something that happens at this time");
+                ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Task, RichText::new("Task").size(PLANNER_META_SIZE))
+                    .on_hover_text("Time set aside to work on something — sets no deadline");
+                ui.label(
+                    RichText::new("New:")
+                        .size(PLANNER_META_SIZE)
+                        .color(Color32::from_white_alpha(150)),
+                )
+                .on_hover_text("What a drag — or a double-click — on empty timeline makes");
+
+                ui.add_space(24.0);
+
+                ui.label(
+                    RichText::new(self.planner_day_summary())
+                        .size(PLANNER_META_SIZE)
+                        .color(Color32::from_white_alpha(190)),
+                )
+                .on_hover_text("Overlapping blocks are counted once: this is how much of the day is committed");
             });
         });
     }
@@ -1869,12 +1947,17 @@ impl TaskApp {
         let mut unplan = false;
         let mut rename = false;
         let mut changed = false;
+        let mut new_duration: Option<u32> = None;
 
         ui.horizontal(|ui| {
             ui.set_min_height(PLANNER_INSPECTOR_HEIGHT);
-            ui.add_space(4.0);
-            ui.label(RichText::new(if is_event { "Event" } else { "Task" }).size(12.0).color(Color32::from_white_alpha(140)));
-            ui.label(RichText::new(&name).size(14.0).strong());
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(if is_event { "Event" } else { "Task" })
+                    .size(PLANNER_FINE_SIZE)
+                    .color(Color32::from_white_alpha(140)),
+            );
+            ui.label(RichText::new(&name).size(PLANNER_NAME_SIZE).strong());
 
             // For an unplanned task the anchor *is* its deadline, which the
             // "due …" label below already spells out in full — printing the bare
@@ -1882,15 +1965,20 @@ impl TaskApp {
             if let Some(anchor) = anchor.filter(|_| is_event || is_planned) {
                 let when = match duration {
                     Some(minutes) => format!(
-                        "{}–{} · {}",
+                        "{}–{}",
                         anchor.format("%H:%M"),
-                        (anchor + Duration::minutes(minutes as i64)).format("%H:%M"),
-                        planner::format_duration(minutes)
+                        (anchor + Duration::minutes(minutes as i64)).format("%H:%M")
                     ),
                     None => anchor.format("%H:%M").to_string(),
                 };
-                ui.label(RichText::new(when).size(12.0).color(Color32::from_white_alpha(170)));
+                ui.label(RichText::new(when).size(PLANNER_META_SIZE).color(Color32::from_white_alpha(180)));
             }
+
+            // How long this takes, as a control rather than as text. Dragging a
+            // block's bottom edge sets the same field, but "two hours" is
+            // something you know about the work before you know where it goes —
+            // and on an unplanned task there is no edge to drag at all.
+            new_duration = self.planner_duration_picker(ui, duration, is_planned);
 
             // Spell out the deadline for tasks. Blocking out time on the planner
             // sets *when you will do it*, never a due date, and there is no way
@@ -1903,7 +1991,7 @@ impl TaskApp {
                 };
                 ui.label(
                     RichText::new(due)
-                        .size(12.0)
+                        .size(PLANNER_META_SIZE)
                         .color(if deadline.is_some() {
                             Color32::from_white_alpha(190)
                         } else {
@@ -1917,7 +2005,7 @@ impl TaskApp {
             }
 
             if ui
-                .small_button("✎")
+                .button(RichText::new("✎").size(PLANNER_META_SIZE))
                 .on_hover_text("Rename  (Enter, or double-click the block)")
                 .clicked()
             {
@@ -1929,24 +2017,36 @@ impl TaskApp {
             if !is_event {
                 ui.add_space(10.0);
                 if let Some(level) = time_importance.as_mut() {
-                    ui.label(RichText::new("Urgency:").size(12.0));
+                    ui.label(RichText::new("Urgency:").size(PLANNER_META_SIZE));
                     ComboBox::from_id_salt("planner_urgency")
-                        .selected_text(URGENCY[(*level as usize).min(URGENCY.len() - 1)])
+                        .selected_text(
+                            RichText::new(URGENCY[(*level as usize).min(URGENCY.len() - 1)])
+                                .size(PLANNER_META_SIZE),
+                        )
                         .show_ui(ui, |ui| {
                             for (index, label) in URGENCY.iter().enumerate() {
-                                if ui.selectable_value(level, index as u8, *label).clicked() {
+                                if ui
+                                    .selectable_value(level, index as u8, RichText::new(*label).size(PLANNER_META_SIZE))
+                                    .clicked()
+                                {
                                     changed = true;
                                 }
                             }
                         });
                 } else {
                     let level = importance.get_or_insert(PLANNER_NEW_TASK_IMPORTANCE);
-                    ui.label(RichText::new("Importance:").size(12.0));
+                    ui.label(RichText::new("Importance:").size(PLANNER_META_SIZE));
                     ComboBox::from_id_salt("planner_importance")
-                        .selected_text(IMPORTANCE[(*level as usize).min(IMPORTANCE.len() - 1)])
+                        .selected_text(
+                            RichText::new(IMPORTANCE[(*level as usize).min(IMPORTANCE.len() - 1)])
+                                .size(PLANNER_META_SIZE),
+                        )
                         .show_ui(ui, |ui| {
                             for (index, label) in IMPORTANCE.iter().enumerate() {
-                                if ui.selectable_value(level, index as u8, *label).clicked() {
+                                if ui
+                                    .selectable_value(level, index as u8, RichText::new(*label).size(PLANNER_META_SIZE))
+                                    .clicked()
+                                {
                                     changed = true;
                                 }
                             }
@@ -1955,24 +2055,32 @@ impl TaskApp {
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_space(4.0);
-                if ui.button("✗ Delete").on_hover_text("Delete  (Del)").clicked() {
+                ui.add_space(6.0);
+                if ui
+                    .button(RichText::new("✗ Delete").size(PLANNER_META_SIZE))
+                    .on_hover_text("Delete  (Del)")
+                    .clicked()
+                {
                     delete = true;
                 }
-                if ui.button("✓ Complete").clicked() {
+                if ui.button(RichText::new("✓ Complete").size(PLANNER_META_SIZE)).clicked() {
                     complete = true;
                 }
                 if !is_event
                     && is_planned
                     && ui
-                        .button("↩ Unplan")
-                        .on_hover_text("Back to the tray, keeping the task and its deadline  (U)")
+                        .button(RichText::new("↩ Unplan").size(PLANNER_META_SIZE))
+                        .on_hover_text("Back to the tray, keeping the task, its deadline and its estimate  (U)")
                         .clicked()
                 {
                     unplan = true;
                 }
             });
         });
+
+        if let Some(minutes) = new_duration {
+            self.set_item_duration(id, minutes);
+        }
 
         if changed {
             if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
@@ -2000,6 +2108,83 @@ impl TaskApp {
         }
     }
 
+    /// The "how long does this take" picker, returning a new length when the
+    /// user chose one.
+    ///
+    /// `planned` only changes what it is called. On a block it is the length of
+    /// the block; on something still in the tray it is an estimate, which is the
+    /// same field either way (`Active::duration_minutes`) and survives planning
+    /// and unplanning. That is the point: how long the physics homework takes is
+    /// a fact about the homework, not about the slot you eventually give it.
+    fn planner_duration_picker(&self, ui: &mut Ui, current: Option<u32>, planned: bool) -> Option<u32> {
+        let mut chosen = None;
+
+        ui.label(
+            RichText::new(if planned { "for" } else { "takes" })
+                .size(PLANNER_FINE_SIZE)
+                .color(Color32::from_white_alpha(140)),
+        );
+
+        let label = match current {
+            Some(minutes) => planner::format_duration(minutes),
+            None => "—".to_string(),
+        };
+        ComboBox::from_id_salt("planner_duration")
+            .selected_text(RichText::new(label).size(PLANNER_META_SIZE))
+            .show_ui(ui, |ui| {
+                for minutes in planner::duration_options(current) {
+                    if ui
+                        .selectable_label(
+                            current == Some(minutes),
+                            RichText::new(planner::format_duration(minutes)).size(PLANNER_META_SIZE),
+                        )
+                        .clicked()
+                    {
+                        chosen = Some(minutes);
+                    }
+                }
+            })
+            .response
+            .on_hover_text(if planned {
+                "How long this block runs. The same as dragging its bottom edge."
+            } else {
+                "How long you think this takes. Drag it onto the timeline and it lands that long."
+            });
+
+        chosen
+    }
+
+    /// Set how long an item takes, from the footer's picker.
+    ///
+    /// Legal-block clamping is the timeline's job everywhere else, so it is done
+    /// here too: a length chosen for a block that would then run past midnight
+    /// pulls the block back rather than being silently shortened, exactly as
+    /// dragging its edge would.
+    fn set_item_duration(&mut self, id: u64, minutes: u32) {
+        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
+            return;
+        };
+
+        item.duration_minutes = Some(minutes.max(planner::MIN_BLOCK_MINUTES));
+
+        // Re-seat the block if the new length would push it out of its day.
+        if let Some(anchor) = item.planner_anchor().filter(|_| item.is_planned()) {
+            let start = anchor.hour() as i32 * 60 + anchor.minute() as i32;
+            let (start, length) = planner::clamp_block(start as f32, minutes as f32);
+            item.duration_minutes = Some(length);
+            if let Some(when) = planner::resolve_on_day(anchor.date_naive(), start) {
+                if item.is_event {
+                    item.deadline = Some(when);
+                } else {
+                    item.planned_start = Some(when);
+                }
+            }
+        }
+
+        self.summarize_calendar();
+        self.save_active_things();
+    }
+
     /// The footer with nothing selected: what the timeline responds to.
     ///
     /// The row is reserved either way, so an empty selection costs a blank strip
@@ -2020,7 +2205,7 @@ impl TaskApp {
                     "Drag on the timeline to add {kind}  ·  double-click for a quick one  ·  \
                      drag a card in from the left to give it a slot  ·  click anything to edit it"
                 ))
-                .size(12.0)
+                .size(PLANNER_META_SIZE)
                 .color(Color32::from_white_alpha(130)),
             );
         });
@@ -2045,10 +2230,10 @@ impl TaskApp {
         ui.vertical(|ui| {
             ui.set_width(PLANNER_TRAY_WIDTH);
 
-            ui.label(RichText::new("Unplanned").size(14.0).strong());
+            ui.label(RichText::new("Unplanned").size(PLANNER_NAME_SIZE).strong());
             ui.label(
                 RichText::new("drag onto the timeline")
-                    .size(12.0)
+                    .size(PLANNER_FINE_SIZE)
                     .color(Color32::from_white_alpha(130)),
             );
             ui.add_space(6.0);
@@ -2062,7 +2247,7 @@ impl TaskApp {
                 ui.add_space(12.0);
                 ui.label(
                     RichText::new("Nothing waiting.\nEvery task has a slot.")
-                        .size(13.0)
+                        .size(PLANNER_META_SIZE)
                         .color(Color32::from_white_alpha(120)),
                 );
                 return;
@@ -2112,7 +2297,7 @@ impl TaskApp {
         ui.add_space(2.0);
         ui.label(
             RichText::new(text)
-                .font(FontId::new(11.0, FontFamily::Name("space".into())))
+                .font(FontId::new(PLANNER_FINE_SIZE, FontFamily::Name("space".into())))
                 .color(if urgent {
                     Color32::from_rgb(255, 150, 120)
                 } else {
@@ -2147,13 +2332,27 @@ impl TaskApp {
         let response = frame
             .show(ui, |ui| {
                 ui.set_width(PLANNER_TRAY_WIDTH - 40.0);
-                ui.label(RichText::new(&card.name).size(14.0));
+                ui.label(RichText::new(&card.name).size(PLANNER_NAME_SIZE));
+
+                // Second line: how long it takes, then when it is owed. The
+                // estimate is shown here because it is what the card will be
+                // worth when dropped — a "2h" card lands as a two-hour block.
+                let mut meta = Vec::new();
+                if let Some(minutes) = card.duration {
+                    meta.push(format!("takes {}", planner::format_duration(minutes)));
+                }
+                let overdue = card.deadline.is_some_and(|deadline| deadline < now);
                 if let Some(deadline) = card.deadline {
-                    let relative = planner::relative_due(deadline, now);
-                    let overdue = relative == "overdue";
+                    meta.push(format!(
+                        "due {} · {}",
+                        deadline.format("%a %H:%M"),
+                        planner::relative_due(deadline, now)
+                    ));
+                }
+                if !meta.is_empty() {
                     ui.label(
-                        RichText::new(format!("due {} · {}", deadline.format("%a %H:%M"), relative))
-                            .font(FontId::new(11.0, FontFamily::Name("space".into())))
+                        RichText::new(meta.join("  ·  "))
+                            .font(FontId::new(PLANNER_FINE_SIZE, FontFamily::Name("space".into())))
                             .color(if overdue {
                                 Color32::from_rgb(255, 120, 90)
                             } else {
@@ -2214,7 +2413,7 @@ impl TaskApp {
             let preview = self
                 .planner_drag
                 .clone()
-                .and_then(|drag| self.planner_drag_preview_for(&drag, &entries, pointer, &geometry));
+                .and_then(|drag| self.planner_drag_preview_for(&drag, pointer, &geometry));
             if let Some((id, start, minutes)) = preview {
                 match entries.iter_mut().find(|e| e.id == id) {
                     Some(entry) => entry.placement = planner::Placement::Block { start, minutes },
@@ -2291,7 +2490,7 @@ impl TaskApp {
                     pos2(rect.left() + PLANNER_GUTTER_WIDTH - 10.0, y + 2.0),
                     egui::Align2::RIGHT_TOP,
                     format!("{hour:02}"),
-                    FontId::new(12.0, FontFamily::Monospace),
+                    FontId::new(PLANNER_META_SIZE, FontFamily::Monospace),
                     Color32::from_white_alpha(if on_the_hour { 190 } else { 110 }),
                 );
                 // Half-hour tick, to make a 30-minute block easy to read off.
@@ -2375,7 +2574,7 @@ impl TaskApp {
                     pos2(rect.left() + 8.0, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     if naming { prefix.clone() } else { format!("{prefix}{}", entry.name) },
-                    FontId::new(12.0, FontFamily::Monospace),
+                    FontId::new(PLANNER_META_SIZE, FontFamily::Monospace),
                     Color32::from_white_alpha(220),
                 );
 
@@ -2421,7 +2620,7 @@ impl TaskApp {
                         planner::format_minutes(start + minutes as i32),
                         planner::format_duration(minutes)
                     ),
-                    FontId::new(11.0, FontFamily::Monospace),
+                    FontId::new(PLANNER_FINE_SIZE, FontFamily::Monospace),
                     Color32::from_white_alpha(200),
                 );
 
@@ -2432,12 +2631,12 @@ impl TaskApp {
                         pos2(text_rect.right(), (text_rect.top() + 41.0).min(text_rect.bottom())),
                     );
                     self.planner_name_editor(ui, field);
-                } else if rect.height() > 26.0 {
+                } else if rect.height() > PLANNER_TWO_LINE_BLOCK {
                     clipped.text(
-                        pos2(text_rect.left(), text_rect.top() + 14.0),
+                        pos2(text_rect.left(), text_rect.top() + 16.0),
                         egui::Align2::LEFT_TOP,
                         &entry.name,
-                        FontId::new(14.0, FontFamily::Monospace),
+                        FontId::new(PLANNER_NAME_SIZE, FontFamily::Monospace),
                         Color32::WHITE,
                     );
                 } else {
@@ -2446,18 +2645,37 @@ impl TaskApp {
                         pos2(text_rect.right(), text_rect.center().y),
                         egui::Align2::RIGHT_CENTER,
                         &entry.name,
-                        FontId::new(12.0, FontFamily::Monospace),
+                        FontId::new(PLANNER_META_SIZE, FontFamily::Monospace),
                         Color32::WHITE,
                     );
                 }
 
-                // The resize grip, hinted with a pair of lines along the bottom.
+                // The resize grip. A single faint hairline read as decoration
+                // rather than as a handle, which is most of why nobody found
+                // it: two stacked bars centred in a shaded strip look like
+                // something you pull, and the strip is the size of the target
+                // you actually have to hit. It brightens under the pointer.
                 if rect.height() >= 24.0 {
-                    let grip_y = rect.bottom() - 4.0;
-                    ui.painter().line_segment(
-                        [pos2(rect.center().x - 12.0, grip_y), pos2(rect.center().x + 12.0, grip_y)],
-                        Stroke::new(1.5, Color32::from_white_alpha(150)),
+                    let strip = Rect::from_min_max(
+                        pos2(rect.left() + 1.0, rect.bottom() - PLANNER_RESIZE_HANDLE),
+                        pos2(rect.right() - 1.0, rect.bottom() - 1.0),
                     );
+                    let hot = ui.rect_contains_pointer(strip);
+                    let painter = ui.painter();
+                    painter.rect_filled(
+                        strip,
+                        CornerRadius { nw: 0, ne: 0, sw: 7, se: 7 },
+                        Color32::from_white_alpha(if hot { 34 } else { 12 }),
+                    );
+                    let bars = Color32::from_white_alpha(if hot { 235 } else { 165 });
+                    let half = (rect.width() * 0.16).clamp(11.0, 26.0);
+                    for offset in [-2.5_f32, 1.5] {
+                        let y = strip.center().y + offset;
+                        painter.line_segment(
+                            [pos2(rect.center().x - half, y), pos2(rect.center().x + half, y)],
+                            Stroke::new(1.6, bars),
+                        );
+                    }
                 }
             }
         }
@@ -2518,26 +2736,41 @@ impl TaskApp {
                     continue;
                 };
 
+                // Body first, resize handle second. The handle sits *inside* the
+                // body's rect, and egui gives a click to the most recently added
+                // widget under the pointer — so registering the handle first, as
+                // this did, made it unreachable: every press on it was a press
+                // on the body, and pulling the bottom edge moved the whole block
+                // instead of lengthening it. Order is the whole fix; the handle
+                // being thin only made it harder to notice.
+                let body_response =
+                    ui.interact(*rect, egui::Id::new(("planner_block", *id)), egui::Sense::click_and_drag());
+
                 let handle = Rect::from_min_max(
                     pos2(rect.left(), rect.bottom() - PLANNER_RESIZE_HANDLE),
                     rect.max,
                 );
                 let handle_response =
                     ui.interact(handle, egui::Id::new(("planner_resize", *id)), egui::Sense::click_and_drag());
+
                 if handle_response.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                } else if body_response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
+
                 if handle_response.drag_started() {
                     self.planner_drag = Some(PlannerDrag::Resize { id: *id, start });
                     self.planner_selection = Some(*id);
                     continue;
                 }
-
-                let body_response =
-                    ui.interact(*rect, egui::Id::new(("planner_block", *id)), egui::Sense::click_and_drag());
-                if body_response.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                // A click on the handle that never became a drag is still a
+                // click on the block: selecting by aiming slightly low should
+                // not be a way to select nothing.
+                if handle_response.clicked() {
+                    self.planner_selection = Some(*id);
                 }
+
                 if body_response.clicked() {
                     self.planner_selection = Some(*id);
                 }
@@ -2601,7 +2834,7 @@ impl TaskApp {
             return;
         }
         let Some(drag) = self.planner_drag.take() else { return };
-        let Some(preview) = self.planner_drag_preview_for(&drag, entries, pointer, geometry) else {
+        let Some(preview) = self.planner_drag_preview_for(&drag, pointer, geometry) else {
             return;
         };
         let (_, start, minutes) = preview;
@@ -2636,8 +2869,8 @@ impl TaskApp {
     ///
     /// The arithmetic lives in `planner::preview`, which is unit-tested; this
     /// only supplies the two things it can't know: the pointer's position in
-    /// minutes, and the length to give a backlog card being dropped (its own, if
-    /// it has been planned before, else the default).
+    /// minutes, and the length to give a tray card being dropped (how long the
+    /// task says it takes, else the default).
     ///
     /// Taking the gesture as an argument rather than reading `self.planner_drag`
     /// lets the commit path call this *after* `take()`ing the gesture, so the
@@ -2646,7 +2879,6 @@ impl TaskApp {
     fn planner_drag_preview_for(
         &self,
         drag: &PlannerDrag,
-        entries: &[PlannerEntry],
         pointer: Option<Pos2>,
         geometry: &planner::TimelineGeometry,
     ) -> Option<(u64, i32, u32)> {
@@ -2666,14 +2898,17 @@ impl TaskApp {
             }
         }
 
+        // A card dropped out of the tray lands at the length the *task* says it
+        // takes. This used to read the length off the entry already on this
+        // day's timeline, which only exists when the task happens to be due
+        // today — so an estimate set anywhere else was thrown away and every
+        // drop was the default half-hour.
         let default_minutes = match drag {
-            PlannerDrag::FromBacklog { id } => entries
+            PlannerDrag::FromBacklog { id } => self
+                .active_things
                 .iter()
-                .find(|entry| entry.id == *id)
-                .and_then(|entry| match entry.placement {
-                    planner::Placement::Block { minutes, .. } => Some(minutes),
-                    planner::Placement::Marker { .. } => None,
-                })
+                .find(|item| item.id == *id)
+                .map(planner::default_length_for)
                 .unwrap_or(planner::DEFAULT_BLOCK_MINUTES),
             _ => planner::DEFAULT_BLOCK_MINUTES,
         };
@@ -3299,14 +3534,17 @@ impl TaskApp {
                         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                         .show(ctx, |ui| {
                             ui.label(format!("Are you sure you want to mark \"{}\" as complete?", name));
+                            let (accepted, dismissed) = confirmation_keys(ui.ctx());
+                            ui.add_space(8.0);
                             ui.horizontal(|ui| {
-                                if ui.button("Yes").clicked() {
+                                if ui.add(Button::new("Yes").min_size(CONFIRM_BUTTON)).clicked() || accepted {
                                     self.complete_active_thing(id);
                                 }
-                                if ui.button("No").clicked() {
+                                if ui.add(Button::new("No").min_size(CONFIRM_BUTTON)).clicked() || dismissed {
                                     self.confirm_complete_task = None;
                                     self.user_wants_to_complete_task_flag = false;
                                 }
+                                confirmation_key_hint(ui);
                             });
                         });
                 } else {
@@ -3325,14 +3563,17 @@ impl TaskApp {
                         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                         .show(ctx, |ui| {
                             ui.label(format!("Are you sure you want to delete \"{}\"?", name));
+                            let (accepted, dismissed) = confirmation_keys(ui.ctx());
+                            ui.add_space(8.0);
                             ui.horizontal(|ui| {
-                                if ui.button("Yes").clicked() {
+                                if ui.add(Button::new("Yes").min_size(CONFIRM_BUTTON)).clicked() || accepted {
                                     self.delete_active_thing(id);
                                 }
-                                if ui.button("No").clicked() {
+                                if ui.add(Button::new("No").min_size(CONFIRM_BUTTON)).clicked() || dismissed {
                                     self.confirm_delete_task = None;
                                     self.user_wants_to_delete_task_flag = false;
                                 }
+                                confirmation_key_hint(ui);
                             });
                         });
                 } else {
@@ -4253,7 +4494,10 @@ impl TaskApp {
 
                         let button = ui.add(Button::new("Ok").min_size(Vec2::new(50.0, 30.0)));
 
-                        if button.clicked() {
+                        // Either key dismisses: there is only one thing to do
+                        // with an error you have read.
+                        let (accepted, dismissed) = confirmation_keys(ui.ctx());
+                        if button.clicked() || accepted || dismissed {
                             self.error_flag = false;
                         }
                     });
