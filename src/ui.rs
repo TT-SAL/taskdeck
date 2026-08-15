@@ -171,8 +171,68 @@ const NOTEPAD_CHROME_HEIGHT: f32 = 46.0;
 const SCHEME_LIST_WIDTH: f32 = 330.0;
 /// Height of one row of that list.
 const SCHEME_ROW_HEIGHT: f32 = 30.0;
+/// Gap between rows, set explicitly so a list can be made exactly as tall as
+/// the rows it holds. Sizing one by `rows × height` and letting egui's default
+/// spacing pile up underneath is how the last scheme ended up below the fold of
+/// a list nobody expects to scroll.
+const SCHEME_ROW_GAP: f32 = 4.0;
+/// Height one row costs a list, gap included.
+const SCHEME_ROW_PITCH: f32 = SCHEME_ROW_HEIGHT + SCHEME_ROW_GAP;
 /// Side of one palette swatch in a scheme row.
 const SCHEME_SWATCH: f32 = 17.0;
+/// Width of the scheme editor window.
+const SCHEME_EDITOR_WIDTH: f32 = 460.0;
+/// Side of one editable swatch in that window.
+const SCHEME_EDIT_SWATCH: f32 = 46.0;
+/// Height of its "on the calendar" preview strip.
+const SCHEME_PREVIEW_HEIGHT: f32 = 44.0;
+
+/// One editable swatch in the scheme editor.
+///
+/// egui's colour button is the swatch itself rather than something painted
+/// under it, so what is shown is the colour over a checkerboard — alpha read as
+/// alpha, which is what you need while editing and exactly what you cannot
+/// judge the calendar from. The preview strip below the row answers that half.
+///
+/// A click opens the picker and a drag swaps two swatches: egui resolves click
+/// and drag targets separately, so the colour button (which senses clicks only)
+/// takes the click while the drag falls through to the rect underneath it.
+fn colorscheme_swatch(
+    ui: &mut Ui,
+    color: &mut [u8; 4],
+    index: usize,
+    dragged: &mut Option<usize>,
+    swap_with: &mut Option<usize>,
+) {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::splat(SCHEME_EDIT_SWATCH), egui::Sense::click_and_drag());
+
+    if response.drag_started() {
+        *dragged = Some(index);
+    }
+    if let Some(from) = *dragged {
+        if from != index && response.hovered() {
+            *swap_with = Some(index);
+        }
+    }
+
+    // A ring around the swatch being carried, so a drag looks like one.
+    if *dragged == Some(index) {
+        ui.painter().rect_stroke(
+            rect.expand(3.0),
+            CornerRadius::same(10),
+            Stroke::new(1.5, Color32::from_white_alpha(160)),
+            StrokeKind::Outside,
+        );
+    }
+
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        // Makes egui's button exactly the swatch, rather than a small chip in
+        // the corner of one.
+        ui.spacing_mut().interact_size = rect.size();
+        ui.color_edit_button_srgba_unmultiplied(color);
+    });
+}
 
 /// A section title, in the face the planner's tray headings use.
 fn settings_section_heading(ui: &mut Ui, title: &str) {
@@ -4254,12 +4314,32 @@ impl TaskApp {
         }
 
         let strip = 6.0 * SCHEME_SWATCH + 5.0 * 3.0;
-        painter.text(
-            pos2(rect.left() + 10.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            name,
-            FontId::new(SETTINGS_LABEL_SIZE, FontFamily::Monospace),
-            if selected { Color32::WHITE } else { Color32::from_white_alpha(190) },
+
+        // The name gets the room the swatches leave and no more, cut with an
+        // ellipsis where it doesn't fit. A generated scheme is named after the
+        // picture it came from — `Scheme from "pexels-francesco-ungaro-…"` — and
+        // painted as a plain string it ran straight under the palette it was
+        // supposed to be labelling.
+        let name_width = (rect.width() - strip - 26.0).max(40.0);
+        let mut job = egui::text::LayoutJob::single_section(
+            name.to_string(),
+            egui::TextFormat {
+                font_id: FontId::new(SETTINGS_LABEL_SIZE, FontFamily::Monospace),
+                color: if selected { Color32::WHITE } else { Color32::from_white_alpha(190) },
+                ..Default::default()
+            },
+        );
+        job.wrap = egui::text::TextWrapping {
+            max_width: name_width,
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('…'),
+        };
+        let galley = painter.layout_job(job);
+        painter.galley(
+            pos2(rect.left() + 10.0, rect.center().y - galley.size().y * 0.5),
+            galley,
+            Color32::WHITE,
         );
 
         let mut x = rect.right() - 10.0 - strip;
@@ -5226,11 +5306,16 @@ impl TaskApp {
                             // so every scheme landed in the first list and the
                             // second was permanently empty.
                             settings_section_heading(ui, "BUILT IN");
+                            // Tall enough for the built-ins there actually are:
+                            // a constant here meant that adding one hid it
+                            // below the fold of a list nobody expects to
+                            // scroll.
                             egui::ScrollArea::vertical()
                                 .scroll_source(egui::scroll_area::ScrollSource::ALL)
-                                .max_height(SCHEME_ROW_HEIGHT * 5.5)
+                                .max_height(SCHEME_ROW_PITCH * (builtin.len() as f32).min(9.0))
                                 .id_salt("builtin_schemes")
                                 .show(ui, |ui| {
+                                    ui.spacing_mut().item_spacing.y = SCHEME_ROW_GAP;
                                     for (id, name, colors, _) in &builtin {
                                         self.colorscheme_row(ui, *id, name, *colors);
                                     }
@@ -5243,9 +5328,10 @@ impl TaskApp {
                             }
                             egui::ScrollArea::vertical()
                                 .scroll_source(egui::scroll_area::ScrollSource::ALL)
-                                .max_height(SCHEME_ROW_HEIGHT * 7.0)
+                                .max_height(SCHEME_ROW_PITCH * (mine.len() as f32).clamp(1.0, 8.0))
                                 .id_salt("user_schemes")
                                 .show(ui, |ui| {
+                                    ui.spacing_mut().item_spacing.y = SCHEME_ROW_GAP;
                                     for (id, name, colors, _) in &mine {
                                         self.colorscheme_row(ui, *id, name, *colors);
                                     }
@@ -5352,101 +5438,143 @@ impl TaskApp {
         if self.edit_colorscheme_flag && !self.rename_colorscheme_flag && !self.user_wants_to_delete_colorscheme_flag {
             let mut should_save = false;
             let mut should_cancel = false;
-            
+
             if let Some(scheme) = &mut self.colorscheme_being_edited {
-                egui::Window::new("Editing colorscheme:")
-                    .collapsible(true)
+                egui::Window::new("Edit scheme")
+                    .collapsible(false)
                     .resizable(false)
-                    .fixed_size(vec2(270.0, 800.0))
-                    .default_pos(pos2(580.0, 250.0))
+                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                    .default_width(SCHEME_EDITOR_WIDTH)
                     .show(ctx, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.add(Label::new(RichText::new(scheme.name.clone()).color(Color32::from_white_alpha(120))).wrap().selectable(false));
+                        ui.set_width(SCHEME_EDITOR_WIDTH);
 
-                            ui.add_space(5.0);
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new(&scheme.name)
+                                .size(SETTINGS_LABEL_SIZE)
+                                .color(Color32::from_white_alpha(215)),
+                        );
+                        ui.add_space(12.0);
 
-                            ui.horizontal(|ui| {
-                                ui.add_space(5.0);
+                        // The six swatches are not six of the same thing, and
+                        // the window now says so: five are a ramp with a
+                        // direction, the sixth is a different question
+                        // altogether. Before, they were one anonymous row of
+                        // squares and the only way to find out which was which
+                        // was to change one and go and look at the calendar.
+                        let mut swap_with: Option<usize> = None;
 
-                                let color_size = Vec2::new(36.0, 36.0);
-                                let spacing = 8.0;
+                        settings_section_heading(ui, "URGENCY");
+                        ui.horizontal(|ui| {
+                            for index in 0..5 {
+                                colorscheme_swatch(
+                                    ui,
+                                    &mut scheme.colors[index],
+                                    index,
+                                    &mut self.dragged_color_index,
+                                    &mut swap_with,
+                                );
+                                ui.add_space(8.0);
+                            }
+                            settings_note(ui, "least → most");
+                        });
 
-                                let mut swap_with: Option<usize> = None;
+                        ui.add_space(14.0);
+                        settings_section_heading(ui, "EVENTS");
+                        ui.horizontal(|ui| {
+                            colorscheme_swatch(
+                                ui,
+                                &mut scheme.colors[5],
+                                5,
+                                &mut self.dragged_color_index,
+                                &mut swap_with,
+                            );
+                            ui.add_space(8.0);
+                            settings_note(ui, "something that happens at a time");
+                        });
 
-                                for i in 0..scheme.colors.len() {
-                                    let (rect, response) = ui.allocate_exact_size(
-                                        color_size,
-                                        egui::Sense::click_and_drag(),
-                                    );
+                        // The swap lands after the row is drawn, so no swatch is
+                        // painted from a palette that changed under it.
+                        if let (Some(from), Some(to)) = (self.dragged_color_index, swap_with) {
+                            scheme.colors.swap(from, to);
+                            self.dragged_color_index = Some(to);
+                        }
+                        if ui.input(|i| i.pointer.any_released()) {
+                            self.dragged_color_index = None;
+                        }
 
-                                    // Start dragging
-                                    if response.drag_started() {
-                                        self.dragged_color_index = Some(i);
-                                    }
+                        ui.add_space(16.0);
+                        settings_section_heading(ui, "ON THE CALENDAR");
 
-                                    // Handle hover-based swapping
-                                    if let Some(dragged) = self.dragged_color_index {
-                                        if dragged != i && response.hovered() {
-                                            swap_with = Some(i);
-                                        }
-                                    }
+                        // What the palette will actually look like: over a dark
+                        // ground, as the items themselves are drawn. The
+                        // swatches above are the honest editing view — colour
+                        // over a checkerboard, so alpha is visible as alpha —
+                        // which is exactly what you cannot judge the result
+                        // from, these being translucent tints meant for a
+                        // photograph.
+                        let (strip, _) = ui.allocate_exact_size(
+                            vec2(SCHEME_EDITOR_WIDTH, SCHEME_PREVIEW_HEIGHT),
+                            egui::Sense::hover(),
+                        );
+                        let painter = ui.painter_at(strip);
+                        painter.rect_filled(strip, CornerRadius::same(8), Color32::from_black_alpha(160));
+                        let pill_width = (strip.width() - 7.0 * 6.0) / 6.0;
+                        for (index, color) in scheme.colors.iter().enumerate() {
+                            let left = strip.left() + 6.0 + index as f32 * (pill_width + 6.0);
+                            let pill = Rect::from_min_size(
+                                pos2(left, strip.top() + 6.0),
+                                vec2(pill_width, strip.height() - 12.0),
+                            );
+                            painter.rect_filled(
+                                pill,
+                                CornerRadius::same(6),
+                                Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]),
+                            );
+                            painter.rect_stroke(
+                                pill,
+                                CornerRadius::same(6),
+                                Stroke::new(0.8, Color32::from_white_alpha(40)),
+                                StrokeKind::Inside,
+                            );
+                        }
 
-                                    // Draw background frame
-                                    let visuals = ui.style().interact(&response);
-                                    ui.painter().rect_filled(
-                                        rect.expand(2.0),
-                                        4.0,
-                                        visuals.bg_fill,
-                                    );
-
-                                    // Draw color button
-                                    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                                        ui.color_edit_button_srgba_unmultiplied(&mut scheme.colors[i]);
-                                    });
-
-                                    ui.add_space(spacing);
-                                }
-
-                                // Perform swap AFTER rendering
-                                if let (Some(from), Some(to)) = (self.dragged_color_index, swap_with) {
-                                    scheme.colors.swap(from, to);
-                                    self.dragged_color_index = Some(to);
-                                }
-
-                                // Clear drag state
-                                if ui.input(|i| i.pointer.any_released()) {
-                                    self.dragged_color_index = None;
-                                }
-
-                                ui.add_space(5.0);
-                            });
-
-                            ui.add_space(30.0);
-
-                            ui.horizontal(|ui| {
-                                ui.add_space(10.0);
-                                let button = ui.add(Button::new("Save").min_size(Vec2::new(50.0, 30.0)));
-                                if button.clicked() {
+                        ui.add_space(14.0);
+                        // On its own line: in the button row it was drawn
+                        // underneath them, the row being laid out from both ends
+                        // at once.
+                        settings_note(ui, "click a swatch to change it, drag one onto another to swap");
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui
+                                    .add(
+                                        Button::new(RichText::new("Save").size(SETTINGS_LABEL_SIZE))
+                                            .min_size(vec2(92.0, 32.0)),
+                                    )
+                                    .clicked()
+                                {
                                     should_save = true;
                                 }
-
-                                ui.add_space(40.0);
-                                ui.label(RichText::new("drag to reorder").weak().small());
-
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.add_space(10.0);
-                                    let button = ui.add(Button::new("Cancel").min_size(Vec2::new(50.0, 30.0)));
-                                    if button.clicked() {
-                                        should_cancel = true;
-                                    }
-                                });
+                                if ui
+                                    .add(
+                                        Button::new(RichText::new("Cancel").size(SETTINGS_LABEL_SIZE))
+                                            .min_size(vec2(92.0, 32.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    should_cancel = true;
+                                }
                             });
                         });
                     });
 
+                    // The edit is live on the calendar behind the window, which
+                    // is the only way to judge a palette meant for it.
                     self.active_colorscheme = scheme.colors.map(|c| Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
             }
-            
+
             if should_save {
                 self.save_colorscheme_edits();
                 self.set_colorscheme();

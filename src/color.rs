@@ -121,6 +121,35 @@ impl ColorScheme {
                 ],
                 [ 72, 162, 168],       // events: cyan
             ),
+            // The other four ramps are one colour walked along a hue; these two
+            // go round the wheel instead, so the steps are told apart by *hue*
+            // alone and the calendar reads as a set of lit panels rather than as
+            // a temperature. The urgency order still holds — the alpha curve
+            // sees to that — it just isn't the thing you notice first.
+            scheme(
+                "DISCO",
+                [
+                    [ 60, 200, 220],   // cyan
+                    [ 90, 220, 110],   // green
+                    [250, 210,  60],   // yellow
+                    [250, 120,  40],   // orange
+                    [240,  60, 140],   // hot pink
+                ],
+                [150,  90, 245],       // events: electric violet
+            ),
+            // The same wheel with the lights down: a disco you can leave open on
+            // a third monitor all day.
+            scheme(
+                "MILD DISCO",
+                [
+                    [ 92, 150, 162],
+                    [104, 164, 116],
+                    [186, 168,  92],
+                    [204, 118,  72],
+                    [186,  98, 134],
+                ],
+                [132, 112, 184],
+            ),
         ]
     }
 

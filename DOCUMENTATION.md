@@ -558,7 +558,9 @@ and only a paste can still bring one in.
   Requires ≥500 usable pixels, else returns `None`.
 - **`builtin_schemes()`**: the schemes every install has. `COLORSCHEME ZERO` (six fully
   transparent entries) stays id 0, so the untinted default look is unchanged, followed by
-  `EMBER`, `TIDE`, `MOSS` and `DUSK`. Each ramps quiet→loud across palette slots 0–4 (least to
+  `EMBER`, `TIDE`, `MOSS`, `DUSK`, and the two that go round the colour wheel instead of along a
+  hue — `DISCO` and `MILD DISCO`, where the steps are told apart by hue alone and the urgency order
+  is carried by the alpha curve. Each ramps quiet→loud across palette slots 0–4 (least to
   most important) with slot 5 — events — deliberately outside the ramp, so a glance at the
   calendar reads as urgency and events stand apart. A ramp is written as five plain RGB triples
   and takes its alpha from the shared `RAMP_ALPHA` curve, so no scheme can disagree with the
@@ -585,9 +587,22 @@ and only a paste can still bring one in.
   **Yours**, each sorted by id — `HashMap` iteration order is arbitrary *and differs between
   runs*, so an unsorted list reshuffled itself at every launch. Edit / Rename / Delete are shown
   disabled rather than hidden on a built-in: a button column that grows and shrinks as the
-  selection moves is harder to aim at than one that greys out.
-- The **editor** (in `ui.rs`) lets the user color-pick each of the six swatches and **drag to
-  reorder** them; Save commits the edited scheme back into the map.
+  selection moves is harder to aim at than one that greys out. Each row paints the palette beside
+  the name, and the **name is laid out to the width the swatches leave**, cut with an ellipsis
+  (`LayoutJob` + `TextWrapping { max_rows: 1, overflow_character }`) — a generated scheme is named
+  after the picture it came from, and painted as a plain string it ran straight under the palette
+  it was labelling. Each list is `SCHEME_ROW_PITCH × rows` tall, gap included: sizing by height
+  alone left egui's default spacing to pile up and pushed the last scheme below a fold nobody
+  expects in a seven-item list.
+- The **editor** (in `ui.rs`) is a labelled sheet rather than a row of anonymous squares: five
+  swatches under **URGENCY** with a `least → most` legend, one under **EVENTS**, and an **ON THE
+  CALENDAR** strip that paints the whole palette over a dark ground. Both views are needed and
+  they answer different questions — egui's colour button shows colour over a checkerboard, so
+  alpha reads as alpha while you edit it, which is exactly what you cannot judge the result from
+  when the colours are translucent tints meant for a photograph. A click opens the picker and a
+  drag swaps two swatches: egui resolves click and drag targets separately, so the button (which
+  senses clicks only) takes the click while the drag falls through to the rect underneath. The
+  edit is live on the calendar behind the window; Save commits it into the map, Cancel restores.
 - **`set_background`** (in `ui.rs`) shrinks a picture whose longest side exceeds
   `max_texture_side` (uniformly, so it isn't stretched) before uploading it.
   `Context::load_texture` *panics* on an oversized image, and this is a full-window backdrop —
