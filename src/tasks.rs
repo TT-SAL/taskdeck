@@ -328,8 +328,7 @@ impl Active {
     /// See the module-level notes above for the model. In short:
     /// `weight × pressure`, where a dated task's pressure doubles as its
     /// deadline approaches and an undated task's ripens with age.
-    /// `shuffle_seed` changes once per list rebuild, not with the clock — see
-    /// `tie_break_jitter`.
+    /// `shuffle_seed` is today's date — see `tie_break_jitter`.
     pub fn importance_score(&self, time_now: DateTime<Local>, shuffle_seed: u64) -> f32 {
         self.base_score(time_now) * self.tie_break_jitter(shuffle_seed)
     }
@@ -419,11 +418,14 @@ impl Active {
     /// rebuild straddled a millisecond boundary, an arbitrary subset jumped by
     /// up to 10% instead.
     ///
-    /// The seed is a **rebuild counter**, deliberately not the clock. Keyed on
-    /// the time, any list that re-sorts every frame — the planner's backlog
-    /// tray does — reshuffled once a second, so cards crawled out from under
-    /// the pointer as you reached for one. A counter shuffles exactly when
-    /// §14.4 says it should: when the list is actually rebuilt.
+    /// The seed is **the day** (`TaskApp::shuffle_seed`), deliberately neither
+    /// the clock nor a rebuild counter. Keyed on the time, any list that
+    /// re-sorts every frame — the planner's backlog tray does — reshuffled once
+    /// a second and cards crawled out from under the pointer. Keyed on a
+    /// rebuild counter it moved on every edit instead, so planning a day
+    /// reordered the task list beside it at every keystroke. The jitter exists
+    /// so that a task which is perpetually fourth is not permanently ignored,
+    /// and that argument has a period of about a day.
     ///
     /// It is deliberately small: enough to keep near-ties moving, never enough
     /// to reorder tasks that genuinely differ in priority.
@@ -1177,15 +1179,43 @@ mod tests {
     }
 
     #[test]
-    fn jitter_is_stable_within_a_rebuild_and_moves_between_them() {
+    fn jitter_holds_all_day_and_turns_over_at_midnight() {
         let task = Active { id: 7, ..active(Some(2), None, false, None) };
 
-        // Constant for a given seed, so a list that re-sorts every frame — the
-        // planner's backlog tray — holds still between rebuilds instead of
-        // crawling out from under the pointer.
-        assert_eq!(task.tie_break_jitter(4), task.tie_break_jitter(4));
-        // ...and different in the next rebuild, which is the gentle shuffle.
-        assert_ne!(task.tie_break_jitter(4), task.tie_break_jitter(5));
+        // The seed is the *day* (`TaskApp::shuffle_seed`), so the order is
+        // fixed for as long as anyone is looking at it. It used to be a
+        // rebuild counter, and `summarize_calendar` runs after every mutation —
+        // so booking a block or nudging a deadline reshuffled the whole task
+        // list beside the planner while the user worked.
+        let today = 739_000;
+        assert_eq!(task.tie_break_jitter(today), task.tie_break_jitter(today));
+        // ...and moves once, tomorrow. Which is the whole point of the jitter:
+        // a task that is perpetually fourth should not be permanently ignored,
+        // and that argument has a period of about a day.
+        assert_ne!(task.tie_break_jitter(today), task.tie_break_jitter(today + 1));
+    }
+
+    #[test]
+    fn a_days_worth_of_edits_cannot_reorder_the_list() {
+        let now = noon();
+        // Three tasks close enough in score for the jitter to matter at all.
+        let tasks: Vec<Active> = (1..=3)
+            .map(|id| Active { id, ..dated(2, 5.0, now) })
+            .collect();
+
+        let order_at = |seed: u64| {
+            let mut scored: Vec<(f32, u64)> =
+                tasks.iter().map(|t| (t.importance_score(now, seed), t.id)).collect();
+            scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            scored.into_iter().map(|(_, id)| id).collect::<Vec<_>>()
+        };
+
+        // Every rebuild in a day sees the same seed, so however many times the
+        // list is rebuilt, it comes back in the same order.
+        let settled = order_at(739_000);
+        for _ in 0..50 {
+            assert_eq!(order_at(739_000), settled);
+        }
     }
 
     #[test]

@@ -24,7 +24,9 @@ Drag on the timeline to block out time; the block appears where you dragged and 
 
 The tray leads with what is **due by this day and has no time set aside for it** — the things a day plan should start from — and the rest of the backlog follows underneath, most pressing first. There is a field at the top for adding a task without leaving the day: type a name, press Enter, and it is waiting in the tray to be dragged onto an hour.
 
-Click anything, on the timeline or in the tray, and the row along the bottom shows what it is, when it runs, how long it takes, when it is due, and how much it matters — every one of them editable right there — plus buttons to complete it, delete it, book it more time, or send time back. Arrow keys step through the days, `T` goes to today, `Esc` closes, and the confirmation you get before anything is deleted answers to `Enter` and `Esc` too.
+Click anything, on the timeline or in the tray, and the row along the bottom shows what it is, when it runs, how long it takes, when it is due, and how much it matters — every one of them editable right there — plus buttons to complete it, delete it, book it more time, or send time back. Arrow keys step through the days, `T` goes to today, `1` `2` `3` pick what a drag makes, `Esc` closes, and the confirmation you get before anything is deleted answers to `Enter` and `Esc` too.
+
+The planner comes back to the day you left it on, so looking something up and returning does not send you back to today.
 
 Naming a new block is typing and `Enter`. If you dragged one out by mistake, `Esc` — it takes the block away with the name, no dialog to answer. On something that already existed `Esc` is gentler: it just puts the old name back.
 
@@ -59,6 +61,20 @@ A few details worth pointing out:
 
 - Drop any image into the `images` folder and pick it as your background from Settings. TaskDeck can also read that image and build a colour palette from it, which it uses to tint the items on the calendar. It ships with a few palettes to start from — `EMBER`, `TIDE`, `MOSS`, `DUSK`, and a `DISCO` with a `MILD DISCO` for the rest of the week — alongside the untinted `COLORSCHEME ZERO` it opens on. Those five are built in and stay as they are; duplicate one to get a copy that is yours to edit.
 - Set your weather location by clicking it on a world map instead of typing in coordinates. Around two hundred cities are marked to get you close.
+
+## Keys
+
+One rule: the topmost open thing owns the keyboard. Every window closes on the key that opened it, and on `Esc`. Nothing fires while you are typing, so the notepad is safe.
+
+| | |
+|---|---|
+| `P` `A` `S` | Planner · Archive · Settings |
+| `T` `E` | New task · new event, with the caret already in the name |
+| In the planner | `←` `→` days, `T` today, `1` `2` `3` task/event/routine, `Enter` rename, `U` un-book, `Del` delete |
+| In the archive | `/` search |
+| `F11` | Fullscreen (`Ctrl`+`Cmd`+`F` on macOS) |
+
+The tasks on the left are ordered by score, with a small random nudge between near-ties so nothing sits permanently fourth and forgotten. That nudge is fixed for the whole day and turns over at midnight — the list holds still while you work, and looks slightly different tomorrow.
 
 ## Getting started
 

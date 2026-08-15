@@ -145,9 +145,14 @@ struct ArchiveView {
     /// only genuinely irreversible thing in the app, so it asks — restoring
     /// does not, because it can simply be done again.
     confirm_forget: Option<ArchiveKey>,
-    /// Set for the one frame after opening, to put the caret in the search
-    /// field. One frame, not every frame — see `planner_naming_focus` for what
-    /// re-requesting focus every frame does to a text field.
+    /// Set for the one frame after `/` is pressed, to put the caret in the
+    /// search field. One frame, not every frame — see `planner_naming_focus`
+    /// for what re-requesting focus every frame does to a text field.
+    ///
+    /// Deliberately **not** set on open. The archive is mostly read, not
+    /// searched, and a field that grabs the keyboard the moment the window
+    /// appears takes every letter shortcut with it — `A` would type an `a`
+    /// instead of closing the window it just opened.
     focus_search: bool,
 }
 
@@ -680,14 +685,24 @@ fn archive_window(
     // Drawn after the window so it stacks on top of it.
     archive_forget_confirmation(ctx, &rows, view, &mut action);
 
-    if owns_keys && !confirm_owned_frame && ctx.input(|i| i.key_pressed(Key::Escape)) {
-        // Escape in two steps, so a search you are half way through is not
-        // something the window closes over: it clears whatever the filter is
-        // doing first, and only leaves once there is nothing to take back.
-        if view.filter.is_open() {
+    if owns_keys && !confirm_owned_frame {
+        let typing = ctx.egui_wants_keyboard_input();
+
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            // Escape in two steps, so a search you are half way through is not
+            // something the window closes over: it clears whatever the filter
+            // is doing first, and only leaves once there is nothing to take
+            // back.
+            if view.filter.is_open() {
+                action = Some(ArchiveAction::Close);
+            } else {
+                view.filter = archive::Filter::default();
+            }
+        } else if !typing && ctx.input(|i| i.key_pressed(Key::A)) {
+            // The key that opened it closes it again.
             action = Some(ArchiveAction::Close);
-        } else {
-            view.filter = archive::Filter::default();
+        } else if !typing && ctx.input(|i| i.key_pressed(Key::Slash)) {
+            view.focus_search = true;
         }
     }
 
@@ -753,7 +768,7 @@ fn archive_filter_row(
         ui.add_space(14.0);
         let search = ui.add(
             egui::TextEdit::singleline(&mut view.filter.query)
-                .hint_text("search")
+                .hint_text("search  (/)")
                 .desired_width(200.0),
         );
         // One frame only. Re-requesting focus every frame is how a text field
@@ -1334,6 +1349,10 @@ pub struct TaskApp {
 
     user_wants_to_complete_task_flag: bool,
     user_wants_to_delete_task_flag: bool,
+    /// Set for the one frame after a create dialog opens, to put the caret in
+    /// its name field. A shortcut that opens a dialog you then have to reach
+    /// for the mouse to type into is half a shortcut.
+    dialog_wants_focus: bool,
 
     /* ───────────────────────── Day planner ───────────────────────── */
     /// Whether the planner window is open, and the day it is showing.
@@ -1407,11 +1426,6 @@ pub struct TaskApp {
     /// Points-per-pixel the text styles were last snapped for. See
     /// `apply_ui_scale` and `snap_font_points`.
     last_font_ppp: f32,
-    /// Bumped once per `summarize_calendar`, and fed to the priority score's
-    /// tie-break jitter. Keying the shuffle to rebuilds rather than to the
-    /// clock is what keeps the planner's backlog — which re-sorts every frame —
-    /// from reordering under the pointer. See `Active::tie_break_jitter`.
-    shuffle_seed: u64,
 
     /* ───────────────────────── Errors & Confirmations ───────────────────────── */
     /// Id of the item awaiting a complete/delete confirmation. The dialog looks
@@ -1550,6 +1564,7 @@ impl TaskApp {
             settings_flag: false,
             user_wants_to_complete_task_flag: false,
             user_wants_to_delete_task_flag: false,
+            dialog_wants_focus: false,
 
             /* Day planner */
             planner_flag: false,
@@ -1585,7 +1600,6 @@ impl TaskApp {
                 config.ui_scale_percent
             },
             last_font_ppp: 0.0,
-            shuffle_seed: 0,
 
             /* Errors */
             confirm_complete_task: None,
@@ -2429,11 +2443,27 @@ impl TaskApp {
         self.save_active_things();
     }
 
-    pub fn summarize_calendar(&mut self) {
-        // Each rebuild gets a new shuffle seed, which is the whole extent of the
-        // intentional gentle reshuffle (DOCUMENTATION §14.4).
-        self.shuffle_seed = self.shuffle_seed.wrapping_add(1);
+    /// Seed for the task list's tie-break jitter: **today's date**.
+    ///
+    /// Derived rather than stored, so there is no question of when to bump it.
+    /// It was a counter bumped once per `summarize_calendar` — and
+    /// `summarize_calendar` runs after every mutation, so booking a block,
+    /// dragging a card or nudging a deadline reshuffled the whole task list
+    /// under the user while they worked. The counter was itself a fix for a
+    /// clock-keyed seed that reshuffled once a second; both had the same fault,
+    /// which is that they answered "how often should this move" with "whenever
+    /// something happens" rather than by asking what the jitter is *for*.
+    ///
+    /// What it is for is keeping a task that is perpetually fourth from being
+    /// permanently ignored (§14.4). That is a fairness argument, and its
+    /// natural period is a day, not a keystroke. So the list is fixed for as
+    /// long as you are looking at it and turns over at midnight — which is also
+    /// exactly what a calendar on a wall does.
+    fn shuffle_seed(&self) -> u64 {
+        self.date.date_naive().num_days_from_ce() as u64
+    }
 
+    pub fn summarize_calendar(&mut self) {
         // 1) Sort and separate active things
         let (mut events, tasks): (Vec<_>, Vec<_>) = self.active_things
             .drain(..)
@@ -2456,7 +2486,7 @@ impl TaskApp {
         let now = self.date;
         let mut scored_tasks: Vec<(f32, Active)> = tasks
             .into_iter()
-            .map(|t| (t.importance_score(now, self.shuffle_seed), t))
+            .map(|t| (t.importance_score(now, self.shuffle_seed()), t))
             .collect();
         scored_tasks.sort_by(|(a, _), (b, _)| {
             b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
@@ -2671,7 +2701,7 @@ impl TaskApp {
             .active_things
             .iter()
             .filter(|item| item.wants_planning())
-            .map(|item| (item.importance_score(now, self.shuffle_seed), item))
+            .map(|item| (item.importance_score(now, self.shuffle_seed()), item))
             .collect();
         items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -3039,6 +3069,103 @@ impl TaskApp {
         }
     }
 
+    /* ───────────────────────── The keyboard ─────────────────────────
+     *
+     * One rule, and everything follows from it: **the topmost open thing owns
+     * the keyboard.** With nothing open the menu keys below are live; open the
+     * planner and its own keys take over (arrows, T, U, Del, 1–3); open
+     * something over the planner and that owns them instead
+     * (`modal_over_planner`). Each window closes on the key that opened it and
+     * on Escape, so nothing is a one-way door.
+     *
+     * That is why `T` can mean "new task" out here and "today" inside the
+     * planner without ambiguity: they are never live at the same time, and each
+     * is the obvious mnemonic on its own screen.
+     *
+     * Plain letters mean a text field must never be able to see them — typing
+     * "Plan the trip" into the notepad would otherwise open the planner — so
+     * every one of these stands down for keyboard focus.
+     */
+
+    /// The menu bar's shortcuts: one letter per window, live only when nothing
+    /// is open over the calendar.
+    fn handle_menu_keys(&mut self, ctx: &Context, modal_owned_frame: bool) {
+        // A focused text field owns every letter it can see: the notepad, and
+        // any field inside a window that is already open.
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        // Something was open when the frame began, and it answers for itself —
+        // including closing on its own letter again. `modal_owned_frame` rather
+        // than a live check: the window that just closed on this very keypress
+        // would otherwise be reopened by it a few lines below.
+        if modal_owned_frame {
+            return;
+        }
+
+        let (planner, archive, settings, task, event) = ctx.input(|i| {
+            (
+                i.key_pressed(Key::P),
+                i.key_pressed(Key::A),
+                i.key_pressed(Key::S),
+                i.key_pressed(Key::T),
+                i.key_pressed(Key::E),
+            )
+        });
+
+        if planner {
+            self.open_planner(self.planner_day);
+        }
+        if archive {
+            self.toggle_archive();
+        }
+        if settings {
+            self.settings_flag = true;
+        }
+        if task {
+            self.new_task_flag = true;
+            self.dialog_wants_focus = true;
+        }
+        if event {
+            self.new_event_flag = true;
+            self.dialog_wants_focus = true;
+        }
+    }
+
+    /// Escape, and the letter that opened it, for the two windows that answer
+    /// no keys of their own.
+    ///
+    /// Settings and the create dialogs used to be closable only by aiming at a
+    /// button, which is a strange thing to be true of an app where every other
+    /// overlay answers Escape.
+    fn handle_overlay_close_keys(&mut self, ctx: &Context) {
+        // The colour-scheme stack and the map picker live inside Settings and
+        // have their own Cancel semantics; Escape must not pull the sheet out
+        // from under them.
+        if self.error_flag
+            || self.color_picker_flag
+            || self.coordinates_map_flag
+            || self.user_wants_to_complete_task_flag
+            || self.user_wants_to_delete_task_flag
+        {
+            return;
+        }
+
+        let escape = ctx.input(|i| i.key_pressed(Key::Escape));
+        let typing = ctx.egui_wants_keyboard_input();
+
+        if self.settings_flag && (escape || (!typing && ctx.input(|i| i.key_pressed(Key::S)))) {
+            self.settings_flag = false;
+        }
+        // Escape only, and no toggle letter: these hold a half-typed name, and
+        // the letter would be part of it. Escape abandons the draft, which is
+        // what Cancel does and what Escape means everywhere else in the app.
+        if escape {
+            self.new_task_flag = false;
+            self.new_event_flag = false;
+        }
+    }
+
     /// Keyboard shortcuts for the planner.
     ///
     /// Planning a week is a lot of "next day, look, next day", so the day
@@ -3088,7 +3215,7 @@ impl TaskApp {
             return;
         }
 
-        let (previous, next, today, rename, delete, unplan) = ctx.input(|i| {
+        let (previous, next, today, rename, delete, unplan, close) = ctx.input(|i| {
             (
                 i.key_pressed(Key::ArrowLeft),
                 i.key_pressed(Key::ArrowRight),
@@ -3096,8 +3223,30 @@ impl TaskApp {
                 i.key_pressed(Key::Enter),
                 i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace),
                 i.key_pressed(Key::U),
+                i.key_pressed(Key::P),
             )
         });
+
+        // What a drag makes, on the number row — the switch is at the far right
+        // of the masthead and choosing with it costs a round trip across the
+        // window for something you change constantly while filling in a day.
+        // In the order the switch reads, left to right.
+        for (key, kind) in [
+            (Key::Num1, planner::CreateKind::Task),
+            (Key::Num2, planner::CreateKind::Event),
+            (Key::Num3, planner::CreateKind::Routine),
+        ] {
+            if ctx.input(|i| i.key_pressed(key)) {
+                self.planner_create_kind = kind;
+            }
+        }
+
+        // The same key that opened it closes it, so `P` is a toggle from both
+        // sides rather than a one-way door with Escape as the only way out.
+        if close {
+            self.close_planner();
+            return;
+        }
 
         if previous {
             let day = self.planner_day.pred_opt().unwrap_or(self.planner_day);
@@ -3237,17 +3386,17 @@ impl TaskApp {
                 // went with it. Routine is a different third thing entirely —
                 // not a time you record but a claim that repeats.
                 ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Routine, RichText::new("Routine").size(PLANNER_META_SIZE))
-                    .on_hover_text("Time that is spoken for every week — sleep, meals, the commute");
+                    .on_hover_text("Time that is spoken for every week — sleep, meals, the commute  (3)");
                 ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Event, RichText::new("Event").size(PLANNER_META_SIZE))
-                    .on_hover_text("Something that happens then");
+                    .on_hover_text("Something that happens then  (2)");
                 ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Task, RichText::new("Task").size(PLANNER_META_SIZE))
-                    .on_hover_text("Time set aside to work on something");
+                    .on_hover_text("Time set aside to work on something  (1)");
                 ui.label(
                     RichText::new("New:")
                         .size(PLANNER_META_SIZE)
                         .color(Color32::from_white_alpha(150)),
                 )
-                .on_hover_text("What a drag makes");
+                .on_hover_text("What a drag makes  (1 · 2 · 3)");
 
                 ui.add_space(24.0);
 
@@ -3789,8 +3938,8 @@ impl TaskApp {
             ui.add_space(PLANNER_EDGE_MARGIN);
             ui.label(
                 RichText::new(format!(
-                    "Drag for {kind}  ·  double-click for {}  ·  drag a card in from the tray  ·  \
-                     click anything to edit it",
+                    "Drag for {kind}  ·  double-click for {}  ·  1 · 2 · 3 switch what a drag makes  \
+                     ·  drag a card in from the tray  ·  click anything to edit it",
                     planner::format_duration(planner::DEFAULT_BLOCK_MINUTES)
                 ))
                 .size(PLANNER_META_SIZE)
@@ -4884,7 +5033,6 @@ impl TaskApp {
 
         if self.archive_view.open {
             self.load_archive();
-            self.archive_view.focus_search = true;
         } else {
             self.archive_view.selected = None;
             self.archive_view.confirm_forget = None;
@@ -5722,6 +5870,15 @@ impl TaskApp {
         let ctx_owned = ui.ctx().clone();
         let ctx = &ctx_owned;
 
+        // Captured **before** anything is drawn, and for the same reason
+        // `naming_owned_frame` is: a window closes itself during its own draw,
+        // so by the end of the frame it looks as though nothing was ever open —
+        // and the very keypress that closed it is still in this frame's input.
+        // Asking afterwards would have `P` close the planner and then reopen it
+        // on the same press, forever. Whatever owned the keyboard when the
+        // frame began owns it for all of the frame.
+        let modal_owned_frame = self.any_modal_open();
+
         // Fit the fixed-width layout to whatever window we were given. Runs before
         // anything is drawn so the whole frame uses one consistent scale.
         self.apply_ui_scale(ctx);
@@ -5778,35 +5935,42 @@ impl TaskApp {
 
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                if ui.button("New Task").clicked() {
+                if ui.button("New Task").on_hover_text("New task  (T)").clicked() {
                     self.new_task_flag = true;
+                    self.dialog_wants_focus = true;
                 }
                 ui.add_space(12.0);
-                if ui.button("New Event").clicked() {
+                if ui.button("New Event").on_hover_text("New event  (E)").clicked() {
                     self.new_event_flag = true;
+                    self.dialog_wants_focus = true;
                 }
                 ui.add_space(12.0);
 
-                // Opens on today; the day popup's own button opens it on the day
-                // you clicked.
+                // Opens on **the day it was last left**, not on today.
+                //
+                // Planning a Thursday is not one visit: you open the day, look
+                // at the week, come back. Snapping to today each time made
+                // every one of those a trip back through the calendar, and the
+                // day is remembered anyway — it just wasn't used. Clicking a
+                // calendar day still opens *that* day, which is the explicit
+                // gesture, and `Today` / `T` are one press away inside.
                 if self.planner_flag {
-                    if ui.button("Planner").highlight().clicked() {
+                    if ui.button("Planner").highlight().on_hover_text("Close the planner  (P, Esc)").clicked() {
                         self.close_planner();
                     }
                 } else {
-                    if ui.button("Planner").clicked() {
-                        let today = self.date.date_naive();
-                        self.open_planner(today);
+                    if ui.button("Planner").on_hover_text("The day you were last on  (P)").clicked() {
+                        self.open_planner(self.planner_day);
                     }
                 }
                 ui.add_space(12.0);
 
                 if self.archive_view.open {
-                    if ui.button("Archive").highlight().clicked() {
+                    if ui.button("Archive").highlight().on_hover_text("Close the archive  (A, Esc)").clicked() {
                         self.toggle_archive();
                     }
                 } else {
-                    if ui.button("Archive").clicked() {
+                    if ui.button("Archive").on_hover_text("What became of everything  (A)").clicked() {
                         self.toggle_archive();
                     }
                 }
@@ -5814,11 +5978,11 @@ impl TaskApp {
                 ui.add_space(12.0);
 
                 if self.settings_flag {
-                    if ui.button("Settings").highlight().clicked() {
+                    if ui.button("Settings").highlight().on_hover_text("Close settings  (S, Esc)").clicked() {
                         self.settings_flag = false;
                     }
                 } else {
-                    if ui.button("Settings").clicked() {
+                    if ui.button("Settings").on_hover_text("Settings  (S)").clicked() {
                         self.settings_flag = true;
                     }
                 }
@@ -5953,7 +6117,10 @@ impl TaskApp {
                     ui.vertical(|ui| {
                         ui.add_space(5.0);
                         ui.label("Event Name:");
-                        ui.add(egui::TextEdit::singleline(&mut self.event_name_input).hint_text("Attend meeting"));
+                        let name = ui.add(egui::TextEdit::singleline(&mut self.event_name_input).hint_text("Attend meeting"));
+                        if std::mem::take(&mut self.dialog_wants_focus) {
+                            name.request_focus();
+                        }
 
                         ui.add_space(10.0);
 
@@ -5996,7 +6163,12 @@ impl TaskApp {
                     ui.vertical(|ui| {
                         //insert fields
                         ui.label("Task Name:");
-                        ui.add(egui::TextEdit::singleline(&mut self.task_name_input).hint_text("Complete assignment"));
+                        let name = ui.add(egui::TextEdit::singleline(&mut self.task_name_input).hint_text("Complete assignment"));
+                        // One frame only — see `planner_naming_focus` for what
+                        // re-requesting focus every frame does to a field.
+                        if std::mem::take(&mut self.dialog_wants_focus) {
+                            name.request_focus();
+                        }
 
                         ui.checkbox(&mut self.use_date_for_addable, "Has deadline");
 
@@ -6771,6 +6943,14 @@ impl TaskApp {
                     });
                 });
         }
+
+    // Last, after every window has had its frame. Each one claims the keys it
+    // owns while it is drawn (the planner's own handler, the archive's, the
+    // confirmations'); these two pick up what is left — the menu bar's letters
+    // when nothing is open, and Escape for the two windows that answer nothing
+    // of their own.
+    self.handle_overlay_close_keys(ctx);
+    self.handle_menu_keys(ctx, modal_owned_frame);
 
     if self.any_modal_open() {
         self.hovered_calendar_cell = None;

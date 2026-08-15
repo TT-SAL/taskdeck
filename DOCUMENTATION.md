@@ -36,6 +36,7 @@
 16. The day planner
 17. The archive
 18. Routines
+19. The keyboard
 
 ---
 
@@ -778,7 +779,8 @@ visual language: a rounded "notch" around the day number, two-line wrapped item 
 | `planner_naming_created` / `planner_naming_focus` | Whether the item under the title editor was created by the gesture that opened it (Escape then removes it), and the one-frame request for keyboard focus (§16.3.5). |
 | `planner_selected_session` | Which of the selection's sessions was clicked, when a work block was — what the footer's per-block controls act on. |
 | `planner_due_edit` | Task whose deadline is open in the footer's due editor (§16.3.4). |
-| `planner_create_kind` | What a drag or double-click on empty timeline makes: `Task`, `Event` or `Routine` (§16.3, §18). |
+| `planner_create_kind` | What a drag or double-click on empty timeline makes: `Task`, `Event` or `Routine` — the `1` / `2` / `3` keys (§16.3, §18). |
+| `dialog_wants_focus` | One-frame request to put the caret in a create dialog's name field, so `T` / `E` open something you can type into straight away (§19). |
 | `planner_quick_add_input` | The tray's quick-add field. |
 | `settings_flag` | Show Settings. |
 | `color_picker_flag` / `edit_colorscheme_flag` / `rename_colorscheme_flag` | Color-scheme manager sub-modals. |
@@ -863,28 +865,34 @@ fullscreen on a chosen monitor, and even then the animation/widget code stays un
 ### 14.4 Random tie-break shuffle in `importance_score`
 
 `Active::importance_score` multiplies the final score by a small random factor. This is
-**intentional**: it gives the task list a gentle shuffle between rebuilds rather than a frozen
+**intentional**: it gives the task list a gentle shuffle from day to day rather than a frozen
 order, and is not a bug to remove.
 
 The score is evaluated **once per task per rebuild** and stored, so the shuffle is captured a
 single time and the comparator stays consistent within a sort (see §7 and `CODE_REVIEW.md` B3).
 
-**The implementation was rewritten because it never actually shuffled.** It read the current
-millisecond *at the moment of the call*, so every task scored within the same millisecond — which,
-at these list sizes, is all of them — got an identical multiplier, and multiplying every score by
-the same number changes no ordering whatsoever. The only time it did anything was when a rebuild
-happened to straddle a millisecond boundary, at which point an arbitrary subset of the list jumped
-by up to 10% relative to the rest. So the effect was "nothing, occasionally something arbitrary".
+`tie_break_jitter` hashes the task's **id** with a seed, giving each task its own factor in
+`[1.0, 1.08)`. The magnitude is deliberately below one importance step (a factor of two), so it can
+shuffle near-ties without ever reordering tasks that genuinely differ in priority — which is
+asserted by a test.
 
-`tie_break_jitter` now hashes the task's **id** with a **rebuild counter** (`TaskApp::shuffle_seed`,
-bumped once per `summarize_calendar`), giving each task its own factor in `[1.0, 1.08)`. The
-magnitude is deliberately below one importance step (a factor of two), so it can shuffle near-ties
-without ever reordering tasks that genuinely differ in priority — which is asserted by a test.
+**The seed is the day** (`TaskApp::shuffle_seed`, derived from `self.date`), and it took two wrong
+answers to get there:
 
-**The seed is a counter and not the clock, deliberately.** Keyed on the time, it reshuffled once a
-second — and the planner's backlog tray re-sorts *every frame*, so its cards crawled out from under
-the pointer as you reached for one. A counter shuffles exactly when §14.4 says it should: when the
-list is actually rebuilt.
+| Seed | What went wrong |
+|------|-----------------|
+| the current millisecond | Every task scored in the same millisecond got the *same* factor, which changes no ordering at all; when a rebuild straddled a boundary, an arbitrary subset jumped by up to 8%. Effect: "nothing, occasionally something arbitrary". |
+| a rebuild counter | `summarize_calendar` runs after **every mutation**, so booking a block, dragging a card or nudging a deadline reshuffled the whole task list beside the planner while the user worked. |
+
+Both answered "how often should this move?" with "whenever something happens" rather than by asking
+what the jitter is *for*. What it is for is keeping a task that is perpetually fourth from being
+permanently ignored — a fairness argument, whose natural period is a day. So the list is fixed for
+as long as anyone is looking at it and turns over at midnight, which is also exactly what a calendar
+on a wall does.
+
+Deriving it from the date rather than storing it also removes the question of where to bump it:
+there is no seed state, and `self.date` is refreshed every frame with a day-rollover check that
+already calls `summarize_calendar`.
 
 ### 14.5 Plans stay out of the calendar grid
 
@@ -1658,6 +1666,77 @@ are the known edges:
   block to materialise a one-off override, which is a bigger change than the rule itself.
 - **No end date, no monthly or n-weekly rules.** A weekday mask covers routine; anything else is a
   recurring *event*, which is a different feature.
+
+---
+
+## 19. The Keyboard
+
+### 19.1 One rule
+
+**The topmost open thing owns the keyboard.**
+
+With nothing open, the menu bar's letters are live. Open the planner and its own keys take over.
+Open something over the planner and that owns them instead (`modal_over_planner`). Every window
+closes on the key that opened it *and* on Escape, so nothing is a one-way door.
+
+That rule is what lets `T` mean "new task" on the calendar and "today" in the planner without
+ambiguity: they are never live at the same time, and each is the obvious mnemonic on its own screen.
+
+| Where | Key | Does |
+|-------|-----|------|
+| Calendar | `P` | Planner, **on the day it was last left** |
+| | `A` | Archive |
+| | `S` | Settings |
+| | `T` | New task (caret already in the field) |
+| | `E` | New event |
+| | `F11` / `⌃⌘F` | Fullscreen (§15) |
+| Planner | `←` `→` | Previous / next day |
+| | `T` | Today |
+| | `1` `2` `3` | What a drag makes: task / event / routine |
+| | `Enter` | Rename the selection |
+| | `U` | Un-book the selected block, or the whole plan |
+| | `Del` | Delete the selection (through the confirmation) |
+| | `P` / `Esc` | Close |
+| Archive | `/` | Search |
+| | `Esc` | Clear the filter, then close |
+| | `A` | Close |
+| Settings | `S` / `Esc` | Close |
+| Dialogs | `Enter` / `Esc` | Accept / cancel |
+
+The shortcuts are named in the menu buttons' hover text and in the planner's own hint line, because
+a single-letter shortcut nobody knows about is not a feature.
+
+### 19.2 Two things that are easy to get wrong
+
+**Plain letters and text fields.** Every global key stands down for
+`ctx.egui_wants_keyboard_input()`. Without it, typing "please stop and archive" into the notepad
+would open the planner, the settings sheet and the archive on the way through. The archive's search
+field is deliberately **not** focused when the window opens for the same reason — it would take
+every letter shortcut with it, and `A` would type an `a` instead of closing the window it had just
+opened. `/` reaches for it instead.
+
+**A toggle must not fire twice in one frame.** A window closes itself *during its own draw*, so by
+the end of the frame it looks as though nothing was ever open — and the keypress that closed it is
+still in that frame's input. Asking "is anything open?" at the end would have `P` close the planner
+and reopen it on the same press, forever. So `ui()` captures `modal_owned_frame` **before** anything
+is drawn, and the menu keys stand down for the whole of any frame that began with something open.
+
+This is the third instance of the same pattern in the codebase — `naming_owned_frame` (§16.3.5) and
+the archive's `confirm_owned_frame` (§17.3) are the others. Whenever a handler runs after the thing
+it defers to has already been drawn, the state it needs is the state at the *start* of the frame.
+
+### 19.3 The planner remembers its day
+
+`open_planner` is called with `self.planner_day` from the menu button and from `P`, so the planner
+comes back to the day you left it on. Only clicking a calendar cell moves it, which is the explicit
+gesture; `Today` and `T` are one press away inside.
+
+The day was always remembered — `close_planner` never cleared it — it simply was not used, and
+every reopen snapped to today. Planning a Thursday is not one visit: you open the day, look at the
+week, come back, and each of those trips went through the calendar to get home.
+
+Within a run only. A restart opens on today, which is the right default for a program whose whole
+premise is the current date.
 
 ---
 
