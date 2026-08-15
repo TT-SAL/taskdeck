@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod tasks;
 pub mod ui;
 pub mod utilities;

@@ -34,6 +34,7 @@
 14. Design decisions & deliberate trade-offs
 15. Platform notes (Windows / macOS / Linux)
 16. The day planner
+17. The archive
 
 ---
 
@@ -48,13 +49,13 @@ left-to-right as three regions:
 | **Center** | `show_calendar` | A virtualized, weeks-long calendar grid (7 columns). Each day cell shows up to 3 items with times. Rows animate (scale + fade) based on scroll velocity. Clicking a day opens the planner on it (§16). |
 | **Right** | `show_weather_forecast` | A 2- or 3-day weather forecast (12 two-hour slots/day) with SVG icons, **or** a free-text notepad when 3-day mode is off. |
 
-Top menu bar: **New Task**, **New Event**, **Planner**, **Archived**, **Settings**, **Quit**
+Top menu bar: **New Task**, **New Event**, **Planner**, **Archive**, **Settings**, **Quit**
 (+ optional FPS readout). The **day planner** (§16) is a second view of a single day — a
 timeline you block time out on, and a tray of everything still waiting for a slot.
 
 Additional features:
 - **Events vs Tasks:** events are pinned to a date/time; tasks are ranked either by a deadline plus a **severity** (how bad is missing it) or, with no deadline, by a **horizon** (roughly how soon it should happen) that ripens over time.
-- **Archive:** completed/deleted items are appended to a JSONL log and viewable with pagination ("Show more").
+- **Archive:** completed *and* deleted items are kept whole — sessions, estimate, dates and all — in an append-only JSONL log, read once into memory and shown as a searchable ledger that says how each one went, with restore and a permanent forget. See §17.
 - **Weather coordinate picker:** an interactive Blue-Marble world map with zoom/pan, click-to-pick, a graticule, ~270 city markers, and the nearest of them named for whatever you picked (§9.2).
 - **Color schemes:** user-editable 6-color palettes used to tint calendar items; palettes can be **auto-generated from the current background image** via k-means clustering in CIE-Lab space.
 - **Settings:** one sheet in four sections — appearance (background picture, its brightness, the colour scheme), window (UI scale, startup monitor, fullscreen, frame-rate readout), calendar (weeks shown), weather (coordinates, two or three day forecast). See §11.1.
@@ -76,10 +77,13 @@ Additional features:
 | HTTP (weather) | `reqwest` (blocking, `rustls-tls`; `default-features = false` keeps system OpenSSL out of the Linux build) |
 | Images | `image` (backgrounds, world map, icon) |
 | Palette generation | `kmeans_colors`, `palette` (Lab/sRGB conversion) |
-| Reverse file reading | `rev_lines` (archive pagination) |
 | Atomic file writes | `tempfile` (`NamedTempFile::persist`) |
 | Allocator | `mimalloc` (set as `#[global_allocator]`) |
 | Build | `embed-resource` (embeds `resources.rc` → `icon.ico`), `chrono` (stamps `BUILD_DATE`) |
+
+> `rev_lines` was here, used to reverse-scan the archive log a page at a time. The archive
+> is read whole and kept in memory now (§17.2), so nothing reads a file backwards any more
+> and the dependency is gone.
 
 The release profile is aggressively tuned for a small, fast binary: `opt-level=3`,
 `lto="fat"`, `codegen-units=1`, `strip="symbols"`, `panic="abort"`.
@@ -142,7 +146,7 @@ Files inside `taskdeck_data/`:
 | File | Format | Written by |
 |------|--------|-----------|
 | `read_at_startup.json` | JSON array of `Active` | `tasks::oversafe_activesave` (atomic) |
-| `archived.jsonl` | newline-delimited `InActive` | `tasks::save_inactive` (append) |
+| `archived.jsonl` | newline-delimited `archive::Archived` | `archive::ArchiveLog` (append; atomic whole-file rewrite on restore/forget) |
 | `colorschemes.json` | JSON map `u32 → ColorScheme` | `color::save_colorschemes` (atomic) |
 | `notepad_text.json` | JSON string | `utilities::save_notepad_text` (atomic) |
 | `userconfig.toml` | TOML | `initialization` + `toml_edit` writers |
@@ -296,19 +300,28 @@ Three valid shapes:
 knobs may be present on one task — whichever matches the deadline's presence is live (§7.3), and
 the other is remembered for the day the deadline is added or cleared again.
 
-### `InActive` (`tasks.rs`) — an archived item
+### `Archived` (`archive.rs`) — an item that has left the board
 
-Same fields minus `time_importance`, plus `inactivated: DateTime<Local>`. Carries the originating
-`Active::id` (also `#[serde(default)]` for legacy rows). Produced by `Active::to_inactive()` when a
-task is completed.
+**Every** field of `Active` that carries meaning, plus `archived_at: DateTime<Local>` and an
+`outcome: Outcome` (`Finished` / `Dropped`). It is a faithful copy, not a summary, which is what
+makes the verdict line, the summary figures, the planner's ghosts and `to_active()` (restore) all
+possible from the one record. `Archived::retire(item, outcome, at)` takes the `Active` **by value** —
+retiring ends its life as a live item — and `to_active()` is its exact inverse. Full rationale in
+§17.
+
+> **Superseded `InActive` (`tasks.rs`).** That record was the item minus `time_importance`,
+> `sessions` and `duration_minutes`, with no outcome field. Three consequences, all now fixed:
+> a restored task would have come back as a bare name the scorer reads as `MALFORMED_SCORE`
+> (§7.3); the deadline-versus-finish and estimate-versus-booked comparisons were impossible to
+> make; and *deleting* wrote nothing at all, so the README's claim that deleted items are kept
+> was untrue. Rows in that shape still load — see the wire-compatibility note in §17.1.
 
 ### Persistence functions
 
-- `read_at_startup` / `oversafe_activesave` — load/save the active set. Saving is **atomic**:
-  serialize → write to a temp file in the same dir → `fsync` → `persist` (rename).
-- `save_inactive` — append one JSON line to `archived.jsonl`.
-- `read_lines_range(offset, limit)` — reads the archive **newest-first** using `rev_lines`,
-  skipping `offset` lines and taking `limit`; powers the paginated Archive window.
+- `read_at_startup` / `oversafe_activesave` (`tasks.rs`) — load/save the active set. Saving is
+  **atomic**: serialize → write to a temp file in the same dir → `fsync` → `persist` (rename).
+- `archive::ArchiveLog` owns `archived.jsonl` entirely: `load` (once, whole), `record` (one
+  appended line), `take` (remove one row + atomic whole-file rewrite). §17.2.
 
 ---
 
@@ -748,7 +761,9 @@ visual language: a rounded "notch" around the day number, two-line wrapped item 
 |------|---------|
 | `new_task_flag` / `new_event_flag` | Show the create-task / create-event modal. |
 | `error_flag` + `error_text` | Show the (top-most) error modal. |
-| `display_archive_flag` | Show the Archive window (paginated). |
+| `archive_view` | **Not a flag** — a struct (`ArchiveView`) holding the archive window's whole state: `open`, the filter, the selected row, the pending forget confirmation, the one-frame search focus. See the D6 note below. |
+| `archive` | The `ArchiveLog` itself: the session's copy of `archived.jsonl`, loaded lazily and kept (§17.2). |
+| `planner_ghosts` | The archived blocks that fall on `planner_day`, cached per day rather than rebuilt per frame (§17.4). |
 | `planner_flag` + `planner_day` | Show the day planner, and which day it is on. The day is a date, not a calendar cell index, so the planner can step past the end of the calendar's range and a rebuild underneath it can't repoint it. |
 | `planner_drag` / `planner_selection` / `planner_naming` | In-flight timeline gesture, selected item, and the item whose title is being typed. |
 | `planner_naming_created` / `planner_naming_focus` | Whether the item under the title editor was created by the gesture that opened it (Escape then removes it), and the one-frame request for keyboard focus (§16.3.5). |
@@ -770,6 +785,14 @@ When any modal flag is set, `hovered_calendar_cell` is cleared at the end of `ui
 calendar doesn't show a hover state behind a modal. `any_modal_open` is `planner_flag ||
 modal_over_planner()`; the second half is the same list without the planner, and is what the
 planner's own keyboard shortcuts stand down for (§16.3).
+
+> **On the flag count (`CODE_REVIEW.md` D6).** The archive redesign was the sequencing point that
+> review named, and it takes the first step: the archive owns `ArchiveView` rather than adding
+> `display_archive_flag` + `archive` + `offset` + a forget-confirmation boolean to the pile. Net
+> change is three loose fields removed and none added. It is not the modal *stack* D6 ultimately
+> asks for — the remaining screens still keep their booleans — but it is the shape the rest should
+> move to: a screen owns its own state, and `any_modal_open` remains the single place that knows
+> the full set.
 
 ---
 
@@ -1080,7 +1103,8 @@ done, file it in the archive", and an event is not work you finish — it is a t
 and passes whether or not you were there. Offering the ✓ on one asked a question with no answer,
 and filed dentist appointments in the archive as things the user had *done*. An event that
 shouldn't be there is deleted; the task list never offered the ✓ on one, because it never shows
-events (`refilter_tasks`), so the footer was the only place this was reachable.
+events (`refilter_tasks`), so the footer was the only place this was reachable. Rows already in the
+log from before that fix are handled at the reading end too — see `was_finished()` in §17.1.
 
 **Due markers are deliberately not draggable.** A deadline is a fact about the task; dragging it
 on a planner would silently rewrite it while the user thought they were planning. Clicking one
@@ -1320,6 +1344,169 @@ read — only the `item_count` the cell layout actually dispatches on. And the o
 `NaiveDate` rather than the popup's `expanded_day` cell index, so a calendar rebuild underneath it
 (a midnight rollover, a reduced week count) can no longer leave it pointing at a different day;
 the popup needed an explicit bounds check and closed itself when that happened.
+
+---
+
+## 17. The Archive
+
+`archive.rs` (model + store, pure and unit-tested), plus the window and the ghosts in `ui.rs`.
+
+### 17.1 The central idea: the record is the item
+
+The app's one real claim is that **due is not the same as planned** (§16.1): a deadline says when
+something is *owed*, `sessions` say when you will *sit down and do it*, and the two are stored
+separately because they are genuinely different facts.
+
+Those two facts only ever become *checkable against each other* at one moment — the moment the
+thing is finished. That was precisely the moment the old archive discarded them. `InActive` kept a
+name, a created date, a deadline and a timestamp; the sessions, the estimate and the horizon went
+on the floor. So the app recorded the most interesting thing it knows — what you intended — and
+deleted it at the exact instant it became possible to check.
+
+`Archived` keeps the whole item, plus one fact the old record could not express: **how it left**.
+
+```rust
+pub enum Outcome { Finished, Dropped }
+```
+
+Three things follow, and they are the whole reason for the redesign:
+
+| Follows from | What it buys |
+|--------------|--------------|
+| deadline + `archived_at` | **The verdict.** Was the date met, and by how much. |
+| `duration_minutes` + `sessions` | The other half of it: was the *estimate* any good. |
+| nothing is lost | **Restore.** `to_active()` is the exact inverse of `retire()`. |
+| sessions survive | **Ghosts.** The planner can draw what a day was actually spent on (§17.4). |
+
+**Deleting archives too.** Completing and deleting used to differ in kind — one wrote a row, the
+other simply dropped the item. A task you gave up on left no trace it had existed, and the README's
+"completed and deleted items are not thrown away" was false. They are one act with different
+outcomes now (`TaskApp::retire_active_thing`), and the ledger is what tells them apart.
+
+The one path that still removes without recording is `forget_active_thing`, used for Escape on a
+just-created, not-yet-named block (§16.3.5). It is seconds old, the only thing in it is the slot an
+accidental drag gave it, and *"untitled, dropped a moment after it was written down"* is noise, not
+history.
+
+**An event is never finished.** It is a time that arrives and passes on its own, which is why the
+planner offers no ✓ on one (§16.3) — an event reaches the archive only by being deleted. Rows
+written before `outcome` existed all default to `Finished`, events among them, so `was_finished()`
+lets the *kind* decide first and the stored outcome only break the tie. Without that, a real log
+read back with a dentist appointment wearing a ✓ next to it, and the "N finished" figure counted
+appointments as work done.
+
+**Wire compatibility.** Old lines still load. `outcome` defaults to `Finished` — correct, because
+only the complete path ever wrote one — and the missing fields default to empty. The timestamp
+keeps its old JSON name:
+
+```rust
+#[serde(rename = "inactivated")]
+pub archived_at: DateTime<Local>,
+```
+
+Renaming it on disk would produce a log the previous build cannot read at all, which is not a trade
+worth making for a nicer field name. A test asserts the wire name, so nobody "tidies" it later.
+
+### 17.2 The store: read once, keep it
+
+One append-only JSONL file, read **whole** into memory the first time something asks to see it, and
+kept for the session.
+
+What that replaces (`CODE_REVIEW.md` B4): `read_lines_range(offset, limit)` re-opened
+`archived.jsonl` and reverse-scanned past `offset` lines on every "Show more" — O(n) a page, O(n²)
+to walk the log — and it counted *raw* lines while rendering *parsed* ones, so a single unreadable
+line silently skipped or duplicated rows across a page boundary. Both are gone rather than patched,
+because line-offset paging is gone.
+
+Reading it whole is not a concession, it is the enabling move: you cannot compute *"29 of 34
+deadlines met"*, or search by name, or group by month, from a fifteen-row window onto a file.
+
+| Operation | Cost | How often |
+|-----------|------|-----------|
+| `load` | O(n), once per session | first time anything opens the archive or the planner |
+| `record` | one appended line + `fsync` | every completion / deletion |
+| `take` (restore, forget) | O(n) whole-file atomic rewrite | only when the user deliberately asks |
+
+The rewrite uses the same discipline as `oversafe_activesave`: temp file in the same directory →
+flush → `fsync` → `persist` (rename). If it fails, the removed row is put **back** into memory, so
+the window and the file cannot disagree.
+
+`record` mirrors into memory only when the log is already loaded — pushing onto an unloaded log
+would have the next `load` read the same row off disk and hold it twice. Entries are sorted by
+`archived_at` descending rather than merely reversed: appends happen in time order, but a
+hand-edited or hand-merged log has no such guarantee, and the month runs depend on the order being
+real.
+
+**Unreadable lines are kept verbatim** and written back out on a rewrite, at the head of the file.
+Failing to parse a line is not grounds for deleting it. The count is shown in the window rather
+than swallowed — a number that is not zero is a fact about the user's own data.
+
+### 17.3 The window: a ledger with a footer
+
+Built like the planner rather than like the fixed 500×800, hardcoded-Dracula, three-column
+`Grid` + "Show more" it replaces: sized from the viewport, a masthead that says what the rows add
+up to, a body you read, a footer that acts on the selection.
+
+- **Masthead** — `Summary::headline()` over the *filtered* rows: `41 finished · 6 dropped · 3
+  events removed · 29 of 34 deadlines met · 52h booked · typically 4d on the board`. Only
+  **finished, dated tasks** are judged: a dropped task withdrew rather than failed, and an event
+  never made a promise. The median, not the mean, so one task forgotten for two years doesn't
+  become the headline figure for how you work.
+- **Filters** — a name search, `Everything / Finished / Dropped`, `Both / Tasks / Events`. The
+  outcome pair keys on `was_finished()`, so between them they still cover every row (an event falls
+  under "dropped": it was taken off the calendar).
+- **Ledger** — rows under month headings, newest first, each with a date spine, the ✓/✗ mark in the
+  item's own palette colour, the name, and `Archived::verdict()`.
+- **Footer** — reserved whether or not anything is selected, so selecting doesn't shift the ledger
+  under the pointer. Carries the full timestamps the rows deliberately don't spell out, plus **↩
+  Put it back** and **Forget**.
+
+**Only Forget asks.** Restoring is undone by ticking the thing off again, one button away.
+Forgetting is the single irreversible act in the app, so it is the single one with a confirmation.
+
+**Escape in two steps**: clears the filter if the filter is doing anything, closes the window
+otherwise — a search you are half way through is not something the window should close over. It
+stands down for the forget confirmation (captured *before* the body runs, for the reason §16.3
+gives) and for the error window, which answers Escape itself.
+
+`archive_window` is a **free function** over `(&ArchiveLog, &mut ArchiveView)`, not a method. The
+window reads hundreds of rows *and* offers buttons that mutate the log, which cannot both hold
+`&mut self`. Borrowing the two fields separately means the rows are borrowed rather than cloned
+every frame, and it forces the buttons to return an `ArchiveAction` instead of acting mid-draw — so
+every change to the archive happens in one place, after the frame is laid out.
+
+**Restore and the id.** The id comes back with the record, but it may not be free: `next_id` is
+seeded past the highest id in the *live* set, so archiving the highest-numbered item and restarting
+leaves the counter behind it, and a legacy row carries the `0` sentinel. `restore_archived` pushes
+the counter past whatever came back and hands out a fresh id if the old one is taken.
+
+### 17.4 Ghosts: the archive inside the calendar
+
+Open a day in the planner and the blocks of archived items that fall on it are drawn behind
+whatever is still live — outlined over a dark wash rather than filled, with a ✓ or ✗ and the name.
+
+This is what the lossless record buys the rest of the app. A day used to show only what was still
+coming: tick the morning's work off and the morning went blank, as though it had never been spent.
+The masthead's day summary gains a `· 2h done` alongside `planned`, counted separately — folding it
+into "planned" would make a finished day look like a day with everything still ahead of it.
+
+Three deliberate limits:
+
+- **Blocks only, never due markers.** A ghost answers *"what did this day go on"*, and the deadline
+  of something already dealt with is not part of that answer. Events therefore never appear at all:
+  they have no sessions, and a deleted appointment is not something a day was spent on.
+- **Not interactive.** A ghost is a record, and drawing it as a solid grabbable block would be a
+  lie the pointer immediately exposes. It is kept out of the entry list the gesture handling reads,
+  so `handle_planner_gestures` is untouched by any of this.
+- **In the lane packing all the same.** `lay_out` runs over live placements *and* ghosts, then the
+  lanes are split back apart. An hour you already spent behaves like an hour that is booked: a new
+  block dropped on top of finished work lands beside it, exactly as it would beside a live one.
+
+`planner_ghosts` is a cache rebuilt when the day changes and whenever the archive does — on open,
+on day step, on retire, restore and forget. Deriving it per frame would walk the whole log inside a
+loop that redraws continuously, for an answer that stands still. `placements_of` in `planner.rs`
+takes the fields rather than an `Active`, so the placement rule has one implementation rather than
+a second copy drifting alongside it in the archive.
 
 ---
 

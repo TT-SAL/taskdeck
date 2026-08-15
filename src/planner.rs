@@ -17,7 +17,7 @@
 
 use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Timelike};
 
-use crate::tasks::Active;
+use crate::tasks::{Active, Session};
 
 /// Minutes in a day; the timeline's full extent.
 pub const DAY_MINUTES: i32 = 24 * 60;
@@ -113,13 +113,35 @@ pub struct DayPlacement {
 /// "worked on Friday morning, due Friday 17:00" is exactly the day where
 /// seeing the deadline next to the work matters most.
 pub fn placements_for(item: &Active, day: NaiveDate) -> Vec<DayPlacement> {
+    placements_of(
+        item.is_event,
+        item.deadline,
+        item.duration_minutes,
+        &item.sessions,
+        day,
+    )
+}
+
+/// The same, from the fields rather than from an `Active`.
+///
+/// An archived item puts blocks on a day too — the planner draws what a past
+/// day was actually spent on behind what is still planned for it — and it is
+/// not an `Active` any more. Taking the parts keeps one copy of the placement
+/// rule instead of a second one drifting alongside it in the archive.
+pub fn placements_of(
+    is_event: bool,
+    deadline: Option<DateTime<Local>>,
+    duration_minutes: Option<u32>,
+    sessions: &[Session],
+    day: NaiveDate,
+) -> Vec<DayPlacement> {
     let mut placements = Vec::new();
 
-    if item.is_event {
-        if let Some(at) = item.deadline.and_then(|deadline| minutes_into_day(deadline, day)) {
+    if is_event {
+        if let Some(at) = deadline.and_then(|deadline| minutes_into_day(deadline, day)) {
             placements.push(DayPlacement {
                 session: None,
-                placement: match item.duration_minutes {
+                placement: match duration_minutes {
                     Some(minutes) => {
                         Placement::Block { start: at, minutes: minutes.max(MIN_BLOCK_MINUTES) }
                     }
@@ -130,7 +152,7 @@ pub fn placements_for(item: &Active, day: NaiveDate) -> Vec<DayPlacement> {
         return placements;
     }
 
-    for (index, session) in item.sessions.iter().enumerate() {
+    for (index, session) in sessions.iter().enumerate() {
         if let Some(start) = minutes_into_day(session.start, day) {
             placements.push(DayPlacement {
                 session: Some(index),
@@ -142,7 +164,7 @@ pub fn placements_for(item: &Active, day: NaiveDate) -> Vec<DayPlacement> {
         }
     }
 
-    if let Some(due) = item.deadline.and_then(|deadline| minutes_into_day(deadline, day)) {
+    if let Some(due) = deadline.and_then(|deadline| minutes_into_day(deadline, day)) {
         placements.push(DayPlacement {
             session: None,
             placement: Placement::Marker { at: due, due: true },

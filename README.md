@@ -34,11 +34,25 @@ Naming a new block is typing and `Enter`. If you dragged one out by mistake, `Es
 
 The important part is what it records. A deadline is when something is **due**; planned blocks are when you will **work on** it. Those are different, so TaskDeck stores them separately: a report due Friday that you plan to write on Tuesday shows as a block on Tuesday and still shows as due on Friday. A task you drag out gets time and no deadline — you have said when you will do it, not when it is owed — and it still rises up the task list as its slot comes round. Dragging blocks around never moves a deadline: a due date is a fact about the task, changed only where changing it looks like changing it.
 
+## The archive
+
+Nothing you finish or delete is thrown away. It goes to the **Archive**, which is a record of what became of your work rather than a bin you can look inside.
+
+The reason it can be is the same distinction the planner is built on. TaskDeck knows when something was **due** and, separately, when you set time aside to **do** it — and the moment you tick something off is the only moment those two facts can be checked against each other. So the archive keeps the whole task: its blocks, its estimate, its dates. Each row then says what happened, in one line:
+
+> ✓ **Write the physics homework**
+> finished 2d early · 2h estimated, 3h over 2 sittings · 12d on the board
+
+Across the top is what the rows you are looking at add up to — how many you finished, how many you dropped, how many of your deadlines you actually met, how many hours you booked, and how long a thing typically sits on the board before it leaves it. Search by name, narrow to finished or dropped, tasks or events, and the summary follows whatever you are looking at.
+
+Because nothing is lost, anything in the archive can be **put back**: a task you ticked off by mistake returns with its plan, its due date and its estimate intact. **Forget** is there for the rare thing you want gone for good, and it is the only button in TaskDeck that asks twice.
+
+The archive also shows up where the work happened. Open a past day in the planner and the hours you spent are still drawn on the timeline, outlined rather than filled, behind whatever is still live. A day you have finished no longer goes blank.
+
 A few details worth pointing out:
 
 - Drop any image into the `images` folder and pick it as your background from Settings. TaskDeck can also read that image and build a colour palette from it, which it uses to tint the items on the calendar. It ships with a few palettes to start from — `EMBER`, `TIDE`, `MOSS`, `DUSK`, and a `DISCO` with a `MILD DISCO` for the rest of the week — alongside the untinted `COLORSCHEME ZERO` it opens on. Those five are built in and stay as they are; duplicate one to get a copy that is yours to edit.
 - Set your weather location by clicking it on a world map instead of typing in coordinates. Around two hundred cities are marked to get you close.
-- Completed and deleted items are not thrown away. They go to an archive you can page back through.
 
 ## Getting started
 

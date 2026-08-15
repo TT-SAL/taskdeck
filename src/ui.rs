@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Timelike, Weekday};
 use egui::{self, Align, Button, Color32, ColorImage, ComboBox, Context, CornerRadius, Event, FontData, FontDefinitions, FontFamily, FontId, Grid, Key, Label, Layout, Margin, PointerButton, Pos2, Rect, RichText, Stroke, StrokeKind, TextureHandle, Ui, Vec2, ViewportCommand, pos2, vec2};
 use image::{ImageBuffer, Rgba};
 
-use crate::{calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, InActive, Session}, weather::{self, WeatherService}};
+use crate::{archive::{self, ArchiveKey, ArchiveLog, Archived, KindFilter, Outcome, OutcomeFilter}, calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, Session}, weather::{self, WeatherService}};
 
 const WEEK_DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -92,6 +92,62 @@ const PLANNER_NEW_TASK_IMPORTANCE: u8 = 2;
 /// "within a week", the middle of the road. Matches the New Task dialog's
 /// default, so where a task was typed doesn't change what it is.
 const PLANNER_NEW_TASK_HORIZON: u8 = 1;
+
+/* ──────────────────────────────── The archive ─────────────────────────────
+ *
+ * A ledger, and deliberately built like the planner rather than like the grid
+ * it replaces: a masthead that says what the rows add up to, a body you read,
+ * and a footer that acts on whatever is selected. The old window was a fixed
+ * 500×800 three-column table in hardcoded Dracula colours with a "Show more"
+ * button under it — it could tell you that a thing had happened and the date it
+ * happened on, and nothing else at all.
+ */
+
+/// How much of the window the archive leaves showing around itself. Narrower
+/// than the planner: a ledger is a column of lines, and a very wide one is
+/// harder to read, not easier.
+const ARCHIVE_WINDOW_INSET: Vec2 = Vec2::new(420.0, 96.0);
+/// Bounds on its width. The floor is what the filter row needs before its two
+/// ends meet; the ceiling is where a line of text stops being a line.
+const ARCHIVE_MIN_WIDTH: f32 = 620.0;
+const ARCHIVE_MAX_WIDTH: f32 = 1080.0;
+/// Width of the date spine down the left of the ledger — "15 Aug" over
+/// "Wed 21:04" in the mono face, which is what sets the number.
+const ARCHIVE_DATE_COLUMN: f32 = 92.0;
+/// Height of the footer. Reserved whether or not a row is selected, so
+/// selecting one doesn't shift the ledger under the pointer — the same bargain
+/// the planner's inspector makes.
+const ARCHIVE_FOOTER_HEIGHT: f32 = 62.0;
+/// The archive's type scale, one step under the planner's: this is a document
+/// you read at the desk, not a timeline you aim a pointer at.
+const ARCHIVE_NAME_SIZE: f32 = 16.0;
+const ARCHIVE_META_SIZE: f32 = 14.0;
+const ARCHIVE_FINE_SIZE: f32 = 12.0;
+/// Month headings, in the same face the planner's tray headings use.
+const ARCHIVE_MONTH_SIZE: f32 = 13.0;
+
+/// Everything the archive window remembers between frames.
+///
+/// One struct rather than the four loose fields this replaces (`archive`,
+/// `offset`, `display_archive_flag`, and a confirmation flag it would otherwise
+/// have needed): `CODE_REVIEW.md` D6 asks for the modal booleans to stop
+/// multiplying, and the honest way to do that is for a screen to own its own
+/// state rather than scattering it across `TaskApp`.
+#[derive(Default)]
+struct ArchiveView {
+    open: bool,
+    filter: archive::Filter,
+    /// The row the footer is editing.
+    selected: Option<ArchiveKey>,
+    /// Row awaiting a "forget this permanently" confirmation. Forgetting is the
+    /// only genuinely irreversible thing in the app, so it asks — restoring
+    /// does not, because it can simply be done again.
+    confirm_forget: Option<ArchiveKey>,
+    /// Set for the one frame after opening, to put the caret in the search
+    /// field. One frame, not every frame — see `planner_naming_focus` for what
+    /// re-requesting focus every frame does to a text field.
+    focus_search: bool,
+}
 
 /* ─────────────────────────── The settings sheet ───────────────────────────
  *
@@ -340,6 +396,26 @@ struct PlannerEntry {
     placement: planner::Placement,
 }
 
+/// One block of a day that has already been accounted for: time an archived
+/// item was given, drawn on the timeline behind everything still live.
+///
+/// This is what the lossless archive buys the planner. A day used to show only
+/// what was still *coming* — tick the morning's work off and the morning went
+/// blank, as though it had never been spent. The record keeps the sessions now,
+/// so the day can keep them too.
+///
+/// Blocks only, never due markers: a ghost answers "what did this day go on",
+/// and the deadline of something already dealt with is not part of that answer.
+/// Ghosts carry no id and take no gestures — they are not in the entry list the
+/// pointer handling reads, only in the lane packing, so a live block still lays
+/// out beside one instead of on top of it.
+struct PlannerGhost {
+    name: String,
+    outcome: Outcome,
+    color_id: usize,
+    placement: planner::Placement,
+}
+
 /// One card in the planner's tray: a task with no time set aside for it yet.
 struct BacklogCard {
     id: u64,
@@ -394,6 +470,590 @@ fn planner_entry_rect(
             )
         }
     }
+}
+
+/// Draw one ghost: an hour of this day that has already been accounted for.
+///
+/// Deliberately an outline over a dark wash rather than a filled block. A live
+/// block is a solid object you can pick up and move; a ghost is a record, and
+/// making it look grabbable would be a lie the pointer immediately exposes —
+/// it takes no gestures at all. Painted before the live entries, so anything
+/// still on the day covers it rather than the other way round.
+fn paint_planner_ghost(ui: &Ui, ghost: &PlannerGhost, rect: Rect, palette: &[Color32; 6]) {
+    let accent = accent_for(palette, ghost.color_id);
+    let painter = ui.painter();
+
+    painter.rect_filled(rect, CornerRadius::same(8), Color32::from_black_alpha(90));
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(8),
+        // Half the weight of a live block's outline, in a washed-out version of
+        // the colour the item wore in life.
+        Stroke::new(1.0, accent.gamma_multiply(0.55)),
+        StrokeKind::Inside,
+    );
+
+    let clipped = painter.with_clip_rect(rect.intersect(ui.clip_rect()));
+    let text = format!("{}  {}", ghost.outcome.glyph(), ghost.name);
+    clipped.text(
+        rect.shrink2(vec2(8.0, 4.0)).left_top(),
+        egui::Align2::LEFT_TOP,
+        text,
+        FontId::new(PLANNER_FINE_SIZE, FontFamily::Monospace),
+        Color32::from_white_alpha(match ghost.outcome {
+            Outcome::Finished => 165,
+            // A block you abandoned is fainter than one you finished: the time
+            // was set aside and then not spent, which is a quieter fact.
+            Outcome::Dropped => 115,
+        }),
+    );
+}
+
+/// Accent colour for an item of a given palette index.
+///
+/// The palette drives it, exactly as on the calendar — but the default scheme
+/// is six fully transparent entries (`ColorScheme::default_scheme`), because on
+/// the calendar the background photo is meant to show through. Anything drawn
+/// as a solid object — a planner block, an archive row's mark — has to stay
+/// visible, so a transparent entry falls back to a neutral highlight.
+fn accent_for(palette: &[Color32; 6], color_id: usize) -> Color32 {
+    let color = palette[color_id.min(5)];
+    if color.a() < 24 {
+        Color32::from_white_alpha(85)
+    } else {
+        color
+    }
+}
+
+/* ─────────────────────────── The archive window ───────────────────────────
+ *
+ * Built as a free function over `(&ArchiveLog, &mut ArchiveView)`: see
+ * `TaskApp::show_archive` for why, and for where the returned intent is
+ * carried out.
+ */
+
+/// The one thing a frame of the archive window can ask for. Everything the
+/// window's buttons do is deferred into this, so nothing mutates the log while
+/// its rows are still being drawn from.
+enum ArchiveAction {
+    Close,
+    Restore(ArchiveKey),
+    Forget(ArchiveKey),
+}
+
+fn archive_window(
+    ctx: &Context,
+    log: &ArchiveLog,
+    view: &mut ArchiveView,
+    palette: [Color32; 6],
+    owns_keys: bool,
+) -> Option<ArchiveAction> {
+    // Sized from the viewport like the planner, and for the same reason: the
+    // viewport is a different number of points on every machine. The old
+    // window was pinned at 500×800 whatever it was opened on.
+    let viewport = ctx.viewport_rect();
+    let width =
+        (viewport.width() - ARCHIVE_WINDOW_INSET.x).clamp(ARCHIVE_MIN_WIDTH, ARCHIVE_MAX_WIDTH);
+    let height = (viewport.height() - ARCHIVE_WINDOW_INSET.y).clamp(360.0, 1400.0);
+
+    // Filtering is one pass over rows that are already in the order they are
+    // read in, and it borrows them rather than copying — which is the whole
+    // reason the log lives in memory. Searching, grouping and the summary line
+    // are all impossible against a fifteen-row window onto a file.
+    let rows: Vec<&Archived> = log
+        .entries()
+        .iter()
+        .filter(|row| view.filter.admits(row))
+        .collect();
+    let summary = archive::summarize(rows.iter().copied());
+    let months = archive::group_by_month(&rows);
+
+    // Captured before the body runs: the confirmation clears its own state the
+    // instant it is answered, and the Escape that answered it is still in this
+    // frame's input — so asking afterwards whether one was open answers "no" on
+    // exactly the frame where it matters, and the key falls through and closes
+    // the window underneath. The planner learned this the same way.
+    let confirm_owned_frame = view.confirm_forget.is_some();
+    let mut action = None;
+
+    egui::Window::new("archive")
+        // No title bar: the masthead names the window better than a caption,
+        // and it carries the ✕ the way the planner's does.
+        .title_bar(false)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+        .default_size(vec2(width, height))
+        .show(ctx, |ui| {
+            ui.set_width(width);
+            ui.set_height(height);
+
+            archive_masthead(ui, &summary, &mut action);
+            archive_filter_row(ui, view, rows.len(), log.entries().len(), log.unreadable());
+            ui.separator();
+
+            // Measured, not guessed: the masthead's height depends on font
+            // metrics and the UI scale, and a constant that disagreed with
+            // either would push the footer off the bottom of the window.
+            let body_height = (ui.available_height() - ARCHIVE_FOOTER_HEIGHT - 12.0).max(120.0);
+            archive_ledger(ui, &rows, &months, view, palette, body_height);
+
+            ui.separator();
+            archive_footer(ui, &rows, view, &mut action);
+        });
+
+    // Drawn after the window so it stacks on top of it.
+    archive_forget_confirmation(ctx, &rows, view, &mut action);
+
+    if owns_keys && !confirm_owned_frame && ctx.input(|i| i.key_pressed(Key::Escape)) {
+        // Escape in two steps, so a search you are half way through is not
+        // something the window closes over: it clears whatever the filter is
+        // doing first, and only leaves once there is nothing to take back.
+        if view.filter.is_open() {
+            action = Some(ArchiveAction::Close);
+        } else {
+            view.filter = archive::Filter::default();
+        }
+    }
+
+    action
+}
+
+/// The title, and the one line that says what the rows below add up to.
+fn archive_masthead(ui: &mut Ui, summary: &archive::Summary, action: &mut Option<ArchiveAction>) {
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(14.0);
+        ui.vertical(|ui| {
+            ui.add(
+                Label::new(
+                    RichText::new("ARCHIVE")
+                        .font(FontId::new(34.0, FontFamily::Name("anton".into()))),
+                )
+                .selectable(false),
+            );
+            ui.add_space(-6.0);
+            // The figure the old window could never have shown: a fifteen-row
+            // page cannot tell you how many deadlines you have met.
+            ui.label(
+                RichText::new(summary.headline())
+                    .size(ARCHIVE_META_SIZE)
+                    .color(Color32::from_white_alpha(190)),
+            );
+        });
+
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_space(14.0);
+            if ui
+                .add(
+                    Button::new(RichText::new("✕").size(ARCHIVE_META_SIZE))
+                        .min_size(vec2(30.0, 30.0))
+                        .corner_radius(CornerRadius::same(8)),
+                )
+                .on_hover_text("Close  (Esc)")
+                .clicked()
+            {
+                *action = Some(ArchiveAction::Close);
+            }
+        });
+    });
+    ui.add_space(6.0);
+}
+
+/// Search, and the two things worth narrowing by.
+fn archive_filter_row(
+    ui: &mut Ui,
+    view: &mut ArchiveView,
+    shown: usize,
+    total: usize,
+    unreadable: usize,
+) {
+    let label = |text: &str| {
+        RichText::new(text.to_string())
+            .font(FontId::new(ARCHIVE_FINE_SIZE, FontFamily::Name("space".into())))
+            .color(Color32::from_white_alpha(120))
+    };
+
+    ui.horizontal(|ui| {
+        ui.add_space(14.0);
+        let search = ui.add(
+            egui::TextEdit::singleline(&mut view.filter.query)
+                .hint_text("search")
+                .desired_width(200.0),
+        );
+        // One frame only. Re-requesting focus every frame is how a text field
+        // becomes impossible to leave — see `planner_naming_focus`.
+        if std::mem::take(&mut view.focus_search) {
+            search.request_focus();
+        }
+
+        ui.add_space(18.0);
+        ui.label(label("SHOW"));
+        ui.selectable_value(
+            &mut view.filter.outcome,
+            OutcomeFilter::Any,
+            RichText::new("Everything").size(ARCHIVE_META_SIZE),
+        );
+        ui.selectable_value(
+            &mut view.filter.outcome,
+            OutcomeFilter::Finished,
+            RichText::new("Finished").size(ARCHIVE_META_SIZE),
+        )
+        .on_hover_text("Things you ticked off");
+        ui.selectable_value(
+            &mut view.filter.outcome,
+            OutcomeFilter::Dropped,
+            RichText::new("Dropped").size(ARCHIVE_META_SIZE),
+        )
+        .on_hover_text("Things you deleted");
+
+        ui.add_space(18.0);
+        ui.selectable_value(
+            &mut view.filter.kind,
+            KindFilter::Any,
+            RichText::new("Both").size(ARCHIVE_META_SIZE),
+        );
+        ui.selectable_value(
+            &mut view.filter.kind,
+            KindFilter::Tasks,
+            RichText::new("Tasks").size(ARCHIVE_META_SIZE),
+        );
+        ui.selectable_value(
+            &mut view.filter.kind,
+            KindFilter::Events,
+            RichText::new("Events").size(ARCHIVE_META_SIZE),
+        );
+
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_space(14.0);
+            // Only worth saying when the filter is actually hiding something.
+            let count = if shown == total {
+                format!("{total} rows")
+            } else {
+                format!("{shown} of {total}")
+            };
+            ui.label(label(&count));
+
+            // Said out loud rather than swallowed. Lines this build cannot
+            // parse are kept in the file untouched, but a count that is not
+            // zero is a fact about the user's own data and they should hear it
+            // — the old reader dropped such lines silently and mis-paged the
+            // ones around them.
+            if unreadable > 0 {
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(format!(
+                        "{unreadable} line{} unreadable",
+                        if unreadable == 1 { "" } else { "s" }
+                    ))
+                    .font(FontId::new(ARCHIVE_FINE_SIZE, FontFamily::Name("space".into())))
+                    .color(Color32::from_rgb(255, 150, 120)),
+                )
+                .on_hover_text("Kept in the file exactly as they are, and left alone");
+            }
+        });
+    });
+    ui.add_space(6.0);
+}
+
+/// The ledger: the rows, under the month they fall in, newest first.
+fn archive_ledger(
+    ui: &mut Ui,
+    rows: &[&Archived],
+    months: &[archive::MonthRun],
+    view: &mut ArchiveView,
+    palette: [Color32; 6],
+    body_height: f32,
+) {
+    if rows.is_empty() {
+        ui.add_space(28.0);
+        ui.vertical_centered(|ui| {
+            let (headline, hint) = if view.filter.is_open() {
+                (
+                    "Nothing here yet.",
+                    "Finish something, or delete it, and it is kept here.",
+                )
+            } else {
+                ("Nothing matches.", "Widen the search, or show everything.")
+            };
+            ui.label(RichText::new(headline).size(ARCHIVE_NAME_SIZE));
+            ui.label(
+                RichText::new(hint)
+                    .size(ARCHIVE_META_SIZE)
+                    .color(Color32::from_white_alpha(130)),
+            );
+        });
+        // The body still claims its height, so the footer does not float up the
+        // window when a search happens to match nothing.
+        ui.allocate_space(vec2(ui.available_width(), (body_height - 80.0).max(0.0)));
+        return;
+    }
+
+    egui::ScrollArea::vertical()
+        .id_salt("archive_ledger")
+        .scroll_source(egui::scroll_area::ScrollSource::ALL)
+        .max_height(body_height)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let row_width = (ui.available_width() - 24.0).max(320.0);
+
+            for month in months {
+                archive_month_heading(ui, &month.label, month.rows.len(), row_width);
+                for row in &rows[month.rows.clone()] {
+                    let selected = view.selected == Some(row.key());
+                    if archive_row(ui, row, selected, palette, row_width).clicked() {
+                        // Clicking the selected row again clears it, so the
+                        // footer can be put away without hunting for somewhere
+                        // neutral to click.
+                        view.selected = (!selected).then(|| row.key());
+                    }
+                }
+                ui.add_space(10.0);
+            }
+        });
+}
+
+fn archive_month_heading(ui: &mut Ui, label: &str, count: usize, width: f32) {
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        ui.set_width(width);
+        ui.label(
+            RichText::new(label.to_uppercase())
+                .font(FontId::new(ARCHIVE_MONTH_SIZE, FontFamily::Name("space".into())))
+                .color(Color32::from_white_alpha(150)),
+        );
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(
+                RichText::new(format!("{count}"))
+                    .font(FontId::new(ARCHIVE_MONTH_SIZE, FontFamily::Name("space".into())))
+                    .color(Color32::from_white_alpha(90)),
+            );
+        });
+    });
+    ui.add_space(4.0);
+}
+
+/// One row: the date it left the board down the left, then what it was and how
+/// it went.
+fn archive_row(
+    ui: &mut Ui,
+    row: &Archived,
+    selected: bool,
+    palette: [Color32; 6],
+    width: f32,
+) -> egui::Response {
+    let accent = accent_for(&palette, row.color_id());
+    // Finished and merely-gone are told apart by the mark rather than by the
+    // row's colour: the palette entry still says what *kind* of thing it was,
+    // and overriding it would throw that away for a fact the glyph carries.
+    let mark_color = if row.was_finished() {
+        accent
+    } else {
+        Color32::from_white_alpha(110)
+    };
+
+    let response = egui::Frame::new()
+        .fill(if selected {
+            Color32::from_white_alpha(20)
+        } else {
+            Color32::TRANSPARENT
+        })
+        .stroke(Stroke::new(if selected { 1.4 } else { 0.0 }, accent))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(Margin::symmetric(8, 6))
+        .show(ui, |ui| {
+            ui.set_width(width - 16.0);
+            ui.horizontal_top(|ui| {
+                // The date spine. Monospace, so the column of dates reads as a
+                // column rather than as ragged text.
+                ui.vertical(|ui| {
+                    ui.set_width(ARCHIVE_DATE_COLUMN);
+                    ui.label(
+                        RichText::new(row.archived_at.format("%-d %b").to_string())
+                            .font(FontId::new(ARCHIVE_META_SIZE, FontFamily::Monospace))
+                            .color(Color32::from_white_alpha(215)),
+                    );
+                    ui.add_space(-4.0);
+                    ui.label(
+                        RichText::new(row.archived_at.format("%a %H:%M").to_string())
+                            .font(FontId::new(ARCHIVE_FINE_SIZE, FontFamily::Name("space".into())))
+                            .color(Color32::from_white_alpha(115)),
+                    );
+                });
+
+                ui.label(
+                    RichText::new(row.mark())
+                        .size(ARCHIVE_NAME_SIZE)
+                        .color(mark_color),
+                );
+                ui.add_space(2.0);
+
+                ui.vertical(|ui| {
+                    ui.add(
+                        Label::new(
+                            RichText::new(&row.name)
+                                .size(ARCHIVE_NAME_SIZE)
+                                .color(Color32::from_white_alpha(if selected { 245 } else { 210 })),
+                        )
+                        .wrap()
+                        .selectable(false),
+                    );
+                    ui.add_space(-2.0);
+                    // The line the whole redesign exists to be able to write.
+                    ui.add(
+                        Label::new(
+                            RichText::new(row.verdict())
+                                .font(FontId::new(
+                                    ARCHIVE_FINE_SIZE,
+                                    FontFamily::Name("space".into()),
+                                ))
+                                .color(Color32::from_white_alpha(155)),
+                        )
+                        .wrap()
+                        .selectable(false),
+                    );
+                });
+            });
+        })
+        .response
+        .interact(egui::Sense::click());
+
+    // Painted after the frame rather than baked into its fill, because whether
+    // the pointer is over a row is only known once the row has been laid out.
+    if response.hovered() {
+        ui.painter().rect_stroke(
+            response.rect,
+            CornerRadius::same(8),
+            Stroke::new(1.0, Color32::from_white_alpha(45)),
+            StrokeKind::Inside,
+        );
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    ui.add_space(2.0);
+    response
+}
+
+/// What the selected row is, in full, and the two things that can be done to
+/// it. Reserved whether or not anything is selected, so selecting does not
+/// shift the ledger under the pointer.
+fn archive_footer(
+    ui: &mut Ui,
+    rows: &[&Archived],
+    view: &mut ArchiveView,
+    action: &mut Option<ArchiveAction>,
+) {
+    // A selection can survive its row: restoring or forgetting rebuilds the
+    // list, and so does typing in the search field.
+    let selected = view
+        .selected
+        .and_then(|key| rows.iter().copied().find(|row| row.key() == key));
+
+    ui.horizontal(|ui| {
+        ui.add_space(14.0);
+        ui.set_height(ARCHIVE_FOOTER_HEIGHT - 10.0);
+
+        let Some(row) = selected else {
+            ui.label(
+                RichText::new("Pick a row to put it back, or to forget it for good.")
+                    .size(ARCHIVE_META_SIZE)
+                    .color(Color32::from_white_alpha(130)),
+            );
+            return;
+        };
+
+        ui.vertical(|ui| {
+            ui.add(
+                Label::new(RichText::new(&row.name).size(ARCHIVE_NAME_SIZE).strong())
+                    .truncate()
+                    .selectable(false),
+            );
+            ui.add_space(-2.0);
+            // The timestamps in full — the one thing the row above deliberately
+            // does not spell out, because a column of them would be unreadable.
+            let mut facts = vec![format!(
+                "written {}",
+                row.created.format("%-d %b %Y %H:%M")
+            )];
+            if let Some(deadline) = row.deadline {
+                facts.push(format!(
+                    "{} {}",
+                    if row.is_event { "was set for" } else { "due" },
+                    deadline.format("%-d %b %Y %H:%M")
+                ));
+            }
+            facts.push(format!(
+                "{} {}",
+                if row.was_finished() { "finished" } else { "removed" },
+                row.archived_at.format("%-d %b %Y %H:%M")
+            ));
+            ui.label(
+                RichText::new(facts.join("  ·  "))
+                    .font(FontId::new(ARCHIVE_FINE_SIZE, FontFamily::Name("space".into())))
+                    .color(Color32::from_white_alpha(160)),
+            );
+        });
+
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_space(14.0);
+            if ui
+                .button(RichText::new("Forget").size(ARCHIVE_META_SIZE))
+                .on_hover_text("Remove it from the archive for good")
+                .clicked()
+            {
+                view.confirm_forget = Some(row.key());
+            }
+            // Restoring asks nothing: it is undone by ticking the thing off
+            // again, which is a button away. Forgetting is the one act in the
+            // app with no way back, so it is the one that asks.
+            if ui
+                .button(RichText::new("↩ Put it back").size(ARCHIVE_META_SIZE))
+                .on_hover_text("Return it to the board, with its plan and its dates")
+                .clicked()
+            {
+                *action = Some(ArchiveAction::Restore(row.key()));
+            }
+        });
+    });
+}
+
+fn archive_forget_confirmation(
+    ctx: &Context,
+    rows: &[&Archived],
+    view: &mut ArchiveView,
+    action: &mut Option<ArchiveAction>,
+) {
+    let Some(key) = view.confirm_forget else { return };
+    // The row can vanish underneath the dialog (a search narrowing, a restore);
+    // dismiss rather than act on something that is no longer there.
+    let Some(row) = rows.iter().copied().find(|row| row.key() == key) else {
+        view.confirm_forget = None;
+        return;
+    };
+
+    egui::Window::new("Forget this?")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.label(format!("Forget \"{}\"?", row.name));
+            ui.label(
+                RichText::new("This one is not kept. It leaves the archive for good.")
+                    .size(ARCHIVE_META_SIZE)
+                    .color(Color32::from_white_alpha(160)),
+            );
+            let (accepted, dismissed) = confirmation_keys(ui.ctx());
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.add(Button::new("Yes").min_size(CONFIRM_BUTTON)).clicked() || accepted {
+                    *action = Some(ArchiveAction::Forget(key));
+                }
+                if ui.add(Button::new("No").min_size(CONFIRM_BUTTON)).clicked() || dismissed {
+                    view.confirm_forget = None;
+                }
+                confirmation_key_hint(ui);
+            });
+        });
 }
 
 /// "14:30–15:15" for an event's footer, from its time and length; just the
@@ -540,7 +1200,6 @@ pub struct TaskApp {
     dirs: AppDirs,
 
     hovered_calendar_cell: Option<usize>,
-    offset: usize,
     press_origin: Option<PressState>,
 
     userconfig_path: PathBuf,
@@ -555,7 +1214,11 @@ pub struct TaskApp {
     /* ───────────────────────── Tasks & Events ───────────────────────── */
     active_things: Vec<Active>,
     list_tasks: Vec<Active>,
-    archive: Option<Vec<InActive>>,
+    /// Everything that has left the board, and what became of it. Read from
+    /// disk the first time something asks to see it and kept from then on —
+    /// the window, the planner's ghosts and the summary all read the same copy.
+    archive: ArchiveLog,
+    archive_view: ArchiveView,
     /// Next stable id to hand out to a newly created item. Seeded past the
     /// highest id present at startup (see `tasks::assign_missing_ids`).
     next_id: u64,
@@ -591,7 +1254,6 @@ pub struct TaskApp {
     new_task_flag: bool,
     new_event_flag: bool,
     error_flag: bool,
-    display_archive_flag: bool,
     settings_flag: bool,
     should_save_textbox_text: bool,
 
@@ -643,6 +1305,14 @@ pub struct TaskApp {
     /// Set for one frame after the planner opens or changes day, to scroll the
     /// timeline to a useful hour rather than to midnight.
     planner_scroll_to_hour: Option<f32>,
+    /// What the shown day was actually spent on: the blocks of items that have
+    /// since been finished or dropped, drawn behind what is still planned.
+    ///
+    /// Cached rather than derived each frame. Building it means walking the
+    /// whole archive, and the planner redraws continuously — but the answer
+    /// only changes when the day does or when something is archived, restored
+    /// or forgotten. See `rebuild_planner_ghosts`.
+    planner_ghosts: Vec<PlannerGhost>,
 
     /* ───────────────────────── Settings ───────────────────────── */
     start_in_fullscreen: bool,
@@ -753,7 +1423,6 @@ impl TaskApp {
             pending_initial_background: Some(config.background),
             dirs: config.dirs,
             hovered_calendar_cell: None,
-            offset: 0,
             press_origin: None,
             userconfig_path,
 
@@ -769,7 +1438,11 @@ impl TaskApp {
                 .cloned()
                 .collect(),
             active_things: active_items,
-            archive: None,
+            // Not read here: the archive is only ever wanted by a window
+            // somebody opened, and booting is not the moment to walk a log
+            // that may be years long.
+            archive: ArchiveLog::new(),
+            archive_view: ArchiveView::default(),
             next_id,
             calendar_elements: Vec::new(),
 
@@ -799,7 +1472,6 @@ impl TaskApp {
             new_task_flag: false,
             new_event_flag: false,
             error_flag: config.startup_error.is_some(),
-            display_archive_flag: false,
             settings_flag: false,
             user_wants_to_complete_task_flag: false,
             user_wants_to_delete_task_flag: false,
@@ -818,6 +1490,7 @@ impl TaskApp {
             planner_create_kind: planner::CreateKind::default(),
             planner_quick_add_input: String::new(),
             planner_scroll_to_hour: None,
+            planner_ghosts: Vec::new(),
             should_save_textbox_text: false,
 
             /* Settings */
@@ -1652,11 +2325,18 @@ impl TaskApp {
         });
     }
 
-    fn delete_active_thing(&mut self, id: u64) {
-        self.user_wants_to_delete_task_flag = false;
+    /// Drop an item from the live set without recording anything.
+    ///
+    /// Deliberately *not* what the delete button does — that is
+    /// `retire_active_thing`, which files the item as `Dropped`. This is for
+    /// the one case where there is nothing worth recording: Escape on a block
+    /// you have just dragged out and not yet named. It is seconds old, the only
+    /// thing in it is the slot an accident gave it, and filing "untitled,
+    /// dropped a moment after it was written down" in the ledger would be
+    /// noise, not history. See `discard_planner_naming`.
+    fn forget_active_thing(&mut self, id: u64) {
         self.active_things.retain(|task| task.id != id);
-        self.confirm_delete_task = None;
-        // A deleted item must not stay selected on the planner.
+        // A removed item must not stay selected on the planner.
         if self.planner_selection == Some(id) {
             self.planner_selection = None;
             self.planner_selected_session = None;
@@ -1809,6 +2489,9 @@ impl TaskApp {
         self.planner_drag = None;
         self.commit_planner_naming();
         self.planner_scroll_to_hour = Some(self.planner_default_scroll_hour());
+        // The first thing that reads the archive on most launches: opening a
+        // day asks what that day was spent on.
+        self.rebuild_planner_ghosts();
     }
 
     /// Hour to bring into view when the day changes.
@@ -1845,6 +2528,7 @@ impl TaskApp {
         // Only Escape throws an edit away.
         self.commit_planner_naming();
         self.planner_scroll_to_hour = Some(self.planner_default_scroll_hour());
+        self.rebuild_planner_ghosts();
     }
 
     fn close_planner(&mut self) {
@@ -1856,6 +2540,7 @@ impl TaskApp {
         self.planner_selection = None;
         self.planner_selected_session = None;
         self.planner_due_edit = None;
+        self.planner_ghosts.clear();
     }
 
     /// The items that appear on `planner_day`'s timeline, in a stable order.
@@ -2153,7 +2838,7 @@ impl TaskApp {
         self.planner_name_input.clear();
 
         if created {
-            self.delete_active_thing(id);
+            self.forget_active_thing(id);
         }
     }
 
@@ -2466,19 +3151,35 @@ impl TaskApp {
         let placements: Vec<_> = self.planner_entries().iter().map(|e| e.placement).collect();
         let summary = planner::summarize(&placements);
 
-        if summary.blocks == 0 && summary.due == 0 {
+        // What the day has already been spent on, counted separately: it is
+        // not "planned" any more, and adding it into that figure would make a
+        // finished day look like a day with everything still ahead of it.
+        let ghost_placements: Vec<_> =
+            self.planner_ghosts.iter().map(|ghost| ghost.placement).collect();
+        let done = planner::summarize(&ghost_placements);
+
+        if summary.blocks == 0 && summary.due == 0 && done.blocks == 0 {
             return "nothing on this day".to_string();
         }
 
-        let mut parts = vec![format!(
-            "{} planned",
-            planner::format_duration(summary.planned_minutes.max(0) as u32)
-        )];
+        let mut parts = Vec::new();
+        if summary.blocks > 0 || done.blocks == 0 {
+            parts.push(format!(
+                "{} planned",
+                planner::format_duration(summary.planned_minutes.max(0) as u32)
+            ));
+        }
         if summary.blocks > 0 {
             parts.push(format!("{} block{}", summary.blocks, if summary.blocks == 1 { "" } else { "s" }));
         }
         if summary.due > 0 {
             parts.push(format!("{} due", summary.due));
+        }
+        if done.blocks > 0 {
+            parts.push(format!(
+                "{} done",
+                planner::format_duration(done.planned_minutes.max(0) as u32)
+            ));
         }
         parts.join(" · ")
     }
@@ -3287,13 +3988,27 @@ impl TaskApp {
                 }
             }
 
-            let placements: Vec<_> = entries.iter().map(|e| e.placement).collect();
+            // Ghosts are packed *with* the live entries and then split back
+            // out. One `lay_out` over both is what makes an hour you already
+            // spent behave like an hour that is booked: a new block dropped on
+            // top of finished work lands beside it rather than over it, exactly
+            // as it would beside a live one. They are split out again because
+            // the pointer handling below indexes entries and rects in step, and
+            // a ghost is not something you can grab.
+            let mut placements: Vec<_> = entries.iter().map(|e| e.placement).collect();
+            placements.extend(self.planner_ghosts.iter().map(|ghost| ghost.placement));
             let lanes = planner::lay_out(&placements);
 
             let block_rects: Vec<Rect> = entries
                 .iter()
                 .zip(lanes.iter())
                 .map(|(entry, lane)| planner_entry_rect(entry.placement, *lane, lane_area, &geometry))
+                .collect();
+            let ghost_rects: Vec<Rect> = self
+                .planner_ghosts
+                .iter()
+                .zip(lanes[entries.len()..].iter())
+                .map(|(ghost, lane)| planner_entry_rect(ghost.placement, *lane, lane_area, &geometry))
                 .collect();
 
             // Interactions are registered *before* anything is drawn on top of
@@ -3317,6 +4032,12 @@ impl TaskApp {
                     .position(|entry| entry.id == id && entry.session == selected)
                     .or_else(|| entries.iter().position(|entry| entry.id == id))
             });
+
+            // Ghosts first, so anything still live sits on top of the record of
+            // what is already done.
+            for (ghost, ghost_rect) in self.planner_ghosts.iter().zip(ghost_rects.iter()) {
+                paint_planner_ghost(ui, ghost, *ghost_rect, &self.active_colorscheme);
+            }
 
             for (index, (entry, block_rect)) in entries.iter().zip(block_rects.iter()).enumerate() {
                 self.paint_planner_entry(ui, entry, *block_rect, naming_host == Some(index));
@@ -3395,21 +4116,45 @@ impl TaskApp {
         }
     }
 
-    /// Accent colour for a planner item.
-    ///
-    /// The palette drives it, exactly as on the calendar — but the default
-    /// scheme is six fully transparent entries (see `ColorScheme::default_scheme`),
-    /// because on the calendar the background photo is meant to show through. A
-    /// planner block has to read as a solid object you can grab, so a
-    /// transparent palette entry falls back to a neutral highlight instead of
-    /// disappearing.
+    /// Accent colour for a planner item. See `accent_for`, which the archive
+    /// window shares.
     fn planner_accent(&self, color_id: usize) -> Color32 {
-        let color = self.active_colorscheme[color_id.min(5)];
-        if color.a() < 24 {
-            Color32::from_white_alpha(85)
-        } else {
-            color
+        accent_for(&self.active_colorscheme, color_id)
+    }
+
+    /// Rebuild the shown day's ghosts — the blocks of archived items that fall
+    /// on it.
+    ///
+    /// Called when the day changes and whenever the archive does, rather than
+    /// per frame: it walks the whole log, and the planner redraws continuously
+    /// while the answer stands still. Cheap to call — on a day with nothing
+    /// archived it is one pass that finds nothing.
+    ///
+    /// Does nothing while the planner is closed, so opening the archive on a
+    /// machine that has never opened the planner does not go looking for a day.
+    fn rebuild_planner_ghosts(&mut self) {
+        self.planner_ghosts.clear();
+        if !self.planner_flag {
+            return;
         }
+        self.load_archive();
+
+        let day = self.planner_day;
+        for row in self.archive.entries() {
+            // Blocks only, and so events — which have no sessions — never
+            // appear. A deleted appointment is not something the day was spent
+            // on; it is something that was taken off the calendar.
+            for placed in planner::placements_of(row.is_event, None, None, &row.sessions, day) {
+                self.planner_ghosts.push(PlannerGhost {
+                    name: row.name.clone(),
+                    outcome: row.outcome,
+                    color_id: row.color_id(),
+                    placement: placed.placement,
+                });
+            }
+        }
+        self.planner_ghosts
+            .sort_by_key(|ghost| ghost.placement.start());
     }
 
     /// Draw one block or due marker, plus the controls it reveals on hover.
@@ -3859,7 +4604,7 @@ impl TaskApp {
         self.new_task_flag
             || self.new_event_flag
             || self.settings_flag
-            || self.display_archive_flag
+            || self.archive_view.open
             || self.error_flag
             || self.user_wants_to_complete_task_flag
             || self.user_wants_to_delete_task_flag
@@ -3870,40 +4615,156 @@ impl TaskApp {
             || self.user_wants_to_delete_colorscheme_flag
     }
 
-    fn complete_active_thing(&mut self, id: u64) {
-        if let Some(thing) = self.active_things.iter().find(|x| x.id == id) {
-            let found_inactive: InActive = thing.clone().to_inactive();
+    /// Take an item off the board and file what became of it.
+    ///
+    /// Both endings come through here. Completing and deleting used to be
+    /// different in kind — completing wrote an archive row, deleting simply
+    /// dropped the item, so a task you gave up on left no trace that it had
+    /// ever existed and the README's promise that deleted items are kept was
+    /// untrue. They are the same act with a different `Outcome` now, and the
+    /// ledger is what tells them apart.
+    ///
+    /// The item is removed from the live set whether or not the write
+    /// succeeded: refusing to complete a task because the disk is full is the
+    /// wrong trade, so the failure is reported and the removal stands.
+    fn retire_active_thing(&mut self, id: u64, outcome: Outcome) {
+        let Some(index) = self.active_things.iter().position(|item| item.id == id) else {
+            self.dismiss_retire_confirmations();
+            return;
+        };
 
-            if let Err(text) = tasks::save_inactive(&found_inactive, &self.dirs.data) {
-                self.show_error(format!("Error archiving:\n{}", text.to_string()));
-            };
+        // Removed first and archived by value: the record is the item, not a
+        // copy of it that could drift from the one being deleted.
+        let item = self.active_things.remove(index);
+        let record = Archived::retire(item, outcome, Local::now());
 
-            self.delete_active_thing(id);
-
-            self.confirm_complete_task = None;
-            self.user_wants_to_complete_task_flag = false;
+        if let Err(error) = self.archive.record(&self.dirs.data, record) {
+            self.show_error(format!("Could not write to the archive:\n{error}"));
         }
+
+        self.forget_active_thing(id);
+        self.rebuild_planner_ghosts();
+        self.dismiss_retire_confirmations();
     }
 
+    fn dismiss_retire_confirmations(&mut self) {
+        self.confirm_complete_task = None;
+        self.user_wants_to_complete_task_flag = false;
+        self.confirm_delete_task = None;
+        self.user_wants_to_delete_task_flag = false;
+    }
+
+    /// Open or close the archive window.
+    ///
+    /// Opening reads the log if it has not been read yet, and that is the only
+    /// time it is read: closing keeps it, so re-opening is free and the
+    /// planner's ghosts can consult the same copy without touching the disk.
+    /// The old version threw the loaded rows away on close and re-read the
+    /// first page from the file on every open.
     fn toggle_archive(&mut self) {
-        self.display_archive_flag = !self.display_archive_flag;
+        self.archive_view.open = !self.archive_view.open;
 
-        if !self.display_archive_flag {
-            self.archive = None;
-            self.offset = 0;
+        if self.archive_view.open {
+            self.load_archive();
+            self.archive_view.focus_search = true;
         } else {
-            self.load_more_archives();
+            self.archive_view.selected = None;
+            self.archive_view.confirm_forget = None;
         }
     }
 
-    fn load_more_archives(&mut self) {
-        let new_items = tasks::read_lines_range(self.offset, 15, &self.dirs.data).unwrap_or_else(|_| Vec::new());
-        self.offset += 15;
+    /// Make sure the log is in memory, reporting a read failure rather than
+    /// showing an empty archive as though nothing had ever been finished.
+    fn load_archive(&mut self) {
+        if let Err(error) = self.archive.load(&self.dirs.data) {
+            self.show_error(format!("Could not read the archive:\n{error}"));
+        }
+    }
 
-        if let Some(archive) = self.archive.as_mut() {
-            archive.extend(new_items);
-        } else {
-            self.archive = Some(new_items);
+    /// Put an archived item back on the board.
+    ///
+    /// Only possible because the record keeps the whole item: its sessions, its
+    /// estimate and its horizon come back with it, so a restored task lands
+    /// exactly where it was rather than as a bare name the priority scorer
+    /// treats as corrupt.
+    ///
+    /// The row leaves the archive. An archive is a record of what is *out of
+    /// play*, and a task you are doing again is not out of play — leaving the
+    /// row behind would have the ledger claim it was finished while it sat in
+    /// the task list.
+    fn restore_archived(&mut self, key: ArchiveKey) {
+        let taken = match self.archive.take(&self.dirs.data, key) {
+            Ok(taken) => taken,
+            Err(error) => {
+                self.show_error(format!("Could not update the archive:\n{error}"));
+                return;
+            }
+        };
+        let Some(record) = taken else { return };
+
+        let mut item = record.to_active();
+
+        // The id it had may not be free. `next_id` is seeded past the highest
+        // id in the *live* set, so archiving the highest-numbered item and
+        // restarting leaves the counter behind it — and a legacy row carries
+        // the `0` sentinel, which is nobody's id. Either way it gets a new one,
+        // and the counter is pushed past whatever came back so the next fresh
+        // item cannot collide either.
+        self.next_id = self.next_id.max(item.id.saturating_add(1));
+        if item.id == 0 || self.active_things.iter().any(|live| live.id == item.id) {
+            item.id = self.next_item_id();
+        }
+
+        if self.archive_view.selected == Some(key) {
+            self.archive_view.selected = None;
+        }
+        self.archive_view.confirm_forget = None;
+
+        self.push_active_thing(item);
+        self.rebuild_planner_ghosts();
+    }
+
+    /// Delete an archived row for good. The one irreversible act in the app,
+    /// which is why it is the only one in the archive that asks first.
+    fn forget_archived(&mut self, key: ArchiveKey) {
+        if let Err(error) = self.archive.take(&self.dirs.data, key) {
+            self.show_error(format!("Could not update the archive:\n{error}"));
+            return;
+        }
+        if self.archive_view.selected == Some(key) {
+            self.archive_view.selected = None;
+        }
+        self.archive_view.confirm_forget = None;
+        self.rebuild_planner_ghosts();
+    }
+
+    /// The archive window.
+    ///
+    /// The drawing itself is a free function over `(&ArchiveLog, &mut
+    /// ArchiveView)` rather than a method, for a plain borrow reason with a
+    /// pleasant consequence: the window reads hundreds of rows *and* offers
+    /// buttons that mutate the log, which cannot both hold `&mut self`. Taking
+    /// the two fields separately lets the rows be borrowed rather than cloned
+    /// every frame, and forces the buttons to return an intent instead of
+    /// acting mid-draw — so every change to the archive happens here, in one
+    /// place, after the frame is laid out.
+    fn show_archive(&mut self, ctx: &Context) {
+        if !self.archive_view.open {
+            return;
+        }
+
+        let palette = self.active_colorscheme;
+        // The error window answers Escape itself and is drawn over everything;
+        // the archive stands down for it rather than closing underneath the
+        // message the key was meant to dismiss.
+        let owns_keys = !self.error_flag;
+        let action = archive_window(ctx, &self.archive, &mut self.archive_view, palette, owns_keys);
+
+        match action {
+            Some(ArchiveAction::Close) => self.toggle_archive(),
+            Some(ArchiveAction::Restore(key)) => self.restore_archived(key),
+            Some(ArchiveAction::Forget(key)) => self.forget_archived(key),
+            None => {}
         }
     }
 
@@ -4722,12 +5583,12 @@ impl TaskApp {
                 }
                 ui.add_space(12.0);
 
-                if self.display_archive_flag {
-                    if ui.button("Archived").highlight().clicked() {
+                if self.archive_view.open {
+                    if ui.button("Archive").highlight().clicked() {
                         self.toggle_archive();
                     }
                 } else {
-                    if ui.button("Archived").clicked() {
+                    if ui.button("Archive").clicked() {
                         self.toggle_archive();
                     }
                 }
@@ -4810,7 +5671,7 @@ impl TaskApp {
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
                                 if ui.add(Button::new("Yes").min_size(CONFIRM_BUTTON)).clicked() || accepted {
-                                    self.complete_active_thing(id);
+                                    self.retire_active_thing(id, Outcome::Finished);
                                 }
                                 if ui.add(Button::new("No").min_size(CONFIRM_BUTTON)).clicked() || dismissed {
                                     self.confirm_complete_task = None;
@@ -4835,11 +5696,20 @@ impl TaskApp {
                         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                         .show(ctx, |ui| {
                             ui.label(format!("Are you sure you want to delete \"{}\"?", name));
+                            // Deleting is no longer the end of the item: it is
+                            // filed as dropped, and can be put back from the
+                            // archive. Saying so is what makes the button
+                            // something you can press without weighing it up.
+                            ui.label(
+                                RichText::new("It goes to the archive, where it can be restored.")
+                                    .size(ARCHIVE_META_SIZE)
+                                    .color(Color32::from_white_alpha(150)),
+                            );
                             let (accepted, dismissed) = confirmation_keys(ui.ctx());
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
                                 if ui.add(Button::new("Yes").min_size(CONFIRM_BUTTON)).clicked() || accepted {
-                                    self.delete_active_thing(id);
+                                    self.retire_active_thing(id, Outcome::Dropped);
                                 }
                                 if ui.add(Button::new("No").min_size(CONFIRM_BUTTON)).clicked() || dismissed {
                                     self.confirm_delete_task = None;
@@ -4985,67 +5855,7 @@ impl TaskApp {
         // straight here.
         self.show_planner(ctx);
 
-        if self.display_archive_flag {
-            egui::Window::new("Archive")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ctx, |ui| {
-                    ui.set_min_size(Vec2::new(500.0, 800.0));
-                    
-                    egui::Frame::default()
-                        .fill(Color32::from_rgba_unmultiplied(40, 44, 52, 240)) // New background color
-                        .outer_margin(5)
-                        .corner_radius(egui::CornerRadius::same(14))
-                        .show(ui, |ui| {
-                                egui::ScrollArea::vertical().scroll_source(egui::scroll_area::ScrollSource::ALL).show(ui, |ui| {
-                                    egui::Grid::new("archive_grid")
-                                        .spacing([0.0, 30.0])
-                                        .striped(true)
-                                        .show(ui, |ui| {
-                                            let header_font = FontId::new(20.0, FontFamily::Monospace);
-                                            let label_color = Color32::LIGHT_GRAY;
-
-                                            ui.label("");
-                                            ui.label(RichText::new("Created").font(header_font.clone()).color(label_color));
-                                            ui.label("");
-                                            ui.label(RichText::new("Name").font(header_font.clone()).color(label_color));
-                                            ui.label("");
-                                            ui.label(RichText::new("Completed").font(header_font).color(label_color));
-                                            ui.label("");
-                                            ui.end_row();
-
-                                            let date_color = Color32::from_rgb(98, 114, 164); // Soft blue
-                                            let name_color = Color32::from_rgba_unmultiplied(255, 255, 255, 180);
-                                            let font = FontId::new(18.0, FontFamily::Monospace);
-                                            let font_space = FontId::new(15.0, FontFamily::Name("space".into()));
-
-                                            if let Some(ref vec) = self.archive {
-                                                for archive in vec {
-                                                    ui.label("");
-                                                    ui.label(RichText::new(archive.created.format("%d.%m.%Y %H.%M").to_string())
-                                                        .font(font_space.clone()).color(date_color));
-                                                    ui.label("");
-                                                    ui.label(RichText::new(&archive.name)
-                                                        .font(font.clone()).color(name_color));
-                                                    ui.label("");
-                                                    ui.label(RichText::new(archive.inactivated.format("%d.%m.%Y %H.%M").to_string())
-                                                        .font(font_space.clone()).color(date_color));
-                                                    ui.label("");
-                                                    ui.end_row();
-                                                }
-                                            }
-                                        });
-                                    ui.vertical_centered_justified(|ui| {
-                                        if ui.button("Show more").clicked() {
-                                            self.load_more_archives();
-                                        }
-                                    });
-
-                                });
-                        });
-                });
-        }
+        self.show_archive(ctx);
 
         if self.settings_flag && !self.color_picker_flag {
             egui::Window::new("Settings")

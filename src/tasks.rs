@@ -1,6 +1,5 @@
-use std::{collections::HashMap, error::Error, fs::{self, File, OpenOptions}, io::{BufReader, BufWriter, Write}, path::Path};
+use std::{collections::HashMap, error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::Path};
 use chrono::{DateTime, Duration, Local, NaiveDate};
-use rev_lines::RevLines;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
@@ -321,31 +320,8 @@ impl Active {
         let unit = (mixed >> 40) as f32 / (1u64 << 24) as f32;
         1.0 + unit * JITTER
     }
-    pub fn to_inactive(self) -> InActive {
-        InActive {
-            id: self.id,
-            importance: self.importance,
-            name: self.name,
-            created: self.created,
-            deadline: self.deadline,
-            is_event: self.is_event,
-            inactivated: chrono::Local::now(),
-        }
-    }
     pub fn calendar_item_color(&self) -> usize {
-        if self.is_event {
-            5
-        } else if let Some(importance) = self.importance {
-            importance as usize
-        } else if let Some(horizon) = self.time_importance {
-            // The horizon indices are load-compatible with the old 3-level
-            // urgency scale, which forced "whenever" to take index 3 — but as
-            // the *least* pressing tier it wears the calmest colour, not the
-            // "highly important" one that index would buy it.
-            if horizon >= HORIZON_WHENEVER { 0 } else { horizon as usize }
-        } else {
-            0
-        }
+        calendar_item_color(self.is_event, self.importance, self.time_importance)
     }
 
     /// The instant this item occupies on the planner's timeline, if any: an
@@ -394,6 +370,31 @@ impl Active {
     }
 }
 
+/// Which of the six palette entries an item wears.
+///
+/// A free function rather than a method because an archived item wants the same
+/// answer and is no longer an `Active` — the planner draws a completed task's
+/// old blocks in the colour it had in life (`archive::Archived::color_id`).
+pub fn calendar_item_color(
+    is_event: bool,
+    importance: Option<u8>,
+    time_importance: Option<u8>,
+) -> usize {
+    if is_event {
+        5
+    } else if let Some(importance) = importance {
+        importance as usize
+    } else if let Some(horizon) = time_importance {
+        // The horizon indices are load-compatible with the old 3-level
+        // urgency scale, which forced "whenever" to take index 3 — but as
+        // the *least* pressing tier it wears the calmest colour, not the
+        // "highly important" one that index would buy it.
+        if horizon >= HORIZON_WHENEVER { 0 } else { horizon as usize }
+    } else {
+        0
+    }
+}
+
 /// Fold the pre-sessions single slot (`planned_start` + `duration_minutes`)
 /// into a session, once, at load. Nothing else reads `planned_start`; after
 /// this it stays `None` and the next save writes the migrated shape.
@@ -436,20 +437,11 @@ pub fn bucket_by_deadline_day(items: &[Active]) -> HashMap<NaiveDate, Vec<&Activ
     buckets
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InActive {
-    /// Carried over from the `Active` item so archived rows keep a stable
-    /// identity. See `Active::id`.
-    #[serde(default)]
-    pub id: u64,
-    pub importance: Option<u8>,
-    pub name: String,
-    pub created: DateTime<Local>,
-    pub deadline: Option<DateTime<Local>>,
-    pub is_event: bool,
-    pub inactivated: DateTime<Local>,
-}
-
+/* The archived counterpart of `Active` used to live here, as `InActive`: the
+ * same item with most of it missing (no sessions, no estimate, no horizon) and
+ * no record of *how* it left. It is now `archive::Archived`, which keeps the
+ * whole item and says whether it was finished or dropped — see `archive.rs`
+ * for why that is the difference between a receipt and a record. */
 
 pub fn read_at_startup(data_dir: &Path) -> Result<Vec<Active>, Box<dyn Error>> {
     let file_path = data_dir.join("read_at_startup.json");
@@ -534,40 +526,11 @@ pub fn oversafe_activesave(payload: &Vec<Active>, data_dir: &Path) -> Result<(),
     Ok(())
 }
 
-pub fn save_inactive(payload: &InActive, data_dir: &Path) -> Result<(), Box<dyn Error>> {
-    let final_path = data_dir.join("archived.jsonl");
-
-    // Ensure the directory exists (it may have been removed while running)
-    fs::create_dir_all(data_dir)?;
-
-    let mut json = serde_json::to_string(payload)?;
-    json.push_str("\n");
-
-    let mut file = OpenOptions::new().create(true).append(true).open(final_path)?;
-
-    {
-        let mut writer = BufWriter::new(&mut file);
-        writer.write_all(json.as_bytes())?;
-        writer.flush()?;
-    }
-
-    Ok(file.sync_all()?)
-}
-
-pub fn read_lines_range(offset: usize, limit: usize, data_dir: &Path) -> Result<Vec<InActive>, Box<dyn Error>> {
-    let path = data_dir.join("archived.jsonl");
-
-    let file = File::open(path)?;
-    let rev_lines = RevLines::new(file);
-
-    let archives: Vec<InActive> = rev_lines
-        .skip(offset)
-        .take(limit)
-        .filter_map(|line| serde_json::from_str::<InActive>(&line.ok()?).ok())
-        .collect();
-
-    Ok(archives)
-}
+/* Writing and paging the archive lived here too — `save_inactive` and
+ * `read_lines_range`, the latter reverse-scanning the whole log past `offset`
+ * lines on every "Show more". Both are `archive::ArchiveLog`'s job now: it
+ * reads the log once and keeps it, which is what searching and summarising it
+ * need and what retires the quadratic paging. */
 
 #[cfg(test)]
 mod tests {

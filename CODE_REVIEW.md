@@ -25,20 +25,22 @@ _All items in this section are resolved — see the changelog._
 
 ## B. Performance & Power (high priority for an "always-on" calendar)
 
-### B4. Per-page archive read is O(n) → O(n²) overall  *(deferred — archive redesign)*
-> **Deferred:** this is archive-subsystem work, and the archive is slated for a redesign that
-> dissolves it into the calendar (a "show completed tasks" overlay + upward scroll). That redesign
-> would replace line-offset pagination with **date-ranged** reads, retiring this issue's framing
-> rather than fixing it in place — so don't patch `read_lines_range` now.
+### B4. Per-page archive read is O(n) → O(n²) overall  *(resolved — see the changelog)*
 
-`read_lines_range` (`tasks.rs`) re-opens and reverse-scans the whole `archived.jsonl`, skipping
-`offset` lines on every "Show more". Fine for small archives, quadratic for large ones.
-- **Sub-issue (new): pagination can mis-page on unparseable lines.** It `.skip(offset)` over *raw*
-  lines, then parses with `filter_map(... .ok())`. The UI advances `offset` by the number of *raw*
-  lines consumed, but renders only the *parsed* rows — so any unparseable archived line causes rows
-  to be skipped or duplicated across pages.
-- **Fix:** keep the `RevLines` iterator (or a byte offset) alive across pages, or read forward with a
-  persisted cursor; count consumed lines consistently with what's displayed.
+`read_lines_range` re-opened and reverse-scanned the whole `archived.jsonl` past `offset` lines on
+every "Show more", and counted *raw* lines while rendering *parsed* ones, so any unparseable line
+skipped or duplicated rows across a page boundary.
+
+Both are **retired rather than patched**, as this entry anticipated: the archive redesign removed
+line-offset paging entirely. `archive::ArchiveLog` reads the log **once, whole**, and keeps it —
+which is not a concession but the enabling move, since search, month grouping and the summary
+figures are all impossible against a fifteen-row window onto a file. Unparseable lines are counted,
+surfaced in the window, and preserved verbatim on rewrite. See `DOCUMENTATION.md` §17.2.
+
+The half of the old plan that has **not** happened is dissolving the archive into the *calendar
+grid*, which was tied to upward scroll (still on the README roadmap). The planner got it instead:
+opening a day draws the blocks of archived items behind what is still live (§17.4), which puts the
+record where the work happened without needing the grid to scroll backwards.
 
 
 ---
@@ -67,6 +69,12 @@ open" disjunctions are now centralized (see changelog), but the booleans themsel
   orthogonal confirmation overlay), not a flat enum. Best sequenced with the UI/archive redesign so the
   modal model is designed against the new screens rather than retrofitted. Until then, `any_modal_open()`
   is the single place that knows the full set.
+- **The archive redesign took the first step.** It was the sequencing point named above, and rather
+  than adding to the pile (`display_archive_flag` + a forget-confirmation boolean) the archive owns
+  an `ArchiveView` struct holding its own open state, filter, selection and pending confirmation.
+  Net: three loose `TaskApp` fields removed, none added. Not the stack D6 ultimately wants — the
+  other screens still keep their booleans — but it is the shape they should move to, and it is now
+  demonstrated in-tree rather than only described here. See `DOCUMENTATION.md` §13.
 
 ### D7. Static side-panel/dialog spacers assume a fixed DPI / window size  *(mitigated, not removed)*
 The side panels and dialogs are laid out with absolute `add_space` spacers, which won't adapt to
@@ -116,11 +124,11 @@ The app is a working, complete product; these are hardening steps, ordered by pa
 1. **Linux verification** — the code is written to Linux conventions (XDG data dir, GL/EGL display
    handle, surface-format fallback, rustls so no system OpenSSL) but has not been built or run
    there. Nothing in it is expected to fail; it simply hasn't been exercised.
-2. **D6 (remainder)** — model a modal **stack** to replace the `*_flag` booleans; deferred to the
-   UI/archive redesign (a flat enum isn't faithful — see D6).
+2. **D6 (remainder)** — model a modal **stack** to replace the remaining `*_flag` booleans (a flat
+   enum isn't faithful — see D6). The archive now shows the target shape in-tree.
 3. **D7 (remainder)** — reflow within dialogs; the global fit problem is solved by the UI scale.
 
-_(B4 is deferred pending the archive redesign — see B4. E8 and E10 are resolved.)_
+_(B4, E8 and E10 are resolved.)_
 
 ### Not problems, but worth a decision some day
 
@@ -139,6 +147,26 @@ _(B4 is deferred pending the archive redesign — see B4. E8 and E10 are resolve
 ## Changelog — Resolved
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
+
+- **The archive threw away everything that made it worth keeping (B4, and more).** Rebuilt as
+  `archive.rs` + a ledger window + planner ghosts; the whole design is `DOCUMENTATION.md` §17.
+  - **The record was a receipt.** `InActive` dropped `sessions`, `duration_minutes` and
+    `time_importance` — so the app deleted what you had *intended* at the exact moment it became
+    checkable against what happened, and anything put back would have returned as a bare name the
+    scorer reads as `MALFORMED_SCORE`. `Archived` keeps the whole item plus an `Outcome`.
+  - **Deleting archived nothing.** Only completing wrote a row; a task you abandoned vanished
+    without trace, and the README's "completed and deleted items are not thrown away" was simply
+    false. One `retire_active_thing` handles both endings now, and the README is true.
+  - **B4, both halves.** Line-offset paging is gone rather than fixed: the log is read once, whole,
+    and kept. Unparseable lines are counted, shown, and preserved verbatim on rewrite instead of
+    being silently dropped and mis-paging their neighbours. `rev_lines` is no longer a dependency.
+  - **A legacy event claimed to have been finished.** Rows predating `outcome` default to
+    `Finished`, events among them — a real log read back with a dentist appointment wearing a ✓,
+    and counted it under "finished". `was_finished()` lets the kind of thing decide first.
+  - **New because the record is lossless:** a verdict line per row (deadline vs finish, estimate vs
+    booked), summary figures over whatever is on screen, search and filters, **restore**, a
+    confirmed permanent **forget**, and ghosts of a day's spent hours on the planner timeline.
+  - **D6, one step.** The window's state is an `ArchiveView` struct, not four more `TaskApp` fields.
 
 - **The task list reordered under the pointer, and a planned task scored as if it were new.**
   Both fell out of the scoring rebuild below.
