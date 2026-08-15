@@ -26,7 +26,7 @@ emath = "0.35.0"
 
 # rustls rather than the default native-tls: it needs no system OpenSSL, so a
 # Linux build works from a bare toolchain like the Windows and macOS ones do.
-reqwest = { version = "0.11", default-features = false, features = ["blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 image = "0.25"
 tempfile = "3.20.0"
 rev_lines = "0.3.0"
@@ -49,3 +49,14 @@ strip = "symbols"      # Removes debug symbols (smaller binary)
 panic = "abort"        # Smaller + faster panic handling
 incremental = false    # Disable incremental builds (forces full optimization)
 debug = false          # No debug info in final binary
+
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"
+incremental = true
+codegen-units = 256
+
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+codegen-units = 16
