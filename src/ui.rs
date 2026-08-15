@@ -84,6 +84,88 @@ const PLANNER_NEW_TASK_IMPORTANCE: u8 = 2;
 /// default, so where a task was typed doesn't change what it is.
 const PLANNER_NEW_TASK_HORIZON: u8 = 1;
 
+/* ─────────────────────────── The settings sheet ───────────────────────────
+ *
+ * One column of labelled rows in named sections, at a width the sheet chooses
+ * rather than one it is cut off at. What was here before was a single-column
+ * `Grid` used as a spacer — every row a `horizontal_centered` with a pair of
+ * `end_row()`s after it for padding — inside a window pinned to 400×300 with
+ * far more than that in it, so nothing lined up with anything and the last
+ * rows fell out of the bottom.
+ */
+
+/// Width of the settings window, and of the colour-scheme manager beside it.
+const SETTINGS_WIDTH: f32 = 660.0;
+/// Width of the label column. Every section shares it, so the controls line up
+/// down the whole sheet rather than per section.
+const SETTINGS_LABEL_COLUMN: f32 = 200.0;
+/// Width of a combo box or slider in the control column.
+const SETTINGS_CONTROL_WIDTH: f32 = 240.0;
+/// Height at which the body starts scrolling instead of growing.
+const SETTINGS_MAX_BODY_HEIGHT: f32 = 660.0;
+/// Row labels and control text. Under the 18-point body size: a settings sheet
+/// is a dense form, not something read from across the room.
+const SETTINGS_LABEL_SIZE: f32 = 16.0;
+/// Units, ranges, and the notes that qualify a control.
+const SETTINGS_FINE_SIZE: f32 = 13.0;
+/// Section headings, in the same face the planner's tray headings use.
+const SETTINGS_SECTION_SIZE: f32 = 13.0;
+
+/// Width of the scheme list in the colour-scheme manager.
+const SCHEME_LIST_WIDTH: f32 = 330.0;
+/// Height of one row of that list.
+const SCHEME_ROW_HEIGHT: f32 = 30.0;
+/// Side of one palette swatch in a scheme row.
+const SCHEME_SWATCH: f32 = 17.0;
+
+/// A section title, in the face the planner's tray headings use.
+fn settings_section_heading(ui: &mut Ui, title: &str) {
+    ui.label(
+        RichText::new(title)
+            .font(FontId::new(SETTINGS_SECTION_SIZE, FontFamily::Name("space".into())))
+            .color(Color32::from_white_alpha(125)),
+    );
+    ui.add_space(6.0);
+}
+
+/// A named group of settings rows.
+///
+/// The heading sits outside the grid and each section owns its own grid, so a
+/// section can be moved or added without renumbering anything;
+/// `SETTINGS_LABEL_COLUMN` is what keeps their columns agreeing.
+fn settings_section(ui: &mut Ui, title: &str, id: &str, contents: impl FnOnce(&mut Ui)) {
+    ui.add_space(12.0);
+    settings_section_heading(ui, title);
+    Grid::new(id)
+        .num_columns(2)
+        .min_col_width(SETTINGS_LABEL_COLUMN)
+        .spacing([14.0, 10.0])
+        .show(ui, contents);
+}
+
+/// One row: its label on the left, its controls on the right. An empty label
+/// is a continuation of the row above it — a note, or the second half of a
+/// control that needs two lines.
+fn settings_row(ui: &mut Ui, label: &str, contents: impl FnOnce(&mut Ui)) {
+    ui.label(RichText::new(label).size(SETTINGS_LABEL_SIZE));
+    ui.horizontal(|ui| contents(ui));
+    ui.end_row();
+}
+
+/// A note beside a control: units, a range, what the setting costs.
+fn settings_note(ui: &mut Ui, text: impl Into<String>) {
+    ui.label(
+        RichText::new(text.into())
+            .size(SETTINGS_FINE_SIZE)
+            .color(Color32::from_white_alpha(120)),
+    );
+}
+
+/// A button sized and set like everything else on the sheet.
+fn settings_button(ui: &mut Ui, text: &str) -> egui::Response {
+    ui.add(Button::new(RichText::new(text).size(SETTINGS_LABEL_SIZE)).min_size(vec2(0.0, 28.0)))
+}
+
 /// The timeline gesture and the maths that interprets it live in `planner`;
 /// this alias keeps the call sites here short.
 use planner::Drag as PlannerDrag;
@@ -332,7 +414,10 @@ pub struct TaskApp {
     weather_is_broken_flag: bool,
 
     /* ───────────────────────── Inputs ───────────────────────── */
-    week_number_input: String,
+    /// Weeks the settings sheet is offering, which is not yet the number the
+    /// calendar is drawing: applying rebuilds the whole calendar model, so the
+    /// two only meet when the drag stops. See `set_calendar_weeks`.
+    week_input: usize,
     task_name_input: String,
     task_importance_input: u8,
     time_importance_input: u8,
@@ -411,11 +496,13 @@ pub struct TaskApp {
     selected_background_index: usize,
     background_options: Vec<String>,
     background_image_tint_percent: u32,
-    background_tint_input: String,
     /// Percentage the whole UI is scaled by, or `UI_SCALE_AUTO` for the
     /// fit-to-window default. See `apply_ui_scale`.
     ui_scale_percent: u32,
-    ui_scale_input: String,
+    /// The explicit percentage the settings slider edits, kept while the scale
+    /// is set to fit automatically — otherwise turning the automatic fit off
+    /// would have no number to turn it off *to*.
+    ui_scale_input: u32,
     /// Points-per-pixel the text styles were last snapped for. See
     /// `apply_ui_scale` and `snap_font_points`.
     last_font_ppp: f32,
@@ -533,7 +620,7 @@ impl TaskApp {
             weather_is_broken_flag: false,
 
             /* Inputs */
-            week_number_input: config.calendar_weeks_to_show.to_string(),
+            week_input: config.calendar_weeks_to_show,
             task_name_input: String::new(),
             task_importance_input: 2,
             time_importance_input: 1,
@@ -580,9 +667,14 @@ impl TaskApp {
             selected_background_index,
             background_options: config.background_options,
             background_image_tint_percent: config.background_image_tint_percent,
-            background_tint_input: config.background_image_tint_percent.to_string(),
             ui_scale_percent: config.ui_scale_percent,
-            ui_scale_input: config.ui_scale_percent.to_string(),
+            // Fitting automatically leaves no percentage to show, so the slider
+            // starts from the top of the range rather than from zero.
+            ui_scale_input: if config.ui_scale_percent == UI_SCALE_AUTO {
+                UI_SCALE_MAX
+            } else {
+                config.ui_scale_percent
+            },
             last_font_ppp: 0.0,
             shuffle_seed: 0,
 
@@ -3670,26 +3762,29 @@ impl TaskApp {
         }
     }
 
+    /// Apply the weeks the settings sheet is offering (`week_input`).
+    ///
+    /// Called when the number is *settled* — the drag stopped, or the field
+    /// lost focus — never per step: each apply rebuilds the calendar model for
+    /// up to ten years of days, and doing that on every tick of a drag would
+    /// make the control feel like it was fighting back.
     fn set_calendar_weeks(&mut self) {
-        let truncated: String = self.week_number_input.chars().take(5).collect();
-        match truncated.parse::<usize>() {
-            Ok(weeks) => {
-                let clamped = weeks.clamp(
-                    crate::initialization::CALENDAR_WEEKS_MIN,
-                    crate::initialization::CALENDAR_WEEKS_MAX,
-                );
-                self.calendar_weeks_to_show = clamped;
-                // Reflect the applied (post-clamp) value back into the field.
-                self.week_number_input = clamped.to_string();
-                self.persist_config_value("calendar_weeks_to_show", clamped as i64);
-                // Apply immediately rather than only after a restart: rebuild the
-                // calendar model and resize the per-row animation cache.
-                self.summarize_calendar();
-                self.sync_calendar_caches();
-            }
-            // Unparseable / empty input: restore the field to the active value.
-            Err(_) => self.week_number_input = self.calendar_weeks_to_show.to_string(),
+        let clamped = self.week_input.clamp(
+            crate::initialization::CALENDAR_WEEKS_MIN,
+            crate::initialization::CALENDAR_WEEKS_MAX,
+        );
+        self.week_input = clamped;
+
+        if clamped == self.calendar_weeks_to_show {
+            return;
         }
+
+        self.calendar_weeks_to_show = clamped;
+        self.persist_config_value("calendar_weeks_to_show", clamped as i64);
+        // Apply immediately rather than only after a restart: rebuild the
+        // calendar model and resize the per-row animation cache.
+        self.summarize_calendar();
+        self.sync_calendar_caches();
     }
     /// Keep the whole layout inside the window by scaling the UI.
     ///
@@ -3756,24 +3851,357 @@ impl TaskApp {
         }
     }
 
-    fn set_ui_scale(&mut self) {
-        let filtered: String = self.ui_scale_input.chars().take(3).collect();
-        // An empty field, or anything unparseable, is read as "automatic" — the
-        // same thing `0` means in the config file.
-        let requested = filtered.trim().parse::<u32>().unwrap_or(UI_SCALE_AUTO);
-        let clamped = clamp_ui_scale_percent(requested);
-        self.ui_scale_percent = clamped;
-        self.ui_scale_input = clamped.to_string();
-        self.persist_config_value("ui_scale_percent", clamped as i64);
+    /// Apply a UI scale: the slider's percentage, or the automatic fit.
+    ///
+    /// Like the week count, this is called when the control settles rather than
+    /// per step — the scale is what every point in the window is measured in,
+    /// so changing it mid-drag moves the slider out from under the pointer.
+    fn set_ui_scale(&mut self, automatic: bool) {
+        self.ui_scale_input = self.ui_scale_input.clamp(UI_SCALE_MIN, UI_SCALE_MAX);
+        let applied = if automatic {
+            UI_SCALE_AUTO
+        } else {
+            clamp_ui_scale_percent(self.ui_scale_input)
+        };
+
+        if applied == self.ui_scale_percent {
+            return;
+        }
+        self.ui_scale_percent = applied;
+        self.persist_config_value("ui_scale_percent", applied as i64);
     }
 
+    /// Persist the background brightness. The value itself is live — it is one
+    /// multiply in the draw — so only the write to disk waits for the drag to
+    /// stop.
     fn set_background_tint(&mut self) {
-        let filtered: String = self.background_tint_input.chars().take(3).collect();
-        if let Ok(number) = filtered.parse::<u32>() {
-            let clamped = number.clamp(0, 100);
-            self.background_image_tint_percent = clamped;
-            self.persist_config_value("background_image_tint_percent", clamped as i64);
+        let clamped = self.background_image_tint_percent.clamp(0, 100);
+        self.background_image_tint_percent = clamped;
+        self.persist_config_value("background_image_tint_percent", clamped as i64);
+    }
+
+    /* ─────────────────────── The settings sheet ─────────────────────── */
+
+    /// What the window looks like: the picture behind it, how bright it is, and
+    /// which palette tints the items on the calendar.
+    fn settings_appearance(&mut self, ui: &mut Ui, ctx: &Context) {
+        settings_section(ui, "APPEARANCE", "settings_appearance", |ui| {
+            settings_row(ui, "Background", |ui| {
+                if self.background_options.is_empty() {
+                    settings_note(ui, "nothing in the images folder");
+                } else {
+                    // An index left over from a picture that has since been
+                    // deleted would index off the end of the list — which is
+                    // what the old sheet did, and it panicked.
+                    self.selected_background_index =
+                        self.selected_background_index.min(self.background_options.len() - 1);
+                    let previous_index = self.selected_background_index;
+
+                    ComboBox::from_id_salt("background_combo")
+                        .width(SETTINGS_CONTROL_WIDTH)
+                        .selected_text(
+                            RichText::new(&self.background_options[previous_index])
+                                .size(SETTINGS_LABEL_SIZE),
+                        )
+                        .show_ui(ui, |ui| {
+                            for (index, name) in self.background_options.iter().enumerate() {
+                                ui.selectable_value(
+                                    &mut self.selected_background_index,
+                                    index,
+                                    RichText::new(name).size(SETTINGS_LABEL_SIZE),
+                                );
+                            }
+                        });
+
+                    let reload = settings_button(ui, "Reload")
+                        .on_hover_text("Read the picture off disk again");
+
+                    if previous_index != self.selected_background_index || reload.clicked() {
+                        let name = self.background_options[self.selected_background_index].clone();
+                        self.background_image_texture =
+                            Some(set_background(ctx, &self.dirs, name.clone()));
+                        self.persist_config_value("background", name);
+                    }
+                }
+            });
+
+            settings_row(ui, "Picture brightness", |ui| {
+                let slider = ui.add(
+                    egui::Slider::new(&mut self.background_image_tint_percent, 0..=100)
+                        .suffix("%")
+                        .trailing_fill(true),
+                );
+                // The picture follows the slider live; only the write to disk
+                // waits for the drag to end.
+                if slider.drag_stopped() || slider.lost_focus() {
+                    self.set_background_tint();
+                }
+            });
+
+            settings_row(ui, "Colour scheme", |ui| {
+                let name = self
+                    .colorschemes
+                    .get(&self.selected_colorscheme_id)
+                    .map(|scheme| scheme.name.clone())
+                    .unwrap_or_else(|| "none".to_string());
+                ui.label(
+                    RichText::new(name)
+                        .size(SETTINGS_LABEL_SIZE)
+                        .color(Color32::from_white_alpha(205)),
+                );
+                if settings_button(ui, "Manage").clicked() {
+                    self.color_picker_flag = true;
+                }
+            });
+        });
+    }
+
+    /// The window itself: how big everything is drawn, where it opens, and what
+    /// it shows about itself.
+    fn settings_window_section(&mut self, ui: &mut Ui, ctx: &Context) {
+        settings_section(ui, "WINDOW", "settings_window", |ui| {
+            settings_row(ui, "UI scale", |ui| {
+                let mut automatic = self.ui_scale_percent == UI_SCALE_AUTO;
+                if ui
+                    .checkbox(
+                        &mut automatic,
+                        RichText::new("Fit to window").size(SETTINGS_LABEL_SIZE),
+                    )
+                    .changed()
+                {
+                    self.set_ui_scale(automatic);
+                }
+                if automatic {
+                    settings_note(ui, format!("now {}%", (ctx.zoom_factor() * 100.0).round()));
+                }
+            });
+
+            settings_row(ui, "", |ui| {
+                let automatic = self.ui_scale_percent == UI_SCALE_AUTO;
+                let slider = ui.add_enabled(
+                    !automatic,
+                    egui::Slider::new(&mut self.ui_scale_input, UI_SCALE_MIN..=UI_SCALE_MAX)
+                        .suffix("%")
+                        .trailing_fill(true),
+                );
+                // Applied when the drag ends, never during it: the scale is
+                // what every point in the window is measured in, so applying it
+                // live drags the slider out from under the pointer.
+                if slider.drag_stopped() || slider.lost_focus() {
+                    self.set_ui_scale(false);
+                }
+            });
+
+            settings_row(ui, "Opens on", |ui| {
+                if self.monitor_options.is_empty() {
+                    // winit reports unnamed monitors as `None`, and some
+                    // headless or remote setups report none at all.
+                    settings_note(ui, "no monitors detected");
+                } else {
+                    // Sync the index to the saved name, falling back to the
+                    // first monitor when the saved one is not plugged in.
+                    let previous_index = self
+                        .monitor_options
+                        .iter()
+                        .position(|name| name == &self.selected_monitor_name)
+                        .unwrap_or(0);
+                    self.selected_monitor_index = previous_index;
+
+                    let selected_text = self
+                        .monitor_options
+                        .get(previous_index)
+                        .cloned()
+                        .unwrap_or_default();
+
+                    ComboBox::from_id_salt("monitor_combo")
+                        .width(SETTINGS_CONTROL_WIDTH)
+                        .selected_text(RichText::new(selected_text).size(SETTINGS_LABEL_SIZE))
+                        .show_ui(ui, |ui| {
+                            for (index, name) in self.monitor_options.iter().enumerate() {
+                                ui.selectable_value(
+                                    &mut self.selected_monitor_index,
+                                    index,
+                                    RichText::new(name).size(SETTINGS_LABEL_SIZE),
+                                );
+                            }
+                        });
+
+                    if previous_index != self.selected_monitor_index {
+                        self.set_selected_monitor_name();
+                    }
+                }
+            });
+
+            settings_row(ui, "", |ui| {
+                // The window is bound to its monitor at startup, so this is the
+                // one setting that cannot take effect where it is made.
+                settings_note(ui, "takes effect at the next start");
+                if settings_button(ui, "Restart now").clicked() {
+                    self.restart_self();
+                }
+            });
+
+            settings_row(ui, "On startup", |ui| {
+                let previous = self.start_in_fullscreen;
+                ui.checkbox(
+                    &mut self.start_in_fullscreen,
+                    RichText::new("Open fullscreen").size(SETTINGS_LABEL_SIZE),
+                );
+                if previous != self.start_in_fullscreen {
+                    self.persist_config_value("start_in_fullscreen", self.start_in_fullscreen);
+                }
+                settings_note(ui, "F11 either way");
+            });
+
+            settings_row(ui, "Diagnostics", |ui| {
+                let previous = self.enable_fps_counter;
+                ui.checkbox(
+                    &mut self.enable_fps_counter,
+                    RichText::new("Show the frame rate").size(SETTINGS_LABEL_SIZE),
+                );
+                if previous != self.enable_fps_counter {
+                    self.persist_config_value("enable_fps_counter", self.enable_fps_counter);
+                }
+            });
+        });
+    }
+
+    /// One row of the colour-scheme list: the name, and the palette itself as
+    /// six swatches.
+    ///
+    /// The list used to be names alone, which is guesswork: `DUSK` and
+    /// `Scheme from "lake.jpg"` are evocative, not informative, and the only
+    /// way to find out what either did to the calendar was to select it and
+    /// look. The swatches are painted over a dark base because these are
+    /// translucent tints meant to sit on a photograph — on nothing at all they
+    /// read as nothing.
+    fn colorscheme_row(&mut self, ui: &mut Ui, id: u32, name: &str, colors: [[u8; 4]; 6]) {
+        let width = ui.available_width().min(SCHEME_LIST_WIDTH);
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(width, SCHEME_ROW_HEIGHT), egui::Sense::click());
+
+        let selected = self.selected_colorscheme_id == id;
+        let painter = ui.painter_at(rect);
+
+        if selected || response.hovered() {
+            painter.rect_filled(
+                rect,
+                CornerRadius::same(6),
+                Color32::from_white_alpha(if selected { 34 } else { 14 }),
+            );
         }
+
+        let strip = 6.0 * SCHEME_SWATCH + 5.0 * 3.0;
+        painter.text(
+            pos2(rect.left() + 10.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            FontId::new(SETTINGS_LABEL_SIZE, FontFamily::Monospace),
+            if selected { Color32::WHITE } else { Color32::from_white_alpha(190) },
+        );
+
+        let mut x = rect.right() - 10.0 - strip;
+        for color in colors {
+            let cell = Rect::from_min_size(
+                pos2(x, rect.center().y - SCHEME_SWATCH * 0.5),
+                Vec2::splat(SCHEME_SWATCH),
+            );
+            painter.rect_filled(cell, CornerRadius::same(3), Color32::from_black_alpha(170));
+            painter.rect_filled(
+                cell,
+                CornerRadius::same(3),
+                Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]),
+            );
+            painter.rect_stroke(
+                cell,
+                CornerRadius::same(3),
+                Stroke::new(0.8, Color32::from_white_alpha(45)),
+                StrokeKind::Inside,
+            );
+            x += SCHEME_SWATCH + 3.0;
+        }
+
+        if response.clicked() {
+            self.selected_colorscheme_id = id;
+            self.set_colorscheme();
+        }
+    }
+
+    /// How much of the calendar there is to scroll through.
+    fn settings_calendar(&mut self, ui: &mut Ui) {
+        settings_section(ui, "CALENDAR", "settings_calendar", |ui| {
+            settings_row(ui, "Weeks shown", |ui| {
+                let weeks = ui.add(
+                    egui::DragValue::new(&mut self.week_input)
+                        .range(
+                            crate::initialization::CALENDAR_WEEKS_MIN
+                                ..=crate::initialization::CALENDAR_WEEKS_MAX,
+                        )
+                        .speed(0.5),
+                );
+                // Applied when the number settles: every apply rebuilds the
+                // calendar model for up to ten years of days.
+                if weeks.drag_stopped() || weeks.lost_focus() {
+                    self.set_calendar_weeks();
+                }
+                settings_note(
+                    ui,
+                    format!(
+                        "{}–{}",
+                        crate::initialization::CALENDAR_WEEKS_MIN,
+                        crate::initialization::CALENDAR_WEEKS_MAX
+                    ),
+                );
+            });
+        });
+    }
+
+    /// Where the forecast is for, and how much of it there is.
+    fn settings_weather(&mut self, ui: &mut Ui) {
+        settings_section(ui, "WEATHER", "settings_weather", |ui| {
+            settings_row(ui, "Location", |ui| {
+                ui.add(
+                    egui::DragValue::new(&mut self.coordinates[0])
+                        .prefix("lat ")
+                        .range(-90..=90)
+                        .fixed_decimals(2)
+                        .speed(0.0025),
+                );
+                ui.add(
+                    egui::DragValue::new(&mut self.coordinates[1])
+                        .prefix("lon ")
+                        .range(-180..=180)
+                        .fixed_decimals(2)
+                        .speed(0.005),
+                );
+            });
+
+            settings_row(ui, "", |ui| {
+                if settings_button(ui, "Pick on a map").clicked() {
+                    self.coordinates_map_flag = true;
+                }
+                // Fetching is a network round trip, so it is asked for rather
+                // than fired off after every nudge of a coordinate.
+                if settings_button(ui, "Fetch forecast")
+                    .on_hover_text("Load the forecast for these coordinates")
+                    .clicked()
+                {
+                    self.set_weather_coordinates();
+                }
+            });
+
+            settings_row(ui, "Forecast", |ui| {
+                let previous = self.three_day_weather;
+                ui.checkbox(
+                    &mut self.three_day_weather,
+                    RichText::new("Three days").size(SETTINGS_LABEL_SIZE),
+                );
+                if previous != self.three_day_weather {
+                    self.persist_config_value("three_day_weather", self.three_day_weather);
+                }
+                settings_note(ui, "off: that space is the notepad");
+            });
+        });
     }
     fn set_weather_coordinates(&mut self) {
         let coords = self.coordinates;
@@ -4346,237 +4774,58 @@ impl TaskApp {
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .fixed_size(Vec2::new(400.0, 300.0))
+                .default_width(SETTINGS_WIDTH)
                 .show(ctx, |ui| {
-                    Grid::new("fgd").show(ui, |ui| {
-                        ui.horizontal_centered(|ui| {
-                            ui.label("Background:");
+                    ui.set_width(SETTINGS_WIDTH);
+                    // Sliders are the widest control on the sheet and egui's
+                    // default is a stub; set it once for all of them.
+                    ui.spacing_mut().slider_width = SETTINGS_CONTROL_WIDTH;
 
-                            // Keep track of the previously selected index
-                            let previous_index = self.selected_background_index;
-
-                            ComboBox::from_id_salt("background_combo")
-                                .selected_text(&self.background_options[self.selected_background_index])
-                                .show_ui(ui, |ui| {
-                                    for (i, background_name) in self.background_options.iter().enumerate() {
-                                        ui.selectable_value(
-                                            &mut self.selected_background_index,
-                                            i,
-                                            background_name,
-                                        );
-                                    }
-                                });
-
-                            // Check if the selection changed
-                            if previous_index != self.selected_background_index {
-                                // Own the name so no borrow of `self` is held across
-                                // the `&mut self` persist call.
-                                let new_background = self.background_options[self.selected_background_index].clone();
-
-                                self.background_image_texture = Some(set_background(ctx, &self.dirs, new_background.clone()));
-
-                                self.persist_config_value("background", new_background);
-                            }
-
-                            if ui.button("♲").clicked() {
-                                let available_background_name_to_refresh_into = self.background_options[self.selected_background_index].to_string();
-                                self.persist_config_value("background", available_background_name_to_refresh_into.clone());
-                                self.background_image_texture = Some(set_background(ctx, &self.dirs, available_background_name_to_refresh_into));
-                            }
+                    // The sheet scrolls rather than being cut off. It used to be
+                    // pinned to a fixed 400×300 with far more than that inside
+                    // it, so the bottom rows simply fell out of the window.
+                    egui::ScrollArea::vertical()
+                        .max_height(SETTINGS_MAX_BODY_HEIGHT)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            self.settings_appearance(ui, ctx);
+                            self.settings_window_section(ui, ctx);
+                            self.settings_calendar(ui);
+                            self.settings_weather(ui);
+                            ui.add_space(4.0);
                         });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            ui.label("Selected startup monitor:");
 
-                            if self.monitor_options.is_empty() {
-                                // winit can report unnamed monitors (name() == None) and
-                                // some headless/remote setups report none at all; either
-                                // way the list is empty. Show a placeholder instead of
-                                // indexing into it (which would panic).
-                                ui.add_enabled(false, egui::Label::new("No monitors detected"));
-                            } else {
-                                // Sync the selected index to the saved name (falling back
-                                // to the first monitor if the saved name isn't present).
-                                let previous_index = self
-                                    .monitor_options
-                                    .iter()
-                                    .position(|name| name == &self.selected_monitor_name)
-                                    .unwrap_or(0);
-                                self.selected_monitor_index = previous_index;
-
-                                let selected_text = self
-                                    .monitor_options
-                                    .get(self.selected_monitor_index)
-                                    .cloned()
-                                    .unwrap_or_default();
-
-                                ComboBox::from_id_salt("monitor_combo")
-                                    .selected_text(selected_text)
-                                    .show_ui(ui, |ui| {
-                                        for (i, monitor_name) in self.monitor_options.iter().enumerate() {
-                                            ui.selectable_value(
-                                                &mut self.selected_monitor_index,
-                                                i,
-                                                monitor_name,
-                                            );
-                                        }
-                                    });
-
-                                if previous_index != self.selected_monitor_index {
-                                    self.set_selected_monitor_name();
-                                }
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("TaskDeck  ·  Timi Salonen")
+                                .size(SETTINGS_FINE_SIZE)
+                                .color(Color32::from_white_alpha(110)),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    Button::new(RichText::new("Done").size(SETTINGS_LABEL_SIZE))
+                                        .min_size(vec2(92.0, 32.0)),
+                                )
+                                .clicked()
+                            {
+                                self.settings_flag = false;
                             }
-
-                            // The window is bound to its monitor at startup, so the
-                            // monitor choice only takes effect after a restart. Make
-                            // that explicit instead of silently saving the setting.
-                            if ui.button("♲").on_hover_text("Restart now to move the window to the selected monitor").clicked() {
-                                self.restart_self();
-                            }
-                            ui.label(RichText::new("(applies after restart)").weak());
-
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            let previous_selection = self.start_in_fullscreen;
-
-                            ui.checkbox(&mut self.start_in_fullscreen, "Start in fullscreen");
-
-                            if previous_selection != self.start_in_fullscreen {
-                                self.persist_config_value("start_in_fullscreen", self.start_in_fullscreen);
-                            }
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            let previous_selection = self.enable_fps_counter;
-
-                            ui.checkbox(&mut self.enable_fps_counter, "Enable fps counter");
-
-                            if previous_selection != self.enable_fps_counter {
-                                self.persist_config_value("enable_fps_counter", self.enable_fps_counter);
-                            }
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            let previous_selection = self.three_day_weather;
-
-                            ui.checkbox(&mut self.three_day_weather, "Show weather for three days");
-
-                            if previous_selection != self.three_day_weather {
-                                self.persist_config_value("three_day_weather", self.three_day_weather);
-                            }
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            ui.set_max_width(300.0);
-                            ui.label("Number of displayed weeks: ");
-                            // Commit on Enter / focus loss rather than every keystroke:
-                            // applying re-builds the (potentially large) calendar model,
-                            // so we don't want to do it per character.
-                            if ui.text_edit_singleline(&mut self.week_number_input).lost_focus() {
-                                self.set_calendar_weeks();
-                            }
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            ui.set_max_width(300.0);
-                            ui.label("Background tint percent: ");
-                            if ui.text_edit_singleline(&mut self.background_tint_input).changed() {
-                                self.set_background_tint();
-                            }
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            ui.label("UI scale percent: ");
-                            ui.scope(|ui| {
-                                ui.set_max_width(60.0);
-                                // Committed on Enter / focus-loss rather than per
-                                // keystroke: every apply re-lays out the whole UI,
-                                // and a half-typed "5" would briefly clamp to the
-                                // minimum.
-                                if ui.text_edit_singleline(&mut self.ui_scale_input).lost_focus() {
-                                    self.set_ui_scale();
-                                }
-                            });
-                            if self.ui_scale_percent == UI_SCALE_AUTO {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "(0 = fit to window, now {}%)",
-                                        (ctx.zoom_factor() * 100.0).round() as u32
-                                    ))
-                                    .weak(),
-                                );
-                            } else {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "({UI_SCALE_MIN}–{UI_SCALE_MAX}, or 0 to fit to window)"
-                                    ))
-                                    .weak(),
-                                );
-                            }
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            ui.label("Weather Coordinates: ");
-
-                            let y_slider = egui::DragValue::new(&mut self.coordinates[0])
-                                .prefix("Latitude (Y): ")
-                                .range(-90..=90)
-                                .fixed_decimals(2)
-                                .speed(0.0025);
-                            ui.add(y_slider);
-
-                            let x_slider = egui::DragValue::new(&mut self.coordinates[1])
-                                .prefix("Longitude (X): ")
-                                .range(-180..=180)
-                                .fixed_decimals(2)
-                                .speed(0.005);
-                            ui.add(x_slider);
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            if ui.button("Pick coordinates with map").clicked() {
-                                self.coordinates_map_flag = true;
-                            }
-                            if ui.button("Apply coordinates").clicked() {
-                                self.set_weather_coordinates();
-                            }
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.horizontal_centered(|ui| {
-                            let button = ui.add(Button::new("Manage colorschemes").min_size(Vec2::new(50.0, 30.0)));
-
-                            if button.clicked() {
-                                self.color_picker_flag = true;
-                            }
-                        });
-                        ui.end_row();
-                        ui.end_row();
-                        ui.vertical_centered(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("Timi Salonen").weak());
-
-                                ui.add_space(190.0);
-
-                                let button = ui.add(Button::new("Ok").min_size(Vec2::new(50.0, 30.0)));
-
-                                if button.clicked() {
-                                    self.settings_flag = false;
-                                }
-                            });
                         });
                     });
                 });
+
+            // Escape closes the sheet, the way it closes the planner. Not while
+            // the map picker is stacked over it (Escape belongs to the topmost
+            // window), and not while a field has the keyboard.
+            if !self.coordinates_map_flag
+                && !ctx.egui_wants_keyboard_input()
+                && ctx.input(|i| i.key_pressed(Key::Escape))
+            {
+                self.settings_flag = false;
+            }
         }
 
         if self.coordinates_map_flag {
@@ -4781,145 +5030,156 @@ impl TaskApp {
         }
 
         if self.color_picker_flag && !self.edit_colorscheme_flag {
-            egui::Window::new("Colorscheme manager")
+            egui::Window::new("Colour schemes")
+                .collapsible(false)
                 .resizable(false)
-                .default_pos(pos2(580.0, 250.0))
-                .fixed_size(vec2(800.0, 800.0))
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .default_width(SETTINGS_WIDTH)
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
+                    ui.set_width(SETTINGS_WIDTH);
 
-                        ui.group(|ui| {
-                            ui.set_max_size(vec2(310.0, 620.0));
-                            ui.vertical(|ui| {
-                                let previous_id = self.selected_colorscheme_id;
+                    // Sorted, and taken as a list rather than iterated straight
+                    // off the HashMap: map order is arbitrary *and differs
+                    // between runs*, so the schemes reshuffled themselves at
+                    // every launch. By id, the built-ins keep the order they
+                    // are defined in and a new scheme lands at the bottom,
+                    // where the user just made it.
+                    let mut listed: Vec<(u32, String, [[u8; 4]; 6], bool)> = self
+                        .colorschemes
+                        .iter()
+                        .map(|(id, scheme)| {
+                            (*id, scheme.name.clone(), scheme.colors, scheme.is_builtin())
+                        })
+                        .collect();
+                    listed.sort_unstable_by_key(|(id, ..)| *id);
+                    let (builtin, mine): (Vec<_>, Vec<_>) =
+                        listed.into_iter().partition(|(.., builtin)| *builtin);
 
-                                // Sorted, and taken as a list rather than
-                                // iterated straight off the HashMap: map order
-                                // is arbitrary *and differs between runs*, so
-                                // the schemes shuffled themselves every launch.
-                                // By id, the built-ins keep the order they are
-                                // defined in and a new scheme lands at the
-                                // bottom, where the user just made it.
-                                let mut listed: Vec<(u32, String, bool)> = self
-                                    .colorschemes
-                                    .iter()
-                                    .map(|(id, scheme)| (*id, scheme.name.clone(), scheme.is_builtin()))
-                                    .collect();
-                                listed.sort_unstable_by_key(|(id, _, _)| *id);
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(SCHEME_LIST_WIDTH);
 
-                                let (builtin, mine): (Vec<_>, Vec<_>) =
-                                    listed.into_iter().partition(|(_, _, builtin)| *builtin);
+                            // Both sections are labelled. They used to be an
+                            // unlabelled pair split on a flag nothing ever set,
+                            // so every scheme landed in the first list and the
+                            // second was permanently empty.
+                            settings_section_heading(ui, "BUILT IN");
+                            egui::ScrollArea::vertical()
+                                .scroll_source(egui::scroll_area::ScrollSource::ALL)
+                                .max_height(SCHEME_ROW_HEIGHT * 5.5)
+                                .id_salt("builtin_schemes")
+                                .show(ui, |ui| {
+                                    for (id, name, colors, _) in &builtin {
+                                        self.colorscheme_row(ui, *id, name, *colors);
+                                    }
+                                });
 
-                                // Both sections are labelled. The two lists used
-                                // to be an unlabelled pair split on a flag that
-                                // nothing ever set, so every scheme landed in
-                                // the top one and the lower list was simply
-                                // always empty.
-                                ui.heading("Built in");
-                                egui::ScrollArea::vertical()
-                                    .scroll_source(egui::scroll_area::ScrollSource::ALL)
-                                    .max_height(200.0)
-                                    .max_width(300.0)
-                                    .id_salt("builtin_schemes")
-                                    .show(ui, |ui| {
-                                        for (id, name, _) in &builtin {
-                                            ui.selectable_value(&mut self.selected_colorscheme_id, *id, name);
-                                        }
-                                    });
-
-                                ui.add_space(8.0);
-                                ui.separator();
-                                ui.add_space(8.0);
-
-                                ui.heading("Yours");
-                                if mine.is_empty() {
-                                    ui.label(
-                                        RichText::new("Duplicate one to make it yours to edit.")
-                                            .weak()
-                                            .small(),
-                                    );
-                                }
-                                egui::ScrollArea::vertical()
-                                    .scroll_source(egui::scroll_area::ScrollSource::ALL)
-                                    .max_height(300.0)
-                                    .max_width(300.0)
-                                    .id_salt("user_schemes")
-                                    .show(ui, |ui| {
-                                        for (id, name, _) in &mine {
-                                            ui.selectable_value(&mut self.selected_colorscheme_id, *id, name);
-                                        }
-                                    });
-
-                                if previous_id != self.selected_colorscheme_id {
-                                    self.set_colorscheme();
-                                }
-                            });
+                            ui.add_space(10.0);
+                            settings_section_heading(ui, "YOURS");
+                            if mine.is_empty() {
+                                settings_note(ui, "duplicate one to get a scheme you can edit");
+                            }
+                            egui::ScrollArea::vertical()
+                                .scroll_source(egui::scroll_area::ScrollSource::ALL)
+                                .max_height(SCHEME_ROW_HEIGHT * 7.0)
+                                .id_salt("user_schemes")
+                                .show(ui, |ui| {
+                                    for (id, name, colors, _) in &mine {
+                                        self.colorscheme_row(ui, *id, name, *colors);
+                                    }
+                                });
                         });
+
+                        ui.add_space(18.0);
 
                         ui.vertical(|ui| {
                             let mine = self.currently_selected_colorscheme_is_user_configurable();
+                            let wide = vec2(230.0, 30.0);
 
-                            let duplicate_button = ui.add(Button::new("Duplicate").min_size(Vec2::new(50.0, 30.0)));
-
-                            // The three verbs a built-in doesn't answer to are
-                            // shown disabled rather than hidden: a column that
-                            // grows and shrinks as you move down the list is
-                            // harder to aim at than one that greys out, and the
-                            // hover says why.
-                            let edit_button = ui
-                                .add_enabled(mine, Button::new("Edit").min_size(Vec2::new(50.0, 30.0)));
-                            let rename_button = ui
-                                .add_enabled(mine, Button::new("Rename").min_size(Vec2::new(50.0, 30.0)));
-                            let delete_button = ui
-                                .add_enabled(mine, Button::new("Delete").min_size(Vec2::new(50.0, 30.0)));
-
-                            if !mine {
-                                ui.label(
-                                    RichText::new("Built-in schemes can't be changed.\nDuplicate to make one yours.")
-                                        .weak()
-                                        .small(),
-                                );
+                            if ui
+                                .add(Button::new(RichText::new("Duplicate").size(SETTINGS_LABEL_SIZE)).min_size(wide))
+                                .on_hover_text("Make an editable copy of the selected scheme")
+                                .clicked()
+                            {
+                                self.duplicate_current_colorscheme();
                             }
 
-                            if rename_button.clicked() {
+                            // The three verbs a built-in doesn't answer to are
+                            // shown disabled rather than hidden: a button column
+                            // that grows and shrinks as the selection moves is
+                            // harder to aim at than one that greys out.
+                            let edit = ui.add_enabled(
+                                mine,
+                                Button::new(RichText::new("Edit").size(SETTINGS_LABEL_SIZE)).min_size(wide),
+                            );
+                            let rename = ui.add_enabled(
+                                mine,
+                                Button::new(RichText::new("Rename").size(SETTINGS_LABEL_SIZE)).min_size(wide),
+                            );
+                            let delete = ui.add_enabled(
+                                mine,
+                                Button::new(RichText::new("Delete").size(SETTINGS_LABEL_SIZE)).min_size(wide),
+                            );
+
+                            if !mine {
+                                settings_note(ui, "built-in schemes stay as they are");
+                            }
+
+                            if edit.clicked() {
+                                self.edit_colorscheme_flag = true;
+                                self.colorscheme_being_edited = Some(
+                                    self.colorschemes
+                                        .get(&self.selected_colorscheme_id)
+                                        .unwrap_or(&ColorScheme::default_scheme())
+                                        .clone(),
+                                );
+                            }
+                            if rename.clicked() {
                                 self.rename_colorscheme_flag = true;
+                                // Seeded with the current name, so renaming is
+                                // an edit rather than a retype.
                                 self.colorscheme_rename_input = self
                                     .colorschemes
                                     .get(&self.selected_colorscheme_id)
                                     .map(|scheme| scheme.name.clone())
                                     .unwrap_or_default();
                             }
-
-                            if delete_button.clicked() {
+                            if delete.clicked() {
                                 self.user_wants_to_delete_colorscheme_flag = true;
                             }
 
-                            if edit_button.clicked() {
-                                self.edit_colorscheme_flag = true;
-                                self.colorscheme_being_edited = Some(self.colorschemes.get(&self.selected_colorscheme_id).unwrap_or(&ColorScheme::default_scheme()).clone());
-                            }
-
-                            ui.add_space(5.0);
+                            ui.add_space(10.0);
                             ui.separator();
-                            ui.add_space(5.0);
+                            ui.add_space(10.0);
 
-                            let generate_button = ui.add(Button::new("Generate one from the background").min_size(Vec2::new(50.0, 30.0)));
-                            if generate_button.clicked() {
+                            if ui
+                                .add(
+                                    Button::new(
+                                        RichText::new("Generate from the background")
+                                            .size(SETTINGS_LABEL_SIZE),
+                                    )
+                                    .min_size(wide),
+                                )
+                                .on_hover_text("Read the background picture and build a palette out of it")
+                                .clicked()
+                            {
                                 self.try_to_generate_colorscheme();
                             }
+                        });
+                    });
 
-                            ui.add_space(5.0);
-                            ui.separator();
-                            ui.add_space(5.0);
-
-                            let ok_button = ui.add(Button::new("OK").min_size(Vec2::new(50.0, 30.0)));
-
-
-                            if duplicate_button.clicked() {
-                                self.duplicate_current_colorscheme();
-                            }
-
-                            if ok_button.clicked() {
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        settings_note(ui, "the ramp runs least to most urgent; the last swatch is events");
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    Button::new(RichText::new("Done").size(SETTINGS_LABEL_SIZE))
+                                        .min_size(vec2(92.0, 32.0)),
+                                )
+                                .clicked()
+                            {
                                 self.color_picker_flag = false;
                             }
                         });

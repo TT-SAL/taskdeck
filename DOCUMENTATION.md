@@ -57,7 +57,7 @@ Additional features:
 - **Archive:** completed/deleted items are appended to a JSONL log and viewable with pagination ("Show more").
 - **Weather coordinate picker:** an interactive Blue-Marble world map with zoom/pan, click-to-pick, and ~200 labeled city markers.
 - **Color schemes:** user-editable 6-color palettes used to tint calendar items; palettes can be **auto-generated from the current background image** via k-means clustering in CIE-Lab space.
-- **Settings:** background image, startup monitor, fullscreen, FPS counter, number of weeks, background tint %, weather coordinates, 3-day weather toggle.
+- **Settings:** one sheet in four sections — appearance (background picture, its brightness, the colour scheme), window (UI scale, startup monitor, fullscreen, frame-rate readout), calendar (weeks shown), weather (coordinates, two or three day forecast). See §11.1.
 - **Day planner:** clicking any calendar day opens it. Drag on the day's timeline to block out time, drag unplanned tasks in from the tray, move/resize blocks, and set a due time without leaving the day. Records *when you will do* something separately from *when it is due* — see §16.
 - **Idle sleep:** when unfocused and idle for 10 s, the redraw loop stops to save power.
 
@@ -578,22 +578,56 @@ strings). A missing or unparseable file falls back to a fresh document (same sel
 | `three_day_weather` | bool | `false` | |
 | `ui_scale_percent` | u32 | `0` (automatic) | `0` = fit to window, else clamped `UI_SCALE_MIN..=MAX` (`40..=100`) |
 
-Runtime setting changes go through one shared helper, `TaskApp::write_config_value(key, value)`
-(read → parse → set typed value → write), wrapped by `persist_config_value(key, value)` which routes
-any write failure to the error window instead of dropping it. The boolean toggles and the background
+Runtime setting changes go through one shared helper, `initialization::write_config_value(path, key,
+value)` (read → parse → set typed value → write), which `TaskApp::write_config_value` forwards to and
+`persist_config_value(key, value)` wraps to route any write failure to the error window instead of
+dropping it. It is public because startup needs it too: `main` can have to correct a setting — a
+selected colour scheme whose id had to move (§10) — before there is any `TaskApp` to route it through. The boolean toggles and the background
 picker call `persist_config_value` directly; the setters that also mutate live state
 (`set_calendar_weeks`, `set_background_tint`, `set_weather_coordinates`, `set_selected_monitor_name`,
 `set_colorscheme`) do their side-effect and then call it. Both the startup writer and these setters
 share the same mechanism and value types, so the file no longer round-trips numbers as strings.
 
-**Apply timing.** Most settings apply live. `set_calendar_weeks` updates `calendar_weeks_to_show`
-and re-runs `summarize_calendar` immediately (committed on Enter / focus-loss, not per keystroke, to
-avoid rebuilding the calendar on every character); the clamp bounds are the shared
-`CALENDAR_WEEKS_MIN/MAX` constants so the live value matches what a restart would load. The **startup
-monitor** is the exception — the window binds to a monitor at launch, so that choice only takes
-effect after a restart; the UI says "(applies after restart)" and the ♲ button restarts the app.
-`restart_self` spawns a fresh copy and `exit`s only on a successful spawn; if locating the exe or
-spawning fails it reports the error and keeps the current process running (no panic, no respawn loop).
+**Apply timing.** Most settings apply live. Two apply when their control *settles* — the drag stops
+or the field loses focus — rather than per step, and for the same reason in both cases: the step is
+expensive enough to fight back. `set_calendar_weeks` rebuilds the calendar model for up to ten years
+of days; `set_ui_scale` changes what every point in the window is measured in, so applying it
+mid-drag moves the slider out from under the pointer. Background brightness is the opposite case —
+one multiply in the draw — so it follows the slider live and only the *write to disk* waits. The
+clamp bounds are the shared `CALENDAR_WEEKS_MIN/MAX` and `UI_SCALE_MIN/MAX` constants, so a live
+value always matches what a restart would load. The **startup monitor** is the one setting that
+cannot take effect where it is made — the window binds to a monitor at launch — so the sheet says
+"takes effect at the next start" and offers **Restart now**. `restart_self` spawns a fresh copy and
+`exit`s only on a successful spawn; if locating the exe or spawning fails it reports the error and
+keeps the current process running (no panic, no respawn loop).
+
+### 11.1 The settings sheet
+
+Four named sections — **APPEARANCE**, **WINDOW**, **CALENDAR**, **WEATHER** — each a two-column
+`Grid` of `settings_row(label, contents)`, plus a footer with the author line and **Done**. All the
+sections share `SETTINGS_LABEL_COLUMN`, so the controls line up down the whole sheet rather than per
+section, and the body scrolls past `SETTINGS_MAX_BODY_HEIGHT` instead of being cut off.
+
+What it replaced is worth recording as a shape to avoid: a single-column `Grid` used purely as a
+spacer, every row a `horizontal_centered` with a pair of `end_row()`s after it for padding, inside a
+window pinned to `fixed_size(400×300)` holding far more than that. Nothing aligned with anything and
+the last rows fell out of the bottom of the window.
+
+Controls were also chosen for what they are: numbers that have a range are sliders and drag values
+rather than text fields that parse and clamp on focus loss, and the UI scale is a **Fit to window**
+checkbox plus a percentage slider rather than a text field where `0` secretly meant "automatic".
+Escape closes the sheet, unless the map picker is stacked over it or a field has the keyboard.
+
+One latent crash went with it: the background row indexed `background_options[selected_index]`
+directly, so an index left over from a picture that had since been deleted from `images/` panicked
+the moment Settings opened. The index is clamped to the list, and an empty list says so.
+
+**The colour-scheme manager** (opened from *Colour scheme → Manage*) is built the same way: the two
+labelled lists from §10 on the left, the verbs on the right, **Done** below. Each row paints the
+palette as six swatches beside the name — over a dark base, because these are translucent tints
+meant to sit on a photograph and on nothing at all they read as nothing. A list of names alone was
+guesswork: `DUSK` and `Scheme from "lake.jpg"` are evocative, not informative, and the only way to
+find out what either did to the calendar was to select it and look.
 
 ---
 
