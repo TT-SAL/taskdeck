@@ -22,9 +22,14 @@ const IMPORTANCE: [&str; 5] = ["Not important", "Mildly important", "Important",
 
 /* ─────────────────────────── Day planner layout ─────────────────────────── */
 
-/// Height of one hour on the planner timeline. Sized so a 15-minute block — the
-/// snap step — is still a comfortable click target.
-const PLANNER_HOUR_HEIGHT: f32 = 52.0;
+/// Height of one hour on the planner timeline.
+///
+/// The trade the whole window turns on: taller hours are easier to aim a
+/// 15-minute block at, shorter ones put more of the day on screen at once. At
+/// 48 the snap step is still a dozen points — a comfortable target — and a
+/// full day is 1152, which fits inside the body of the window on an ordinary
+/// screen with only the small hours left to scroll to.
+const PLANNER_HOUR_HEIGHT: f32 = 48.0;
 /// Width of the hour-label gutter down the left of the timeline.
 const PLANNER_GUTTER_WIDTH: f32 = 52.0;
 /// Width of the backlog tray.
@@ -51,6 +56,10 @@ const PLANNER_WEEKDAY_SIZE: f32 = 50.0;
 /// window frame's own margin is small enough that the day stepper and the ✕ sat
 /// in the corners; this is what keeps them off it.
 const PLANNER_EDGE_MARGIN: f32 = 14.0;
+/// How much of the window the planner leaves showing around itself. Wider than
+/// it is tall: a strip of calendar down each side says what is behind the
+/// window, while every point of height is another few minutes of the day.
+const PLANNER_WINDOW_INSET: Vec2 = Vec2::new(160.0, 64.0);
 
 /* ─────────────────────────── Planner type scale ───────────────────────────
  *
@@ -2071,9 +2080,15 @@ impl TaskApp {
         // Sized from the viewport rather than fixed: the planner wants as much of
         // the day on screen at once as it can get, and the viewport is a
         // different number of points on every machine (see `apply_ui_scale`).
+        //
+        // The insets are what is left of the window around it — enough to show
+        // that something is behind it, and no more. They were three times this,
+        // and the ceilings were low enough to bind on an ordinary screen, so the
+        // planner sat in the middle of a large window showing two thirds of a
+        // day with a wide margin of calendar around it.
         let viewport = ctx.viewport_rect();
-        let width = (viewport.width() - 140.0).clamp(640.0, 1600.0);
-        let height = (viewport.height() - 110.0).clamp(380.0, 1180.0);
+        let width = (viewport.width() - PLANNER_WINDOW_INSET.x).clamp(640.0, 2000.0);
+        let height = (viewport.height() - PLANNER_WINDOW_INSET.y).clamp(380.0, 1500.0);
 
         // Captured *before* the body runs. Both editors clear their own flag
         // the instant they finish, and the keystroke that finished them is

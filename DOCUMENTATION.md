@@ -1222,6 +1222,14 @@ drawn. The masthead's height depends on the metrics of a 50-point face and on th
 constant that disagreed with either would push the footer off the bottom of the window on someone
 else's display.
 
+**How much of the day is on screen** is the product of two numbers, and both are set for it. The
+window is the viewport less `PLANNER_WINDOW_INSET` — wider than it is tall, so a strip of calendar
+down each side says what is behind the window while every point of height buys more minutes — with
+ceilings high enough not to bind on an ordinary screen. `PLANNER_HOUR_HEIGHT` is the other half of
+the trade: taller hours are easier to aim a 15-minute block at, shorter ones fit more day. At 48 the
+snap step is still a dozen points and a full day is 1152, so roughly eighteen hours are visible at
+once and opening on the working hour shows the rest of the day without a scroll.
+
 ### 16.6 State
 
 The planner keeps no cached model: `planner_entries()` rebuilds from `active_things` every
