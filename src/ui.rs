@@ -5,11 +5,19 @@ use egui::{self, Align, Button, Color32, ColorImage, ComboBox, Context, CornerRa
 use image::{ImageBuffer, Rgba};
 use toml_edit::{DocumentMut};
 
-use crate::{calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, InActive}, weather::{self, WeatherService}};
+use crate::{calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, InActive, Session}, weather::{self, WeatherService}};
 
 const WEEK_DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-const URGENCY: [&str; 3] = ["Time-independence", "Normal urgency", "High urgency"];
+/// Labels for an undated task's **horizon** — "roughly how soon should this
+/// happen" — indexed by `Active::time_importance`. The index order is a
+/// serialization fact (the first three are load-compatible with the old
+/// urgency scale, "whenever" is appended); `HORIZON_DISPLAY_ORDER` is how a
+/// combo presents them, soonest first.
+const HORIZON: [&str; 4] = ["Within a month", "Within a week", "Within days", "Whenever"];
+
+/// Presentation order for `HORIZON`: soonest first, the parking lot last.
+const HORIZON_DISPLAY_ORDER: [u8; 4] = [2, 1, 0, 3];
 
 const IMPORTANCE: [&str; 5] = ["Not important", "Mildly important", "Important", "Highly important", "Lethally important"];
 
@@ -63,9 +71,15 @@ const PLANNER_FINE_SIZE: f32 = 13.0;
 /// fits while giving text a much better chance of a whole-pixel height.
 const PPP_QUANTUM: f32 = 0.25;
 
-/// Importance given to a task created straight on the timeline. Mid-scale: the
-/// user is planning their day, not triaging, and can adjust it later.
+/// Severity seeded onto a task the moment the due editor gives it its first
+/// deadline. Mid-scale: a dated task is scored by how bad missing the date is,
+/// the user hasn't said yet, and the footer is right there to adjust it.
 const PLANNER_NEW_TASK_IMPORTANCE: u8 = 2;
+
+/// Horizon given to a task created on the timeline or in the quick-add:
+/// "within a week", the middle of the road. Matches the New Task dialog's
+/// default, so where a task was typed doesn't change what it is.
+const PLANNER_NEW_TASK_HORIZON: u8 = 1;
 
 /// The timeline gesture and the maths that interprets it live in `planner`;
 /// this alias keeps the call sites here short.
@@ -76,6 +90,10 @@ use planner::Drag as PlannerDrag;
 /// model of its own, so it can't drift out of sync with the calendar.
 struct PlannerEntry {
     id: u64,
+    /// Which of the item's sessions this entry is, when it is a planned work
+    /// block; `None` for an event's block and for due markers. Together with
+    /// `id` this is the address a gesture edits.
+    session: Option<usize>,
     name: String,
     color_id: usize,
     placement: planner::Placement,
@@ -87,10 +105,12 @@ struct BacklogCard {
     name: String,
     color_id: usize,
     deadline: Option<DateTime<Local>>,
-    /// How long the task is estimated to take, if the user has said. This is
-    /// what the card is worth when dropped on the timeline, so the card shows
-    /// it: a "2h" card lands as a two-hour block.
+    /// How long the task is estimated to take, if the user has said.
     duration: Option<u32>,
+    /// Minutes already booked in sessions. With an estimate, the difference is
+    /// what the card is worth when dropped — a "2h" card with an hour planned
+    /// lands the remaining hour.
+    planned: u32,
 }
 
 /// Screen rectangle for a placement in its lane.
@@ -130,6 +150,20 @@ fn planner_entry_rect(
             )
         }
     }
+}
+
+/// "14:30–15:15" for an event's footer, from its time and length; just the
+/// time when it has no length yet.
+fn item_anchor_text(deadline: Option<DateTime<Local>>, minutes: Option<u32>) -> Option<String> {
+    let at = deadline?;
+    Some(match minutes {
+        Some(minutes) => format!(
+            "{}–{}",
+            at.format("%H:%M"),
+            (at + Duration::minutes(minutes as i64)).format("%H:%M")
+        ),
+        None => at.format("%H:%M").to_string(),
+    })
 }
 
 /// Whether a yes/no dialog was answered from the keyboard this frame, as
@@ -326,8 +360,15 @@ pub struct TaskApp {
     /// leave it pointing at the wrong day.
     planner_flag: bool,
     planner_day: NaiveDate,
-    /// Item the user last clicked on the timeline; its card shows the controls.
+    /// Item the user last clicked on the timeline or in the tray; the footer
+    /// edits it.
     planner_selection: Option<u64>,
+    /// Which of the selection's sessions was clicked, when a work block was —
+    /// per-block controls (remove, and the gestures) act on this one. `None`
+    /// when the selection came from the tray, a marker, or an event block.
+    planner_selected_session: Option<usize>,
+    /// Task whose deadline is being edited in the footer's due popup, if any.
+    planner_due_edit: Option<u64>,
     /// The pointer gesture in progress, if any. One field, because the gestures
     /// are mutually exclusive — you can't resize one block while moving another.
     planner_drag: Option<PlannerDrag>,
@@ -424,9 +465,11 @@ impl TaskApp {
             .unwrap_or(0);
 
         // Backfill stable ids onto any items from a pre-id / hand-edited save and
-        // seed the id counter past the highest one in use.
+        // seed the id counter past the highest one in use; fold any pre-sessions
+        // single slot into a session while we're at it.
         let mut active_items = config.active_items;
         let next_id = tasks::assign_missing_ids(&mut active_items);
+        tasks::migrate_legacy_plans(&mut active_items);
 
         let userconfig_path = config.dirs.config_file();
 
@@ -500,6 +543,8 @@ impl TaskApp {
             planner_flag: false,
             planner_day: now.date_naive(),
             planner_selection: None,
+            planner_selected_session: None,
+            planner_due_edit: None,
             planner_drag: None,
             planner_naming: None,
             planner_name_input: String::new(),
@@ -1238,7 +1283,8 @@ impl TaskApp {
             is_event,
             created: chrono::Local::now(),
             // Nothing created through the modals is placed on the planner yet;
-            // the planner sets these when the user gives the item a slot.
+            // the planner adds sessions when the user gives it time.
+            sessions: Vec::new(),
             planned_start: None,
             duration_minutes: None,
         });
@@ -1395,6 +1441,8 @@ impl TaskApp {
         self.planner_flag = true;
         self.planner_day = day;
         self.planner_selection = None;
+        self.planner_selected_session = None;
+        self.planner_due_edit = None;
         self.planner_drag = None;
         self.cancel_planner_naming();
         self.planner_scroll_to_hour = Some(self.planner_default_scroll_hour());
@@ -1427,6 +1475,8 @@ impl TaskApp {
     fn planner_go_to_day(&mut self, day: NaiveDate) {
         self.planner_day = day;
         self.planner_selection = None;
+        self.planner_selected_session = None;
+        self.planner_due_edit = None;
         self.planner_drag = None;
         self.cancel_planner_naming();
         self.planner_scroll_to_hour = Some(self.planner_default_scroll_hour());
@@ -1439,46 +1489,53 @@ impl TaskApp {
         self.planner_flag = false;
         self.planner_drag = None;
         self.planner_selection = None;
+        self.planner_selected_session = None;
+        self.planner_due_edit = None;
     }
 
     /// The items that appear on `planner_day`'s timeline, in a stable order.
     ///
-    /// One item can produce two entries across different days (a work block and
-    /// a due marker), but never two on the same day — `placement_for` picks the
-    /// block when both fall on the day being shown.
+    /// One item can produce several entries on one day — a session per block it
+    /// has here, plus its due marker if it is owed here. Each entry remembers
+    /// which session it is, so a gesture on a block edits that block and no
+    /// other.
     fn planner_entries(&self) -> Vec<PlannerEntry> {
-        let mut entries: Vec<PlannerEntry> = self
-            .active_things
-            .iter()
-            .filter_map(|item| {
-                planner::placement_for(item, self.planner_day).map(|placement| PlannerEntry {
+        let mut entries: Vec<PlannerEntry> = Vec::new();
+        for item in &self.active_things {
+            for placed in planner::placements_for(item, self.planner_day) {
+                entries.push(PlannerEntry {
                     id: item.id,
+                    session: placed.session,
                     name: item.name.clone(),
                     color_id: item.calendar_item_color(),
-                    placement,
-                })
-            })
-            .collect();
+                    placement: placed.placement,
+                });
+            }
+        }
         // Stable, time-ordered: the lane packer sorts its own copy, but a stable
         // input order keeps egui widget ids from shuffling between frames.
-        entries.sort_by_key(|e| (e.placement.start(), e.id));
+        entries.sort_by_key(|e| (e.placement.start(), e.id, e.session));
         entries
     }
 
-    /// Tasks with no time set aside for them yet — the planner's tray.
+    /// Tasks still wanting time on a timeline — the planner's tray.
     ///
-    /// Ordered by the same urgency score as the main task list, so the most
-    /// pressing thing to schedule is at the top of its group, and split into
-    /// `(due by this day, everything else)` by `planner::backlog_group`. The
-    /// split is the point of the tray: "owed today and not yet planned" is the
-    /// one list a day planner should lead with, and it is exactly what the day
-    /// popup used to show as a flat read-only list with nothing to do about it.
+    /// A task belongs here while it has no sessions, or while its estimate is
+    /// not yet covered by the sessions it has: a two-hour task with one hour
+    /// booked is still half a card, and dragging it out again plans the rest
+    /// (`planner::drop_length_for`).
+    ///
+    /// Ordered by the same score as the main task list, so the most pressing
+    /// thing to schedule is at the top of its group, and split into `(due by
+    /// this day, everything else)` by `planner::backlog_group`. The split is
+    /// the point of the tray: "owed today and not yet planned" is the one list
+    /// a day planner should lead with.
     fn planner_backlog_items(&self) -> (Vec<BacklogCard>, Vec<BacklogCard>) {
         let now = Local::now();
         let mut items: Vec<(f32, &Active)> = self
             .active_things
             .iter()
-            .filter(|item| !item.is_event && item.planned_start.is_none())
+            .filter(|item| item.wants_planning())
             .map(|item| (item.importance_score(now, self.shuffle_seed), item))
             .collect();
         items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -1492,6 +1549,7 @@ impl TaskApp {
                 color_id: item.calendar_item_color(),
                 deadline: item.deadline,
                 duration: item.duration_minutes,
+                planned: item.planned_minutes(),
             };
             match planner::backlog_group(item.deadline, self.planner_day) {
                 planner::BacklogGroup::Due => due.push(card),
@@ -1501,12 +1559,40 @@ impl TaskApp {
         (due, later)
     }
 
-    /// Give an item a slot on the planner's current day.
+    /// Move or resize one existing block on the planner's current day: session
+    /// `session` of task `id`, or the event's block when `session` is `None`.
     ///
-    /// An event *is* its time, so this moves its deadline. A task's deadline is
-    /// when it is **due**, which planning must not touch — it gets a
-    /// `planned_start` instead, and keeps showing a due marker on its own day.
-    fn plan_item(&mut self, id: u64, start_minutes: i32, minutes: u32) {
+    /// An event *is* its time, so its block moves its deadline. A task's
+    /// deadline is when it is **due**, which planning must never touch — the
+    /// gesture edits the addressed session and nothing else.
+    fn plan_item(&mut self, id: u64, session: Option<usize>, start_minutes: i32, minutes: u32) {
+        let Some(when) = planner::resolve_on_day(self.planner_day, start_minutes) else {
+            self.show_error("That time doesn't exist on this day (daylight saving).".to_string());
+            return;
+        };
+        let minutes = minutes.max(planner::MIN_BLOCK_MINUTES);
+
+        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
+            return;
+        };
+
+        if item.is_event {
+            item.deadline = Some(when);
+            item.duration_minutes = Some(minutes);
+        } else if let Some(slot) = session.and_then(|index| item.sessions.get_mut(index)) {
+            *slot = Session { start: when, minutes };
+        } else {
+            return;
+        }
+
+        self.summarize_calendar();
+        self.save_active_things();
+    }
+
+    /// Add a fresh session to a task, dropped from the tray or the footer's
+    /// ＋ block button. The deadline and the estimate are untouched: this books
+    /// more time, it doesn't re-describe the task.
+    fn add_session(&mut self, id: u64, start_minutes: i32, minutes: u32) {
         let Some(when) = planner::resolve_on_day(self.planner_day, start_minutes) else {
             self.show_error("That time doesn't exist on this day (daylight saving).".to_string());
             return;
@@ -1515,35 +1601,74 @@ impl TaskApp {
         let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
             return;
         };
-
         if item.is_event {
-            item.deadline = Some(when);
-        } else {
-            item.planned_start = Some(when);
+            return;
         }
-        item.duration_minutes = Some(minutes.max(planner::MIN_BLOCK_MINUTES));
+        item.sessions.push(Session {
+            start: when,
+            minutes: minutes.max(planner::MIN_BLOCK_MINUTES),
+        });
+        self.planner_selected_session = Some(item.sessions.len() - 1);
 
         self.summarize_calendar();
         self.save_active_things();
     }
 
-    /// Return a task to the tray, keeping the task itself, its deadline, and how
-    /// long it takes. Only tasks can be unplanned — an event with no time isn't
-    /// an event, so its block offers delete instead.
+    /// Remove one session from a task — the block-level undo of `add_session`.
+    /// Cheap and unconfirmed: the task, its deadline and its estimate all stay,
+    /// and the freed time goes back onto the card in the tray.
+    fn remove_session(&mut self, id: u64, session: usize) {
+        if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
+            if item.is_event || session >= item.sessions.len() {
+                return;
+            }
+            item.sessions.remove(session);
+        }
+        self.planner_selected_session = None;
+        self.summarize_calendar();
+        self.save_active_things();
+    }
+
+    /// Set or clear a task's deadline from the footer's due editor.
     ///
-    /// `duration_minutes` used to be cleared here, back when it only meant "the
-    /// length of the block". It is also the estimate now, and giving up on a
-    /// slot is not forgetting that the homework takes two hours — so it stays,
-    /// and dropping the card back on the timeline lands the same length.
+    /// This is the verb whose absence forced deadlines to be *created* — as
+    /// their own items, on the right day, through a mode switch — rather than
+    /// simply attached to the task they describe. A dated task is scored by
+    /// severity, so setting a first deadline also seeds a middling importance
+    /// for the footer to adjust.
+    fn set_item_deadline(&mut self, id: u64, deadline: Option<DateTime<Local>>) {
+        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
+            return;
+        };
+        if item.is_event {
+            return;
+        }
+        item.deadline = deadline;
+        if deadline.is_some() && item.importance.is_none() {
+            item.importance = Some(PLANNER_NEW_TASK_IMPORTANCE);
+        }
+        self.summarize_calendar();
+        self.save_active_things();
+    }
+
+    /// Return a task to the tray whole, dropping every session but keeping the
+    /// task itself, its deadline, and its estimate. Only tasks can be unplanned
+    /// — an event with no time isn't an event, so its block offers delete
+    /// instead.
+    ///
+    /// The estimate survives on purpose: giving up on the slots is not
+    /// forgetting that the homework takes two hours, and the card goes back to
+    /// being worth its full length.
     fn unplan_item(&mut self, id: u64) {
         if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
             if item.is_event {
                 return;
             }
-            item.planned_start = None;
+            item.sessions.clear();
         }
         if self.planner_selection == Some(id) {
             self.planner_selection = None;
+            self.planner_selected_session = None;
         }
         self.summarize_calendar();
         self.save_active_things();
@@ -1553,11 +1678,10 @@ impl TaskApp {
     /// so putting something on a day is one gesture and a few keystrokes rather
     /// than a trip through a modal's five date combo boxes.
     ///
-    /// `kind` decides which of the two time fields the gesture fills in, which
-    /// is the whole due-versus-planned distinction: see `planner::CreateKind`.
-    /// A `Deadline` claims no time, so `minutes` is ignored for it — the item
-    /// lands as a due marker and, having no slot, also appears in the tray under
-    /// "due", ready to be dragged onto an hour.
+    /// `kind` decides which time field the gesture fills, which is the whole
+    /// due-versus-planned distinction: a task gets its first session and no due
+    /// date of its own — the footer's due editor adds one when there is one to
+    /// add — while an event *is* its time, so the slot is its deadline.
     fn create_planned_item(&mut self, start_minutes: i32, minutes: u32, kind: planner::CreateKind) {
         let Some(when) = planner::resolve_on_day(self.planner_day, start_minutes) else {
             self.show_error("That time doesn't exist on this day (daylight saving).".to_string());
@@ -1565,25 +1689,31 @@ impl TaskApp {
         };
 
         let is_event = kind == planner::CreateKind::Event;
-        let is_deadline = kind == planner::CreateKind::Deadline;
 
         let id = self.next_item_id();
         self.push_active_thing(Active {
             id,
             name: String::new(),
-            // An event lives at its deadline and a deadline *is* a deadline; a
-            // planned task is placed by `planned_start` and starts life with no
-            // due date of its own.
-            deadline: (is_event || is_deadline).then_some(when),
-            planned_start: (!is_event && !is_deadline).then_some(when),
-            duration_minutes: (!is_deadline).then_some(minutes),
-            importance: (!is_event).then_some(PLANNER_NEW_TASK_IMPORTANCE),
-            time_importance: None,
+            deadline: is_event.then_some(when),
+            sessions: if is_event {
+                Vec::new()
+            } else {
+                vec![Session { start: when, minutes }]
+            },
+            planned_start: None,
+            // The dragged-out length doubles as the first estimate.
+            duration_minutes: Some(minutes),
+            // A task born on the timeline is undated, and undated tasks carry a
+            // horizon, not a severity — it gets one the moment the due editor
+            // gives it a deadline.
+            importance: None,
+            time_importance: (!is_event).then_some(PLANNER_NEW_TASK_HORIZON),
             is_event,
             created: Local::now(),
         });
 
         self.planner_selection = Some(id);
+        self.planner_selected_session = (!is_event).then_some(0);
         self.begin_planner_naming(id);
     }
 
@@ -1596,8 +1726,8 @@ impl TaskApp {
             return;
         }
         self.planner_quick_add_input.clear();
-        // Normal urgency: the same default the New Task dialog offers for a task
-        // with no deadline, so where a task was typed doesn't change what it is.
+        // The middle horizon — "within a week" — matching the New Task dialog's
+        // default, so where a task was typed doesn't change what it is.
         self.add_active_thing(name, None, None, false, Some(1));
     }
 
@@ -1690,7 +1820,19 @@ impl TaskApp {
                 self.planner_footer(ui);
             });
 
-        self.handle_planner_keys(ctx);
+        // Checked *before* the due editor runs: when Enter confirms it, the
+        // editor clears its own flag mid-frame, and the shortcut handler below
+        // would then read the very same Enter as the rename shortcut — the
+        // dialog's keystroke must never leak into the planner it was typed
+        // over.
+        let due_editor_owned_this_frame = self.planner_due_edit.is_some();
+
+        // Drawn after the planner so it stacks on top of it.
+        self.show_due_editor(ctx);
+
+        if !due_editor_owned_this_frame {
+            self.handle_planner_keys(ctx);
+        }
 
         // A drag released outside the timeline (or outside the window entirely)
         // must not leave a gesture stuck to the pointer.
@@ -1710,6 +1852,13 @@ impl TaskApp {
         // Something is stacked on top of the planner — a confirmation, an error,
         // the settings window. The keys belong to it, not to the day underneath.
         if self.modal_over_planner() {
+            return;
+        }
+
+        // The due editor is a mode of its own: it answers Enter/Escape itself
+        // (see `show_due_editor`), and stepping the day underneath it with the
+        // arrow keys would be edited-task roulette.
+        if self.planner_due_edit.is_some() {
             return;
         }
 
@@ -1757,7 +1906,12 @@ impl TaskApp {
             self.begin_planner_naming(id);
         }
         if unplan {
-            self.unplan_item(id);
+            // The same adaptive un-book as the footer's button: the clicked
+            // block if one is selected, the whole plan otherwise.
+            match self.planner_selected_session {
+                Some(index) => self.remove_session(id, index),
+                None => self.unplan_item(id),
+            }
         }
         if delete {
             // Through the same confirmation the buttons raise: a keystroke is
@@ -1855,14 +2009,14 @@ impl TaskApp {
 
                 ui.add_space(18.0);
 
-                // Deadline last: it is the exception, and reading right-to-left
-                // the two planning kinds come first.
-                ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Deadline, RichText::new("Deadline").size(PLANNER_META_SIZE))
-                    .on_hover_text("A due time on this day, with no time set aside for it yet");
+                // Right-to-left, so Task reads first. There used to be a third
+                // kind here, Deadline; the footer's due editor made a due time
+                // an attribute you set rather than a thing you draw, and the
+                // mode went with it.
                 ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Event, RichText::new("Event").size(PLANNER_META_SIZE))
                     .on_hover_text("Something that happens at this time");
                 ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Task, RichText::new("Task").size(PLANNER_META_SIZE))
-                    .on_hover_text("Time set aside to work on something — sets no deadline");
+                    .on_hover_text("Time set aside to work on something — set what it's due, if anything, from the bar below");
                 ui.label(
                     RichText::new("New:")
                         .size(PLANNER_META_SIZE)
@@ -1932,11 +2086,20 @@ impl TaskApp {
             return;
         };
 
+        // A stale session index (the block was just removed or the selection
+        // moved to another task) must not address someone else's session.
+        let session = self
+            .planner_selected_session
+            .filter(|index| *index < item.sessions.len());
+        self.planner_selected_session = session;
+
         // Copy out what the row needs; the closure below takes `&mut self`.
         let name = item.name.clone();
         let is_event = item.is_event;
         let is_planned = item.is_planned();
-        let anchor = item.planner_anchor();
+        let selected_session = session.and_then(|index| item.sessions.get(index).copied());
+        let block_count = item.sessions.len();
+        let planned_total = item.planned_minutes();
         let duration = item.duration_minutes;
         let deadline = item.deadline;
         let mut importance = item.importance;
@@ -1945,9 +2108,11 @@ impl TaskApp {
         let mut complete = false;
         let mut delete = false;
         let mut unplan = false;
+        let mut add_block = false;
         let mut rename = false;
         let mut changed = false;
         let mut new_duration: Option<u32> = None;
+        let mut open_due_editor = false;
 
         ui.horizontal(|ui| {
             ui.set_min_height(PLANNER_INSPECTOR_HEIGHT);
@@ -1959,49 +2124,68 @@ impl TaskApp {
             );
             ui.label(RichText::new(&name).size(PLANNER_NAME_SIZE).strong());
 
-            // For an unplanned task the anchor *is* its deadline, which the
-            // "due …" label below already spells out in full — printing the bare
-            // time first as well says nothing twice.
-            if let Some(anchor) = anchor.filter(|_| is_event || is_planned) {
-                let when = match duration {
-                    Some(minutes) => format!(
+            // When it runs: the clicked block's span, or the plan in aggregate.
+            if is_event {
+                if let Some(anchor) = item_anchor_text(deadline, duration) {
+                    ui.label(RichText::new(anchor).size(PLANNER_META_SIZE).color(Color32::from_white_alpha(180)));
+                }
+            } else if let Some(block) = selected_session {
+                ui.label(
+                    RichText::new(format!(
                         "{}–{}",
-                        anchor.format("%H:%M"),
-                        (anchor + Duration::minutes(minutes as i64)).format("%H:%M")
-                    ),
-                    None => anchor.format("%H:%M").to_string(),
-                };
-                ui.label(RichText::new(when).size(PLANNER_META_SIZE).color(Color32::from_white_alpha(180)));
+                        block.start.format("%H:%M"),
+                        (block.start + Duration::minutes(block.minutes as i64)).format("%H:%M")
+                    ))
+                    .size(PLANNER_META_SIZE)
+                    .color(Color32::from_white_alpha(180)),
+                );
+            } else if block_count > 1 {
+                ui.label(
+                    RichText::new(format!(
+                        "{} in {} blocks",
+                        planner::format_duration(planned_total),
+                        block_count
+                    ))
+                    .size(PLANNER_META_SIZE)
+                    .color(Color32::from_white_alpha(180)),
+                );
             }
 
-            // How long this takes, as a control rather than as text. Dragging a
-            // block's bottom edge sets the same field, but "two hours" is
-            // something you know about the work before you know where it goes —
-            // and on an unplanned task there is no edge to drag at all.
-            new_duration = self.planner_duration_picker(ui, duration, is_planned);
+            // How long this takes, as a control rather than as text. For a task
+            // it is the estimate — something you know about the work before you
+            // know where it goes; each block's own length is set by dragging its
+            // bottom edge. For an event it is simply the block's length.
+            new_duration = self.planner_duration_picker(ui, duration, is_event);
 
-            // Spell out the deadline for tasks. Blocking out time on the planner
-            // sets *when you will do it*, never a due date, and there is no way
-            // to tell that from the block alone — so say it here rather than
-            // leaving people to guess what a dragged-out task is due.
+            // The due editor's door. A planned slot is when you will *work on*
+            // this; the deadline is when it is *owed* — and it is finally an
+            // attribute you set, not a thing you had to create. The absence of
+            // this one control is what used to force the create-a-deadline,
+            // unplan, replan dance.
             if !is_event {
-                let due = match deadline {
-                    Some(deadline) => format!("due {}", deadline.format("%a %d %b %H:%M")),
-                    None => "no deadline".to_string(),
+                let due_text = match deadline {
+                    Some(deadline) => format!("due {} ▾", deadline.format("%a %d %b %H:%M")),
+                    None => "no deadline ▾".to_string(),
                 };
-                ui.label(
-                    RichText::new(due)
+                let due_button = Button::new(
+                    RichText::new(due_text)
                         .size(PLANNER_META_SIZE)
                         .color(if deadline.is_some() {
-                            Color32::from_white_alpha(190)
+                            Color32::from_white_alpha(220)
                         } else {
-                            Color32::from_white_alpha(120)
+                            Color32::from_white_alpha(130)
                         }),
-                )
-                .on_hover_text(
-                    "A planned slot is when you will work on this; a deadline is when it is due. \
-                     Dragging on the timeline sets the slot and leaves the deadline alone.",
                 );
+                if ui
+                    .add(due_button)
+                    .on_hover_text(
+                        "When this is owed — separate from when you plan to work on it. \
+                         Click to set, change, or clear.",
+                    )
+                    .clicked()
+                {
+                    open_due_editor = true;
+                }
             }
 
             if ui
@@ -2012,30 +2196,18 @@ impl TaskApp {
                 rename = true;
             }
 
-            // Events take their colour from being events (palette index 5) and
-            // are ordered by time, so importance would mean nothing for them.
+            // The one knob a task's ranking asks for — and which question it is
+            // depends on whether the task is dated. With a deadline, timing
+            // comes from the date and the knob is *severity*: how bad is
+            // missing it. Without one, the knob is the *horizon*: roughly how
+            // soon this should happen. (Events take their colour from being
+            // events and are ordered by time; neither question applies.)
             if !is_event {
                 ui.add_space(10.0);
-                if let Some(level) = time_importance.as_mut() {
-                    ui.label(RichText::new("Urgency:").size(PLANNER_META_SIZE));
-                    ComboBox::from_id_salt("planner_urgency")
-                        .selected_text(
-                            RichText::new(URGENCY[(*level as usize).min(URGENCY.len() - 1)])
-                                .size(PLANNER_META_SIZE),
-                        )
-                        .show_ui(ui, |ui| {
-                            for (index, label) in URGENCY.iter().enumerate() {
-                                if ui
-                                    .selectable_value(level, index as u8, RichText::new(*label).size(PLANNER_META_SIZE))
-                                    .clicked()
-                                {
-                                    changed = true;
-                                }
-                            }
-                        });
-                } else {
+                if deadline.is_some() {
                     let level = importance.get_or_insert(PLANNER_NEW_TASK_IMPORTANCE);
-                    ui.label(RichText::new("Importance:").size(PLANNER_META_SIZE));
+                    ui.label(RichText::new("Severity:").size(PLANNER_META_SIZE))
+                        .on_hover_text("How bad is missing the deadline?");
                     ComboBox::from_id_salt("planner_importance")
                         .selected_text(
                             RichText::new(IMPORTANCE[(*level as usize).min(IMPORTANCE.len() - 1)])
@@ -2045,6 +2217,29 @@ impl TaskApp {
                             for (index, label) in IMPORTANCE.iter().enumerate() {
                                 if ui
                                     .selectable_value(level, index as u8, RichText::new(*label).size(PLANNER_META_SIZE))
+                                    .clicked()
+                                {
+                                    changed = true;
+                                }
+                            }
+                        });
+                } else {
+                    let level = time_importance.get_or_insert(PLANNER_NEW_TASK_HORIZON);
+                    ui.label(RichText::new("Horizon:").size(PLANNER_META_SIZE))
+                        .on_hover_text("Roughly how soon should this happen?");
+                    ComboBox::from_id_salt("planner_horizon")
+                        .selected_text(
+                            RichText::new(HORIZON[(*level as usize).min(HORIZON.len() - 1)])
+                                .size(PLANNER_META_SIZE),
+                        )
+                        .show_ui(ui, |ui| {
+                            for index in HORIZON_DISPLAY_ORDER {
+                                if ui
+                                    .selectable_value(
+                                        level,
+                                        index,
+                                        RichText::new(HORIZON[index as usize]).size(PLANNER_META_SIZE),
+                                    )
                                     .clicked()
                                 {
                                     changed = true;
@@ -2066,14 +2261,29 @@ impl TaskApp {
                 if ui.button(RichText::new("✓ Complete").size(PLANNER_META_SIZE)).clicked() {
                     complete = true;
                 }
+                // One un-book button that names what it will actually do: the
+                // clicked block when one is selected, the whole plan otherwise.
+                if !is_event && is_planned {
+                    let (label, hover) = if session.is_some() {
+                        ("↩ Remove block", "Free this block; the time goes back onto the card  (U)")
+                    } else {
+                        ("↩ Unplan", "Free every block, keeping the task, its deadline and its estimate  (U)")
+                    };
+                    if ui
+                        .button(RichText::new(label).size(PLANNER_META_SIZE))
+                        .on_hover_text(hover)
+                        .clicked()
+                    {
+                        unplan = true;
+                    }
+                }
                 if !is_event
-                    && is_planned
                     && ui
-                        .button(RichText::new("↩ Unplan").size(PLANNER_META_SIZE))
-                        .on_hover_text("Back to the tray, keeping the task, its deadline and its estimate  (U)")
+                        .button(RichText::new("＋ Block").size(PLANNER_META_SIZE))
+                        .on_hover_text("Book another block of time for this task on the shown day")
                         .clicked()
                 {
-                    unplan = true;
+                    add_block = true;
                 }
             });
         });
@@ -2092,11 +2302,20 @@ impl TaskApp {
             self.summarize_calendar();
             self.save_active_things();
         }
+        if open_due_editor {
+            self.open_due_editor(id);
+        }
         if rename {
             self.begin_planner_naming(id);
         }
         if unplan {
-            self.unplan_item(id);
+            match session {
+                Some(index) => self.remove_session(id, index),
+                None => self.unplan_item(id),
+            }
+        }
+        if add_block {
+            self.add_block_on_shown_day(id);
         }
         if complete {
             self.confirm_complete_task = Some(id);
@@ -2111,16 +2330,15 @@ impl TaskApp {
     /// The "how long does this take" picker, returning a new length when the
     /// user chose one.
     ///
-    /// `planned` only changes what it is called. On a block it is the length of
-    /// the block; on something still in the tray it is an estimate, which is the
-    /// same field either way (`Active::duration_minutes`) and survives planning
-    /// and unplanning. That is the point: how long the physics homework takes is
-    /// a fact about the homework, not about the slot you eventually give it.
-    fn planner_duration_picker(&self, ui: &mut Ui, current: Option<u32>, planned: bool) -> Option<u32> {
+    /// For an event it is the block's length ("for"). For a task it is the
+    /// **estimate** ("takes"), which is a fact about the work, not about any
+    /// slot — each block's own length is set by dragging its bottom edge, and
+    /// the tray card is worth the un-booked remainder of this number.
+    fn planner_duration_picker(&self, ui: &mut Ui, current: Option<u32>, is_event: bool) -> Option<u32> {
         let mut chosen = None;
 
         ui.label(
-            RichText::new(if planned { "for" } else { "takes" })
+            RichText::new(if is_event { "for" } else { "takes" })
                 .size(PLANNER_FINE_SIZE)
                 .color(Color32::from_white_alpha(140)),
         );
@@ -2145,21 +2363,24 @@ impl TaskApp {
                 }
             })
             .response
-            .on_hover_text(if planned {
-                "How long this block runs. The same as dragging its bottom edge."
+            .on_hover_text(if is_event {
+                "How long this event runs. The same as dragging its bottom edge."
             } else {
-                "How long you think this takes. Drag it onto the timeline and it lands that long."
+                "How long you think this takes, in total. The tray card is worth whatever \
+                 of it isn't booked into blocks yet."
             });
 
         chosen
     }
 
-    /// Set how long an item takes, from the footer's picker.
+    /// Set how long an item takes, from the footer's picker: an event's block
+    /// length, or a task's total estimate.
     ///
-    /// Legal-block clamping is the timeline's job everywhere else, so it is done
-    /// here too: a length chosen for a block that would then run past midnight
-    /// pulls the block back rather than being silently shortened, exactly as
-    /// dragging its edge would.
+    /// For an event, legal-block clamping is the timeline's job everywhere
+    /// else, so it is done here too: a length that would run the block past
+    /// midnight pulls the start back rather than being silently shortened,
+    /// exactly as dragging its edge would. A task's estimate is not a block, so
+    /// there is nothing to clamp against the day.
     fn set_item_duration(&mut self, id: u64, minutes: u32) {
         let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
             return;
@@ -2167,22 +2388,48 @@ impl TaskApp {
 
         item.duration_minutes = Some(minutes.max(planner::MIN_BLOCK_MINUTES));
 
-        // Re-seat the block if the new length would push it out of its day.
-        if let Some(anchor) = item.planner_anchor().filter(|_| item.is_planned()) {
-            let start = anchor.hour() as i32 * 60 + anchor.minute() as i32;
-            let (start, length) = planner::clamp_block(start as f32, minutes as f32);
-            item.duration_minutes = Some(length);
-            if let Some(when) = planner::resolve_on_day(anchor.date_naive(), start) {
-                if item.is_event {
+        if item.is_event {
+            if let Some(anchor) = item.deadline {
+                let start = anchor.hour() as i32 * 60 + anchor.minute() as i32;
+                let (start, length) = planner::clamp_block(start as f32, minutes as f32);
+                item.duration_minutes = Some(length);
+                if let Some(when) = planner::resolve_on_day(anchor.date_naive(), start) {
                     item.deadline = Some(when);
-                } else {
-                    item.planned_start = Some(when);
                 }
             }
         }
 
         self.summarize_calendar();
         self.save_active_things();
+    }
+
+    /// Book another block for a task on the shown day, from the footer's
+    /// ＋ Block button.
+    ///
+    /// It goes after the last block already on the day — or at the default
+    /// morning hour on an empty one — for the task's remaining estimate, and
+    /// lands selected, ready to be dragged where it belongs. This button exists
+    /// so "split it over two days" never needs the card to leave the tray and
+    /// come back.
+    fn add_block_on_shown_day(&mut self, id: u64) {
+        let day_end = planner::DAY_MINUTES - planner::DEFAULT_BLOCK_MINUTES as i32;
+        let start = self
+            .planner_entries()
+            .iter()
+            .map(|entry| entry.placement.end())
+            .max()
+            .unwrap_or((PLANNER_DEFAULT_SCROLL_HOUR * 60.0) as i32)
+            .clamp(0, day_end);
+
+        let minutes = self
+            .active_things
+            .iter()
+            .find(|item| item.id == id)
+            .map(planner::drop_length_for)
+            .unwrap_or(planner::DEFAULT_BLOCK_MINUTES);
+
+        let (start, minutes) = planner::clamp_block(start as f32, minutes as f32);
+        self.add_session(id, start, minutes);
     }
 
     /// The footer with nothing selected: what the timeline responds to.
@@ -2194,7 +2441,6 @@ impl TaskApp {
         let kind = match self.planner_create_kind {
             planner::CreateKind::Task => "a task to work on",
             planner::CreateKind::Event => "an event",
-            planner::CreateKind::Deadline => "a due time",
         };
 
         ui.horizontal(|ui| {
@@ -2203,12 +2449,128 @@ impl TaskApp {
             ui.label(
                 RichText::new(format!(
                     "Drag on the timeline to add {kind}  ·  double-click for a quick one  ·  \
-                     drag a card in from the left to give it a slot  ·  click anything to edit it"
+                     drag a card in from the left to book its time  ·  click anything to edit it"
                 ))
                 .size(PLANNER_META_SIZE)
                 .color(Color32::from_white_alpha(130)),
             );
         });
+    }
+
+    /// Open the footer's due editor on `id`, seeding the shared date inputs
+    /// from the task's current deadline — or, for a task without one, from the
+    /// day being planned at the end of the working day. The seed is a
+    /// suggestion in the editor, not a change to the task; nothing is written
+    /// until **Set**.
+    fn open_due_editor(&mut self, id: u64) {
+        let deadline = self
+            .active_things
+            .iter()
+            .find(|item| item.id == id)
+            .and_then(|item| item.deadline);
+
+        match deadline {
+            Some(deadline) => {
+                self.year_input = deadline.year();
+                self.month_input = deadline.month() as i32;
+                self.day_input = deadline.day() as i32;
+                self.hour_input = deadline.hour() as i32;
+                self.minute_input = deadline.minute() as i32;
+            }
+            None => {
+                self.year_input = self.planner_day.year();
+                self.month_input = self.planner_day.month() as i32;
+                self.day_input = self.planner_day.day() as i32;
+                self.hour_input = 17;
+                self.minute_input = 0;
+            }
+        }
+        self.planner_due_edit = Some(id);
+    }
+
+    /// The due editor: a small modal over the planner that sets, changes, or
+    /// clears the selected task's deadline.
+    ///
+    /// This is the verb the old model was missing. A due date used to be fixed
+    /// at creation — the only way to "due Friday, worked on Tuesday" was to
+    /// *create* the task through a deadline gesture on Friday and then plan it
+    /// from the tray, and there was no way at all to change a date later. Now
+    /// it is an attribute of the task, edited where the task is.
+    fn show_due_editor(&mut self, ctx: &Context) {
+        let Some(id) = self.planner_due_edit else { return };
+        let Some(name) = self
+            .active_things
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.name.clone())
+        else {
+            // The task vanished under the editor (completed or deleted).
+            self.planner_due_edit = None;
+            return;
+        };
+
+        let mut set = false;
+        let mut clear = false;
+        let mut cancel = false;
+
+        egui::Window::new("due_editor")
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!("When is \"{name}\" due?")).size(PLANNER_NAME_SIZE));
+                ui.label(
+                    RichText::new("The deadline is when it is owed — planned blocks say when you'll work on it.")
+                        .size(PLANNER_FINE_SIZE)
+                        .color(Color32::from_white_alpha(140)),
+                );
+                ui.add_space(8.0);
+                self.display_date_entering(ui);
+                ui.add_space(10.0);
+
+                let (accepted, dismissed) = confirmation_keys(ui.ctx());
+                ui.horizontal(|ui| {
+                    if ui.add(Button::new("Set").min_size(CONFIRM_BUTTON)).clicked() || accepted {
+                        set = true;
+                    }
+                    if ui
+                        .add(Button::new("No deadline").min_size(CONFIRM_BUTTON))
+                        .on_hover_text("Clear the deadline; the task keeps its horizon instead")
+                        .clicked()
+                    {
+                        clear = true;
+                    }
+                    if ui.add(Button::new("Cancel").min_size(CONFIRM_BUTTON)).clicked() || dismissed {
+                        cancel = true;
+                    }
+                    confirmation_key_hint(ui);
+                });
+            });
+
+        if set {
+            match utilities::parse_time_input(
+                self.day_input,
+                self.month_input,
+                self.year_input,
+                self.hour_input,
+                self.minute_input,
+            ) {
+                Ok(date) => {
+                    self.set_item_deadline(id, Some(date));
+                    self.planner_due_edit = None;
+                }
+                Err(_) => self.show_error("Problem with date".to_string()),
+            }
+        }
+        if clear {
+            self.set_item_deadline(id, None);
+            self.planner_due_edit = None;
+        }
+        if cancel {
+            self.planner_due_edit = None;
+        }
     }
 
     /// The tray: every task with no time set aside for it, in two groups.
@@ -2334,12 +2696,23 @@ impl TaskApp {
                 ui.set_width(PLANNER_TRAY_WIDTH - 40.0);
                 ui.label(RichText::new(&card.name).size(PLANNER_NAME_SIZE));
 
-                // Second line: how long it takes, then when it is owed. The
-                // estimate is shown here because it is what the card will be
-                // worth when dropped — a "2h" card lands as a two-hour block.
+                // Second line: how long it takes — and how much of that is
+                // already booked, because the card is worth the *difference*
+                // when dropped: a "2h · 1h booked" card lands the missing hour.
+                // Then when it is owed.
                 let mut meta = Vec::new();
-                if let Some(minutes) = card.duration {
-                    meta.push(format!("takes {}", planner::format_duration(minutes)));
+                match (card.duration, card.planned) {
+                    (Some(estimate), 0) => {
+                        meta.push(format!("takes {}", planner::format_duration(estimate)));
+                    }
+                    (Some(estimate), booked) => {
+                        meta.push(format!(
+                            "takes {} · {} booked",
+                            planner::format_duration(estimate),
+                            planner::format_duration(booked.min(estimate))
+                        ));
+                    }
+                    (None, _) => {}
                 }
                 let overdue = card.deadline.is_some_and(|deadline| deadline < now);
                 if let Some(deadline) = card.deadline {
@@ -2368,9 +2741,10 @@ impl TaskApp {
             self.planner_drag = Some(PlannerDrag::FromBacklog { id: card.id });
         }
         // Selecting from the tray puts the footer's controls — complete, delete,
-        // importance, rename — on a task that has no block to click yet.
+        // due date, estimate, rename — on a task that has no block to click yet.
         if response.clicked() {
             self.planner_selection = Some(card.id);
+            self.planner_selected_session = None;
         }
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -2410,33 +2784,53 @@ impl TaskApp {
             // neighbours re-flow around the block being dragged as it moves.
             let pointer = ui.input(|i| i.pointer.interact_pos());
             let mut entries = self.planner_entries();
-            let preview = self
-                .planner_drag
-                .clone()
-                .and_then(|drag| self.planner_drag_preview_for(&drag, pointer, &geometry));
-            if let Some((id, start, minutes)) = preview {
-                match entries.iter_mut().find(|e| e.id == id) {
-                    Some(entry) => entry.placement = planner::Placement::Block { start, minutes },
-                    // A brand-new item (create drag) has no entry yet. What it
-                    // will look like is the create kind's business: a deadline
-                    // previews as the due marker it is about to become, not as a
-                    // block it will never be.
-                    None => entries.push(PlannerEntry {
-                        id,
-                        name: String::new(),
-                        color_id: self.planner_new_item_color(),
-                        placement: self.planner_create_kind.preview_placement(start, minutes),
-                    }),
+            if let Some(drag) = self.planner_drag.clone() {
+                if let Some((start, minutes)) = self.planner_drag_preview_for(&drag, pointer, &geometry) {
+                    match drag.target() {
+                        // Moving or resizing an existing block: re-place that
+                        // block, addressed by (task, session) so a task's other
+                        // blocks stay put.
+                        Some((id, session)) => {
+                            if let Some(entry) = entries
+                                .iter_mut()
+                                .find(|e| e.id == id && e.session == session && matches!(e.placement, planner::Placement::Block { .. }))
+                            {
+                                entry.placement = planner::Placement::Block { start, minutes };
+                            }
+                        }
+                        // A brand-new block — a create drag, or a tray card
+                        // being dropped. It has no entry yet, so push a
+                        // preview one; a dropped card previews in the task's
+                        // own name and colour.
+                        None => {
+                            let (name, color_id) = match &drag {
+                                PlannerDrag::FromBacklog { id } => self
+                                    .active_things
+                                    .iter()
+                                    .find(|item| item.id == *id)
+                                    .map(|item| (item.name.clone(), item.calendar_item_color()))
+                                    .unwrap_or_default(),
+                                _ => (String::new(), self.planner_new_item_color()),
+                            };
+                            entries.push(PlannerEntry {
+                                id: u64::MAX,
+                                session: None,
+                                name,
+                                color_id,
+                                placement: planner::Placement::Block { start, minutes },
+                            });
+                        }
+                    }
                 }
             }
 
             let placements: Vec<_> = entries.iter().map(|e| e.placement).collect();
             let lanes = planner::lay_out(&placements);
 
-            let block_rects: Vec<(u64, Rect)> = entries
+            let block_rects: Vec<Rect> = entries
                 .iter()
                 .zip(lanes.iter())
-                .map(|(entry, lane)| (entry.id, planner_entry_rect(entry.placement, *lane, lane_area, &geometry)))
+                .map(|(entry, lane)| planner_entry_rect(entry.placement, *lane, lane_area, &geometry))
                 .collect();
 
             // Interactions are registered *before* anything is drawn on top of
@@ -2446,7 +2840,7 @@ impl TaskApp {
             // covering it.
             self.handle_planner_gestures(ui, &background, &block_rects, &entries, pointer, &geometry, lane_area);
 
-            for (entry, (_, block_rect)) in entries.iter().zip(block_rects.iter()) {
+            for (entry, block_rect) in entries.iter().zip(block_rects.iter()) {
                 self.paint_planner_entry(ui, entry, *block_rect);
             }
         });
@@ -2519,7 +2913,7 @@ impl TaskApp {
     fn planner_new_item_color(&self) -> usize {
         match self.planner_create_kind {
             planner::CreateKind::Event => 5,
-            _ => PLANNER_NEW_TASK_IMPORTANCE as usize,
+            planner::CreateKind::Task => PLANNER_NEW_TASK_HORIZON as usize,
         }
     }
 
@@ -2544,7 +2938,14 @@ impl TaskApp {
     fn paint_planner_entry(&mut self, ui: &mut Ui, entry: &PlannerEntry, rect: Rect) {
         let palette = self.active_colorscheme[entry.color_id.min(5)];
         let accent = self.planner_accent(entry.color_id);
-        let selected = self.planner_selection == Some(entry.id);
+        // The strong highlight follows the *clicked block*: a task planned
+        // twice on one day lights up only the session the footer's controls
+        // would act on. Its sibling blocks and its due marker still read as
+        // selected, one notch quieter.
+        let selected = self.planner_selection == Some(entry.id)
+            && (self.planner_selected_session.is_none()
+                || self.planner_selected_session == entry.session
+                || entry.session.is_none());
         let naming = self.planner_naming == Some(entry.id);
 
         // Text is clipped to the item it belongs to. An item only gets a share of
@@ -2708,7 +3109,7 @@ impl TaskApp {
         &mut self,
         ui: &mut Ui,
         background: &egui::Response,
-        block_rects: &[(u64, Rect)],
+        block_rects: &[Rect],
         entries: &[PlannerEntry],
         pointer: Option<Pos2>,
         geometry: &planner::TimelineGeometry,
@@ -2716,22 +3117,26 @@ impl TaskApp {
     ) {
         // --- start a gesture -------------------------------------------------
         if self.planner_drag.is_none() {
-            for (entry, (id, rect)) in entries.iter().zip(block_rects.iter()) {
+            for (entry, rect) in entries.iter().zip(block_rects.iter()) {
                 // The block being named has a text field inside it. These
                 // interaction rects are registered after the field is drawn, so
                 // they sit on top of it and would swallow every click meant for
                 // the cursor — leave the block alone until the title is done.
-                if self.planner_naming == Some(*id) {
+                if self.planner_naming == Some(entry.id) {
                     continue;
                 }
+                // Every interaction id carries the session, so a task planned
+                // twice on one day is two independently grabbable blocks.
+                let widget_key = (entry.id, entry.session);
 
                 let planner::Placement::Block { start, minutes } = entry.placement else {
                     // Due markers are not draggable: a deadline is a fact about
-                    // the task, not a plan, and moving it here would silently
-                    // rewrite it. Click still selects.
-                    let response = ui.interact(*rect, egui::Id::new(("planner_marker", *id)), egui::Sense::click());
+                    // the task, and rewriting it belongs to the footer's due
+                    // editor, deliberately. Click still selects.
+                    let response = ui.interact(*rect, egui::Id::new(("planner_marker", widget_key)), egui::Sense::click());
                     if response.clicked() {
-                        self.planner_selection = Some(*id);
+                        self.planner_selection = Some(entry.id);
+                        self.planner_selected_session = None;
                     }
                     continue;
                 };
@@ -2739,19 +3144,18 @@ impl TaskApp {
                 // Body first, resize handle second. The handle sits *inside* the
                 // body's rect, and egui gives a click to the most recently added
                 // widget under the pointer — so registering the handle first, as
-                // this did, made it unreachable: every press on it was a press
-                // on the body, and pulling the bottom edge moved the whole block
-                // instead of lengthening it. Order is the whole fix; the handle
-                // being thin only made it harder to notice.
+                // this once did, made it unreachable: every press on it was a
+                // press on the body. When two interaction rects overlap, the one
+                // that must win goes last.
                 let body_response =
-                    ui.interact(*rect, egui::Id::new(("planner_block", *id)), egui::Sense::click_and_drag());
+                    ui.interact(*rect, egui::Id::new(("planner_block", widget_key)), egui::Sense::click_and_drag());
 
                 let handle = Rect::from_min_max(
                     pos2(rect.left(), rect.bottom() - PLANNER_RESIZE_HANDLE),
                     rect.max,
                 );
                 let handle_response =
-                    ui.interact(handle, egui::Id::new(("planner_resize", *id)), egui::Sense::click_and_drag());
+                    ui.interact(handle, egui::Id::new(("planner_resize", widget_key)), egui::Sense::click_and_drag());
 
                 if handle_response.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
@@ -2759,39 +3163,49 @@ impl TaskApp {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
 
+                let select = |app: &mut Self| {
+                    app.planner_selection = Some(entry.id);
+                    app.planner_selected_session = entry.session;
+                };
+
                 if handle_response.drag_started() {
-                    self.planner_drag = Some(PlannerDrag::Resize { id: *id, start });
-                    self.planner_selection = Some(*id);
+                    self.planner_drag = Some(PlannerDrag::Resize {
+                        id: entry.id,
+                        session: entry.session,
+                        start,
+                    });
+                    select(self);
                     continue;
                 }
                 // A click on the handle that never became a drag is still a
                 // click on the block: selecting by aiming slightly low should
                 // not be a way to select nothing.
-                if handle_response.clicked() {
-                    self.planner_selection = Some(*id);
-                }
-
-                if body_response.clicked() {
-                    self.planner_selection = Some(*id);
+                if handle_response.clicked() || body_response.clicked() {
+                    select(self);
                 }
                 if body_response.double_clicked() {
-                    self.planner_selection = Some(*id);
-                    self.begin_planner_naming(*id);
+                    select(self);
+                    self.begin_planner_naming(entry.id);
                 }
                 if body_response.drag_started() {
                     let grab = pointer
                         .map(|p| (geometry.minutes_at(p.y) - start as f32).round() as i32)
                         .unwrap_or(0)
                         .clamp(0, minutes as i32);
-                    self.planner_drag = Some(PlannerDrag::Move { id: *id, grab_offset: grab, minutes });
-                    self.planner_selection = Some(*id);
+                    self.planner_drag = Some(PlannerDrag::Move {
+                        id: entry.id,
+                        session: entry.session,
+                        grab_offset: grab,
+                        minutes,
+                    });
+                    select(self);
                 }
             }
 
             // Empty timeline: pressing and pulling blocks out new time.
             if self.planner_drag.is_none() && background.drag_started() {
                 if let Some(pos) = pointer {
-                    let on_a_block = block_rects.iter().any(|(_, rect)| rect.contains(pos));
+                    let on_a_block = block_rects.iter().any(|rect| rect.contains(pos));
                     if !on_a_block && pos.x >= lane_area.left() {
                         self.commit_planner_naming();
                         self.planner_drag = Some(PlannerDrag::Create {
@@ -2804,9 +3218,10 @@ impl TaskApp {
             // A click on bare timeline clears the selection and any title edit.
             if background.clicked() {
                 if let Some(pos) = pointer {
-                    if !block_rects.iter().any(|(_, rect)| rect.contains(pos)) {
+                    if !block_rects.iter().any(|rect| rect.contains(pos)) {
                         self.commit_planner_naming();
                         self.planner_selection = None;
+                        self.planner_selected_session = None;
                     }
                 }
             }
@@ -2818,7 +3233,7 @@ impl TaskApp {
             // selection above; creating sets it again.)
             if background.double_clicked() {
                 if let Some(pos) = pointer {
-                    let on_a_block = block_rects.iter().any(|(_, rect)| rect.contains(pos));
+                    let on_a_block = block_rects.iter().any(|rect| rect.contains(pos));
                     if !on_a_block && pos.x >= lane_area.left() {
                         let start = planner::snap(geometry.minutes_at(pos.y));
                         let kind = self.planner_create_kind;
@@ -2834,10 +3249,9 @@ impl TaskApp {
             return;
         }
         let Some(drag) = self.planner_drag.take() else { return };
-        let Some(preview) = self.planner_drag_preview_for(&drag, pointer, geometry) else {
+        let Some((start, minutes)) = self.planner_drag_preview_for(&drag, pointer, geometry) else {
             return;
         };
-        let (_, start, minutes) = preview;
 
         // Dropping outside the lanes (on the hour gutter, or off the window) is
         // a cancel, not a plan at 00:00.
@@ -2852,25 +3266,28 @@ impl TaskApp {
                     self.create_planned_item(start, minutes, kind);
                 }
             }
-            PlannerDrag::Move { id, .. } | PlannerDrag::Resize { id, .. } => {
-                self.plan_item(id, start, minutes);
+            PlannerDrag::Move { id, session, .. } | PlannerDrag::Resize { id, session, .. } => {
+                self.plan_item(id, session, start, minutes);
             }
             PlannerDrag::FromBacklog { id } => {
                 if dropped_in_lanes {
-                    self.plan_item(id, start, minutes);
+                    // A drop from the tray *adds* a session — the card may
+                    // already have time booked elsewhere.
+                    self.add_session(id, start, minutes);
                     self.planner_selection = Some(id);
                 }
             }
         }
     }
 
-    /// Where the in-flight gesture is currently placing a block, as
-    /// `(id, start, minutes)`.
+    /// Where the in-flight gesture currently puts its block, as
+    /// `(start, minutes)`; which block that is, the gesture itself knows
+    /// (`Drag::target`, or a new pending one).
     ///
     /// The arithmetic lives in `planner::preview`, which is unit-tested; this
     /// only supplies the two things it can't know: the pointer's position in
-    /// minutes, and the length to give a tray card being dropped (how long the
-    /// task says it takes, else the default).
+    /// minutes, and the length to give a tray card being dropped (the task's
+    /// unplanned remainder, else the default).
     ///
     /// Taking the gesture as an argument rather than reading `self.planner_drag`
     /// lets the commit path call this *after* `take()`ing the gesture, so the
@@ -2881,34 +3298,15 @@ impl TaskApp {
         drag: &PlannerDrag,
         pointer: Option<Pos2>,
         geometry: &planner::TimelineGeometry,
-    ) -> Option<(u64, i32, u32)> {
+    ) -> Option<(i32, u32)> {
         let minutes_at_pointer = geometry.minutes_at(pointer?.y);
 
-        // A deadline claims no time, so the span a create drag pulled out means
-        // nothing to it — only where the pointer ended up. Pulling from 09:00
-        // down to 11:00 to set one plainly means 11:00, so the moment follows
-        // the pointer rather than the drag's earlier end.
-        if let PlannerDrag::Create { .. } = drag {
-            if self.planner_create_kind.is_marker() {
-                return Some((
-                    planner::PENDING_ID,
-                    planner::snap(minutes_at_pointer),
-                    planner::DEFAULT_BLOCK_MINUTES,
-                ));
-            }
-        }
-
-        // A card dropped out of the tray lands at the length the *task* says it
-        // takes. This used to read the length off the entry already on this
-        // day's timeline, which only exists when the task happens to be due
-        // today — so an estimate set anywhere else was thrown away and every
-        // drop was the default half-hour.
         let default_minutes = match drag {
             PlannerDrag::FromBacklog { id } => self
                 .active_things
                 .iter()
                 .find(|item| item.id == *id)
-                .map(planner::default_length_for)
+                .map(planner::drop_length_for)
                 .unwrap_or(planner::DEFAULT_BLOCK_MINUTES),
             _ => planner::DEFAULT_BLOCK_MINUTES,
         };
@@ -3640,10 +4038,14 @@ impl TaskApp {
 
                         ui.checkbox(&mut self.use_date_for_addable, "Has deadline");
 
+                        // The one knob, and which question it asks depends on
+                        // the checkbox above: dated tasks rank by severity
+                        // (how bad is missing the date), undated ones by
+                        // horizon (roughly how soon it should happen).
                         if self.use_date_for_addable {
-                            ui.label("Importance:");
+                            ui.label("Severity:");
                             ComboBox::from_id_salt("importance combo")
-                                .selected_text(IMPORTANCE[self.task_importance_input as usize])
+                                .selected_text(IMPORTANCE[(self.task_importance_input as usize).min(IMPORTANCE.len() - 1)])
                                 .show_ui(ui, |ui| {
                                     for (i, importance) in IMPORTANCE.iter().enumerate() {
                                         ui.selectable_value(
@@ -3657,15 +4059,15 @@ impl TaskApp {
                             ui.label("Date:");
                             self.display_date_entering(ui);
                         } else {
-                            ui.label("Urgency:");
+                            ui.label("Horizon:");
                             ComboBox::from_id_salt("urgency combo")
-                                .selected_text(URGENCY[self.time_importance_input as usize])
+                                .selected_text(HORIZON[(self.time_importance_input as usize).min(HORIZON.len() - 1)])
                                 .show_ui(ui, |ui| {
-                                    for (i, urgency) in URGENCY.iter().enumerate() {
+                                    for i in HORIZON_DISPLAY_ORDER {
                                         ui.selectable_value(
                                             &mut self.time_importance_input,
-                                            i as u8,
-                                            urgency.to_string(),
+                                            i,
+                                            HORIZON[i as usize].to_string(),
                                         );
                                     }
                                 });

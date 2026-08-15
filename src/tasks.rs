@@ -4,6 +4,19 @@ use rev_lines::RevLines;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
+/// One planned block of work: when it starts, and for how long.
+///
+/// A task owns a *list* of these, because "when will I do it" is not always one
+/// answer — two hours of homework due Friday may be an hour on Tuesday and an
+/// hour on Thursday. The task itself stays whole: sessions are reserved time,
+/// not sub-tasks, so there is still one record and one ✓, and completing the
+/// task simply releases them all.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct Session {
+    pub start: DateTime<Local>,
+    pub minutes: u32,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Active {
     /// Stable identity for the item. Unlike `name` (which is cosmetic and may
@@ -18,30 +31,39 @@ pub struct Active {
     pub created: DateTime<Local>,
     pub deadline: Option<DateTime<Local>>,
     pub is_event: bool,
-    /// When the user set aside time to **work on** this item, as opposed to
-    /// `deadline`, which is when it is **due**. Those are genuinely different
-    /// facts — a report due Friday can be written on Tuesday morning — so the
-    /// planner gets its own field rather than overloading the deadline and
-    /// changing what the task list and calendar mean.
+    /// The time set aside to **work on** this task, as opposed to `deadline`,
+    /// which is when it is **due**. Those are genuinely different facts — a
+    /// report due Friday can be written on Tuesday morning — and they can
+    /// differ more than once: the same report may be worked on Tuesday *and*
+    /// Wednesday. So a task carries a list of sessions rather than one slot.
     ///
     /// Only tasks use this. An event's `deadline` already *is* when it happens,
-    /// so events are planned by moving their deadline.
+    /// so events are planned by moving that, and their length lives in
+    /// `duration_minutes`.
     ///
-    /// `#[serde(default)]`: absent in pre-planner save files, and serde_json
-    /// ignores unknown fields, so saves round-trip through either version.
+    /// `#[serde(default)]`: absent in older save files, and serde_json ignores
+    /// unknown fields, so saves round-trip through older builds (which simply
+    /// don't see the plans).
+    #[serde(default)]
+    pub sessions: Vec<Session>,
+    /// **Legacy.** The single planned slot from before tasks could carry more
+    /// than one. Read so old saves load; `migrate_legacy_plans` folds it into
+    /// `sessions` at startup and it is `None` from then on. Nothing else may
+    /// read or write it.
     #[serde(default)]
     pub planned_start: Option<DateTime<Local>>,
     /// How long this takes, in minutes.
     ///
-    /// For an item with a slot it is the length of the block. For one still in
-    /// the planner's tray it is an **estimate** — "the physics homework takes
-    /// two hours" is a fact about the task, not about any particular slot, and
-    /// it survives being planned and unplanned. `planner::default_length_for`
-    /// is what spends it: dragging an estimated task onto the timeline lands a
-    /// block of that length rather than the default half-hour.
+    /// For an event, the length of its block. For a **task**, an *estimate* —
+    /// "the physics homework takes two hours" is a fact about the task, not
+    /// about any particular slot, so it lives here rather than on a session,
+    /// and it survives planning and unplanning. The planner spends it twice:
+    /// dragging the task out of the tray lands a block of the *remaining*
+    /// unplanned time (`Active::remaining_minutes`), and the tray card shows
+    /// how much of the estimate is still unplaced.
     ///
     /// `None` means no extent and no estimate: an event not yet given a length,
-    /// or a task nobody has sized. See `planner::Placement`.
+    /// or a task nobody has sized.
     #[serde(default)]
     pub duration_minutes: Option<u32>,
 }
@@ -89,12 +111,39 @@ const WEIGHT_BY_IMPORTANCE: [f32; 5] = [1.0, 2.0, 4.0, 8.0, 16.0];
 /// dominance too.
 const LEAD_DAYS_BY_IMPORTANCE: [f32; 5] = [0.5, 1.0, 2.0, 4.0, 8.0];
 
-/// How much each urgency level counts for, indexed by `Active::time_importance`.
-const WEIGHT_BY_URGENCY: [f32; 3] = [1.0, 2.0, 4.0];
+/* ── The horizon: an undated task's whole input ──────────────────────────
+ *
+ * A dated task asks two questions: when is it due (the deadline), and how bad
+ * is missing that (the 5-level importance — severity). An undated task asks
+ * only one: *roughly how soon should this happen?* "Book a doctor's
+ * appointment" has no due date and no meaningful severity ranking; what its
+ * owner actually knows is "within a week or so". That answer is the horizon,
+ * and it drives both how fast the task ripens and how much it weighs once
+ * ripe.
+ *
+ * The horizon is stored in `Active::time_importance`, and the first three
+ * indices are **load-compatible** with the old 3-level "urgency" scale (same
+ * weights: 1, 2, 4), so old saves mean today what they meant then. That is why
+ * the arrays are ordered month → week → days with "whenever" appended at
+ * index 3, even though the UI presents them soonest-first: the index order is
+ * a serialization fact, the display order a presentation one.
+ */
 
-/// How long an undated task takes to ripen: it reaches half its weight this
-/// long after being created, and approaches full weight from there.
-const RIPEN_DAYS_BY_URGENCY: [f32; 3] = [30.0, 10.0, 3.0];
+/// How much a ripened task of each horizon counts for, indexed by
+/// `Active::time_importance`: within a month / a week / days / whenever.
+///
+/// "Whenever" weighs half of the lowest dated tier — a parking-lot idea should
+/// eventually surface, but never by out-arguing anything with a real claim.
+const WEIGHT_BY_HORIZON: [f32; 4] = [1.0, 2.0, 4.0, 0.5];
+
+/// How long a task of each horizon takes to ripen: it reaches half its weight
+/// this long after being created, and approaches full weight from there. The
+/// horizon *is* this number, worn openly — "within a week" ripens over ten
+/// days.
+const RIPEN_DAYS_BY_HORIZON: [f32; 4] = [30.0, 10.0, 3.0, 90.0];
+
+/// Index of the "whenever" horizon: the appended parking-lot tier.
+pub const HORIZON_WHENEVER: u8 = 3;
 
 /// How far ahead of a *planned* slot a task starts to feel pressing. Short by
 /// design: a plan says "do it at this time", so it should climb into view over
@@ -175,12 +224,22 @@ impl Active {
     /// The score without the tie-break jitter — the part that is a pure
     /// function of the task and the time, and so the part worth testing.
     fn base_score(&self, time_now: DateTime<Local>) -> f32 {
-        // Pressure from a planned slot, if the task has one. Capped at 1.0: a
-        // plan that has come and gone is a plan you didn't keep, which is not
-        // the same thing as a missed deadline and shouldn't escalate like one.
-        let planned_pressure = self.planned_start.map(|start| {
-            deadline_pressure(duration_in_days(start - time_now), PLANNED_LEAD_DAYS).min(1.0)
-        });
+        // Pressure from planned sessions, if the task has any. The *most
+        // pressing* session decides: with work booked for this afternoon and
+        // more for Thursday, this afternoon is what matters now. Capped at
+        // 1.0: a session that has come and gone is a plan you didn't keep,
+        // which is not the same thing as a missed deadline and shouldn't
+        // escalate like one.
+        let planned_pressure = self
+            .sessions
+            .iter()
+            .map(|session| {
+                deadline_pressure(duration_in_days(session.start - time_now), PLANNED_LEAD_DAYS)
+                    .min(1.0)
+            })
+            .fold(None, |best: Option<f32>, pressure| {
+                Some(best.map_or(pressure, |b| b.max(pressure)))
+            });
 
         // A deadline is the strongest thing a task can tell us, so it decides
         // the model whenever there is one. An importance is used if set, and
@@ -201,27 +260,27 @@ impl Active {
         let age_days = duration_in_days(time_now - self.created);
         let weight = match (self.importance, self.time_importance) {
             (Some(importance), _) => weight_for(&WEIGHT_BY_IMPORTANCE, importance),
-            (None, Some(urgency)) => weight_for(&WEIGHT_BY_URGENCY, urgency),
-            (None, None) if self.planned_start.is_some() => {
+            (None, Some(horizon)) => weight_for(&WEIGHT_BY_HORIZON, horizon),
+            (None, None) if !self.sessions.is_empty() => {
                 weight_for(&WEIGHT_BY_IMPORTANCE, ASSUMED_IMPORTANCE)
             }
             (None, None) => return MALFORMED_SCORE,
         };
 
-        // Undated but planned: the slot is the only timing the task has, so it
-        // drives the pressure. Without this a task blocked out for this
+        // Undated but planned: the sessions are the only timing the task has,
+        // so they drive the pressure. Without this a task blocked out for this
         // afternoon scored as if it were brand new — bottom of the list, on the
-        // very day you set time aside for it.
+        // very day time was set aside for it.
         if let Some(pressure) = planned_pressure {
             return weight * pressure;
         }
 
-        // Undated and unplanned: ripen with age, at the rate the urgency asks
-        // for, or the middle rate for a task that only carries an importance
-        // (a shape the UI doesn't produce, but a reasonable one).
+        // Undated and unplanned: ripen with age, over the horizon the user
+        // gave it, or the middle rate for a task that only carries an
+        // importance (a shape the UI doesn't produce, but a reasonable one).
         let ripen_days = match self.time_importance {
-            Some(urgency) => weight_for(&RIPEN_DAYS_BY_URGENCY, urgency),
-            None => RIPEN_DAYS_BY_URGENCY[1],
+            Some(horizon) => weight_for(&RIPEN_DAYS_BY_HORIZON, horizon),
+            None => RIPEN_DAYS_BY_HORIZON[1],
         };
         weight * ripeness(age_days, ripen_days)
     }
@@ -278,34 +337,79 @@ impl Active {
             5
         } else if let Some(importance) = self.importance {
             importance as usize
-        } else if let Some(time_importance) = self.time_importance {
-            time_importance as usize
+        } else if let Some(horizon) = self.time_importance {
+            // The horizon indices are load-compatible with the old 3-level
+            // urgency scale, which forced "whenever" to take index 3 — but as
+            // the *least* pressing tier it wears the calmest colour, not the
+            // "highly important" one that index would buy it.
+            if horizon >= HORIZON_WHENEVER { 0 } else { horizon as usize }
         } else {
             0
         }
     }
 
     /// The instant this item occupies on the planner's timeline, if any: an
-    /// event sits at its `deadline`, a task at the time set aside for it.
-    /// `None` for an unplanned, deadline-less task — those live in the planner's
-    /// backlog tray instead.
+    /// event sits at its `deadline`, a task at the earliest time set aside for
+    /// it (falling back to its deadline). `None` for an unplanned,
+    /// deadline-less task — those live in the planner's tray instead.
     pub fn planner_anchor(&self) -> Option<DateTime<Local>> {
         if self.is_event {
             self.deadline
         } else {
-            self.planned_start.or(self.deadline)
+            self.sessions.iter().map(|s| s.start).min().or(self.deadline)
         }
     }
 
     /// True when the item has been given time on the planner, as opposed to
     /// merely having a due date. Events count as planned once they have a
-    /// length; a task counts once it has a `planned_start`.
+    /// length; a task counts once it has at least one session.
     pub fn is_planned(&self) -> bool {
         if self.is_event {
             self.deadline.is_some() && self.duration_minutes.is_some()
         } else {
-            self.planned_start.is_some()
+            !self.sessions.is_empty()
         }
+    }
+
+    /// Total minutes of this task's planned sessions, across all days.
+    pub fn planned_minutes(&self) -> u32 {
+        self.sessions.iter().map(|s| s.minutes).sum()
+    }
+
+    /// Minutes of the estimate not yet covered by sessions, if the task has an
+    /// estimate. `Some(0)` is meaningful: fully planned.
+    pub fn remaining_minutes(&self) -> Option<u32> {
+        self.duration_minutes
+            .map(|estimate| estimate.saturating_sub(self.planned_minutes()))
+    }
+
+    /// True while the task still belongs in the planner's tray: it has no
+    /// sessions at all, or its estimate isn't yet covered by the sessions it
+    /// has. A 2-hour task with one hour booked is still half a card.
+    pub fn wants_planning(&self) -> bool {
+        if self.is_event {
+            return false;
+        }
+        self.sessions.is_empty() || self.remaining_minutes().is_some_and(|left| left > 0)
+    }
+}
+
+/// Fold the pre-sessions single slot (`planned_start` + `duration_minutes`)
+/// into a session, once, at load. Nothing else reads `planned_start`; after
+/// this it stays `None` and the next save writes the migrated shape.
+pub fn migrate_legacy_plans(items: &mut [Active]) {
+    for item in items.iter_mut() {
+        let Some(start) = item.planned_start.take() else { continue };
+        if item.is_event || !item.sessions.is_empty() {
+            continue;
+        }
+        let minutes = item
+            .duration_minutes
+            .unwrap_or(crate::planner::DEFAULT_BLOCK_MINUTES)
+            .max(crate::planner::MIN_BLOCK_MINUTES);
+        item.sessions.push(Session { start, minutes });
+        // The block's length was also the best available estimate, and
+        // `duration_minutes` keeps meaning that for tasks.
     }
 }
 
@@ -484,6 +588,7 @@ mod tests {
             created: Local.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
             deadline,
             is_event,
+            sessions: Vec::new(),
             planned_start: None,
             duration_minutes: None,
         }
@@ -496,8 +601,11 @@ mod tests {
         assert_eq!(active(None, None, true, dl).calendar_item_color(), 5);
         // Deadline tasks map by importance.
         assert_eq!(active(Some(3), None, false, dl).calendar_item_color(), 3);
-        // Urgency tasks map by time_importance.
+        // Horizon tasks map by time_importance.
         assert_eq!(active(None, Some(2), false, None).calendar_item_color(), 2);
+        // "Whenever" is index 3 for save-compatibility but wears the calmest
+        // colour, not the highly-important one.
+        assert_eq!(active(None, Some(HORIZON_WHENEVER), false, None).calendar_item_color(), 0);
         // Nothing set falls back to 0.
         assert_eq!(active(None, None, false, None).calendar_item_color(), 0);
     }
@@ -510,11 +618,19 @@ mod tests {
         }
     }
 
-    /// An undated task of the given urgency, created `age` days ago.
-    fn undated(urgency: u8, age: f64, now: DateTime<Local>) -> Active {
+    /// An undated task of the given horizon, created `age` days ago.
+    fn undated(horizon: u8, age: f64, now: DateTime<Local>) -> Active {
         Active {
             created: now - Duration::minutes((age * 1440.0) as i64),
-            ..active(None, Some(urgency), false, None)
+            ..active(None, Some(horizon), false, None)
+        }
+    }
+
+    /// A task with one planned session starting at `start`.
+    fn planned(importance: Option<u8>, start: DateTime<Local>, minutes: u32) -> Active {
+        Active {
+            sessions: vec![Session { start, minutes }],
+            ..active(importance, None, false, None)
         }
     }
 
@@ -616,13 +732,13 @@ mod tests {
     #[test]
     fn undated_tasks_ripen_towards_their_weight_and_stop() {
         let now = noon();
-        for urgency in 0..=2u8 {
-            let weight = WEIGHT_BY_URGENCY[urgency as usize];
-            let fresh = undated(urgency, 0.0, now).base_score(now);
-            let ripening = undated(urgency, RIPEN_DAYS_BY_URGENCY[urgency as usize] as f64, now).base_score(now);
-            let ancient = undated(urgency, 3650.0, now).base_score(now);
+        for horizon in 0..=3u8 {
+            let weight = WEIGHT_BY_HORIZON[horizon as usize];
+            let fresh = undated(horizon, 0.0, now).base_score(now);
+            let ripening = undated(horizon, RIPEN_DAYS_BY_HORIZON[horizon as usize] as f64, now).base_score(now);
+            let ancient = undated(horizon, 3650.0, now).base_score(now);
 
-            assert!(fresh < ripening && ripening < ancient, "urgency {urgency} should ripen");
+            assert!(fresh < ripening && ripening < ancient, "horizon {horizon} should ripen");
             // Half weight at the ripening time, by construction.
             assert!((ripening - weight / 2.0).abs() < 0.01, "{ripening} != half of {weight}");
             // And never past its weight, however long it sits.
@@ -638,7 +754,7 @@ mod tests {
         // standing. (A *heavier* undated task outranking a trivial overdue one is
         // correct: that is what the weights are for.)
         let ripest = undated(2, 3650.0, now).base_score(now);
-        let ripest_weight = WEIGHT_BY_URGENCY[2];
+        let ripest_weight = WEIGHT_BY_HORIZON[2];
         for importance in 0..=4u8 {
             if WEIGHT_BY_IMPORTANCE[importance as usize] < ripest_weight {
                 continue;
@@ -669,10 +785,7 @@ mod tests {
         // is not a due date. Without the planned-slot term it scored purely on
         // age, so a task blocked out for this afternoon sat at the bottom of the
         // list on the very day time was set aside for it.
-        let planned_at = |hours_ahead: i64| Active {
-            planned_start: Some(now + Duration::hours(hours_ahead)),
-            ..active(Some(2), None, false, None)
-        };
+        let planned_at = |hours_ahead: i64| planned(Some(2), now + Duration::hours(hours_ahead), 60);
 
         let tomorrow = planned_at(24).base_score(now);
         let this_evening = planned_at(6).base_score(now);
@@ -685,10 +798,7 @@ mod tests {
     #[test]
     fn a_slipped_plan_does_not_escalate_like_a_missed_deadline() {
         let now = noon();
-        let slipped = |days_ago: i64| Active {
-            planned_start: Some(now - Duration::days(days_ago)),
-            ..active(Some(2), None, false, None)
-        };
+        let slipped = |days_ago: i64| planned(Some(2), now - Duration::days(days_ago), 60);
 
         // A plan you didn't keep tops out at the task's weight and stays there.
         // A missed *deadline* keeps climbing past it — the difference between
@@ -707,7 +817,7 @@ mod tests {
         // do it.
         let due_friday = dated(3, 3.0, now);
         let due_friday_planned_now = Active {
-            planned_start: Some(now + Duration::minutes(30)),
+            sessions: vec![Session { start: now + Duration::minutes(30), minutes: 60 }],
             ..due_friday.clone()
         };
         assert!(
@@ -718,7 +828,7 @@ mod tests {
         // But a plan never *lowers* a task: the deadline still applies if it is
         // the more pressing of the two.
         let due_today_planned_next_week = Active {
-            planned_start: Some(now + Duration::days(7)),
+            sessions: vec![Session { start: now + Duration::days(7), minutes: 60 }],
             ..dated(3, 0.0, now)
         };
         assert!(
@@ -732,10 +842,7 @@ mod tests {
         let now = noon();
         // Nothing but a slot: weight falls back to the middle of the scale
         // rather than the task being treated as corrupt.
-        let bare = Active {
-            planned_start: Some(now),
-            ..active(None, None, false, None)
-        };
+        let bare = planned(None, now, 60);
         let score = bare.base_score(now);
         assert!((score - WEIGHT_BY_IMPORTANCE[ASSUMED_IMPORTANCE as usize]).abs() < 0.001);
         assert!(score < MALFORMED_SCORE);
@@ -752,6 +859,101 @@ mod tests {
         };
         let middling = dated(ASSUMED_IMPORTANCE, 0.0, now).base_score(now);
         assert!((no_importance.base_score(now) - middling).abs() < 0.001);
+    }
+
+    #[test]
+    fn the_most_pressing_session_drives_planned_pressure() {
+        let now = noon();
+        // One session this afternoon, one next week: the afternoon one is what
+        // matters now, and adding a far-off second session must never *lower*
+        // the score below what the near one justifies.
+        let near_only = planned(Some(2), now + Duration::hours(2), 60);
+        let both = Active {
+            sessions: vec![
+                Session { start: now + Duration::hours(2), minutes: 60 },
+                Session { start: now + Duration::days(7), minutes: 60 },
+            ],
+            ..active(Some(2), None, false, None)
+        };
+        assert!((both.base_score(now) - near_only.base_score(now)).abs() < 0.001);
+    }
+
+    #[test]
+    fn whenever_surfaces_eventually_but_out_argues_nothing() {
+        let now = noon();
+        // The parking-lot tier still ripens...
+        let fresh = undated(HORIZON_WHENEVER, 0.0, now).base_score(now);
+        let old = undated(HORIZON_WHENEVER, 365.0, now).base_score(now);
+        assert!(fresh < old, "{fresh} !< {old}");
+        // ...but even fully ripe it stays under a ripened month-horizon task,
+        // let alone anything dated.
+        let month = undated(0, 365.0, now).base_score(now);
+        assert!(old < month, "{old} !< {month}");
+        assert!(old < dated(0, 0.0, now).base_score(now));
+    }
+
+    #[test]
+    fn sessions_report_planned_and_remaining_time() {
+        let now = noon();
+        let mut task = active(Some(2), None, false, None);
+        task.duration_minutes = Some(120);
+        assert_eq!(task.planned_minutes(), 0);
+        assert_eq!(task.remaining_minutes(), Some(120));
+        assert!(task.wants_planning(), "an unplanned estimated task is a tray card");
+
+        task.sessions.push(Session { start: now, minutes: 45 });
+        assert_eq!(task.planned_minutes(), 45);
+        assert_eq!(task.remaining_minutes(), Some(75));
+        assert!(task.wants_planning(), "45m of a 2h estimate planned: still half a card");
+
+        task.sessions.push(Session { start: now + Duration::days(1), minutes: 90 });
+        assert_eq!(task.remaining_minutes(), Some(0), "over-planning clamps to zero");
+        assert!(!task.wants_planning(), "estimate covered: the card is done");
+
+        // No estimate: one session is enough to leave the tray.
+        let mut unsized_task = active(Some(2), None, false, None);
+        assert!(unsized_task.wants_planning());
+        unsized_task.sessions.push(Session { start: now, minutes: 30 });
+        assert!(!unsized_task.wants_planning());
+        assert_eq!(unsized_task.remaining_minutes(), None);
+    }
+
+    #[test]
+    fn legacy_single_slots_migrate_into_sessions() {
+        let now = noon();
+        let mut items = vec![
+            // A pre-sessions planned task: slot + length.
+            Active {
+                planned_start: Some(now),
+                duration_minutes: Some(90),
+                ..active(Some(2), None, false, None)
+            },
+            // A pre-sessions planned task that somehow lost its length.
+            Active {
+                planned_start: Some(now),
+                ..active(Some(2), None, false, None)
+            },
+            // An event with a stray planned_start (hand-edited): dropped, an
+            // event's time is its deadline.
+            Active {
+                planned_start: Some(now),
+                ..active(None, None, true, Some(now))
+            },
+        ];
+        migrate_legacy_plans(&mut items);
+
+        assert_eq!(items[0].sessions, vec![Session { start: now, minutes: 90 }]);
+        assert_eq!(items[0].duration_minutes, Some(90), "the length stays as the estimate");
+        assert_eq!(items[1].sessions.len(), 1);
+        assert!(items[1].sessions[0].minutes >= crate::planner::MIN_BLOCK_MINUTES);
+        assert!(items[2].sessions.is_empty());
+        for item in &items {
+            assert_eq!(item.planned_start, None, "the legacy field is spent");
+        }
+
+        // Running the migration again must not duplicate anything.
+        migrate_legacy_plans(&mut items);
+        assert_eq!(items[0].sessions.len(), 1);
     }
 
     #[test]

@@ -36,20 +36,16 @@ pub const DEFAULT_BLOCK_MINUTES: u32 = 30;
 
 /// What a drag (or double-click) on empty timeline makes.
 ///
-/// The three options are exactly the three things a day can gain, and they are
-/// distinguished by *which* time field they fill in — which is the whole
-/// due-versus-planned distinction, expressed as a gesture:
+/// Two kinds, distinguished by which time field the gesture fills in: a `Task`
+/// gets a work session (a plan is not a due date, so its deadline is left
+/// empty), an `Event` gets its `deadline`, because an event's deadline *is*
+/// when it happens.
 ///
-/// | Kind | `deadline` | `planned_start` |
-/// |------|-----------|-----------------|
-/// | `Task` | untouched (a plan is not a due date) | the slot |
-/// | `Event` | the slot (an event's deadline *is* when it happens) | unused |
-/// | `Deadline` | the slot | none — nothing is set aside for it yet |
-///
-/// `Deadline` is what lets the planner say "this is *owed* at 17:00 today"
-/// without leaving the day. Before the planner absorbed the day popup that was
-/// the popup's `Task+` button, which took a trip through a modal with five date
-/// combo boxes to express what a drag already knows.
+/// There used to be a third kind, `Deadline`, which dropped a due marker with
+/// no session behind it. It existed because a deadline could only be *created*,
+/// never attached — with the footer's due editor able to put a deadline on any
+/// task, a due time is an attribute you set, not a thing you draw, and the mode
+/// went away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CreateKind {
     /// Time set aside to work on something. The default: the planner's job.
@@ -57,27 +53,6 @@ pub enum CreateKind {
     Task,
     /// Something that happens at a time.
     Event,
-    /// A due time, with no time set aside for it yet.
-    Deadline,
-}
-
-impl CreateKind {
-    /// True when this kind marks a point in the day rather than claiming a span
-    /// of it — so the create gesture's length is irrelevant and only where the
-    /// pointer ended up matters.
-    pub fn is_marker(self) -> bool {
-        matches!(self, Self::Deadline)
-    }
-
-    /// How a create gesture at `(start, minutes)` should be drawn while it is
-    /// still in flight. The preview goes through the same `Placement` the
-    /// committed item will produce, so what the pointer shows is what lands.
-    pub fn preview_placement(self, start: i32, minutes: u32) -> Placement {
-        match self {
-            Self::Deadline => Placement::Marker { at: start, due: true },
-            _ => Placement::Block { start, minutes },
-        }
-    }
 }
 
 /// Where an item sits on the timeline for a given day.
@@ -115,34 +90,65 @@ fn minutes_into_day(at: DateTime<Local>, day: NaiveDate) -> Option<i32> {
     (at.date_naive() == day).then(|| at.hour() as i32 * 60 + at.minute() as i32)
 }
 
-/// Where `item` belongs on `day`'s timeline, or `None` if it doesn't belong on
-/// that day at all.
+/// One thing an item puts on a day's timeline, with enough identity for the
+/// UI's gestures to say *which* thing they grabbed.
 ///
-/// A task with both a `planned_start` and a `deadline` legitimately produces a
-/// placement on **two** days — a block where it is worked on and a due marker
-/// where it is owed — so this is asked per-day rather than answered once.
-pub fn placement_for(item: &Active, day: NaiveDate) -> Option<Placement> {
+/// `session` is the index into the task's `sessions` when the placement is a
+/// planned work block; `None` for an event's block and for due markers, which
+/// are not sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DayPlacement {
+    pub session: Option<usize>,
+    pub placement: Placement,
+}
+
+/// Everything `item` puts on `day`'s timeline — possibly nothing, possibly
+/// several things.
+///
+/// A task legitimately shows up more than once: once per session that lands on
+/// this day (two hours of homework split across the morning and the evening is
+/// two blocks), plus a due marker on the day it is owed. The marker is shown
+/// even when a session shares its day — earlier versions suppressed it, but
+/// "worked on Friday morning, due Friday 17:00" is exactly the day where
+/// seeing the deadline next to the work matters most.
+pub fn placements_for(item: &Active, day: NaiveDate) -> Vec<DayPlacement> {
+    let mut placements = Vec::new();
+
     if item.is_event {
-        let at = minutes_into_day(item.deadline?, day)?;
-        return Some(match item.duration_minutes {
-            Some(minutes) => Placement::Block { start: at, minutes: minutes.max(MIN_BLOCK_MINUTES) },
-            None => Placement::Marker { at, due: false },
-        });
+        if let Some(at) = item.deadline.and_then(|deadline| minutes_into_day(deadline, day)) {
+            placements.push(DayPlacement {
+                session: None,
+                placement: match item.duration_minutes {
+                    Some(minutes) => {
+                        Placement::Block { start: at, minutes: minutes.max(MIN_BLOCK_MINUTES) }
+                    }
+                    None => Placement::Marker { at, due: false },
+                },
+            });
+        }
+        return placements;
     }
 
-    // A planned task shows as a block on the day it is worked on...
-    if let Some(planned) = item.planned_start {
-        if let Some(start) = minutes_into_day(planned, day) {
-            return Some(Placement::Block {
-                start,
-                minutes: item.duration_minutes.unwrap_or(DEFAULT_BLOCK_MINUTES).max(MIN_BLOCK_MINUTES),
+    for (index, session) in item.sessions.iter().enumerate() {
+        if let Some(start) = minutes_into_day(session.start, day) {
+            placements.push(DayPlacement {
+                session: Some(index),
+                placement: Placement::Block {
+                    start,
+                    minutes: session.minutes.max(MIN_BLOCK_MINUTES),
+                },
             });
         }
     }
 
-    // ...and as a due marker on the day it is owed, which may be a different day.
-    let due = minutes_into_day(item.deadline?, day)?;
-    Some(Placement::Marker { at: due, due: true })
+    if let Some(due) = item.deadline.and_then(|deadline| minutes_into_day(deadline, day)) {
+        placements.push(DayPlacement {
+            session: None,
+            placement: Placement::Marker { at: due, due: true },
+        });
+    }
+
+    placements
 }
 
 /// Vertical geometry of the timeline: where midnight sits and how tall an hour
@@ -253,44 +259,49 @@ pub enum Drag {
     /// press landed on; the block spans from there to the pointer, in either
     /// direction.
     Create { anchor: i32 },
-    /// Moving a block. `grab_offset` is how far into the block the press landed,
-    /// so it doesn't jump to centre itself under the pointer.
-    Move { id: u64, grab_offset: i32, minutes: u32 },
-    /// Dragging a block's bottom edge; `start` is held fixed.
-    Resize { id: u64, start: i32 },
-    /// Dragging a card out of the backlog. Nothing is committed until release.
+    /// Moving a block: session `session` of task `id`, or an event's block when
+    /// `session` is `None`. `grab_offset` is how far into the block the press
+    /// landed, so it doesn't jump to centre itself under the pointer.
+    Move { id: u64, session: Option<usize>, grab_offset: i32, minutes: u32 },
+    /// Dragging a block's bottom edge; `start` is held fixed. Same addressing
+    /// as [`Drag::Move`].
+    Resize { id: u64, session: Option<usize>, start: i32 },
+    /// Dragging a card out of the tray. On release this *adds* a session — the
+    /// task may already have others. Nothing is committed until release.
     FromBacklog { id: u64 },
 }
 
-/// Id reported for the block a [`Drag::Create`] is pulling out: it has no
-/// `Active` behind it until the pointer is released, but the preview still flows
-/// through the same layout as real blocks so neighbours move aside for it.
-pub const PENDING_ID: u64 = u64::MAX;
+impl Drag {
+    /// The existing block this gesture is moving or resizing, if it is one —
+    /// `(task id, session index)`. `Create` and `FromBacklog` make a *new*
+    /// block, so they address nothing yet.
+    pub fn target(&self) -> Option<(u64, Option<usize>)> {
+        match *self {
+            Self::Move { id, session, .. } | Self::Resize { id, session, .. } => {
+                Some((id, session))
+            }
+            Self::Create { .. } | Self::FromBacklog { .. } => None,
+        }
+    }
+}
 
-/// Where `drag` currently places a block, as `(id, start, minutes)`.
+/// Where `drag` currently puts its block, as `(start, minutes)`. Which block
+/// that is, the drag itself says (`Drag::target`, or a new pending block).
 ///
-/// `default_minutes` is the length to use for a backlog card being dropped —
-/// the caller resolves it from the item, since the gesture itself doesn't carry
-/// one. Both the live preview and the commit-on-release go through this, so what
-/// the user sees while dragging is exactly what gets saved.
-pub fn preview(drag: &Drag, minutes_at_pointer: f32, default_minutes: u32) -> (u64, i32, u32) {
+/// `default_minutes` is the length to use for a tray card being dropped — the
+/// caller resolves it from the item, since the gesture itself doesn't carry
+/// one. Both the live preview and the commit-on-release go through this, so
+/// what the user sees while dragging is exactly what gets saved.
+pub fn preview(drag: &Drag, minutes_at_pointer: f32, default_minutes: u32) -> (i32, u32) {
     match *drag {
-        Drag::Create { anchor } => {
-            let (start, minutes) = block_from_drag(anchor as f32, minutes_at_pointer);
-            (PENDING_ID, start, minutes)
+        Drag::Create { anchor } => block_from_drag(anchor as f32, minutes_at_pointer),
+        Drag::Move { grab_offset, minutes, .. } => {
+            clamp_block(minutes_at_pointer - grab_offset as f32, minutes as f32)
         }
-        Drag::Move { id, grab_offset, minutes } => {
-            let (start, minutes) = clamp_block(minutes_at_pointer - grab_offset as f32, minutes as f32);
-            (id, start, minutes)
+        Drag::Resize { start, .. } => {
+            clamp_block(start as f32, minutes_at_pointer - start as f32)
         }
-        Drag::Resize { id, start } => {
-            let (start, minutes) = clamp_block(start as f32, minutes_at_pointer - start as f32);
-            (id, start, minutes)
-        }
-        Drag::FromBacklog { id } => {
-            let (start, minutes) = clamp_block(minutes_at_pointer, default_minutes as f32);
-            (id, start, minutes)
-        }
+        Drag::FromBacklog { .. } => clamp_block(minutes_at_pointer, default_minutes as f32),
     }
 }
 
@@ -422,15 +433,19 @@ pub fn now_marker(day: NaiveDate, now: DateTime<Local>) -> Option<i32> {
     minutes_into_day(now, day)
 }
 
-/// How long a freshly planned item should run when the user didn't drag out a
-/// length: its own duration if it has one, else the default.
+/// How long a block dropped from the tray should run: the task's *unplanned
+/// remainder* when it has an estimate, else the default.
 ///
-/// This is what makes an estimate worth setting. "Physics homework takes two
-/// hours" is a fact about the task, not about the slot, so it lives on the task
-/// — and dragging it out of the tray then lands a two-hour block rather than the
-/// default half-hour to be resized by hand.
-pub fn default_length_for(item: &Active) -> u32 {
-    item.duration_minutes.unwrap_or(DEFAULT_BLOCK_MINUTES).max(MIN_BLOCK_MINUTES)
+/// This is what makes an estimate worth setting, twice over. "Physics homework
+/// takes two hours" lands a two-hour block rather than a default half-hour to
+/// be stretched by hand — and once an hour of it is booked, the next drop
+/// lands the remaining hour, so planning a task across days is just dragging
+/// the same card until it runs out.
+pub fn drop_length_for(item: &Active) -> u32 {
+    item.remaining_minutes()
+        .filter(|left| *left > 0)
+        .unwrap_or(DEFAULT_BLOCK_MINUTES)
+        .max(MIN_BLOCK_MINUTES)
 }
 
 /// The lengths the duration picker offers. Quarter-hours while the numbers are
@@ -507,6 +522,7 @@ pub fn relative_due(deadline: DateTime<Local>, now: DateTime<Local>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tasks::Session;
     use chrono::TimeZone;
 
     fn at(y: i32, m: u32, d: u32, hour: u32, minute: u32) -> DateTime<Local> {
@@ -517,7 +533,8 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 8, 14).unwrap()
     }
 
-    fn task(planned: Option<DateTime<Local>>, deadline: Option<DateTime<Local>>, minutes: Option<u32>) -> Active {
+    /// A task with `sessions` planned blocks, a `deadline`, and an estimate.
+    fn task(sessions: Vec<Session>, deadline: Option<DateTime<Local>>, minutes: Option<u32>) -> Active {
         Active {
             id: 1,
             importance: Some(2),
@@ -526,9 +543,14 @@ mod tests {
             created: at(2026, 8, 1, 9, 0),
             deadline,
             is_event: false,
-            planned_start: planned,
+            sessions,
+            planned_start: None,
             duration_minutes: minutes,
         }
+    }
+
+    fn session(start: DateTime<Local>, minutes: u32) -> Session {
+        Session { start, minutes }
     }
 
     fn event(deadline: DateTime<Local>, minutes: Option<u32>) -> Active {
@@ -540,6 +562,7 @@ mod tests {
             created: at(2026, 8, 1, 9, 0),
             deadline: Some(deadline),
             is_event: true,
+            sessions: Vec::new(),
             planned_start: None,
             duration_minutes: minutes,
         }
@@ -595,104 +618,142 @@ mod tests {
     }
 
     #[test]
-    fn placement_distinguishes_planned_work_from_a_due_date() {
+    fn placements_distinguish_planned_work_from_a_due_date() {
         let planned_day = day();
         let due_day = NaiveDate::from_ymd_opt(2026, 8, 16).unwrap();
 
         // Worked on Friday 09:00 for an hour, due Sunday 17:00.
         let item = task(
-            Some(at(2026, 8, 14, 9, 0)),
+            vec![session(at(2026, 8, 14, 9, 0), 60)],
             Some(at(2026, 8, 16, 17, 0)),
             Some(60),
         );
 
         assert_eq!(
-            placement_for(&item, planned_day),
-            Some(Placement::Block { start: 9 * 60, minutes: 60 }),
+            placements_for(&item, planned_day),
+            vec![DayPlacement { session: Some(0), placement: Placement::Block { start: 9 * 60, minutes: 60 } }],
             "the planned day shows the work block"
         );
         assert_eq!(
-            placement_for(&item, due_day),
-            Some(Placement::Marker { at: 17 * 60, due: true }),
+            placements_for(&item, due_day),
+            vec![DayPlacement { session: None, placement: Placement::Marker { at: 17 * 60, due: true } }],
             "the due day still shows the deadline"
         );
         assert_eq!(
-            placement_for(&item, NaiveDate::from_ymd_opt(2026, 8, 15).unwrap()),
-            None,
+            placements_for(&item, NaiveDate::from_ymd_opt(2026, 8, 15).unwrap()),
+            vec![],
             "an unrelated day shows nothing"
         );
+    }
+
+    #[test]
+    fn a_task_split_across_a_day_shows_every_session_and_its_deadline() {
+        // Two sessions on the same day the task is due: 09:00–10:00,
+        // 14:00–15:30, owed at 17:00. All three appear — the due marker is not
+        // suppressed by the work blocks, because seeing the deadline next to
+        // the work is the point of showing a day whole.
+        let item = task(
+            vec![
+                session(at(2026, 8, 14, 9, 0), 60),
+                session(at(2026, 8, 14, 14, 0), 90),
+            ],
+            Some(at(2026, 8, 14, 17, 0)),
+            Some(150),
+        );
+
+        let placements = placements_for(&item, day());
+        assert_eq!(placements.len(), 3, "{placements:?}");
+        assert_eq!(placements[0].session, Some(0));
+        assert_eq!(placements[1].session, Some(1));
+        assert_eq!(placements[1].placement, Placement::Block { start: 14 * 60, minutes: 90 });
+        assert_eq!(
+            placements[2],
+            DayPlacement { session: None, placement: Placement::Marker { at: 17 * 60, due: true } }
+        );
+
+        // A session on another day stays on that day.
+        let elsewhere = NaiveDate::from_ymd_opt(2026, 8, 13).unwrap();
+        assert_eq!(placements_for(&item, elsewhere), vec![]);
     }
 
     #[test]
     fn events_are_blocks_once_they_have_a_length() {
         let without = event(at(2026, 8, 14, 14, 30), None);
         assert_eq!(
-            placement_for(&without, day()),
-            Some(Placement::Marker { at: 14 * 60 + 30, due: false })
+            placements_for(&without, day()),
+            vec![DayPlacement { session: None, placement: Placement::Marker { at: 14 * 60 + 30, due: false } }]
         );
 
         let with = event(at(2026, 8, 14, 14, 30), Some(45));
         assert_eq!(
-            placement_for(&with, day()),
-            Some(Placement::Block { start: 14 * 60 + 30, minutes: 45 })
+            placements_for(&with, day()),
+            vec![DayPlacement { session: None, placement: Placement::Block { start: 14 * 60 + 30, minutes: 45 } }]
         );
     }
 
     #[test]
     fn unplanned_deadlineless_task_has_no_placement() {
-        assert_eq!(placement_for(&task(None, None, None), day()), None);
+        assert_eq!(placements_for(&task(vec![], None, None), day()), vec![]);
     }
 
     #[test]
     fn create_drag_previews_the_pulled_out_block() {
         // 09:00 anchor, pointer at 10:30.
-        assert_eq!(preview(&Drag::Create { anchor: 540 }, 630.0, 30), (PENDING_ID, 540, 90));
+        assert_eq!(preview(&Drag::Create { anchor: 540 }, 630.0, 30), (540, 90));
         // Pulling upwards builds the same block rather than an inverted one.
-        assert_eq!(preview(&Drag::Create { anchor: 630 }, 540.0, 30), (PENDING_ID, 540, 90));
+        assert_eq!(preview(&Drag::Create { anchor: 630 }, 540.0, 30), (540, 90));
         // A press that barely moves still yields a legal, minimum-length block.
-        assert_eq!(preview(&Drag::Create { anchor: 540 }, 542.0, 30), (PENDING_ID, 540, MIN_BLOCK_MINUTES));
+        assert_eq!(preview(&Drag::Create { anchor: 540 }, 542.0, 30), (540, MIN_BLOCK_MINUTES));
+        // A create addresses no existing block.
+        assert_eq!(Drag::Create { anchor: 540 }.target(), None);
     }
 
     #[test]
     fn move_drag_keeps_the_grab_point_under_the_pointer() {
         // Grabbed 30 minutes into a 60-minute block; pointer now at 14:00, so
         // the block's start should sit 30 minutes earlier, at 13:30.
-        let drag = Drag::Move { id: 7, grab_offset: 30, minutes: 60 };
-        assert_eq!(preview(&drag, 14.0 * 60.0, 30), (7, 13 * 60 + 30, 60));
+        let drag = Drag::Move { id: 7, session: Some(1), grab_offset: 30, minutes: 60 };
+        assert_eq!(preview(&drag, 14.0 * 60.0, 30), (13 * 60 + 30, 60));
         // Length is preserved by a move, not recomputed from the pointer.
-        let (_, _, minutes) = preview(&drag, 9.0 * 60.0, 30);
+        let (_, minutes) = preview(&drag, 9.0 * 60.0, 30);
         assert_eq!(minutes, 60);
+        // The gesture knows which block it holds: task 7's second session.
+        assert_eq!(drag.target(), Some((7, Some(1))));
     }
 
     #[test]
     fn move_drag_cannot_push_a_block_out_of_the_day() {
-        let drag = Drag::Move { id: 7, grab_offset: 0, minutes: 90 };
+        let drag = Drag::Move { id: 7, session: Some(0), grab_offset: 0, minutes: 90 };
         // Dragged past midnight: the block stops flush with the end of the day.
-        let (_, start, minutes) = preview(&drag, (DAY_MINUTES + 300) as f32, 30);
+        let (start, minutes) = preview(&drag, (DAY_MINUTES + 300) as f32, 30);
         assert_eq!((start, minutes), (DAY_MINUTES - 90, 90));
         // Dragged above midnight: it stops at 00:00.
-        let (_, start, _) = preview(&drag, -200.0, 30);
+        let (start, _) = preview(&drag, -200.0, 30);
         assert_eq!(start, 0);
     }
 
     #[test]
     fn resize_drag_holds_the_start_and_respects_the_minimum() {
-        let drag = Drag::Resize { id: 3, start: 600 };
+        // `session: None` addresses an event's block.
+        let drag = Drag::Resize { id: 3, session: None, start: 600 };
         // Pulled down to 11:45.
-        assert_eq!(preview(&drag, 11.0 * 60.0 + 45.0, 30), (3, 600, 105));
+        assert_eq!(preview(&drag, 11.0 * 60.0 + 45.0, 30), (600, 105));
         // Pulled up above its own start: collapses to the minimum, and the start
         // does not move.
-        assert_eq!(preview(&drag, 300.0, 30), (3, 600, MIN_BLOCK_MINUTES));
+        assert_eq!(preview(&drag, 300.0, 30), (600, MIN_BLOCK_MINUTES));
+        assert_eq!(drag.target(), Some((3, None)));
     }
 
     #[test]
     fn backlog_drop_uses_the_supplied_length_at_the_pointer() {
         let drag = Drag::FromBacklog { id: 12 };
-        assert_eq!(preview(&drag, 9.0 * 60.0 + 7.0, 45), (12, 540, 45));
+        assert_eq!(preview(&drag, 9.0 * 60.0 + 7.0, 45), (540, 45));
         // Dropped near midnight, it is pulled back to fit rather than truncated.
-        let (_, start, minutes) = preview(&drag, (DAY_MINUTES - 10) as f32, 60);
+        let (start, minutes) = preview(&drag, (DAY_MINUTES - 10) as f32, 60);
         assert_eq!(minutes, 60);
         assert_eq!(start, DAY_MINUTES - 60);
+        // A tray drop adds a new session; it addresses no existing block.
+        assert_eq!(drag.target(), None);
     }
 
     #[test]
@@ -796,25 +857,8 @@ mod tests {
     }
 
     #[test]
-    fn create_kind_decides_whether_the_gesture_claims_time() {
-        // A task or an event takes the span the user dragged out...
-        assert_eq!(
-            CreateKind::Task.preview_placement(540, 90),
-            Placement::Block { start: 540, minutes: 90 }
-        );
-        assert_eq!(
-            CreateKind::Event.preview_placement(540, 90),
-            Placement::Block { start: 540, minutes: 90 }
-        );
-        // ...a deadline marks a moment, so the length is discarded and the
-        // preview is the same due marker the committed task will draw.
-        assert_eq!(
-            CreateKind::Deadline.preview_placement(540, 90),
-            Placement::Marker { at: 540, due: true }
-        );
-        assert!(CreateKind::Deadline.is_marker());
-        assert!(!CreateKind::Task.is_marker());
-        // Planning is the planner's job, so a plain drag plans.
+    fn a_plain_drag_plans() {
+        // Planning is the planner's job, so the default create kind is a task.
         assert_eq!(CreateKind::default(), CreateKind::Task);
     }
 
@@ -832,15 +876,21 @@ mod tests {
     }
 
     #[test]
-    fn default_length_prefers_the_items_own_estimate() {
-        // "This takes two hours" is a fact about the task, so dropping it on the
-        // timeline lands two hours, not the default half-hour.
-        let estimated = task(None, None, Some(120));
-        assert_eq!(default_length_for(&estimated), 120);
+    fn drop_length_is_the_unplanned_remainder() {
+        // "This takes two hours" is a fact about the task, so dropping it on
+        // the timeline lands two hours, not the default half-hour.
+        let estimated = task(vec![], None, Some(120));
+        assert_eq!(drop_length_for(&estimated), 120);
+
+        // Half of it already booked: the next drop is the other half. This is
+        // what lets one card be dragged out day after day until it runs out.
+        let half_planned = task(vec![session(at(2026, 8, 13, 9, 0), 60)], None, Some(120));
+        assert_eq!(drop_length_for(&half_planned), 60);
+
         // With no estimate, the default.
-        assert_eq!(default_length_for(&task(None, None, None)), DEFAULT_BLOCK_MINUTES);
+        assert_eq!(drop_length_for(&task(vec![], None, None)), DEFAULT_BLOCK_MINUTES);
         // A nonsense estimate still yields a legal block.
-        assert_eq!(default_length_for(&task(None, None, Some(1))), MIN_BLOCK_MINUTES);
+        assert_eq!(drop_length_for(&task(vec![], None, Some(1))), MIN_BLOCK_MINUTES);
     }
 
     #[test]

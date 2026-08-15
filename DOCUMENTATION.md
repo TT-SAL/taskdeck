@@ -53,7 +53,7 @@ Top menu bar: **New Task**, **New Event**, **Planner**, **Archived**, **Settings
 timeline you block time out on, and a tray of everything still waiting for a slot.
 
 Additional features:
-- **Events vs Tasks:** events are pinned to a date/time; tasks may have a deadline+importance, or no deadline and an "urgency" (time-importance) that grows over time.
+- **Events vs Tasks:** events are pinned to a date/time; tasks are ranked either by a deadline plus a **severity** (how bad is missing it) or, with no deadline, by a **horizon** (roughly how soon it should happen) that ripens over time.
 - **Archive:** completed/deleted items are appended to a JSONL log and viewable with pagination ("Show more").
 - **Weather coordinate picker:** an interactive Blue-Marble world map with zoom/pan, click-to-pick, and ~200 labeled city markers.
 - **Color schemes:** user-editable 6-color palettes used to tint calendar items; palettes can be **auto-generated from the current background image** via k-means clustering in CIE-Lab space.
@@ -255,22 +255,28 @@ forecast is picked up.
 ### `Active` (`tasks.rs`) — a live task or event
 
 ```rust
+struct Session { start: DateTime<Local>, minutes: u32 }   // one planned block of work
+
 struct Active {
     id: u64,                      // stable identity; what delete/complete/lookup key on (see below)
-    importance: Option<u8>,       // 0..=4 ("Not"→"Lethally" important); Some only for deadline tasks
-    time_importance: Option<u8>,  // 0..=2 (urgency); Some only for deadline-less tasks
+    importance: Option<u8>,       // 0..=4 severity ("Not"→"Lethally" important); dated tasks
+    time_importance: Option<u8>,  // 0..=3 horizon (month/week/days/whenever); undated tasks
     name: String,                 // cosmetic only — may repeat and be edited freely
     created: DateTime<Local>,
-    deadline: Option<DateTime<Local>>,   // when it is DUE
+    deadline: Option<DateTime<Local>>,   // when it is DUE (tasks); when it HAPPENS (events)
     is_event: bool,               // events render with a distinct palette color (index 5)
-    planned_start: Option<DateTime<Local>>,  // when it will be WORKED ON (planner; tasks only)
-    duration_minutes: Option<u32>,           // how long that block runs
+    sessions: Vec<Session>,       // when it will be WORKED ON (planner; tasks only)
+    planned_start: Option<DateTime<Local>>,  // LEGACY single slot; folded into sessions at load
+    duration_minutes: Option<u32>,           // event: block length. task: total ESTIMATE
 }
 ```
 
-The last two are the day planner's, and are covered in §16 — including why "due" and "planned"
-are separate fields rather than one. Both are `#[serde(default)]`, so pre-planner save files
-load unchanged.
+`sessions` and `duration_minutes` are the day planner's, covered in §16 — including why "due"
+and "planned" are separate fields, and why a task carries a *list* of sessions rather than one
+slot. All planner fields are `#[serde(default)]`, so older save files load unchanged;
+`tasks::migrate_legacy_plans` runs at startup and folds a pre-sessions `planned_start` +
+`duration_minutes` pair into a single `Session` (the length also stays as the estimate, which is
+what it was in practice). The legacy field is `None` from then on and nothing else reads it.
 
 **Identity.** Items are keyed by `id`, not `name`: delete/complete/lookup and the calendar day
 popup all operate on the id, so duplicate or renamed names are harmless. `id` is a monotonic `u64`
@@ -280,11 +286,15 @@ backfilled at startup by `tasks::assign_missing_ids`, which preserves any existi
 `next_id` past the current maximum. New ids persist on the next save.
 
 Three valid shapes:
-| Kind | `is_event` | `importance` | `time_importance` | `deadline` |
+| Kind | `is_event` | `importance` (severity) | `time_importance` (horizon) | `deadline` |
 |------|-----------|--------------|-------------------|------------|
 | Event | true | None | None | **Some** |
-| Deadline task | false | Some | None | **Some** |
-| Urgency task | false | None | Some | None |
+| Dated task | false | Some | kept but dormant | **Some** |
+| Undated task | false | kept but dormant | Some | None |
+
+"Kept but dormant": the footer's due editor moves tasks between the two shapes at will, so both
+knobs may be present on one task — whichever matches the deadline's presence is live (§7.3), and
+the other is remembered for the day the deadline is added or cleared again.
 
 ### `InActive` (`tasks.rs`) — an archived item
 
@@ -317,11 +327,18 @@ comparable, a far-off deadline cannot drown out an imminent one, and nothing can
 
 ### 7.1 The two models
 
+The knob a task carries answers a different question depending on whether it is dated. With a
+deadline, timing comes from the date, and the knob is **severity**: how bad is missing it —
+paying the electric bill on time is lethally important, a piece of homework merely highly.
+Without one, there is nothing for a severity to rank against; what the user actually knows is
+*roughly how soon it should happen*, so the knob is a **horizon** — a soft timescale, stored in
+`time_importance` and worn openly as one ("within a week" ripens over ten days).
+
 | Kind | Pressure |
 |------|----------|
 | **Dated task** (`deadline` set) | `2^(-days_left / lead)` — halves for every `lead` days of remaining time, is exactly `1.0` **at** the deadline, and keeps doubling once overdue (`OVERDUE_DOUBLING_DAYS`, capped at `OVERDUE_PRESSURE_CAP`). |
-| **Undated task** (`time_importance`, no deadline) | `1 - 2^(-age / ripen)` — rises from 0 towards 1 as the task sits, reaching half at `ripen` days. It approaches the task's weight and stops, so an undated task can rise into view but never shouts down something that is actually due. |
-| **Planned task** (`planned_start` set, §16) | Same curve as a deadline but on the slot and with a short `PLANNED_LEAD_DAYS` (0.5), **capped at 1.0**. A plan says "do it at this time", so the task climbs over the hours before its slot; a plan that came and went is a plan you didn't keep, which is not a missed deadline and doesn't escalate like one. |
+| **Undated task** (`time_importance` horizon, no deadline) | `1 - 2^(-age / ripen)` — rises from 0 towards 1 as the task sits, reaching half at `ripen` days. It approaches the task's weight and stops, so an undated task can rise into view but never shouts down something that is actually due. |
+| **Planned task** (any `sessions`, §16) | Same curve as a deadline but on the *most pressing session* and with a short `PLANNED_LEAD_DAYS` (0.5), **capped at 1.0**. A plan says "do it at this time", so the task climbs over the hours before its slot — with work booked this afternoon and more on Thursday, this afternoon is what counts. A session that came and went is a plan you didn't keep, which is not a missed deadline and doesn't escalate like one. |
 
 Both are continuous and monotonically increasing with the passage of time, which is the property
 the list ordering rests on.
@@ -338,13 +355,22 @@ the list ordering rests on.
 
 | `time_importance` | Label | weight | ripen |
 |---|---|---|---|
-| 0 | Time-independence | 1 | 30 d |
-| 1 | Normal urgency | 2 | 10 d |
-| 2 | High urgency | 4 | 3 d |
+| 0 | Within a month | 1 | 30 d |
+| 1 | Within a week | 2 | 10 d |
+| 2 | Within days | 4 | 3 d |
+| 3 | Whenever | ½ | 90 d |
+
+The horizon's index order is a **serialization fact**: 0–2 are load-compatible with the old
+three-level "urgency" scale (identical weights and curves, new names), and "whenever" is
+appended at index 3 even though it is the slowest tier. `HORIZON_DISPLAY_ORDER` presents them
+soonest-first in every combo, and `calendar_item_color` maps index 3 to the calmest palette
+slot rather than the "highly important" one its index would buy. "Whenever" weighs half the
+lowest dated tier: a parking-lot idea should surface eventually, never by out-arguing anything
+with a real claim.
 
 Weights double per level, so **one step of importance is worth exactly one doubling of time
 pressure** — that is what makes the two commensurable. Lead times set how early a task starts to
-be felt, and with the weights they also bound how long importance out-argues urgency: a task
+be felt, and with the weights they also bound how long severity out-argues a horizon: a task
 out-ranks a trivial one sitting at *its own* deadline for `lead × log2(weight)` days — about a
 month at the top level. Lengthening a lead time lengthens that dominance too.
 
@@ -364,13 +390,14 @@ overdue reads as about as pressing as an important one due today — a nag, not 
 ### 7.3 Which model applies
 
 1. **A deadline decides**, whenever there is one — but pressure is the **greater** of the deadline's
-   and the planned slot's, so a task due Friday that you set aside Tuesday morning for rises on
+   and the sessions', so a task due Friday that you set aside Tuesday morning for rises on
    Tuesday morning: that is when you decided to do it. A plan never *lowers* a task.
-   `importance` is used if set and `ASSUMED_IMPORTANCE` (2) assumed otherwise — a shape the UI
-   can't produce but a hand-edited save can, and middling beats broken. A `time_importance`
-   alongside a deadline is ignored rather than given its own precedence rule.
-2. Else, if there is a **planned slot**, it supplies the pressure. The weight comes from
-   `importance`, else `time_importance`, else `ASSUMED_IMPORTANCE`.
+   `importance` is used if set and `ASSUMED_IMPORTANCE` (2) assumed otherwise — the due editor
+   seeds it when it dates a task, so the gap is only reachable from a hand-edited save, and
+   middling beats broken. A `time_importance` alongside a deadline is dormant (§6), not given
+   its own precedence rule.
+2. Else, if there are **sessions**, the most pressing one supplies the pressure. The weight comes
+   from `importance`, else `time_importance`, else `ASSUMED_IMPORTANCE`.
 3. Else **`time_importance`** → the ripening model.
 4. Else **`importance` with no deadline** → the ripening model at the middle rate, carrying the
    importance weight.
@@ -392,12 +419,12 @@ task per rebuild so the comparator stays consistent. (It once cast to `u16`, whi
 scores — `CODE_REVIEW.md` B3.)
 
 `Active::calendar_item_color()` maps an item to a palette index 0–5: events → 5, else
-`importance` → 0–4, else `time_importance` → 0–2, else 0.
+`importance` → 0–4, else `time_importance` → 0–2 (index 3, "whenever", wears 0), else 0.
 
-> **A plan changes *when* a task is pressing, never *how much* it matters.** `planned_start` feeds
-> pressure, never weight, and only ever raises a score (the deadline and the slot are combined with
-> `max`). Scheduling something cannot make it more important than the user said it was — but on the
-> afternoon you set aside for it, it will be at the top of the list, which is the point.
+> **A plan changes *when* a task is pressing, never *how much* it matters.** Sessions feed
+> pressure, never weight, and only ever raise a score (the deadline and the sessions are combined
+> with `max`). Scheduling something cannot make it more important than the user said it was — but
+> on the afternoon you set aside for it, it will be at the top of the list, which is the point.
 >
 > This matters most for a task dragged out on the planner: it has a slot and **no deadline**, so the
 > slot is the only timing it has. Without this term such a task scored purely on age and sat at the
@@ -574,7 +601,9 @@ visual language: a rounded "notch" around the day number, two-line wrapped item 
 | `display_archive_flag` | Show the Archive window (paginated). |
 | `planner_flag` + `planner_day` | Show the day planner, and which day it is on. The day is a date, not a calendar cell index, so the planner can step past the end of the calendar's range and a rebuild underneath it can't repoint it. |
 | `planner_drag` / `planner_selection` / `planner_naming` | In-flight timeline gesture, selected item, and the item whose title is being typed. |
-| `planner_create_kind` | What a drag or double-click on empty timeline makes: `Task`, `Event`, or `Deadline` (§16.3). |
+| `planner_selected_session` | Which of the selection's sessions was clicked, when a work block was — what the footer's per-block controls act on. |
+| `planner_due_edit` | Task whose deadline is open in the footer's due editor (§16.3.4). |
+| `planner_create_kind` | What a drag or double-click on empty timeline makes: `Task` or `Event` (§16.3). |
 | `planner_quick_add_input` | The tray's quick-add field. |
 | `settings_flag` | Show Settings. |
 | `color_picker_flag` / `edit_colorscheme_flag` / `rename_colorscheme_flag` | Color-scheme manager sub-modals. |
@@ -765,38 +794,45 @@ A calendar answers *when is this due*. A planner answers *when will I do it*. Th
 different facts about the same task — a report due Friday can be written on Tuesday morning —
 and conflating them is what makes most task apps annoying to plan with.
 
-So `Active` gained a second time field:
+So `Active` carries planning as its own fields:
 
 | Field | Meaning |
 |-------|---------|
-| `deadline` | when the item is **due** (unchanged; still what the calendar and the priority score use) |
-| `planned_start` | when the user set aside time to **work on** it |
-| `duration_minutes` | how long that block runs |
+| `deadline` | when the item is **due** (still what the calendar and the priority score use) — and, since the footer's due editor, an *editable attribute*: set, changed, or cleared on any task without recreating it |
+| `sessions` | the blocks of time set aside to **work on** it — a list, because "when will I do it" is not always one answer: two hours due Friday may be an hour on Tuesday and an hour on Thursday |
+| `duration_minutes` | how long the task **takes in total** — the estimate the tray spends (§16.3.2) |
 
-All three are `#[serde(default)]`, and `serde_json` ignores unknown fields, so save files
-round-trip through a pre-planner build unchanged.
+All are `#[serde(default)]`, and `serde_json` ignores unknown fields, so older save files load
+unchanged (`migrate_legacy_plans` folds the old single-slot shape into a session, §6).
 
 **Events are the exception.** An event's `deadline` *is* when it happens, so events are planned
-by moving that; `planned_start` stays `None` for them. `Active::planner_anchor` and
-`Active::is_planned` encapsulate that asymmetry so callers don't re-derive it.
+by moving that; `sessions` stays empty and `duration_minutes` is simply the block's length.
+`Active::planner_anchor` and `Active::is_planned` encapsulate that asymmetry so callers don't
+re-derive it.
 
-The visible consequence: a task planned for Tuesday and due Friday appears **twice in the
-week** — as a work block on Tuesday and as a due marker on Friday. That is the point, not a
-bug. `planner::placement_for` is asked per-day rather than answering once, which is what makes
-it possible.
+The visible consequence: a task planned for Tuesday and Thursday and due Friday appears **three
+times in the week** — a work block on each planned day and a due marker where it is owed. That
+is the point, not a bug. `planner::placements_for` is asked per-day and answers with a list,
+which is what makes it possible.
 
 ### 16.2 Placement
 
-`planner::Placement` is what an item looks like on a given day:
+`planner::placements_for(item, day)` returns everything an item puts on a day — each element a
+`DayPlacement { session: Option<usize>, placement }`, where `session` is the index of the
+task's session the block belongs to (`None` for event blocks and due markers). That index is
+the address every gesture edits, so a task planned twice on one day is two independently
+grabbable blocks.
 
-| Variant | Drawn as | Produced by |
+| `Placement` variant | Drawn as | Produced by |
 |---------|----------|-------------|
-| `Block { start, minutes }` | filled rectangle spanning its time | a task's `planned_start`, or an event with a `duration_minutes` |
+| `Block { start, minutes }` | filled rectangle spanning its time | each of a task's sessions on the day, or an event with a `duration_minutes` |
 | `Marker { at, due }` | thin pill | an event with no length yet (`due: false`), or a task's due time (`due: true`) |
 
-An item with no placement on any day (an unplanned, deadline-less task) is what the backlog tray
-shows. Note that the marker/block split is also the migration path: every event from before the
-planner existed shows up as a marker, and dragging its bottom edge gives it a length.
+A due marker is shown even when a session shares its day — "worked on Friday morning, due Friday
+17:00" is exactly the day where seeing the deadline next to the work matters most. An item with
+no placement on any day is what the tray shows. The marker/block split is also the migration
+path: every event from before the planner existed shows up as a marker, and dragging its bottom
+edge gives it a length.
 
 ### 16.3 Interaction
 
@@ -813,7 +849,7 @@ The window is a masthead, a body, and a footer:
   BACKLOG (5)      │
   ▸ card           │
  ─────────────────────────────────────────────────────────────────────────────────────
-  Task  Write the report  13:00–15:00  for [2h ▾]  due Fri 21 Aug 17:00  ✎  Importance: …
+  Task  Write the report  13:00–15:00  takes [2h ▾]  due Fri 21 Aug 17:00 ▾  ✎  Severity: …
 ```
 
 The three groups share one row and one centre line. An earlier version stacked the right-hand
@@ -828,38 +864,34 @@ window caption would have done, so the planner has no title bar.
 
 | Gesture | Result |
 |---------|--------|
-| Drag on empty timeline | Creates an item of the masthead's **New** kind and opens its title for typing. |
+| Drag on empty timeline | Creates an item of the masthead's **New** kind (Task or Event) and opens its title for typing. |
 | Double-click empty timeline | The same, at `DEFAULT_BLOCK_MINUTES` — most of what goes on a day is half an hour of something, and aiming a precise drag for it is work the app can do instead. |
-| Drag a tray card onto the timeline | Sets `planned_start`; the deadline is untouched. |
-| Drag a block | Moves it, keeping the grab point under the pointer. |
-| Drag a block's bottom edge | Resizes it. The grip is a shaded strip with two bars, `PLANNER_RESIZE_HANDLE` tall, and brightens under the pointer. |
-| Pick a length in the footer | The same as resizing, and the only way to do it for something with no block yet (§16.3.2). |
-| Click anything (timeline or tray) | Selects it; the **footer** shows what it is, when it runs, how long it takes, its deadline, its importance, and ✓ complete / ✗ delete / ↩ back-to-unplanned. |
+| Drag a tray card onto the timeline | **Adds a session** of the card's remaining length (§16.3.2); the deadline is untouched, and the card stays in the tray until its estimate is covered. |
+| Drag a block | Moves that block, keeping the grab point under the pointer. Its siblings stay put — every gesture is addressed by `(task, session)`. |
+| Drag a block's bottom edge | Resizes that block. The grip is a shaded strip with two bars, `PLANNER_RESIZE_HANDLE` tall, and brightens under the pointer. |
+| `due … ▾` in the footer | Opens the **due editor** (§16.3.4): set, change, or clear the selected task's deadline. |
+| `takes …` in the footer | The task's total estimate (§16.3.2); `for …` on an event is its block length. |
+| `＋ Block` in the footer | Books another session on the shown day, after the last block, for the remaining estimate — so splitting work across days never needs the card to leave the tray and come back. |
+| `↩ Remove block` / `↩ Unplan` | One adaptive un-book button: frees the clicked block when one is selected, the whole plan otherwise. Cheap and unconfirmed either way — the time goes back onto the card. |
+| Click anything (timeline or tray) | Selects it; the **footer** shows what it is, when it runs, how long it takes, its deadline, and its severity or horizon. |
 | Double-click a block | Re-opens the title for editing. |
 | Type in the tray's quick-add | Enter makes an undated, unplanned task and keeps the field focused — a brain-dump is several tasks, not one. |
 | `←` `→` `T` | Previous day, next day, today. |
-| `Enter` `U` `Del` | Rename / unplan / delete the selection (delete still asks, and the dialog answers to `Enter` / `Esc`). |
+| `Enter` `U` `Del` | Rename / un-book (same adaptive rule as the button) / delete the selection (delete still asks, and the dialog answers to `Enter` / `Esc`). |
 | `Esc` | Leaves the title editor; a second press closes the planner. |
 
-Shortcuts stand down whenever a widget has focus (`Context::egui_wants_keyboard_input`) or a
-window is stacked over the planner (`TaskApp::modal_over_planner`) — a confirmation raised from
-the footer must not have the day step out from under it when the user reaches for an arrow key.
+Shortcuts stand down whenever a widget has focus (`Context::egui_wants_keyboard_input`), a
+window is stacked over the planner (`TaskApp::modal_over_planner`), or the due editor is open —
+including **the frame it closes on**: Enter confirms the editor and the editor clears its own
+flag mid-frame, so without that guard the very same keystroke fell through to the shortcut
+handler and renamed the selected task. A dialog's key must never leak into the window it was
+typed over.
 
-**The `New` kind is the whole due-versus-planned distinction as a gesture.** `planner::CreateKind`
-decides which time field a create fills in:
-
-| Kind | `deadline` | `planned_start` | Drawn as |
-|------|-----------|-----------------|----------|
-| `Task` | untouched — a plan is not a due date | the slot | block |
-| `Event` | the slot (an event's deadline *is* when it happens) | unused | block |
-| `Deadline` | the slot | none — nothing set aside yet | due marker |
-
-`Deadline` is what lets the planner say "this is *owed* at 17:00 today" without leaving the day;
-it is where the day popup's `Task+` button went, minus the modal with five date combo boxes. A
-deadline claims no time, so the drag's *length* means nothing to it and only the pointer does:
-`planner_drag_preview_for` returns `snap(minutes_at_pointer)` for that case, and both the live
-preview and the commit read it, so they cannot disagree. The item it creates has no slot, so it
-also lands in the tray's "due" group, ready to be dragged onto an hour.
+**`New:` is two kinds now.** `planner::CreateKind` decides which time field a create fills in: a
+`Task` gets its first session and no due date of its own, an `Event`'s slot *is* its deadline.
+There used to be a third kind, `Deadline`, which existed only because a due time could be
+*created* but never attached; the due editor (§16.3.4) made it an attribute, and the mode went
+away.
 
 Everything snaps to `SNAP_MINUTES` (15) and is clamped inside the day by `clamp_block`, which is
 shared by create, move, and resize so all three agree on what a legal block is.
@@ -877,53 +909,74 @@ obvious in the reading order. The handle is a strip inside the block's own rect,
 recent, took every press on it. Dragging the bottom edge moved the block instead of lengthening
 it, and resizing was simply unreachable. The body is now registered first and the handle second.
 When two interaction rects overlap, the one that must win goes **last**. The footer is also
-where a planner-created task's **importance** is set — without it, dragging out a task left it
-stuck on the default. It sits *below* the timeline because the row is only occupied some of the
+where a task's **severity or horizon** is set — one combo, asking whichever question the task's
+datedness makes meaningful (§7.1). It sits *below* the timeline because the row is only occupied some of the
 time: at the bottom, an empty one costs nothing and a full one doesn't push the day the user is
 aiming at. With nothing selected it carries the gesture hints, none of which announce themselves.
 
 **Due markers are deliberately not draggable.** A deadline is a fact about the task; dragging it
 on a planner would silently rewrite it while the user thought they were planning. Clicking one
-still selects it, and the task can be dragged in from the tray to give it a *planned* time.
+still selects it — and deliberate changes go through the due editor, where changing a deadline
+looks like changing a deadline.
 
 ### 16.3.1 The tray
 
-Every task with no `planned_start`, in two groups (`planner::backlog_group`):
+Every task that still **wants planning** (`Active::wants_planning`): no sessions at all, or an
+estimate not yet covered by the sessions it has. A two-hour task with one hour booked is still
+half a card — it reads `takes 2h · 1h booked` and dropping it books the missing hour. In two
+groups (`planner::backlog_group`):
 
 - **Due by this day** — deadline on or before `planner_day`. "On or before", not "on": something
   due Wednesday and still unplanned belongs at the top of Friday's tray too.
 - **Backlog** — owed later, or not owed at all.
 
-Within each group the order is the task list's own urgency score (§7), so the most pressing thing
-to schedule is at the top. The first group is the tray's reason for existing: *owed today and with
+Within each group the order is the task list's own score (§7), so the most pressing thing to
+schedule is at the top. The first group is the tray's reason for existing: *owed today and with
 no time set aside for it* is the one list a day planner should lead with, and it is exactly what
 the day popup used to show as a flat list you could not act on. Here every row is a card to drag
 onto an hour.
 
-### 16.3.2 How long something takes
+### 16.3.2 How long something takes: the estimate and the budget it funds
 
-`Active::duration_minutes` answers "how long", and it means the same thing whether or not the item
-has a slot:
+For a task, `Active::duration_minutes` is the **total estimate** — "the physics homework takes
+two hours" — and the sessions spend it. The three numbers the planner works with:
 
-| The item | What the field is | Where you set it |
+| Number | Where it lives | Meaning |
 |---|---|---|
-| A block on the timeline | the block's length | drag its bottom edge, or the footer's picker |
-| A card in the tray | an **estimate** | the footer's picker |
+| estimate | `duration_minutes` | how long the work takes in total (`takes` in the footer) |
+| booked | `Σ sessions[i].minutes` (`planned_minutes`) | how much of it has a slot |
+| remaining | `remaining_minutes` | what the tray card is still worth |
 
-That the two are one field is the point. "The physics homework takes two hours" is a fact about the
-homework, not about any particular Tuesday afternoon — so it is worth saying before you know where
-the work goes, and `planner::default_length_for` spends it when you do: dragging an estimated card
-onto the timeline lands a block that long instead of the default half-hour. `unplan_item` keeps it
-for the same reason; giving up on a slot is not forgetting how long the work takes. The tray card
-shows it (`takes 2h`) because that is what the card is worth when dropped.
+`planner::drop_length_for` spends the remainder: an untouched 2-hour card lands a 2-hour block;
+with an hour booked, the next drop lands the missing hour; and the card leaves the tray only when
+the estimate is covered (`wants_planning`). "Split it across two days" is therefore just dragging
+the same card twice — or once plus `＋ Block`. Each block's own length is edited by its bottom
+edge; the footer's `takes` picker edits the estimate. (For an event, with no sessions, the same
+field is simply the block's length and the picker reads `for`.)
 
-Before this, `duration_minutes` was only ever written by the timeline, so the estimate could not be
-expressed at all: you dragged a card out, got thirty minutes, and resized — except that resizing
-was itself unreachable (§16.3). Between them, "this takes two hours" had nowhere to go.
+An estimate survives unplanning — giving up on the slots is not forgetting how long the work
+takes — and a create drag's length doubles as the first estimate, since the drag said exactly
+that.
 
 `planner::duration_options` folds the item's current length into the preset list, so a length
 dragged out by hand — 1h 05m — reads back as the selection rather than as the nearest preset that
 picking anything would round it to.
+
+### 16.3.4 The due editor
+
+The footer's `due … ▾` button opens a small modal: the shared date/time combos
+(`display_date_entering`), seeded from the current deadline — or from the shown day at 17:00 for
+a task without one — and **Set** / **No deadline** / **Cancel** (`Enter` / `Esc` answer it).
+Committing goes through `set_item_deadline`, which also seeds a middling severity onto a task
+gaining its first deadline, since a dated task is ranked by severity and the user hasn't said
+yet; the footer's combo is right there to adjust it. Clearing the deadline returns the task to
+its horizon, which was kept, not erased (§6).
+
+This is the verb whose absence shaped the old model. A due date could only be *created* — as its
+own item, on the right day, through a mode switch — never attached to the task it described, and
+never changed afterwards at all. "Due Friday, worked on Tuesday, takes two hours" was a
+create-unplan-replan-resize dance; it is now one drag (the block, which sets the estimate) and
+one dialog (the deadline).
 
 ### 16.3.3 Type scale
 
@@ -941,21 +994,22 @@ when that does.
 
 ### 16.4 "Plan" is an adjective, not a noun
 
-There is no plan *object*. A plan is `planned_start` + `duration_minutes` on the task itself, so a
-task is never split into two records and there is never a second thing to complete, delete, or keep
-in sync. Homework due Thursday and blocked out on Wednesday is **one** `Active`: one card in the
-task list, one ✓ to finish it, appearing on the planner's Wednesday as a work block and on its
-Thursday as a due marker.
+There is no plan *object*. A plan is the `sessions` on the task itself, so a task is never split
+into records and there is never a second thing to complete, delete, or keep in sync — even
+planned across three evenings, homework due Thursday is **one** `Active`: one card in the task
+list, one ✓ to finish it (which releases every block), appearing on the planner as a work block
+per session and a due marker where it is owed. Sessions stay deliberately dumb — a start and a
+length, no name, no completion state of their own; the moment they grow either, they are
+sub-tasks, and the one-✓ property is gone.
 
 Which fields get filled in is the only difference between how a task was made:
 
-| Created via | `deadline` | `planned_start` |
+| Created via | `deadline` | `sessions` |
 |---|---|---|
-| New Task dialog | set by the user | empty (drag it in from the tray later) |
+| New Task dialog | set by the user, or none | empty (drag it in from the tray later) |
 | Tray quick-add | empty | empty — a name and nothing else, ready to place |
-| Planner drag, **Task** | empty — a plan is not a due date | the slot |
+| Planner drag, **Task** | empty — a plan is not a due date; the due editor adds one when there is one | the dragged slot (whose length is also the first estimate) |
 | Planner drag, **Event** | the slot (an event's deadline *is* when it happens) | unused by events |
-| Planner drag, **Deadline** | the slot — this one *is* a due date | empty, so it also shows in the tray |
 
 **Plans deliberately do not appear in the calendar grid.** `summarize_calendar` buckets on
 `deadline` alone, so a task shows in the grid on the day it is *owed* and nowhere else. A day cell
@@ -963,19 +1017,20 @@ holds at most three items (§12) and is the always-on view read from across the 
 budget with "what I intend to do" would crowd out "what is actually due". Plans belong to the
 planner, which has a whole timeline for them.
 
-The consequence, which is intended and not an oversight: a task dragged out on the planner as a
-**Task** has no deadline, so it **does not appear in the calendar at all**. It lives in the task
-list — where its slot drives its priority (§7) — and on the planner's timeline. A dragged-out
-*event* does appear in the calendar, because its slot is its deadline; so does a dragged-out
-**Deadline**, for the same reason.
+The consequence, which is intended and not an oversight: a task dragged out on the planner has no
+deadline until the due editor gives it one, so it **does not appear in the calendar at all**. It
+lives in the task list — where its sessions drive its priority (§7) — and on the planner's
+timeline. A dragged-out *event* does appear in the calendar, because its slot is its deadline;
+so does any task the moment it is given a due date.
 
 ### 16.5 Structure
 
 `planner.rs` is pure — no egui, no `TaskApp`. It owns the parts that are easy to get subtly
 wrong and hard to see in a screenshot: time↔pixel mapping (`TimelineGeometry`), snapping and
-clamping, the gesture→block arithmetic (`Drag` + `preview`), the side-by-side packing of
-overlapping blocks (`lay_out`), and the day summary (`summarize`). All of it is unit-tested;
-`ui.rs` decides only *which* gesture a press begins and draws the result.
+clamping, the gesture→block arithmetic (`Drag` + `preview`, where every move/resize is addressed
+by `(task, session)` via `Drag::target`), the per-day placement list (`placements_for`), the
+side-by-side packing of overlapping blocks (`lay_out`), and the day summary (`summarize`). All
+of it is unit-tested; `ui.rs` decides only *which* gesture a press begins and draws the result.
 
 Two consequences worth keeping:
 
@@ -1006,14 +1061,16 @@ else's display.
 
 The planner keeps no cached model: `planner_entries()` rebuilds from `active_things` every
 frame, so it cannot drift out of sync with the calendar the way a second copy would. The only
-persistent state is the flag, the day being shown, the selection, the in-flight gesture
-(`planner_drag`), the title being typed, the create kind, and the quick-add field. `planner_flag`
-is listed in `any_modal_open()`.
+persistent state is the flag, the day being shown, the selection (`planner_selection` plus
+`planner_selected_session`, so the footer knows *which block* its per-block controls act on),
+the in-flight gesture (`planner_drag`), the title being typed, the create kind, the quick-add
+field, and the task under the due editor (`planner_due_edit`). `planner_flag` is listed in
+`any_modal_open()`.
 
-The body's controls read `active_things` and write it back through one setter each
-(`plan_item`, `unplan_item`, `set_item_duration`, …), every one of which ends in
-`summarize_calendar` + `save_active_things` — so there is no path that changes a task without the
-calendar and the task list agreeing about it a frame later.
+The body's controls read `active_things` and write it back through one setter each (`plan_item`,
+`add_session`, `remove_session`, `unplan_item`, `set_item_duration`, `set_item_deadline`, …),
+every one of which ends in `summarize_calendar` + `save_active_things` — so there is no path that
+changes a task without the calendar and the task list agreeing about it a frame later.
 
 ### 16.7 What became of the day popup
 
@@ -1029,7 +1086,7 @@ drew better, and its only route to changing anything was to close itself and ope
 | Per-row ✓ / ✗ | The footer, on the selection. |
 | **Plan day** | Gone: the day click *is* the plan-day click. |
 | **Event+** | Drag with **New: Event**. |
-| **Task+** | Drag with **New: Deadline** for a task due on this day, or the tray's quick-add for one with no deadline. |
+| **Task+** | The tray's quick-add, plus the footer's due editor when the task is owed on this day. |
 
 Two things fell out of removing it. `DayCell` no longer carries `items: Vec<DayItem>` — a second,
 fully-cloned copy of every dated item, rebuilt on every `summarize_calendar` for the popup to
