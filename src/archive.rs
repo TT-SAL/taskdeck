@@ -55,8 +55,8 @@ use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
 use crate::{
-    planner::format_duration,
-    tasks::{Active, Session, calendar_item_color},
+    planner::{format_duration, format_minutes},
+    tasks::{Active, Recurrence, Session, calendar_item_color, ROUTINE_COLOR_INDEX},
 };
 
 /// The log's file name inside `taskdeck_data/`.
@@ -137,6 +137,12 @@ pub struct Archived {
     /// hold the guess up against the booking.
     #[serde(default)]
     pub duration_minutes: Option<u32>,
+    /// The weekly rule, when this was a routine. Kept for the same reason as
+    /// everything else here: without it, putting a routine back would produce a
+    /// nameless task with no deadline, no importance and no horizon — the exact
+    /// shape the scorer reads as corrupt.
+    #[serde(default)]
+    pub recurrence: Option<Recurrence>,
     /// When it left the board.
     ///
     /// The wire name stays `inactivated`: that is what every line written
@@ -188,6 +194,7 @@ impl Archived {
             time_importance: item.time_importance,
             sessions: item.sessions,
             duration_minutes: item.duration_minutes,
+            recurrence: item.recurrence,
             archived_at: at,
             outcome,
         }
@@ -214,6 +221,7 @@ impl Archived {
             // pre-sessions build: a restored item is already migrated.
             planned_start: None,
             duration_minutes: self.duration_minutes,
+            recurrence: self.recurrence,
         }
     }
 
@@ -224,7 +232,16 @@ impl Archived {
     /// Palette index, by the same rule the calendar and planner use, so a
     /// ghost on the timeline wears the colour the item wore in life.
     pub fn color_id(&self) -> usize {
+        if self.is_routine() {
+            return ROUTINE_COLOR_INDEX;
+        }
         calendar_item_color(self.is_event, self.importance, self.time_importance)
+    }
+
+    /// True when this was a standing weekly commitment. See
+    /// `Active::recurrence`.
+    pub fn is_routine(&self) -> bool {
+        self.recurrence.is_some()
     }
 
     /// How long it sat on the board before leaving it.
@@ -245,7 +262,9 @@ impl Archived {
     /// Whether the deadline was kept. Events are `Undated` by construction:
     /// an event's "deadline" is when it happened, not a promise it could break.
     pub fn timing(&self) -> Timing {
-        if self.is_event {
+        // Neither an event nor a routine can be early or late: an event's
+        // "deadline" is when it happened, and a routine never had one.
+        if self.is_event || self.is_routine() {
             return Timing::Undated;
         }
         match self.deadline {
@@ -261,11 +280,12 @@ impl Archived {
     ///
     /// Not simply `outcome == Finished`. An event is never finished — it is a
     /// time that arrives and passes on its own, which is why the planner offers
-    /// no ✓ on one — and rows written before `outcome` existed *all* default to
-    /// `Finished`, events among them. So the kind of thing decides first and
-    /// the stored outcome only breaks the tie.
+    /// no ✓ on one — and neither is a routine, which is a standing arrangement
+    /// rather than a piece of work. Rows written before `outcome` existed *all*
+    /// default to `Finished`, events among them. So the kind of thing decides
+    /// first and the stored outcome only breaks the tie.
     pub fn was_finished(&self) -> bool {
-        !self.is_event && self.outcome == Outcome::Finished
+        !self.is_event && !self.is_routine() && self.outcome == Outcome::Finished
     }
 
     /// The mark the ledger puts in front of the name: ✓ for work that was
@@ -290,7 +310,18 @@ impl Archived {
     pub fn verdict(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
 
-        if self.is_event {
+        if let Some(rule) = self.recurrence {
+            // A routine was never work, so there is nothing to be early or late
+            // about and no time to hold against an estimate. What it *was* is
+            // the standing arrangement itself, so that is what the row reports.
+            parts.push("routine dropped".to_string());
+            parts.push(format!(
+                "{} at {} for {}",
+                rule.summary(),
+                format_minutes(rule.start_minutes),
+                format_duration(rule.minutes)
+            ));
+        } else if self.is_event {
             // An event is never "finished" — it is a time that arrives and
             // passes on its own, which is why the planner offers no ✓ on one
             // (§16.3). So the only thing to report is that it was taken off the
@@ -466,6 +497,9 @@ pub struct Summary {
     /// and folding it into "finished" would inflate the one figure in the
     /// headline that is supposed to mean work done.
     pub events: usize,
+    /// Routines that were given up. Same argument again: a standing arrangement
+    /// you stopped keeping is not a task you failed.
+    pub routines: usize,
     /// Finished, dated tasks — the ones a deadline could be kept or broken on.
     pub judged: usize,
     /// How many of those were done by their date.
@@ -482,7 +516,7 @@ pub struct Summary {
 impl Summary {
     /// The masthead line: "41 finished · 6 dropped · 29 of 34 deadlines met · …"
     pub fn headline(&self) -> String {
-        if self.finished == 0 && self.dropped == 0 && self.events == 0 {
+        if self.finished == 0 && self.dropped == 0 && self.events == 0 && self.routines == 0 {
             return "nothing here yet".to_string();
         }
 
@@ -498,6 +532,13 @@ impl Summary {
                 "{} event{} removed",
                 self.events,
                 if self.events == 1 { "" } else { "s" }
+            ));
+        }
+        if self.routines > 0 {
+            parts.push(format!(
+                "{} routine{} dropped",
+                self.routines,
+                if self.routines == 1 { "" } else { "s" }
             ));
         }
         if self.judged > 0 {
@@ -519,7 +560,9 @@ pub fn summarize<'a>(rows: impl IntoIterator<Item = &'a Archived>) -> Summary {
     let mut lifetimes: Vec<Duration> = Vec::new();
 
     for row in rows {
-        if row.is_event {
+        if row.is_routine() {
+            summary.routines += 1;
+        } else if row.is_event {
             summary.events += 1;
         } else if row.was_finished() {
             summary.finished += 1;
@@ -761,6 +804,7 @@ mod tests {
             sessions: Vec::new(),
             planned_start: None,
             duration_minutes: None,
+            recurrence: None,
         }
     }
 
@@ -889,6 +933,42 @@ mod tests {
         // between them still show everything.
         assert!(!Filter { outcome: OutcomeFilter::Finished, ..Filter::default() }.admits(&row));
         assert!(Filter { outcome: OutcomeFilter::Dropped, ..Filter::default() }.admits(&row));
+    }
+
+    #[test]
+    fn a_dropped_routine_comes_back_as_a_routine() {
+        let sleep = Active {
+            recurrence: Some(Recurrence {
+                days: crate::tasks::EVERY_DAY,
+                start_minutes: 23 * 60,
+                minutes: 8 * 60,
+            }),
+            importance: None,
+            ..task("sleep")
+        };
+        let row = Archived::retire(sleep, Outcome::Dropped, at(2026, 8, 20, 9, 0));
+
+        // The rule survives, so putting it back restores the arrangement rather
+        // than a nameless task with nothing the scorer can read.
+        assert!(row.is_routine());
+        let restored = row.to_active();
+        assert!(restored.is_routine());
+        assert_eq!(restored.recurrence, row.recurrence);
+        assert_eq!(restored.importance_score(at(2026, 8, 21, 9, 0), 0), 0.0);
+
+        // It is neither finished work nor a broken promise: it was an
+        // arrangement, and the row says what the arrangement was.
+        assert!(!row.was_finished());
+        assert!(!row.was_judged());
+        assert_eq!(row.timing(), Timing::Undated);
+        assert_eq!(row.mark(), Outcome::Dropped.glyph());
+        let verdict = row.verdict();
+        assert!(verdict.contains("routine dropped"), "{verdict}");
+        assert!(verdict.contains("every day at 23:00 for 8h"), "{verdict}");
+
+        let summary = summarize([&row]);
+        assert_eq!((summary.finished, summary.dropped, summary.events, summary.routines), (0, 0, 0, 1));
+        assert!(summary.headline().contains("1 routine dropped"), "{}", summary.headline());
     }
 
     #[test]

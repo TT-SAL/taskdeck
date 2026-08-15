@@ -17,7 +17,7 @@
 
 use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Timelike};
 
-use crate::tasks::{Active, Session};
+use crate::tasks::{Active, Recurrence, Session};
 
 /// Minutes in a day; the timeline's full extent.
 pub const DAY_MINUTES: i32 = 24 * 60;
@@ -35,18 +35,18 @@ pub const MIN_BLOCK_MINUTES: u32 = 15;
 /// task from the backlog, or a click that didn't travel far enough to be a drag.
 pub const DEFAULT_BLOCK_MINUTES: u32 = 30;
 
-/// What a drag (or double-click) on empty timeline makes.
+/// What a drag (or double-click) on empty timeline makes, distinguished by
+/// which time field it fills in: a `Task` gets a work session (a plan is not a
+/// due date, so its
+/// deadline is left empty), an `Event` gets its `deadline`, because an event's
+/// deadline *is* when it happens, and a `Routine` gets a `Recurrence` — a rule
+/// rather than any single time at all.
 ///
-/// Two kinds, distinguished by which time field the gesture fills in: a `Task`
-/// gets a work session (a plan is not a due date, so its deadline is left
-/// empty), an `Event` gets its `deadline`, because an event's deadline *is*
-/// when it happens.
-///
-/// There used to be a third kind, `Deadline`, which dropped a due marker with
-/// no session behind it. It existed because a deadline could only be *created*,
-/// never attached — with the footer's due editor able to put a deadline on any
-/// task, a due time is an attribute you set, not a thing you draw, and the mode
-/// went away.
+/// There used to be a different third kind, `Deadline`, which dropped a due
+/// marker with no session behind it. It existed because a deadline could only
+/// be *created*, never attached — with the footer's due editor able to put a
+/// deadline on any task, a due time is an attribute you set, not a thing you
+/// draw, and the mode went away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CreateKind {
     /// Time set aside to work on something. The default: the planner's job.
@@ -54,6 +54,10 @@ pub enum CreateKind {
     Task,
     /// Something that happens at a time.
     Event,
+    /// Time that is simply spoken for, every week — sleep, meals, the commute.
+    /// See `Active::recurrence` for why this is a third thing rather than a
+    /// task you never tick off or an event nobody needs to see.
+    Routine,
 }
 
 /// Where an item sits on the timeline for a given day.
@@ -113,29 +117,59 @@ pub struct DayPlacement {
 /// "worked on Friday morning, due Friday 17:00" is exactly the day where
 /// seeing the deadline next to the work matters most.
 pub fn placements_for(item: &Active, day: NaiveDate) -> Vec<DayPlacement> {
-    placements_of(
-        item.is_event,
-        item.deadline,
-        item.duration_minutes,
-        &item.sessions,
-        day,
-    )
+    placements_of(Placeable::of(item), day)
 }
 
-/// The same, from the fields rather than from an `Active`.
+/// Everything about an item that decides where it lands on a day.
 ///
-/// An archived item puts blocks on a day too — the planner draws what a past
-/// day was actually spent on behind what is still planned for it — and it is
-/// not an `Active` any more. Taking the parts keeps one copy of the placement
-/// rule instead of a second one drifting alongside it in the archive.
-pub fn placements_of(
-    is_event: bool,
-    deadline: Option<DateTime<Local>>,
-    duration_minutes: Option<u32>,
-    sessions: &[Session],
-    day: NaiveDate,
-) -> Vec<DayPlacement> {
+/// A struct rather than five positional arguments because an archived item
+/// needs placing too — the planner draws what a past day was actually spent on
+/// (`DOCUMENTATION.md` §17.4) — and it is no longer an `Active`. Taking the
+/// parts keeps one copy of the placement rule instead of a second one drifting
+/// alongside it in the archive; taking them *named* keeps the call sites from
+/// reading `(false, None, None, …)`.
+#[derive(Debug, Clone, Copy)]
+pub struct Placeable<'a> {
+    pub is_event: bool,
+    pub deadline: Option<DateTime<Local>>,
+    pub duration_minutes: Option<u32>,
+    pub sessions: &'a [Session],
+    pub recurrence: Option<Recurrence>,
+}
+
+impl<'a> Placeable<'a> {
+    pub fn of(item: &'a Active) -> Self {
+        Self {
+            is_event: item.is_event,
+            deadline: item.deadline,
+            duration_minutes: item.duration_minutes,
+            sessions: &item.sessions,
+            recurrence: item.recurrence,
+        }
+    }
+}
+
+/// The same, from the parts rather than from an `Active`.
+pub fn placements_of(item: Placeable, day: NaiveDate) -> Vec<DayPlacement> {
+    let Placeable { is_event, deadline, duration_minutes, sessions, recurrence } = item;
     let mut placements = Vec::new();
+
+    // A routine is checked first and answers alone. It is a rule, so it has no
+    // deadline and no sessions to consider — and if a hand-edited save gives it
+    // some anyway, the rule is what the user set here and it wins rather than
+    // the item appearing twice on its own day.
+    if let Some(rule) = recurrence {
+        if rule.falls_on(day) {
+            placements.push(DayPlacement {
+                session: None,
+                placement: Placement::Block {
+                    start: rule.start_minutes.clamp(0, DAY_MINUTES - 1),
+                    minutes: rule.minutes.max(MIN_BLOCK_MINUTES),
+                },
+            });
+        }
+        return placements;
+    }
 
     if is_event {
         if let Some(at) = deadline.and_then(|deadline| minutes_into_day(deadline, day)) {
@@ -180,6 +214,9 @@ pub fn placements_of(
 /// list — used to decide whether a tray card has a block to host its title
 /// editor or has to host it itself.
 pub fn appears_on(item: &Active, day: NaiveDate) -> bool {
+    if let Some(rule) = item.recurrence {
+        return rule.falls_on(day);
+    }
     if item.is_event {
         return item.deadline.is_some_and(|at| at.date_naive() == day);
     }
@@ -582,6 +619,7 @@ mod tests {
             sessions,
             planned_start: None,
             duration_minutes: minutes,
+            recurrence: None,
         }
     }
 
@@ -601,7 +639,66 @@ mod tests {
             sessions: Vec::new(),
             planned_start: None,
             duration_minutes: minutes,
+            recurrence: None,
         }
+    }
+
+    fn routine(days: u8, start_minutes: i32, minutes: u32) -> Active {
+        Active {
+            recurrence: Some(Recurrence { days, start_minutes, minutes }),
+            ..task(Vec::new(), None, None)
+        }
+    }
+
+    #[test]
+    fn a_routine_places_a_block_on_every_day_its_rule_names() {
+        // `day()` is Friday 14 Aug 2026.
+        let friday = day();
+        let saturday = friday.succ_opt().unwrap();
+        let sleep = routine(crate::tasks::EVERY_DAY, 23 * 60, 8 * 60);
+
+        for on in [friday, saturday] {
+            let placed = placements_for(&sleep, on);
+            assert_eq!(placed.len(), 1, "one block a day, generated from the rule");
+            assert_eq!(
+                placed[0].placement,
+                Placement::Block { start: 23 * 60, minutes: 8 * 60 }
+            );
+            // Not a session: there is nothing stored to address, so a gesture
+            // aims at the rule itself.
+            assert_eq!(placed[0].session, None);
+            assert!(appears_on(&sleep, on));
+        }
+
+        let weekdays_only = routine(0b0001_1111, 8 * 60, 30);
+        assert!(placements_for(&weekdays_only, friday).len() == 1);
+        assert!(placements_for(&weekdays_only, saturday).is_empty());
+        assert!(!appears_on(&weekdays_only, saturday));
+    }
+
+    #[test]
+    fn a_routine_ignores_a_deadline_and_sessions_it_should_not_have() {
+        // Not a shape the UI makes, but a hand-edited save can. The rule is
+        // what the user set here, so it answers alone rather than the item
+        // showing up twice on the day it was hand-given.
+        let confused = Active {
+            recurrence: Some(Recurrence { days: crate::tasks::EVERY_DAY, start_minutes: 60, minutes: 30 }),
+            deadline: Some(at(2026, 8, 14, 9, 0)),
+            sessions: vec![session(at(2026, 8, 14, 15, 0), 60)],
+            ..task(Vec::new(), None, None)
+        };
+        let placed = placements_for(&confused, day());
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].placement, Placement::Block { start: 60, minutes: 30 });
+    }
+
+    #[test]
+    fn a_routine_block_is_never_shorter_than_a_block_can_be() {
+        let sliver = routine(crate::tasks::EVERY_DAY, 0, 1);
+        assert_eq!(
+            placements_for(&sliver, day())[0].placement,
+            Placement::Block { start: 0, minutes: MIN_BLOCK_MINUTES }
+        );
     }
 
     #[test]

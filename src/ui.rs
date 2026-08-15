@@ -6,7 +6,9 @@ use image::{ImageBuffer, Rgba};
 
 use crate::{archive::{self, ArchiveKey, ArchiveLog, Archived, KindFilter, Outcome, OutcomeFilter}, calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, Session}, weather::{self, WeatherService}};
 
-const WEEK_DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+/// The calendar's column headings. The same Monday-first list a `Recurrence`
+/// bit indexes into, so there is one place a weekday is named.
+const WEEK_DAYS: [&str; 7] = tasks::WEEKDAY_NAMES;
 
 /// Labels for an undated task's **horizon** — "roughly how soon should this
 /// happen" — indexed by `Active::time_importance`. The index order is a
@@ -393,6 +395,10 @@ struct PlannerEntry {
     session: Option<usize>,
     name: String,
     color_id: usize,
+    /// Whether this is a routine's generated block. It is drawn recessively and
+    /// counted apart from planned work in the day summary — a routine is the
+    /// backdrop a day is planned around, not something planned in it.
+    routine: bool,
     placement: planner::Placement,
 }
 
@@ -470,6 +476,75 @@ fn planner_entry_rect(
             )
         }
     }
+}
+
+/// Side of one weekday toggle in the routine footer. Square, and big enough to
+/// aim at on a scaled-down window without the row of seven crowding the buttons
+/// beside it.
+const PLANNER_WEEKDAY_TOGGLE: f32 = 26.0;
+
+/// A routine's one knob: which days it falls on.
+///
+/// It sits in the same slot a dated task's *severity* and an undated task's
+/// *horizon* occupy, because it is the same kind of thing — the single question
+/// that kind of item asks. Returns whether the rule changed.
+///
+/// Seven toggles rather than a combo of presets: "Mon Wed Fri" is as ordinary
+/// as "every day", and a preset list either omits it or grows a "Custom…" that
+/// opens the toggles anyway. **All** is there because the case this whole
+/// feature exists for — sleeping, eating, the commute — is daily, and the
+/// create gesture deliberately starts from one day (see `create_planned_item`).
+fn planner_weekday_row(ui: &mut Ui, rule: &mut tasks::Recurrence) -> bool {
+    let mut changed = false;
+
+    ui.label(RichText::new("Days:").size(PLANNER_META_SIZE))
+        .on_hover_text("Which days it falls on");
+
+    for (index, name) in tasks::WEEKDAY_NAMES.iter().enumerate() {
+        let on = rule.includes(index as u32);
+        // The initial only — seven three-letter names is most of the footer,
+        // and the row is in weekday order, which is what actually reads it.
+        let initial = name.chars().next().unwrap_or('?').to_string();
+        let button = Button::new(
+            RichText::new(initial)
+                .size(PLANNER_META_SIZE)
+                .color(if on {
+                    Color32::WHITE
+                } else {
+                    Color32::from_white_alpha(110)
+                }),
+        )
+        .min_size(Vec2::splat(PLANNER_WEEKDAY_TOGGLE))
+        .corner_radius(CornerRadius::same(6))
+        .selected(on);
+
+        if ui.add(button).on_hover_text(*name).clicked() {
+            // `toggle` refuses to clear the last day: a rule that fires nowhere
+            // draws nothing, and a routine you cannot see is one you cannot
+            // select to repair. Deleting is how you get rid of one.
+            changed |= rule.toggle(index as u32);
+        }
+    }
+
+    if ui
+        .add_enabled(
+            rule.days != tasks::EVERY_DAY,
+            Button::new(RichText::new("All").size(PLANNER_META_SIZE)),
+        )
+        .on_hover_text("Every day")
+        .clicked()
+    {
+        rule.days = tasks::EVERY_DAY;
+        changed = true;
+    }
+
+    ui.label(
+        RichText::new(rule.summary())
+            .font(FontId::new(PLANNER_FINE_SIZE, FontFamily::Name("space".into())))
+            .color(Color32::from_white_alpha(160)),
+    );
+
+    changed
 }
 
 /// Draw one ghost: an hour of this day that has already been accounted for.
@@ -1576,7 +1651,15 @@ impl TaskApp {
     }
 
     fn refilter_tasks(&mut self) {
-        self.list_tasks = self.active_things.iter().filter(|task| task.is_event == false).cloned().collect();
+        // Neither events nor routines belong in the ranked list: an event is
+        // not work you owe, and a routine is a standing arrangement that would
+        // sit there forever with no ✓ that could ever clear it.
+        self.list_tasks = self
+            .active_things
+            .iter()
+            .filter(|task| !task.is_event && !task.is_routine())
+            .cloned()
+            .collect();
     }
 
     fn show_tasks(&mut self, ui: &mut egui::Ui) {
@@ -2322,6 +2405,7 @@ impl TaskApp {
             sessions: Vec::new(),
             planned_start: None,
             duration_minutes: None,
+            recurrence: None,
         });
     }
 
@@ -2558,6 +2642,7 @@ impl TaskApp {
                     session: placed.session,
                     name: item.name.clone(),
                     color_id: item.calendar_item_color(),
+                    routine: item.is_routine(),
                     placement: placed.placement,
                 });
             }
@@ -2628,7 +2713,15 @@ impl TaskApp {
             return;
         };
 
-        if item.is_event {
+        if let Some(rule) = item.recurrence.as_mut() {
+            // Moving or resizing a routine edits **the rule**, so it moves on
+            // every day it falls on. That is what a routine is: you do not
+            // reschedule Wednesday's sleep, you change what time you go to bed.
+            // The footer names the days so the reach of the gesture is on
+            // screen while you make it.
+            rule.start_minutes = start_minutes.clamp(0, planner::DAY_MINUTES - 1);
+            rule.minutes = minutes;
+        } else if item.is_event {
             item.deadline = Some(when);
             item.duration_minutes = Some(minutes);
         } else if let Some(slot) = session.and_then(|index| item.sessions.get_mut(index)) {
@@ -2741,31 +2834,50 @@ impl TaskApp {
         };
 
         let is_event = kind == planner::CreateKind::Event;
+        let is_routine = kind == planner::CreateKind::Routine;
+
+        // A routine starts on **the weekday you drew it on**, and no other.
+        //
+        // Not every day, tempting as that is for the case this feature exists
+        // for. A gesture should do what you watched it do: drawing a block on
+        // Wednesday and silently rewriting the next six days is the kind of
+        // surprise you only discover by stepping to Thursday. The footer's day
+        // row is right there, with an "All" button, so the daily case is one
+        // more click — and the same rule as elsewhere applies (a deadline is
+        // "changed only where changing it looks like changing it").
+        let recurrence = is_routine.then(|| tasks::Recurrence {
+            days: tasks::weekday_bit(self.planner_day),
+            start_minutes,
+            minutes,
+        });
 
         let id = self.next_item_id();
         self.push_active_thing(Active {
             id,
             name: String::new(),
             deadline: is_event.then_some(when),
-            sessions: if is_event {
+            sessions: if is_event || is_routine {
                 Vec::new()
             } else {
                 vec![Session { start: when, minutes }]
             },
             planned_start: None,
-            // The dragged-out length doubles as the first estimate.
-            duration_minutes: Some(minutes),
+            // The dragged-out length doubles as the first estimate. A routine's
+            // length lives in its rule instead, so it has no estimate at all.
+            duration_minutes: (!is_routine).then_some(minutes),
             // A task born on the timeline is undated, and undated tasks carry a
             // horizon, not a severity — it gets one the moment the due editor
-            // gives it a deadline.
+            // gives it a deadline. A routine is never ranked, so it carries
+            // neither knob.
             importance: None,
-            time_importance: (!is_event).then_some(PLANNER_NEW_TASK_HORIZON),
+            time_importance: (!is_event && !is_routine).then_some(PLANNER_NEW_TASK_HORIZON),
             is_event,
+            recurrence,
             created: Local::now(),
         });
 
         self.planner_selection = Some(id);
-        self.planner_selected_session = (!is_event).then_some(0);
+        self.planner_selected_session = (!is_event && !is_routine).then_some(0);
         self.begin_planner_naming(id, true);
     }
 
@@ -3119,10 +3231,13 @@ impl TaskApp {
 
                 ui.add_space(18.0);
 
-                // Right-to-left, so Task reads first. There used to be a third
-                // kind here, Deadline; the footer's due editor made a due time
-                // an attribute you set rather than a thing you draw, and the
-                // mode went with it.
+                // Right-to-left, so Task reads first. The old third kind here
+                // was Deadline; the footer's due editor made a due time an
+                // attribute you set rather than a thing you draw, and the mode
+                // went with it. Routine is a different third thing entirely —
+                // not a time you record but a claim that repeats.
+                ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Routine, RichText::new("Routine").size(PLANNER_META_SIZE))
+                    .on_hover_text("Time that is spoken for every week — sleep, meals, the commute");
                 ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Event, RichText::new("Event").size(PLANNER_META_SIZE))
                     .on_hover_text("Something that happens then");
                 ui.selectable_value(&mut self.planner_create_kind, planner::CreateKind::Task, RichText::new("Task").size(PLANNER_META_SIZE))
@@ -3148,8 +3263,20 @@ impl TaskApp {
 
     /// "3h 30m planned · 4 blocks · 2 due" for the day being shown.
     fn planner_day_summary(&self) -> String {
-        let placements: Vec<_> = self.planner_entries().iter().map(|e| e.placement).collect();
+        let entries = self.planner_entries();
+
+        // Routines are counted apart from planned work, and this is the number
+        // the whole feature exists to make honest. Folding nine hours of sleep
+        // and meals into "planned" would make every day read as full; leaving
+        // them out of the day altogether — which is what happened before there
+        // was anywhere to put them — makes a day with four genuinely free hours
+        // claim thirteen.
+        let (routine, planned): (Vec<_>, Vec<_>) =
+            entries.iter().partition(|entry| entry.routine);
+        let placements: Vec<_> = planned.iter().map(|e| e.placement).collect();
         let summary = planner::summarize(&placements);
+        let routine_placements: Vec<_> = routine.iter().map(|e| e.placement).collect();
+        let routine_summary = planner::summarize(&routine_placements);
 
         // What the day has already been spent on, counted separately: it is
         // not "planned" any more, and adding it into that figure would make a
@@ -3158,12 +3285,13 @@ impl TaskApp {
             self.planner_ghosts.iter().map(|ghost| ghost.placement).collect();
         let done = planner::summarize(&ghost_placements);
 
-        if summary.blocks == 0 && summary.due == 0 && done.blocks == 0 {
+        if summary.blocks == 0 && summary.due == 0 && done.blocks == 0 && routine_summary.blocks == 0
+        {
             return "nothing on this day".to_string();
         }
 
         let mut parts = Vec::new();
-        if summary.blocks > 0 || done.blocks == 0 {
+        if summary.blocks > 0 || (done.blocks == 0 && routine_summary.blocks == 0) {
             parts.push(format!(
                 "{} planned",
                 planner::format_duration(summary.planned_minutes.max(0) as u32)
@@ -3174,6 +3302,12 @@ impl TaskApp {
         }
         if summary.due > 0 {
             parts.push(format!("{} due", summary.due));
+        }
+        if routine_summary.blocks > 0 {
+            parts.push(format!(
+                "{} routine",
+                planner::format_duration(routine_summary.planned_minutes.max(0) as u32)
+            ));
         }
         if done.blocks > 0 {
             parts.push(format!(
@@ -3249,6 +3383,8 @@ impl TaskApp {
         // Copy out what the row needs; the closure below takes `&mut self`.
         let name = item.name.clone();
         let is_event = item.is_event;
+        let mut recurrence = item.recurrence;
+        let is_routine = recurrence.is_some();
         let is_planned = item.is_planned();
         let selected_session = session.and_then(|index| item.sessions.get(index).copied());
         let block_count = item.sessions.len();
@@ -3271,14 +3407,29 @@ impl TaskApp {
             ui.set_min_height(PLANNER_INSPECTOR_HEIGHT);
             ui.add_space(PLANNER_EDGE_MARGIN);
             ui.label(
-                RichText::new(if is_event { "Event" } else { "Task" })
-                    .size(PLANNER_FINE_SIZE)
-                    .color(Color32::from_white_alpha(140)),
+                RichText::new(match (is_routine, is_event) {
+                    (true, _) => "Routine",
+                    (_, true) => "Event",
+                    _ => "Task",
+                })
+                .size(PLANNER_FINE_SIZE)
+                .color(Color32::from_white_alpha(140)),
             );
             ui.label(RichText::new(&name).size(PLANNER_NAME_SIZE).strong());
 
             // When it runs: the clicked block's span, or the plan in aggregate.
-            if is_event {
+            if let Some(rule) = recurrence {
+                ui.label(
+                    RichText::new(format!(
+                        "{}–{}",
+                        planner::format_minutes(rule.start_minutes),
+                        planner::format_minutes(rule.start_minutes + rule.minutes as i32)
+                    ))
+                    .size(PLANNER_META_SIZE)
+                    .color(Color32::from_white_alpha(180)),
+                )
+                .on_hover_text("Moving the block moves it on every day it falls on");
+            } else if is_event {
                 if let Some(anchor) = item_anchor_text(deadline, duration) {
                     ui.label(RichText::new(anchor).size(PLANNER_META_SIZE).color(Color32::from_white_alpha(180)));
                 }
@@ -3308,14 +3459,18 @@ impl TaskApp {
             // it is the estimate — something you know about the work before you
             // know where it goes; each block's own length is set by dragging its
             // bottom edge. For an event it is simply the block's length.
-            new_duration = self.planner_duration_picker(ui, duration, is_event);
+            new_duration = self.planner_duration_picker(
+                ui,
+                recurrence.map_or(duration, |rule| Some(rule.minutes)),
+                is_event || is_routine,
+            );
 
             // The due editor's door. A planned slot is when you will *work on*
             // this; the deadline is when it is *owed* — and it is finally an
             // attribute you set, not a thing you had to create. The absence of
             // this one control is what used to force the create-a-deadline,
             // unplan, replan dance.
-            if !is_event {
+            if !is_event && !is_routine {
                 let due_text = match deadline {
                     Some(deadline) => format!("due {} ▾", deadline.format("%a %d %b %H:%M")),
                     None => "no deadline ▾".to_string(),
@@ -3352,7 +3507,14 @@ impl TaskApp {
             // missing it. Without one, the knob is the *horizon*: roughly how
             // soon this should happen. (Events take their colour from being
             // events and are ordered by time; neither question applies.)
-            if !is_event {
+            if is_routine {
+                ui.add_space(10.0);
+                if let Some(rule) = recurrence.as_mut() {
+                    if planner_weekday_row(ui, rule) {
+                        changed = true;
+                    }
+                }
+            } else if !is_event {
                 ui.add_space(10.0);
                 if deadline.is_some() {
                     let level = importance.get_or_insert(PLANNER_NEW_TASK_IMPORTANCE);
@@ -3414,7 +3576,11 @@ impl TaskApp {
                 // the ✓ on one asked a question with no answer, and made the
                 // archive read as if the user had *done* their dentist
                 // appointment. An event that shouldn't be there is deleted.
+                // Only a task can be completed. A routine has no ✓ for the
+                // same reason an event has none, one step further along: there
+                // is no state in which sleeping every night is *done*.
                 if !is_event
+                    && !is_routine
                     && ui
                         .button(RichText::new("✓ Complete").size(PLANNER_META_SIZE))
                         .on_hover_text("Finish it; it goes to the archive")
@@ -3424,7 +3590,7 @@ impl TaskApp {
                 }
                 // One un-book button that names what it will actually do: the
                 // clicked block when one is selected, the whole plan otherwise.
-                if !is_event && is_planned {
+                if !is_event && !is_routine && is_planned {
                     let (label, hover) = if session.is_some() {
                         ("↩ Remove block", "Free this block  (U)")
                     } else {
@@ -3439,6 +3605,7 @@ impl TaskApp {
                     }
                 }
                 if !is_event
+                    && !is_routine
                     && ui
                         .button(RichText::new("＋ Block").size(PLANNER_META_SIZE))
                         .on_hover_text("Another block on this day")
@@ -3457,6 +3624,7 @@ impl TaskApp {
             if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
                 item.importance = importance;
                 item.time_importance = time_importance;
+                item.recurrence = recurrence;
             }
             // Importance drives both the task order and the palette colour, so
             // the calendar and task list have to be rebuilt, not just saved.
@@ -3546,6 +3714,18 @@ impl TaskApp {
             return;
         };
 
+        // A routine's length is part of its rule, not an estimate of work — so
+        // it is set there and `duration_minutes` stays empty.
+        if let Some(rule) = item.recurrence.as_mut() {
+            let (start, length) =
+                planner::clamp_block(rule.start_minutes as f32, minutes as f32);
+            rule.start_minutes = start;
+            rule.minutes = length;
+            self.summarize_calendar();
+            self.save_active_things();
+            return;
+        }
+
         item.duration_minutes = Some(minutes.max(planner::MIN_BLOCK_MINUTES));
 
         if item.is_event {
@@ -3601,6 +3781,7 @@ impl TaskApp {
         let kind = match self.planner_create_kind {
             planner::CreateKind::Task => "a task",
             planner::CreateKind::Event => "an event",
+            planner::CreateKind::Routine => "a routine, on this weekday",
         };
 
         ui.horizontal(|ui| {
@@ -3981,6 +4162,8 @@ impl TaskApp {
                                 session: None,
                                 name,
                                 color_id,
+                                routine: self.planner_create_kind == planner::CreateKind::Routine
+                                    && matches!(drag, PlannerDrag::Create { .. }),
                                 placement: planner::Placement::Block { start, minutes },
                             });
                         }
@@ -4112,6 +4295,7 @@ impl TaskApp {
     fn planner_new_item_color(&self) -> usize {
         match self.planner_create_kind {
             planner::CreateKind::Event => 5,
+            planner::CreateKind::Routine => tasks::ROUTINE_COLOR_INDEX,
             planner::CreateKind::Task => PLANNER_NEW_TASK_HORIZON as usize,
         }
     }
@@ -4144,7 +4328,18 @@ impl TaskApp {
             // Blocks only, and so events — which have no sessions — never
             // appear. A deleted appointment is not something the day was spent
             // on; it is something that was taken off the calendar.
-            for placed in planner::placements_of(row.is_event, None, None, &row.sessions, day) {
+            // A dropped routine must not haunt every past day it ever fell on:
+            // its rule would generate a ghost for years of Tuesdays. Passing no
+            // recurrence is what keeps the archive's copy of the rule out of
+            // the placement.
+            let placeable = planner::Placeable {
+                is_event: row.is_event,
+                deadline: None,
+                duration_minutes: None,
+                sessions: &row.sessions,
+                recurrence: None,
+            };
+            for placed in planner::placements_of(placeable, day) {
                 self.planner_ghosts.push(PlannerGhost {
                     name: row.name.clone(),
                     outcome: row.outcome,
@@ -4221,14 +4416,34 @@ impl TaskApp {
                 // legible under any scheme (including the transparent default),
                 // and the palette still tints it the same colour the calendar
                 // uses for this item.
-                painter.rect_filled(rect, CornerRadius::same(8), Color32::from_black_alpha(170));
-                painter.rect_filled(rect, CornerRadius::same(8), palette);
+                //
+                // A routine is drawn a step back from all of that. It is the
+                // backdrop the day is planned *around* — eight hours of sleep
+                // rendered as loud as an hour of actual work would make every
+                // day look full of nothing. Quieter fill, thinner outline; it
+                // is still solid, because unlike a ghost it is live and you can
+                // pick it up.
+                let recessive = entry.routine;
+                painter.rect_filled(
+                    rect,
+                    CornerRadius::same(8),
+                    Color32::from_black_alpha(if recessive { 110 } else { 170 }),
+                );
+                painter.rect_filled(
+                    rect,
+                    CornerRadius::same(8),
+                    if recessive { palette.gamma_multiply(0.45) } else { palette },
+                );
                 painter.rect_stroke(
                     rect,
                     CornerRadius::same(8),
                     Stroke::new(
                         if selected { 2.2 } else { 1.2 },
-                        if selected { Color32::WHITE } else { accent },
+                        match (selected, recessive) {
+                            (true, _) => Color32::WHITE,
+                            (false, true) => accent.gamma_multiply(0.6),
+                            (false, false) => accent,
+                        },
                     ),
                     StrokeKind::Inside,
                 );
@@ -4238,13 +4453,16 @@ impl TaskApp {
                     text_rect.left_top(),
                     egui::Align2::LEFT_TOP,
                     format!(
-                        "{}–{}  ·  {}",
+                        "{}{}–{}  ·  {}",
+                        // Says the block is a rule, not a one-off, right where
+                        // the gesture that would move it every week happens.
+                        if recessive { "↻ " } else { "" },
                         planner::format_minutes(start),
                         planner::format_minutes(start + minutes as i32),
                         planner::format_duration(minutes)
                     ),
                     FontId::new(PLANNER_FINE_SIZE, FontFamily::Monospace),
-                    Color32::from_white_alpha(200),
+                    Color32::from_white_alpha(if recessive { 155 } else { 200 }),
                 );
 
                 if naming {

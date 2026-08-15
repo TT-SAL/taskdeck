@@ -35,6 +35,7 @@
 15. Platform notes (Windows / macOS / Linux)
 16. The day planner
 17. The archive
+18. Routines
 
 ---
 
@@ -54,7 +55,7 @@ Top menu bar: **New Task**, **New Event**, **Planner**, **Archive**, **Settings*
 timeline you block time out on, and a tray of everything still waiting for a slot.
 
 Additional features:
-- **Events vs Tasks:** events are pinned to a date/time; tasks are ranked either by a deadline plus a **severity** (how bad is missing it) or, with no deadline, by a **horizon** (roughly how soon it should happen) that ripens over time.
+- **Tasks, events and routines:** events are pinned to a date/time; tasks are ranked either by a deadline plus a **severity** (how bad is missing it) or, with no deadline, by a **horizon** (roughly how soon it should happen) that ripens over time; **routines** are weekly standing commitments — sleep, meals, the commute — that occupy the day without being ranked, completable or on the calendar (§18).
 - **Archive:** completed *and* deleted items are kept whole — sessions, estimate, dates and all — in an append-only JSONL log, read once into memory and shown as a searchable ledger that says how each one went, with restore and a permanent forget. See §17.
 - **Weather coordinate picker:** an interactive Blue-Marble world map with zoom/pan, click-to-pick, a graticule, ~270 city markers, and the nearest of them named for whatever you picked (§9.2).
 - **Color schemes:** user-editable 6-color palettes used to tint calendar items; palettes can be **auto-generated from the current background image** via k-means clustering in CIE-Lab space.
@@ -299,6 +300,14 @@ Three valid shapes:
 "Kept but dormant": the footer's due editor moves tasks between the two shapes at will, so both
 knobs may be present on one task — whichever matches the deadline's presence is live (§7.3), and
 the other is remembered for the day the deadline is added or cleared again.
+
+### `Recurrence` (`tasks.rs`) — a standing weekly claim
+
+`{ days: u8 (bit 0 = Monday), start_minutes: i32, minutes: u32 }`, held in
+`Active::recurrence`. A **rule**, not a list of instances: one record generates a block for whatever
+day is being looked at, so nothing accumulates and there is no per-occurrence editing question. An
+item carrying one is a **routine** — the third kind, neither ranked nor completable nor on the
+calendar grid. Full rationale in §18.
 
 ### `Archived` (`archive.rs`) — an item that has left the board
 
@@ -769,7 +778,7 @@ visual language: a rounded "notch" around the day number, two-line wrapped item 
 | `planner_naming_created` / `planner_naming_focus` | Whether the item under the title editor was created by the gesture that opened it (Escape then removes it), and the one-frame request for keyboard focus (§16.3.5). |
 | `planner_selected_session` | Which of the selection's sessions was clicked, when a work block was — what the footer's per-block controls act on. |
 | `planner_due_edit` | Task whose deadline is open in the footer's due editor (§16.3.4). |
-| `planner_create_kind` | What a drag or double-click on empty timeline makes: `Task` or `Event` (§16.3). |
+| `planner_create_kind` | What a drag or double-click on empty timeline makes: `Task`, `Event` or `Routine` (§16.3, §18). |
 | `planner_quick_add_input` | The tray's quick-add field. |
 | `settings_flag` | Show Settings. |
 | `color_picker_flag` / `edit_colorscheme_flag` / `rename_colorscheme_flag` | Color-scheme manager sub-modals. |
@@ -1507,6 +1516,148 @@ on day step, on retire, restore and forget. Deriving it per frame would walk the
 loop that redraws continuously, for an answer that stands still. `placements_of` in `planner.rs`
 takes the fields rather than an `Active`, so the placement rule has one implementation rather than
 a second copy drifting alongside it in the archive.
+
+---
+
+## 18. Routines
+
+`Active::recurrence` (`tasks.rs`), `Placeable` / `placements_of` (`planner.rs`), and the footer's
+weekday row (`ui.rs`).
+
+### 18.1 The third thing an item can be
+
+The model had two kinds and needed three. A **task** is work you owe: ranked in the left column,
+completable, archived when it is done. An **event** is news: it goes on the wall calendar because
+somebody — usually future-you — needs to see that it is happening.
+
+Sleeping is neither, and so is cooking, the commute, and the gym. Try it in the old model and both
+answers are wrong:
+
+| | Ranked list | Wall calendar | Wants a ✓ | Recurs |
+|---|---|---|---|---|
+| as a **task** | **yes — climbs to the top**, because a session booked for today is exactly what `PLANNED_LEAD_DAYS` lifts | no | **yes**, and finishing dinner files a row saying you completed an hour of work | no |
+| as an **event** | no | **yes** — a daily block eats one of the three slots in every cell | no | no |
+
+So a routine is its own thing, and it is defined by what it is *excluded* from:
+
+| Excluded from | By | Why |
+|---|---|---|
+| the ranked task list | `refilter_tasks` | nobody is owed it, so there is nothing to rank |
+| the planner's tray | `wants_planning` | it is not waiting for a slot; it *is* a slot |
+| the priority score | `base_score` (early `0.0`) | a guard, not a policy — see below |
+| the calendar grid | having no `deadline` | it is not news |
+| the ✓ | the footer | there is no state in which sleeping every night is *done* |
+
+The `base_score` guard is worth the two lines: a routine's shape — no deadline, no importance, no
+horizon — is precisely the one the scorer calls `MALFORMED_SCORE` and shoves to the top of the list
+so a corrupt entry gets noticed (§7.3). Two filters already keep routines away from it, and a guard
+is cheaper than trusting both to hold forever.
+
+### 18.2 Why it earns its place: the day's figure
+
+The strongest argument for routines is not convenience, it is that **the planner's load figure is a
+lie without them**. If the nine hours you were always going to spend on sleep and meals are not in
+the day, a day with four genuinely free hours reports thirteen.
+
+Which is also why the masthead counts them apart rather than folding them into "planned":
+
+```
+2h 30m planned · 3 blocks · 1 due · 9h routine · 2h done
+```
+
+Folding them in would make every day read as full; leaving them out is the failure above. Each part
+is conditional, so an ordinary day still shows two or three.
+
+### 18.3 A rule, not instances
+
+```rust
+pub struct Recurrence {
+    pub days: u8,          // bit 0 = Monday … bit 6 = Sunday
+    pub start_minutes: i32,
+    pub minutes: u32,
+}
+```
+
+One record generates a block for whatever day is being looked at (`placements_of`), and nothing is
+stored per occurrence. Three things follow:
+
+- **Nothing accumulates.** Sleeping every night for five years is one line of JSON.
+- **There is no "this occurrence or all of them?"** — the question every calendar app has to ask,
+  and the single largest source of complexity in recurring events. There is only the rule, so
+  moving or resizing a block edits the rule and it moves on every day it falls on. You do not
+  reschedule Wednesday's sleep; you change what time you go to bed. The footer names the days while
+  you make the gesture so the reach of it is on screen.
+- **Daylight saving is a non-issue.** The times are minutes from midnight, not `DateTime`s, so
+  "23:00" means 23:00 on every day it lands on, including the ones where the clocks changed.
+  Compare `Session`, which stores an absolute instant and needs `resolve_on_day` to step over a
+  spring-forward gap.
+
+`placements_of` checks the rule **first** and answers alone. A hand-edited save that gives a routine
+a deadline and sessions as well gets the rule, not three copies of the item on its own day.
+
+### 18.4 Which days, and what a drag means
+
+A routine's one knob is *which days*, and it sits in the same footer slot a dated task's **severity**
+and an undated task's **horizon** occupy — it is the same kind of thing, the single question that
+kind of item asks (§7.3).
+
+Seven letter toggles, not a preset combo: "Mon · Wed · Fri" is as ordinary as "every day", and a
+preset list either omits it or grows a "Custom…" that opens the toggles anyway. **All** is beside
+them because the case the feature exists for is daily.
+
+**A new routine starts on the weekday you drew it on, and no other.** Tempting as "every day" is for
+that daily case, a gesture should do what you watched it do — drawing a block on Wednesday and
+silently rewriting the next six days is a surprise you only find by stepping to Thursday. It is the
+same rule the deadline follows: changed only where changing it looks like changing it (§16.1). The
+**All** button makes the daily case one further click.
+
+`Recurrence::toggle` **refuses to clear the last day**. A rule with no days fires nowhere, which
+means it draws nothing on any timeline, which means it cannot be selected and therefore cannot be
+repaired. Deleting is how you get rid of a routine.
+
+### 18.5 How it is drawn
+
+A routine's block is deliberately recessive: a quieter fill, a thinner outline in a washed-out
+accent, and a `↻` in front of the time. Eight hours of sleep rendered as loud as an hour of real
+work would make every day look full of nothing.
+
+It is still **solid**, though, which is the distinction from an archive ghost (§17.4): a ghost is a
+record and takes no gestures, while a routine is live and you can pick it up. Its palette entry is
+`ROUTINE_COLOR_INDEX` — the calmest one — and the planner's timeline is the only place that colour
+is ever seen, since routines never reach the grid.
+
+### 18.6 In the archive
+
+Deleting a routine files it like anything else, with the rule kept (`Archived::recurrence`), so
+restoring brings back the arrangement rather than a nameless task the scorer reads as corrupt. Its
+row reads:
+
+```
+✗  go to sleep
+   routine dropped  ·  every day at 23:00 for 8h  ·  40d on the board
+```
+
+It counts under `Summary::routines`, apart from finished and dropped work, for the same reason
+events do: a standing arrangement you stopped keeping is not a task you failed. `was_finished()`
+excludes routines alongside events.
+
+Ghosts explicitly **do not** generate from an archived rule (`rebuild_planner_ghosts` passes
+`recurrence: None`): a dropped routine would otherwise haunt every past Tuesday it ever fell on.
+
+### 18.7 What this version deliberately does not do
+
+Recurrence is the feature most likely to metastasize, so the first cut is crude on purpose and these
+are the known edges:
+
+- **No blocks across midnight.** A rule is one span inside one day, so sleep 23:00–07:00 cannot be
+  drawn as a single eight-hour block; `clamp_block` truncates it at midnight. A marker at 23:00 —
+  which is what the day view mostly wants from it — works, and so do two routines meeting at
+  midnight. Supporting a wrap means emitting a head and a tail placement on consecutive days and
+  teaching the gestures to map the tail back to the rule.
+- **No exceptions.** There is no "skip today". The natural escape hatch is for dragging a generated
+  block to materialise a one-off override, which is a bigger change than the rule itself.
+- **No end date, no monthly or n-weekly rules.** A weekday mask covers routine; anything else is a
+  recurring *event*, which is a different feature.
 
 ---
 

@@ -1,5 +1,5 @@
 use std::{collections::HashMap, error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::Path};
-use chrono::{DateTime, Duration, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
@@ -14,6 +14,101 @@ use tempfile::NamedTempFile;
 pub struct Session {
     pub start: DateTime<Local>,
     pub minutes: u32,
+}
+
+/// Short weekday names, Monday first — the order `chrono`'s
+/// `num_days_from_monday` counts in, so a `Recurrence` bit and a name share an
+/// index.
+pub const WEEKDAY_NAMES: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/// Every weekday set.
+pub const EVERY_DAY: u8 = 0b0111_1111;
+
+/// Weekdays only — Monday to Friday.
+const WEEKDAYS: u8 = 0b0001_1111;
+
+/// Palette entry a routine wears: the calmest one.
+///
+/// A routine is the backdrop a day is planned *around*, not something competing
+/// for attention in it, and it never reaches the calendar grid — the planner's
+/// timeline is the only place its colour is ever seen.
+pub const ROUTINE_COLOR_INDEX: usize = 0;
+
+/// A standing claim on the week: this happens on these weekdays, at this time,
+/// for this long.
+///
+/// A **rule**, not a list of instances. Sleeping every night is one record that
+/// generates a block for whatever day you are looking at (`placements_of`), so
+/// nothing accumulates on disk, planning six months ahead costs nothing, and
+/// there is no "edit this occurrence or all of them?" question to answer
+/// because there is only ever the rule.
+///
+/// The times are minutes from midnight rather than `DateTime`s, which is what
+/// makes that work: "23:00" means 23:00 on every day it lands on, including the
+/// ones where the clocks changed.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct Recurrence {
+    /// Which weekdays it falls on. Bit 0 is Monday, bit 6 is Sunday.
+    pub days: u8,
+    /// When it starts, in minutes from midnight.
+    pub start_minutes: i32,
+    /// How long it runs.
+    pub minutes: u32,
+}
+
+/// The bit `day`'s weekday occupies in a `Recurrence::days` mask.
+pub fn weekday_bit(day: NaiveDate) -> u8 {
+    1 << day.weekday().num_days_from_monday()
+}
+
+impl Recurrence {
+    /// Whether the rule fires on `day`.
+    pub fn falls_on(&self, day: NaiveDate) -> bool {
+        self.days & weekday_bit(day) != 0
+    }
+
+    /// Whether the weekday at `index` (0 = Monday) is included.
+    pub fn includes(&self, index: u32) -> bool {
+        self.days & (1 << index) != 0
+    }
+
+    /// Turn one weekday on or off, refusing to turn the last one off.
+    ///
+    /// A rule with no days would fire nowhere: invisible on every timeline, and
+    /// therefore impossible to select and repair. The floor of one day is what
+    /// keeps it reachable — clearing a routine entirely is what Delete is for.
+    /// Returns whether anything changed, so a caller can skip the save.
+    pub fn toggle(&mut self, index: u32) -> bool {
+        let bit = 1 << index;
+        if self.days & bit == 0 {
+            self.days |= bit;
+            return true;
+        }
+        if self.days.count_ones() <= 1 {
+            return false;
+        }
+        self.days &= !bit;
+        true
+    }
+
+    /// "every day" / "weekdays" / "weekends" / "Mon · Wed · Fri".
+    pub fn summary(&self) -> String {
+        match self.days {
+            EVERY_DAY => "every day".to_string(),
+            WEEKDAYS => "weekdays".to_string(),
+            0b0110_0000 => "weekends".to_string(),
+            // Not reachable through `toggle`, but a hand-edited save can write
+            // it and "never" is a truer answer than an empty string.
+            0 => "never".to_string(),
+            _ => WEEKDAY_NAMES
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| self.includes(*index as u32))
+                .map(|(_, name)| *name)
+                .collect::<Vec<_>>()
+                .join(" · "),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -65,6 +160,25 @@ pub struct Active {
     /// or a task nobody has sized.
     #[serde(default)]
     pub duration_minutes: Option<u32>,
+    /// Set when this is a **routine**: time that is simply spoken for, every
+    /// week, forever — sleeping, cooking, the commute.
+    ///
+    /// The third thing an item can be, and the one the model was missing. A
+    /// task is work you *owe*, ranked and completable; an event is news, and
+    /// goes on the wall calendar. Sleep is neither: nobody is owed it, there is
+    /// no ✓ that means anything, and it has no business on the calendar — but
+    /// it is unarguably eight hours of a day that a planner claiming "four
+    /// hours free" had better know about.
+    ///
+    /// So a routine is deliberately *quiet*: excluded from the task list
+    /// (`refilter_tasks`), from the planner's tray (`wants_planning`), from
+    /// scoring (`base_score`) and — for free, by having no deadline — from the
+    /// calendar grid, while still counting towards the day's load.
+    ///
+    /// When this is set, `deadline`, `sessions` and `duration_minutes` are not
+    /// used: the rule carries the time and the length itself.
+    #[serde(default)]
+    pub recurrence: Option<Recurrence>,
 }
 
 /* ─────────────────────────── Priority scoring ───────────────────────────
@@ -223,6 +337,16 @@ impl Active {
     /// The score without the tie-break jitter — the part that is a pure
     /// function of the task and the time, and so the part worth testing.
     fn base_score(&self, time_now: DateTime<Local>) -> f32 {
+        // A routine is not ranked, because it is not owed. It never reaches the
+        // task list (`refilter_tasks`) or the tray (`wants_planning`), so this
+        // is a guard rather than a policy — but the shape a routine has (no
+        // deadline, no importance, no horizon) is exactly the one the scorer
+        // treats as corrupt and shoves to the top of the list, and a guard is
+        // cheaper than trusting two filters to never let one through.
+        if self.is_routine() {
+            return 0.0;
+        }
+
         // Pressure from planned sessions, if the task has any. The *most
         // pressing* session decides: with work booked for this afternoon and
         // more for Thursday, this afternoon is what matters now. Capped at
@@ -320,7 +444,16 @@ impl Active {
         let unit = (mixed >> 40) as f32 / (1u64 << 24) as f32;
         1.0 + unit * JITTER
     }
+    /// True when this is a standing weekly commitment rather than a task or an
+    /// event. See `Active::recurrence`.
+    pub fn is_routine(&self) -> bool {
+        self.recurrence.is_some()
+    }
+
     pub fn calendar_item_color(&self) -> usize {
+        if self.is_routine() {
+            return ROUTINE_COLOR_INDEX;
+        }
         calendar_item_color(self.is_event, self.importance, self.time_importance)
     }
 
@@ -329,6 +462,10 @@ impl Active {
     /// it (falling back to its deadline). `None` for an unplanned,
     /// deadline-less task — those live in the planner's tray instead.
     pub fn planner_anchor(&self) -> Option<DateTime<Local>> {
+        if self.is_routine() {
+            // A rule has no single instant — it has one per week, forever.
+            return None;
+        }
         if self.is_event {
             self.deadline
         } else {
@@ -340,6 +477,10 @@ impl Active {
     /// merely having a due date. Events count as planned once they have a
     /// length; a task counts once it has at least one session.
     pub fn is_planned(&self) -> bool {
+        if self.is_routine() {
+            // A routine is nothing but plan.
+            return true;
+        }
         if self.is_event {
             self.deadline.is_some() && self.duration_minutes.is_some()
         } else {
@@ -363,7 +504,10 @@ impl Active {
     /// sessions at all, or its estimate isn't yet covered by the sessions it
     /// has. A 2-hour task with one hour booked is still half a card.
     pub fn wants_planning(&self) -> bool {
-        if self.is_event {
+        // Neither an event nor a routine is waiting for a slot: an event's time
+        // is its deadline, and a routine's is its rule. Both are already
+        // wherever they are going.
+        if self.is_event || self.is_routine() {
             return false;
         }
         self.sessions.is_empty() || self.remaining_minutes().is_some_and(|left| left > 0)
@@ -554,7 +698,77 @@ mod tests {
             sessions: Vec::new(),
             planned_start: None,
             duration_minutes: None,
+            recurrence: None,
         }
+    }
+
+    /// A routine: sleep, 23:00, eight hours, on the given days.
+    fn routine(days: u8) -> Active {
+        Active {
+            recurrence: Some(Recurrence { days, start_minutes: 23 * 60, minutes: 8 * 60 }),
+            ..active(None, None, false, None)
+        }
+    }
+
+    #[test]
+    fn a_routine_is_neither_ranked_nor_waiting_to_be_planned() {
+        let now = noon();
+        let sleep = routine(EVERY_DAY);
+
+        // The shape a routine has — no deadline, no importance, no horizon — is
+        // exactly what the scorer calls malformed and shoves to the top of the
+        // list. It is not work you owe, so it scores nothing at all.
+        assert_eq!(sleep.base_score(now), 0.0);
+        assert!(sleep.base_score(now) < MALFORMED_SCORE);
+
+        // And it is not waiting for a slot: it is already at one, every week.
+        assert!(!sleep.wants_planning(), "a routine must never reach the tray");
+        assert!(sleep.is_planned());
+        assert!(sleep.is_routine());
+
+        // Nothing is owed, so nothing goes on the calendar grid.
+        assert_eq!(sleep.planner_anchor(), None);
+        assert!(bucket_by_deadline_day(&[sleep]).is_empty());
+    }
+
+    #[test]
+    fn a_rule_fires_on_the_days_it_names() {
+        // 14 Aug 2026 is a Friday.
+        let friday = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        let saturday = friday.succ_opt().unwrap();
+
+        let weekdays = Recurrence { days: WEEKDAYS, start_minutes: 8 * 60, minutes: 30 };
+        assert!(weekdays.falls_on(friday));
+        assert!(!weekdays.falls_on(saturday));
+
+        let daily = Recurrence { days: EVERY_DAY, ..weekdays };
+        assert!(daily.falls_on(friday) && daily.falls_on(saturday));
+    }
+
+    #[test]
+    fn a_rule_cannot_be_emptied_down_to_nothing() {
+        // A rule with no days draws nothing on any timeline — which makes it
+        // impossible to select, and therefore impossible to fix. The last day
+        // refuses to come off; Delete is how you get rid of a routine.
+        let mut only_monday = Recurrence { days: 0b0000_0001, start_minutes: 0, minutes: 60 };
+        assert!(!only_monday.toggle(0), "the last day must hold");
+        assert_eq!(only_monday.days, 0b0000_0001);
+
+        // Adding and removing others still works.
+        assert!(only_monday.toggle(2));
+        assert!(only_monday.includes(2));
+        assert!(only_monday.toggle(0));
+        assert_eq!(only_monday.days, 0b0000_0100);
+    }
+
+    #[test]
+    fn a_rule_says_what_it_amounts_to() {
+        let at = |days| Recurrence { days, start_minutes: 0, minutes: 60 };
+        assert_eq!(at(EVERY_DAY).summary(), "every day");
+        assert_eq!(at(WEEKDAYS).summary(), "weekdays");
+        assert_eq!(at(0b0110_0000).summary(), "weekends");
+        assert_eq!(at(0b0001_0101).summary(), "Mon · Wed · Fri");
+        assert_eq!(at(0).summary(), "never");
     }
 
     #[test]
