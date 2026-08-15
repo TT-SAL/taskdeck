@@ -501,26 +501,36 @@ parts.
   3-day weather is off) stays available regardless.
 - **Icons** (`icon_for_wmo`): maps WMO codes → one of the embedded SVGs, choosing day/night
   variants where available. The big comment block documents the `weather_svgs_2` naming scheme.
+- **Cells are allocated at exactly `WEATHER_CELL` and painted**, not laid out from their contents.
+  Laid out, a cell was as wide as its widest line — so a slot reading `-34` was twenty points wider
+  than one reading `7`, its column grew to fit, and **the grid changed shape when the weather did**.
+  The temperature is right-aligned against a fixed edge for the same reason: it is the one thing in
+  the cell whose width isn't known in advance, so it grows towards an edge rather than pushing one.
+  `WEATHER_GRID_WIDTH` is derived from the cell size and is what the notepad below measures itself
+  against.
 - **`CITIES`**: a static list (~200 entries) of `name/lat/lon` used as map markers.
 
 ### 9.1 The notepad (`show_notepad`)
 
-The bottom of the same column, whenever the third day of weather is off. It is a card in the task
-list's visual language — dark fill, hairline stroke, 14pt radius — with a `NOTES` heading and, while
-the two-second autosave debounce is still pending, a quiet `unsaved` beside it. Before, it was a
-bare text area with a slightly darker background floating in the column: nothing said where the
-notes began or ended, and an empty one was invisible.
+The bottom of the same column, whenever the third day of weather is off. It is drawn as **one more
+cell of the weather column** — the same hairline stroke, the same 15pt corner, no fill of its own —
+with a `NOTES` heading and, while the two-second autosave debounce is still pending, a quiet
+`unsaved` beside it.
 
-Three things about the right column make this harder than it looks, and all three were bugs first:
+Its width is `WEATHER_GRID_WIDTH` less its own margins, so the card ends exactly where the cells
+above it do; its height is the column's remaining space (`available_height()` measured in the
+column's own vertical ui) less a bottom margin, clamped. Both were literals before, and both were
+wrong: a dark slab, wider than the forecast it sat under and reaching the bottom edge of the window.
+
+Three things about laying this out are worth keeping, and all three were bugs first:
 
 - **A `Frame` inherits the layout it is placed in**, and this one is placed in a row. Without an
   explicit `ui.vertical` inside it, the heading and the writing area were laid out *side by side* —
   the note wrapped at two characters in what was left over and hugged the right edge of the card.
-- **The column has already overflowed its rect** by the time the notepad is drawn (the forecast
-  grids and their hand-tuned `add_space`s see to that), so `available_height()` reads as good as
-  nothing. A card sized from it collapses to its heading, which is why `NOTEPAD_CARD_HEIGHT` is a
-  constant and the scroll area pins *both* its height bounds. This is the fixed-size bargain of
-  §14.6, not an exception to it.
+  This is also what made `available_height()` look useless from inside the frame, and the height a
+  constant for a while: the figure was the row's, not the column's.
+- **The scroll area pins both height bounds.** With `max_height` alone it shrinks to its content and
+  the card closes up like a fan when the note is short.
 - **The writing area is given the height, not the card.** `ui.set_height` on the card's own ui makes
   the heading row inherit it and centre itself down the middle of the note. The field asks for as
   many rows as the space fits, computed from the real row height of the face it is set in, so an

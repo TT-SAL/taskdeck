@@ -111,23 +111,43 @@ const SETTINGS_FINE_SIZE: f32 = 13.0;
 /// Section headings, in the same face the planner's tray headings use.
 const SETTINGS_SECTION_SIZE: f32 = 13.0;
 
+/* ─────────────────────────── The weather column ───────────────────────────
+ *
+ * The forecast is a 4×3 grid of two-hour slots per day, and the notepad sits
+ * under it in the same column, so both are measured from the same numbers.
+ */
+
+/// Size of one forecast cell. Fixed, and painted rather than laid out — see
+/// `display_stuff`.
+const WEATHER_CELL: Vec2 = Vec2::new(80.0, 78.0);
+/// Gap between cells, in both directions.
+const WEATHER_CELL_GAP: f32 = 10.0;
+/// Columns of cells in a day's grid.
+const WEATHER_COLUMNS: f32 = 4.0;
+/// Side of the sky icon inside a cell.
+const WEATHER_ICON: f32 = 44.0;
+/// Width of a day's grid, and therefore of the column the notepad shares with
+/// it. Derived, so the notepad cannot drift wider than the forecast above it —
+/// which is exactly what it had done.
+const WEATHER_GRID_WIDTH: f32 =
+    WEATHER_COLUMNS * WEATHER_CELL.x + (WEATHER_COLUMNS - 1.0) * WEATHER_CELL_GAP;
+
 /* ─────────────────────────── The notepad ─────────────────────────── */
 
-/// Width of the notepad card. The right column is the weather grids' width,
-/// and the notepad sits under them.
-const NOTEPAD_WIDTH: f32 = 344.0;
-/// Gap between the column's edge and the card.
-const NOTEPAD_LEFT_MARGIN: f32 = 7.0;
-/// Height of the card.
-///
-/// A constant, and it has to be. By the time the notepad is drawn the right
-/// column has already overflowed the rect it was given — the forecast grids and
-/// their hand-tuned `add_space`s see to that — so `available_height()` reads as
-/// good as nothing, and a card sized from it collapses to its heading. The rest
-/// of this layout is fixed-size for the same reason and copes by scaling the
-/// whole UI (§14.6); this is that bargain, not an exception to it. It is sized
-/// to the gap under a two-day forecast.
-const NOTEPAD_CARD_HEIGHT: f32 = 432.0;
+/// Padding between the card's edge and the writing area.
+const NOTEPAD_PADDING: f32 = 10.0;
+/// Width of the writing area: the forecast grid's width, less the card's own
+/// margins and its stroke, so the card ends exactly where the cells above it
+/// do. It used to be a round number that happened to be wider, and the card
+/// visibly overhung the column.
+const NOTEPAD_WIDTH: f32 = WEATHER_GRID_WIDTH - 2.0 * NOTEPAD_PADDING - 3.0;
+/// Gap left under the card, so it doesn't sit on the bottom edge of the window.
+const NOTEPAD_BOTTOM_MARGIN: f32 = 14.0;
+/// Bounds on the card's height, which is otherwise the column's own remaining
+/// space. The floor keeps a usable box on a short window; the ceiling stops the
+/// notes becoming the largest thing in the app on a very tall one.
+const NOTEPAD_MIN_HEIGHT: f32 = 160.0;
+const NOTEPAD_MAX_HEIGHT: f32 = 520.0;
 /// Size of the notes themselves. A note is read from the desk, not from across
 /// the room, so it sits under the 19 points this used to be — which cost two
 /// characters of line width for nothing.
@@ -823,11 +843,19 @@ impl TaskApp {
         });
     }
 
+    /// One day's forecast: twelve two-hour slots in a 4×3 grid.
+    ///
+    /// Every cell is **allocated at exactly `WEATHER_CELL`** and painted, rather
+    /// than laid out from its contents. Laid out, the cell was as wide as its
+    /// widest line — so a slot reading `-34` was twenty points wider than one
+    /// reading `7`, the column grew to fit it, and the whole grid changed shape
+    /// when the forecast did. A wall calendar that reflows because it got cold
+    /// is not a wall calendar.
     fn display_stuff(&self, thing: &Vec<(String, f64, i32, bool)>, ui: &mut Ui, grid_id: String, upper_day: bool) {
         egui::Grid::new(grid_id)
-            .spacing(Vec2::new(10.0, 10.0))
-            .min_col_width(80.0)
-            .max_col_width(80.0)
+            .spacing(Vec2::new(WEATHER_CELL_GAP, WEATHER_CELL_GAP))
+            .min_col_width(WEATHER_CELL.x)
+            .max_col_width(WEATHER_CELL.x)
             .show(ui, |ui| {
                 let nth_cell_to_highlight = match self.date.hour() {
                     0..2 => 0,
@@ -844,56 +872,52 @@ impl TaskApp {
                     _ => 11,
                 };
                 for (i, (time, temp, wmo_code, is_day)) in thing.iter().enumerate() {
-                    egui::Frame::default()
-                        .stroke(
-                            if i == nth_cell_to_highlight && upper_day {
-                                Stroke::new(0.6, Color32::WHITE)
-                            } else {
-                                Stroke::new(0.5, Color32::from_white_alpha(150))
-                            }                            
-                        )
-                        .corner_radius(CornerRadius::same(15))
-                        .inner_margin(egui::Margin {
-                            left: 10,
-                            right: 10,
-                            top: 8,
-                            bottom: 6,
-                        })
-                        .show(ui, |ui| {
-                            ui.with_layout(egui::Layout::bottom_up(Align::Center), |ui| {
-                                let weather_icon_ref = weather::icon_for_wmo(*wmo_code, *is_day);
-                                ui.add(egui::Image::new(weather_icon_ref.clone())
-                                    .fit_to_exact_size(Vec2::new(48.0, 48.0)));
+                    let now = i == nth_cell_to_highlight && upper_day;
+                    let (rect, _) = ui.allocate_exact_size(WEATHER_CELL, egui::Sense::hover());
 
-                                ui.add_space(-15.0);
+                    ui.painter().rect_stroke(
+                        rect,
+                        CornerRadius::same(15),
+                        if now {
+                            Stroke::new(0.6, Color32::WHITE)
+                        } else {
+                            Stroke::new(0.5, Color32::from_white_alpha(150))
+                        },
+                        StrokeKind::Inside,
+                    );
 
-                                ui.horizontal(|ui| {
-                                    ui.add_space(37.0);
+                    let ink = if now { Color32::WHITE } else { Color32::from_white_alpha(120) };
 
-                                    ui.label(RichText::new(format!("{temp:.0}")).color(
-                                        if i == nth_cell_to_highlight && upper_day {
-                                            Color32::WHITE
-                                        } else {
-                                            Color32::from_white_alpha(120)
-                                        }   ));
-                                });
+                    // The hour, along the top.
+                    ui.painter().text(
+                        pos2(rect.left() + 10.0, rect.top() + 7.0),
+                        egui::Align2::LEFT_TOP,
+                        time,
+                        FontId::new(13.5, FontFamily::Name("space".into())),
+                        ink,
+                    );
 
-                                ui.add_space(-5.0);
+                    // The sky, in the bottom-left corner.
+                    egui::Image::new(weather::icon_for_wmo(*wmo_code, *is_day).clone()).paint_at(
+                        ui,
+                        Rect::from_min_size(
+                            pos2(rect.left() + 3.0, rect.bottom() - WEATHER_ICON - 3.0),
+                            Vec2::splat(WEATHER_ICON),
+                        ),
+                    );
 
-                                let time_text = RichText::new(time)
-                                    .color(
-                                        if i == nth_cell_to_highlight && upper_day {
-                                            Color32::WHITE
-                                        } else {
-                                            Color32::from_white_alpha(120)
-                                        }   
-                                )
-                                    .size(14.0)
-                                    .font(FontId { size:13.5, family: FontFamily::Name("space".into()) });
+                    // The temperature beside it, growing leftwards from a fixed
+                    // right edge — it is the one thing in the cell whose width
+                    // isn't known in advance, so it must grow towards an edge
+                    // rather than push one.
+                    ui.painter().text(
+                        pos2(rect.right() - 8.0, rect.bottom() - WEATHER_ICON * 0.5 - 3.0),
+                        egui::Align2::RIGHT_CENTER,
+                        format!("{temp:.0}"),
+                        FontId::new(17.0, FontFamily::Monospace),
+                        ink,
+                    );
 
-                                ui.label(time_text);
-                            });
-                        });
                     if (i + 1) % 4 == 0 {
                         ui.end_row();
                     }
@@ -960,21 +984,26 @@ impl TaskApp {
     /// The notepad: the bottom of the right column whenever the third day of
     /// weather is switched off.
     ///
-    /// It sits in a card of its own, in the same language as a task card. It
-    /// used to be a bare text area with a faintly darker background floating in
-    /// the column — nothing said where the notes began or ended, and an empty
-    /// one was invisible.
+    /// It is drawn as one more cell of the weather column — the same hairline
+    /// stroke, the same corner, no fill of its own — and it is exactly as wide
+    /// as the grid above it. The first version of this card was a heavy dark
+    /// slab, wider than the forecast it sat under, with generous padding eating
+    /// the space the notes were supposed to have: three separate ways of
+    /// announcing itself in a column whose whole manner is to be quiet.
     fn show_notepad(&mut self, ui: &mut Ui) {
-        ui.add_space(14.0);
+        ui.add_space(12.0);
+
+        // What the column has left under the forecast, whatever the UI scale
+        // has made of it — measured here, in the column's own vertical ui,
+        // because that is the only place the answer is meaningful.
+        let card_height = (ui.available_height() - NOTEPAD_BOTTOM_MARGIN)
+            .clamp(NOTEPAD_MIN_HEIGHT, NOTEPAD_MAX_HEIGHT);
 
         ui.horizontal(|ui| {
-            ui.add_space(NOTEPAD_LEFT_MARGIN);
-
             egui::Frame::new()
-                .fill(Color32::from_black_alpha(70))
-                .stroke(Stroke::new(1.5, Color32::from_white_alpha(55)))
-                .corner_radius(CornerRadius::same(14))
-                .inner_margin(Margin::symmetric(12, 10))
+                .stroke(Stroke::new(0.5, Color32::from_white_alpha(150)))
+                .corner_radius(CornerRadius::same(15))
+                .inner_margin(Margin::same(NOTEPAD_PADDING as i8))
                 .show(ui, |ui| {
                     ui.set_width(NOTEPAD_WIDTH);
 
@@ -1011,15 +1040,14 @@ impl TaskApp {
                     //
                     // Both bounds of the scroll area, so it is exactly this tall
                     // whatever is in it — `max_height` alone lets it shrink to
-                    // the (exhausted) available height of the column and the
-                    // card closes up like a fan.
+                    // its content and the card closes up like a fan.
                     //
                     // The field then asks for as many rows as that fits, from
                     // the real row height of the face it is set in rather than a
                     // guessed line spacing, so the caret starts at the top of
                     // the card and an empty note is the same rectangle as a full
                     // one.
-                    let text_height = NOTEPAD_CARD_HEIGHT - NOTEPAD_CHROME_HEIGHT;
+                    let text_height = card_height - NOTEPAD_CHROME_HEIGHT;
                     let font = FontId::new(NOTEPAD_TEXT_SIZE, FontFamily::Monospace);
                     let row_height = ui
                         .ctx()
