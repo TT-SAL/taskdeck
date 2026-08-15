@@ -601,6 +601,7 @@ visual language: a rounded "notch" around the day number, two-line wrapped item 
 | `display_archive_flag` | Show the Archive window (paginated). |
 | `planner_flag` + `planner_day` | Show the day planner, and which day it is on. The day is a date, not a calendar cell index, so the planner can step past the end of the calendar's range and a rebuild underneath it can't repoint it. |
 | `planner_drag` / `planner_selection` / `planner_naming` | In-flight timeline gesture, selected item, and the item whose title is being typed. |
+| `planner_naming_created` / `planner_naming_focus` | Whether the item under the title editor was created by the gesture that opened it (Escape then removes it), and the one-frame request for keyboard focus (§16.3.5). |
 | `planner_selected_session` | Which of the selection's sessions was clicked, when a work block was — what the footer's per-block controls act on. |
 | `planner_due_edit` | Task whose deadline is open in the footer's due editor (§16.3.4). |
 | `planner_create_kind` | What a drag or double-click on empty timeline makes: `Task` or `Event` (§16.3). |
@@ -875,17 +876,21 @@ window caption would have done, so the planner has no title bar.
 | `↩ Remove block` / `↩ Unplan` | One adaptive un-book button: frees the clicked block when one is selected, the whole plan otherwise. Cheap and unconfirmed either way — the time goes back onto the card. |
 | Click anything (timeline or tray) | Selects it; the **footer** shows what it is, when it runs, how long it takes, its deadline, and its severity or horizon. |
 | Double-click a block | Re-opens the title for editing. |
+| `Enter` in the title editor | Keeps the typed name and closes the editor. So does clicking anything else, or leaving the day — everything except Escape. |
+| `Esc` in the title editor | Throws the edit away. On a **just-created** item that removes the item too, unconfirmed — the undo for a block dragged out by accident. On a rename it only puts the old name back. |
 | Type in the tray's quick-add | Enter makes an undated, unplanned task and keeps the field focused — a brain-dump is several tasks, not one. |
 | `←` `→` `T` | Previous day, next day, today. |
 | `Enter` `U` `Del` | Rename / un-book (same adaptive rule as the button) / delete the selection (delete still asks, and the dialog answers to `Enter` / `Esc`). |
-| `Esc` | Leaves the title editor; a second press closes the planner. |
+| `Esc` | Backs out one level: the title editor first (§16.3.5), then the planner. |
 
 Shortcuts stand down whenever a widget has focus (`Context::egui_wants_keyboard_input`), a
-window is stacked over the planner (`TaskApp::modal_over_planner`), or the due editor is open —
-including **the frame it closes on**: Enter confirms the editor and the editor clears its own
-flag mid-frame, so without that guard the very same keystroke fell through to the shortcut
-handler and renamed the selected task. A dialog's key must never leak into the window it was
-typed over.
+window is stacked over the planner (`TaskApp::modal_over_planner`), or either editor — the due
+editor or the in-place title editor — is open. Crucially that includes **the frame an editor
+closes on**, which is why `show_planner` samples both flags *before* running the body: an editor
+clears its own flag the moment Enter finishes it, and the very same Enter is still in this
+frame's input, so a check made afterwards answers "nothing is open" on exactly the frame that
+matters. Escape is exempt and read first, so backing out still works while typing. An editor's
+key must never leak into the window it was typed over.
 
 **`New:` is two kinds now.** `planner::CreateKind` decides which time field a create fills in: a
 `Task` gets its first session and no due date of its own, an `Event`'s slot *is* its deadline.
@@ -991,6 +996,39 @@ combo box. The three sit under the body size — a timeline is denser than a tas
 puts it on a second line: the time line plus a `PLANNER_NAME_SIZE` name plus the block's margins.
 It is a constant rather than a literal because it is derived from the type scale and has to move
 when that does.
+
+### 16.3.5 Naming, and undoing an accident
+
+Creating on the timeline opens the title editor in place, and the two keys that close it mean
+opposite things:
+
+| Key | A just-created item | A rename |
+|---|---|---|
+| `Enter` (or clicking away, or leaving the day) | keeps it, placeholder name if you typed none | keeps the new name |
+| `Esc` | **removes the item** | puts the old name back |
+
+Escape deleting outright is deliberate and unconfirmed. The item is seconds old, the only thing
+in it is the slot an accidental drag gave it, and Escape is the key everyone reaches for to undo
+the last thing they did; making that path go through a selection and a confirmation dialog is
+what made an accidental drag annoying. Anything older is only ever deleted through the footer,
+which asks. `planner_naming_created` is the whole distinction, and the footer spells the keys out
+while the editor is open, because "Escape discards" is not guessable.
+
+Committing an *unnamed* block still keeps it, under a placeholder. The block holds a real
+decision — the time it was dragged out on — so blurring away from it is not the same statement as
+Escape; if you meant neither, Escape says so.
+
+Two mechanics this rests on, both of which were bugs first:
+
+- **The editor claims focus once, not every frame.** `Response::lost_focus` is a *live query*
+  into egui's focus memory, not a flag baked when the widget was built. Re-requesting focus on
+  every frame — which the editor did — put focus back the instant Enter made the field surrender
+  it, so the query always answered "no" and **Enter could not finish an edit at all**.
+  `planner_naming_focus` makes it a one-frame request.
+- **The field's id is keyed to the item**, not to where it sits. Blocks move as neighbours
+  re-flow around them, and an id derived from position would change with it — dropping focus,
+  and with it the edit, mid-word. That only mattered once focus stopped being re-requested every
+  frame, which had been masking it.
 
 ### 16.4 "Plan" is an adjective, not a noun
 

@@ -376,6 +376,17 @@ pub struct TaskApp {
     /// can be named without leaving the timeline.
     planner_naming: Option<u64>,
     planner_name_input: String,
+    /// Whether the item under the title editor was created by the gesture that
+    /// opened it. Escape removes such an item outright; on a rename it only
+    /// restores the old name. See `discard_planner_naming`.
+    planner_naming_created: bool,
+    /// Set for the one frame the title editor should claim keyboard focus.
+    ///
+    /// It must be *one* frame, not every frame. `Response::lost_focus` is a
+    /// live query into egui's focus memory, so re-requesting focus each frame
+    /// put it back the instant Enter made the field surrender it — the query
+    /// then answered "no", and Enter could never finish the edit at all.
+    planner_naming_focus: bool,
     /// What a drag (or double-click) on empty timeline creates.
     planner_create_kind: planner::CreateKind,
     /// The tray's quick-add field: a name typed here becomes an undated,
@@ -548,6 +559,8 @@ impl TaskApp {
             planner_drag: None,
             planner_naming: None,
             planner_name_input: String::new(),
+            planner_naming_created: false,
+            planner_naming_focus: false,
             planner_create_kind: planner::CreateKind::default(),
             planner_quick_add_input: String::new(),
             planner_scroll_to_hour: None,
@@ -1297,6 +1310,7 @@ impl TaskApp {
         // A deleted item must not stay selected on the planner.
         if self.planner_selection == Some(id) {
             self.planner_selection = None;
+            self.planner_selected_session = None;
         }
         self.summarize_calendar();
         self.save_active_things();
@@ -1444,7 +1458,7 @@ impl TaskApp {
         self.planner_selected_session = None;
         self.planner_due_edit = None;
         self.planner_drag = None;
-        self.cancel_planner_naming();
+        self.commit_planner_naming();
         self.planner_scroll_to_hour = Some(self.planner_default_scroll_hour());
     }
 
@@ -1478,7 +1492,9 @@ impl TaskApp {
         self.planner_selected_session = None;
         self.planner_due_edit = None;
         self.planner_drag = None;
-        self.cancel_planner_naming();
+        // Leaving the day keeps the title, like clicking away from the field.
+        // Only Escape throws an edit away.
+        self.commit_planner_naming();
         self.planner_scroll_to_hour = Some(self.planner_default_scroll_hour());
     }
 
@@ -1714,7 +1730,7 @@ impl TaskApp {
 
         self.planner_selection = Some(id);
         self.planner_selected_session = (!is_event).then_some(0);
-        self.begin_planner_naming(id);
+        self.begin_planner_naming(id, true);
     }
 
     /// Add an undated, unplanned task from the tray's quick-add field. It lands
@@ -1731,8 +1747,16 @@ impl TaskApp {
         self.add_active_thing(name, None, None, false, Some(1));
     }
 
-    fn begin_planner_naming(&mut self, id: u64) {
+    /// Open the in-place title editor on `id`.
+    ///
+    /// `created` marks an item that was *just* made by the gesture opening the
+    /// editor. It decides only what Escape means: for a fresh item Escape takes
+    /// the item away with the edit, which is what "I dragged that out by
+    /// accident" needs; for a rename it only puts the old name back.
+    fn begin_planner_naming(&mut self, id: u64, created: bool) {
         self.planner_naming = Some(id);
+        self.planner_naming_created = created;
+        self.planner_naming_focus = true;
         self.planner_name_input = self
             .active_things
             .iter()
@@ -1741,13 +1765,18 @@ impl TaskApp {
             .unwrap_or_default();
     }
 
-    /// Commit the in-place title edit. An untitled *new* block would be a
-    /// mystery rectangle, so an empty name falls back to a placeholder rather
-    /// than being stored blank.
+    /// Keep the typed title. Enter does this, and so does clicking away from
+    /// the field or leaving the day — everything except Escape.
+    ///
+    /// An untitled block would be a mystery rectangle, so an empty name falls
+    /// back to a placeholder rather than being stored blank. The block still
+    /// holds a real decision — the slot it was dragged out on — so committing
+    /// it unnamed keeps that; Escape is the way to say you meant neither.
     fn commit_planner_naming(&mut self) {
         let Some(id) = self.planner_naming.take() else { return };
         let typed = self.planner_name_input.trim().to_string();
         self.planner_name_input.clear();
+        self.planner_naming_created = false;
 
         let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
             return;
@@ -1759,11 +1788,22 @@ impl TaskApp {
         self.save_active_things();
     }
 
-    /// Abandon a title edit without saving. Used when the planner closes or the
-    /// day changes underneath the editor.
-    fn cancel_planner_naming(&mut self) {
-        self.planner_naming = None;
+    /// Throw the title edit away — Escape.
+    ///
+    /// A rename goes back to the name the item already had. A *just-created*
+    /// item goes away entirely, and without a confirmation: it is seconds old,
+    /// the only thing in it is the slot an accidental drag gave it, and Escape
+    /// is the key everyone reaches for to undo the last thing they did. Items
+    /// any older than that are only ever deleted through the footer, which
+    /// asks first.
+    fn discard_planner_naming(&mut self) {
+        let Some(id) = self.planner_naming.take() else { return };
+        let created = std::mem::take(&mut self.planner_naming_created);
         self.planner_name_input.clear();
+
+        if created {
+            self.delete_active_thing(id);
+        }
     }
 
     /// The planner window: the day's masthead across the top, a tray of things
@@ -1787,6 +1827,15 @@ impl TaskApp {
         let viewport = ctx.viewport_rect();
         let width = (viewport.width() - 140.0).clamp(640.0, 1600.0);
         let height = (viewport.height() - 110.0).clamp(380.0, 1180.0);
+
+        // Captured *before* the body runs. Both editors clear their own flag
+        // the instant they finish, and the keystroke that finished them is
+        // still in this frame's input — so asking "is an editor open?" after
+        // the fact answers "no" on exactly the frame that matters, and the
+        // Enter that closed one falls straight through to the shortcut that
+        // re-opens it.
+        let naming_owned_frame = self.planner_naming.is_some();
+        let due_editor_owned_frame = self.planner_due_edit.is_some();
 
         // No title bar: the masthead names the day far better than a window
         // caption could, and it is the day popup's one keepsake. Closing is the
@@ -1820,18 +1869,13 @@ impl TaskApp {
                 self.planner_footer(ui);
             });
 
-        // Checked *before* the due editor runs: when Enter confirms it, the
-        // editor clears its own flag mid-frame, and the shortcut handler below
-        // would then read the very same Enter as the rename shortcut — the
-        // dialog's keystroke must never leak into the planner it was typed
-        // over.
-        let due_editor_owned_this_frame = self.planner_due_edit.is_some();
-
         // Drawn after the planner so it stacks on top of it.
         self.show_due_editor(ctx);
 
-        if !due_editor_owned_this_frame {
-            self.handle_planner_keys(ctx);
+        // The due editor answers Enter and Escape itself; the planner's keys
+        // stand down for the whole frame it owned.
+        if !due_editor_owned_frame {
+            self.handle_planner_keys(ctx, naming_owned_frame);
         }
 
         // A drag released outside the timeline (or outside the window entirely)
@@ -1848,7 +1892,7 @@ impl TaskApp {
     /// aiming at a button. Everything here is suppressed while a text field has
     /// focus — the title editor and the tray's quick-add both want plain
     /// letters and arrows for themselves.
-    fn handle_planner_keys(&mut self, ctx: &Context) {
+    fn handle_planner_keys(&mut self, ctx: &Context, naming_owned_frame: bool) {
         // Something is stacked on top of the planner — a confirmation, an error,
         // the settings window. The keys belong to it, not to the day underneath.
         if self.modal_over_planner() {
@@ -1862,15 +1906,27 @@ impl TaskApp {
             return;
         }
 
-        // Escape backs out one level at a time: first out of a title edit, then
-        // out of the planner. Closing straight from the editor would be a
-        // surprise mid-sentence, so this one runs even while typing.
+        // Escape backs out one level at a time: first out of a title edit —
+        // throwing it away, and taking a just-created item with it — then out
+        // of the planner. Closing straight from the editor would be a surprise
+        // mid-sentence, so this one runs even while typing.
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
             if self.planner_naming.is_some() {
-                self.commit_planner_naming();
+                self.discard_planner_naming();
             } else {
                 self.close_planner();
             }
+            return;
+        }
+
+        // The title editor owns the keyboard for every frame it was open at the
+        // start of: Enter belongs to it, and the letter shortcuts are letters
+        // someone is typing. `naming_owned_frame` rather than a live check,
+        // because Enter *commits* during the draw — by the time this runs the
+        // flag is already clear, and the same Enter would re-open the editor
+        // over the name just typed. (Escape is handled above, so backing out
+        // still works while typing.)
+        if naming_owned_frame || self.planner_naming.is_some() {
             return;
         }
 
@@ -1903,7 +1959,7 @@ impl TaskApp {
 
         let Some(id) = self.planner_selection else { return };
         if rename {
-            self.begin_planner_naming(id);
+            self.begin_planner_naming(id, false);
         }
         if unplan {
             // The same adaptive un-book as the footer's button: the clicked
@@ -2073,6 +2129,33 @@ impl TaskApp {
     /// occupied some of the time: at the bottom, an empty one costs nothing and
     /// a full one doesn't push the day the user is aiming at.
     fn planner_footer(&mut self, ui: &mut Ui) {
+        // While the title editor is open the footer says what the two keys that
+        // close it will do, rather than offering controls that would take the
+        // field's focus — and end the edit — the moment one was clicked. Escape
+        // meaning "discard" is not guessable, so it is spelled out.
+        if self.planner_naming.is_some() {
+            let escape = if self.planner_naming_created {
+                "Esc to discard it"
+            } else {
+                "Esc to keep the old name"
+            };
+            ui.horizontal(|ui| {
+                ui.set_min_height(PLANNER_INSPECTOR_HEIGHT);
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("Naming")
+                        .size(PLANNER_FINE_SIZE)
+                        .color(Color32::from_white_alpha(140)),
+                );
+                ui.label(
+                    RichText::new(format!("Enter to keep it  ·  {escape}"))
+                        .size(PLANNER_META_SIZE)
+                        .color(Color32::from_white_alpha(190)),
+                );
+            });
+            return;
+        }
+
         let Some(id) = self.planner_selection else {
             self.planner_idle_footer(ui);
             return;
@@ -2306,7 +2389,7 @@ impl TaskApp {
             self.open_due_editor(id);
         }
         if rename {
-            self.begin_planner_naming(id);
+            self.begin_planner_naming(id, false);
         }
         if unplan {
             match session {
@@ -3087,18 +3170,40 @@ impl TaskApp {
     /// belongs to. Shared by blocks and markers so naming a deadline works the
     /// same way naming a block does, and Enter means the same thing in both.
     fn planner_name_editor(&mut self, ui: &mut Ui, field: Rect) {
+        let Some(id) = self.planner_naming else { return };
         let mut committed = false;
+
         ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
             let response = ui.add(
                 egui::TextEdit::singleline(&mut self.planner_name_input)
+                    // Keyed to the item, not to where the field happens to sit.
+                    // The block moves as neighbours re-flow around it, and an
+                    // id derived from its position would change with it —
+                    // dropping focus, and with it the edit, mid-word.
+                    .id(egui::Id::new(("planner_name_editor", id)))
                     .hint_text("name it")
                     .desired_width(field.width()),
             );
-            response.request_focus();
-            if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+
+            // Claim focus once, when the editor appears. This used to run every
+            // frame, which is why Enter did nothing: `lost_focus` is a live
+            // query into egui's focus memory, so putting focus straight back
+            // after Enter made the field surrender it meant the query below
+            // always answered "no" and the edit could never be finished.
+            if self.planner_naming_focus {
+                response.request_focus();
+                self.planner_naming_focus = false;
+            }
+
+            // Enter ends the edit, and so does clicking anything else — both
+            // are the field losing focus, and both mean "keep this". Escape
+            // drops focus too but means the opposite, and `handle_planner_keys`
+            // has it; this must not race it to the commit.
+            if response.lost_focus() && !ui.input(|i| i.key_pressed(Key::Escape)) {
                 committed = true;
             }
         });
+
         if committed {
             self.commit_planner_naming();
         }
@@ -3185,7 +3290,7 @@ impl TaskApp {
                 }
                 if body_response.double_clicked() {
                     select(self);
-                    self.begin_planner_naming(entry.id);
+                    self.begin_planner_naming(entry.id, false);
                 }
                 if body_response.drag_started() {
                     let grab = pointer
