@@ -95,6 +95,9 @@ const PLANNER_NEW_TASK_IMPORTANCE: u8 = 2;
 /// default, so where a task was typed doesn't change what it is.
 const PLANNER_NEW_TASK_HORIZON: u8 = 1;
 
+/// Text size in the hover tip that names a day's items in full.
+const CELL_TIP_SIZE: f32 = 14.0;
+
 /* ──────────────────────────────── The archive ─────────────────────────────
  *
  * A ledger, and deliberately built like the planner rather than like the grid
@@ -2273,6 +2276,67 @@ impl TaskApp {
                                         }
                                     });
                                 });
+
+                                // A cell is about thirteen characters to a
+                                // row and a day's names are not, so a long one
+                                // ends in an ellipsis however well it is
+                                // fitted. Hovering is the cheap way to read the
+                                // rest: the calendar is meant to be read from
+                                // across the room, but when you are at the
+                                // machine squinting at "Quarterly financial
+                                // review…", this answers what it actually says.
+                                //
+                                // Registered *after* the cards so it wins the
+                                // hit test against them — egui tests the most
+                                // recently added widget first — and senses only
+                                // hover, so the day click still belongs to the
+                                // calendar's own press/drag handling.
+                                if hovered && !self.any_modal_open() {
+                                    let (lines, hidden) = {
+                                        let cell = &self.calendar_elements[idx];
+                                        let lines: Vec<(String, String)> = cell
+                                            .preview
+                                            .iter()
+                                            .map(|item| (item.time.clone(), item.name.clone()))
+                                            .collect();
+                                        (lines, cell.item_count.saturating_sub(cell.preview.len()))
+                                    };
+                                    if !lines.is_empty() {
+                                        let tip = row_ui.interact(
+                                            rect,
+                                            egui::Id::new(("calendar_cell_tip", idx)),
+                                            egui::Sense::hover(),
+                                        );
+                                        tip.on_hover_ui(|ui| {
+                                            for (time, name) in &lines {
+                                                ui.horizontal(|ui| {
+                                                    if !time.is_empty() {
+                                                        ui.label(
+                                                            RichText::new(time)
+                                                                .font(FontId::new(
+                                                                    CELL_TIP_SIZE,
+                                                                    FontFamily::Name("space".into()),
+                                                                ))
+                                                                .color(Color32::from_white_alpha(150)),
+                                                        );
+                                                    }
+                                                    ui.label(RichText::new(name).size(CELL_TIP_SIZE));
+                                                });
+                                            }
+                                            // The cell only ever shows three;
+                                            // leaving the rest unaccounted for
+                                            // is the same silence the ellipsis
+                                            // was added to break.
+                                            if hidden > 0 {
+                                                ui.label(
+                                                    RichText::new(format!("+{hidden} more"))
+                                                        .size(CELL_TIP_SIZE)
+                                                        .color(Color32::from_white_alpha(130)),
+                                                );
+                                            }
+                                        });
+                                    }
+                                }
 
                                 if !self.planner_flag {
                                     if hovered {

@@ -749,19 +749,64 @@ find out what either did to the calendar was to select it and look.
 ## 12. Custom Calendar Widgets (`calendarwidgets.rs`)
 
 Each implements `egui::Widget` with a fixed `60.0` height and draws via the painter. They share a
-visual language: a rounded "notch" around the day number, two-line wrapped item text, and small
-"hour mark" pills drawn with an **unclipped painter** so they can spill outside the cell.
+visual language: a rounded "notch" around the day number, wrapped item text, and small "hour mark"
+pills drawn with an **unclipped painter** so they can spill outside the cell.
 
 | Widget | Used when a day has… | Notable detail |
 |--------|----------------------|----------------|
 | `DayNumber` | 0 items | Just the day number (top-left). |
-| `DayHeader` | the 1st item | Number + 2-line title + top hour-mark; custom rounded top-right polygon. |
+| `DayHeader` | the 1st item | Number + title + top hour-mark; custom rounded top-right polygon. |
 | `MiddleHeader` | the 2nd item | Plain rounded rect; optional bottom hour-mark. |
 | `RotatedNumberOnly` | filler for 0–2 item days | Day number rotated 180° in the bottom-right. |
 | `BottomHeaderRotated` | the 3rd item (exactly 3) | Rotated number + title + top & bottom hour-marks. |
 | `ButtonHeaderRotated` | the 3rd slot (4+ items) | Same as above plus a "…" overflow button. |
 
 > These widgets are pixel-tuned with many magic offsets; they assume the ~160×215 cell size.
+
+### 12.1 Fitting a name onto a card — `fit_text_rows`
+
+A card is about thirteen characters to a row and a name is any length, so something has to give.
+Worse, a card is **not a rectangle**: the day number is punched out of one corner, so the row beside
+it is narrower than the rows below.
+
+All four card widgets used to solve this separately, and every copy was wrong:
+
+| Fault | Consequence |
+|-------|-------------|
+| Only the *first* row was measured; the remainder was poured into the second unchecked | A long name ran off the side of the card and was clipped mid-glyph |
+| Anything past two rows was dropped | A truncated name looked like the whole name — no ellipsis, no sign it continued |
+| A word wider than a row never fit row one | Row one was left **empty** and the whole word went to row two, where it overflowed |
+| Two copies had no "row one is full" flag | Later *shorter* words were still appended to row one — the name printed **out of order** |
+| One of those appended with `push_str(word)`, no separator | The rest printed **run together**: `overdueprojectretro` |
+
+`fit_text_rows(ui, text, font, widths)` replaces all four. `widths` carries **one entry per row**, in
+order, which is what lets the indented first row and the full-width rows below it each be measured
+against their own space. It breaks at spaces where it can, inside a word where it must (a name with
+no space in it still has to be cut somewhere), and ends in `…` when anything was left over — paid
+for out of the row's own width, not hung past its end.
+
+Two details worth keeping:
+
+- **The row *count* is measured too** (`rows_between`), not assumed. How many rows a card has room
+  for depends on the height of the day number's galley, which depends on the font and the UI scale.
+  A first attempt hardcoded three and the last row straddled the bottom edge of the card, painted in
+  half. The 16-point Anton numeral's galley is also a few points taller than its glyphs, and giving
+  that leading back is what buys `DayHeader` its third row.
+- **The layout is a pure function of a per-character advance** (`fit_rows_by`), so the rules are
+  tested against a known ten-unit character rather than against whatever the font measures. Summing
+  advances is how egui's own layouter measures a row, so this agrees with what is painted.
+
+It is also cheaper than what it replaces, which laid out the whole accumulated line into a fresh
+`Galley` once per word per card. This takes the font lock once and costs one pass over the name.
+
+### 12.2 The hover tip
+
+A name that ends in `…` still has to be readable somehow. Hovering a cell names its items in full,
+with their times, plus `+N more` for the ones past the three a cell can show.
+
+The tip's hit area is registered **after** the cards are drawn — egui hit-tests the most recently
+added widget first — and senses only hover, so the day click still belongs to the calendar's own
+press/drag handling.
 
 ---
 

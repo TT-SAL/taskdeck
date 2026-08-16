@@ -12,7 +12,7 @@ The window is laid out in three columns.
 
 **Tasks** sit on the left, ordered by how much they need your attention. A task with a deadline carries a severity — how bad missing it would be — and works its way up the list as the date closes in. A task without one carries a horizon instead: *within days*, *a week*, *a month*, or *whenever*, and ripens over that timescale, so things do not quietly settle to the bottom and get forgotten.
 
-**The calendar** runs down the middle. It scrolls through as many weeks as you ask it to (a handful, or years of them) and animates as you move. Each day shows the events and deadlines that land on it. Click a day and it opens in the planner, where you can see the whole of it and change it.
+**The calendar** runs down the middle. It scrolls through as many weeks as you ask it to (a handful, or years of them) and animates as you move. Each day shows the events and deadlines that land on it. A name too long for its card wraps as far as the card goes and then ends in `…`; hover the day to read the names in full. Click a day and it opens in the planner, where you can see the whole of it and change it.
 
 **Weather and notes** share the right column. You get a two or three day forecast from Open-Meteo, and when you switch the third day off, that space turns into a notepad for whatever you want kept in front of you.
 
