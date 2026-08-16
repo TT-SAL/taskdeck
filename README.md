@@ -18,7 +18,7 @@ The window is laid out in three columns.
 
 ## Opening a day
 
-Click any day on the calendar — or the **Planner** button in the menu, which opens today. Either way you get the same window, which is the only view of a day there is: the date and weekday across the top, everything still waiting for a slot in a tray down the left, and the day itself as a timeline.
+Click any day on the calendar — or the **Planner** button in the menu (or `P`), which opens the day you were last on. Either way you get the same window, which is the only view of a day there is: the date and weekday across the top, everything still waiting for a slot in a tray down the left, and the day itself as a timeline.
 
 Drag on the timeline to block out time; the block appears where you dragged and you name it right there. Double-click instead if half an hour is what you meant. Drag a task in from the tray to decide when you will actually do it. Drag blocks to move them, drag their bottom edge to make them longer. Overlapping blocks sit side by side so a double-booking is obvious, and a red line shows where you are in the day. The **New** switch at the top right decides what a drag makes: a *task* — time set aside to work on something — an *event*, something that happens at that time — or a *routine*, time that is spoken for every week.
 
@@ -84,6 +84,8 @@ TaskDeck keeps two folders:
 
 - `images/` holds the background pictures you can choose from.
 - `taskdeck_data/` holds your tasks, notes, colour schemes, and settings.
+
+Run one copy at a time. Two copies pointed at the same `taskdeck_data/` each keep their own picture of your tasks and write all of it whenever anything changes, so whichever saves last replaces the other's work — TaskDeck notices and says so at startup rather than letting it happen quietly.
 
 Both are created on first run, next to the executable — so keeping the executable in its own folder gives you a self-contained, portable install you can move around. If the executable lives somewhere you are not allowed to write (`/Applications`, `/usr/local/bin`, `C:\Program Files`), TaskDeck falls back to the usual per-user location instead:
 

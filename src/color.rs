@@ -345,7 +345,12 @@ pub fn generate_colorscheme(dirs: &AppDirs, name: String) -> Option<ColorScheme>
     clusters.sort_by(|(a_lab, a_count), (b_lab, b_count)| {
         let a_score = cluster_score(*a_lab, *a_count);
         let b_score = cluster_score(*b_lab, *b_count);
-        a_score.partial_cmp(&b_score).unwrap()
+        // `total_cmp`, not `partial_cmp(..).unwrap()`. A NaN score — which a
+        // degenerate cluster on an unusual image can produce — made that
+        // `unwrap` panic outright, and a comparator that answered "equal" for
+        // it would trip the sort's own total-order check instead. This orders
+        // every float there is, including NaN, and cannot do either.
+        a_score.total_cmp(&b_score)
     });
 
     // --- 6. Convert to RGBA fills ---

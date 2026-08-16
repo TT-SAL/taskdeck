@@ -762,6 +762,7 @@ impl ArchiveLog {
         }
         temp.as_file_mut().sync_all()?;
         temp.persist(dir.join(ARCHIVE_FILE))?;
+        crate::tasks::sync_directory(dir);
         Ok(())
     }
 }

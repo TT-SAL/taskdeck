@@ -22,8 +22,102 @@ use tempfile::NamedTempFile;
 
 /// Folder holding the user's tasks, notes, colour schemes and config.
 pub const DATA_DIR_NAME: &str = "taskdeck_data";
+/// The file whose lock says "a TaskDeck is using this folder".
+const LOCK_FILE_NAME: &str = ".lock";
 /// Folder holding user-supplied background images.
 pub const IMAGES_DIR_NAME: &str = "images";
+
+/* ────────────────────── One TaskDeck to a data folder ──────────────────────
+ *
+ * Every save in this app is atomic: serialize, write a temp file beside the
+ * real one, fsync it, rename over the top. That makes a save **crash-safe** —
+ * the file on disk is always either the whole previous version or the whole new
+ * one, never half of either.
+ *
+ * It does nothing whatever about a *second copy of the program*, because that
+ * is a different problem. Two instances each read the task list at startup,
+ * each keep their own picture of it in memory, and each write **the whole
+ * picture** on every change. Both writes are individually perfect; the second
+ * one simply replaces the first, and everything the other instance did since it
+ * started is gone. No amount of atomicity helps, because nothing was ever torn
+ * — the loss is that two programs disagreed about what the truth was and the
+ * later one won.
+ *
+ * (The archive is the one exception: `archived.jsonl` is appended to, and an
+ * append is atomic, so two instances filing things is safe. Restoring or
+ * forgetting rewrites the whole log, and that clobbers like everything else.)
+ *
+ * So: an OS lock on a file in the folder, held for as long as the process
+ * lives. An OS lock rather than a PID written to a file, because the kernel
+ * releases it when the process dies however it dies — there is no such thing as
+ * a stale lock to reason about, and no liveness check to get wrong.
+ *
+ * A second instance is **warned, not stopped.** Refusing to start is the
+ * stricter answer and it is the wrong one here: the failure mode of a false
+ * positive is "cannot open my own calendar", which is worse than the thing it
+ * prevents, and some filesystems (network shares especially) do not lock
+ * faithfully. The warning goes through the same startup-error window that
+ * reports a quarantined file, so it has to be read and dismissed.
+ */
+
+/// An exclusive claim on a data folder, held for as long as this value lives.
+///
+/// Nothing is ever read from it — the point is the `File` staying open, and the
+/// kernel's lock going with it when the process ends.
+#[derive(Debug)]
+pub struct DataClaim {
+    /// `None` when the filesystem would not lock at all, which is not an error
+    /// worth telling anyone about: it means the guard is unavailable here, not
+    /// that anything is wrong.
+    _locked: Option<fs::File>,
+    /// Whether another TaskDeck already had the folder.
+    contended: bool,
+}
+
+impl DataClaim {
+    /// True when another instance already owns this folder — the caller should
+    /// tell the user, because whichever of the two saves last will replace the
+    /// other's work.
+    pub fn is_contended(&self) -> bool {
+        self.contended
+    }
+
+    /// What to put in front of the user when it is.
+    pub fn warning(&self) -> String {
+        format!(
+            "Another TaskDeck is already using this {DATA_DIR_NAME} folder.\n\n\
+             Both copies keep their own picture of your tasks and write all of it \
+             when anything changes, so whichever one saves last will replace what \
+             the other did. Close one of them."
+        )
+    }
+}
+
+/// Claim `data` for this process. Always succeeds — see the note above for why
+/// contention is a warning rather than a refusal.
+pub fn claim_data_dir(data: &Path) -> DataClaim {
+    let _ = fs::create_dir_all(data);
+
+    let file = match fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(data.join(LOCK_FILE_NAME))
+    {
+        Ok(file) => file,
+        // Nowhere to put the lock — a read-only folder, most likely, which the
+        // first failed save will report far more usefully than this could.
+        Err(_) => return DataClaim { _locked: None, contended: false },
+    };
+
+    match file.try_lock() {
+        Ok(()) => DataClaim { _locked: Some(file), contended: false },
+        Err(fs::TryLockError::WouldBlock) => DataClaim { _locked: None, contended: true },
+        // The filesystem does not support locking. Carry on unguarded rather
+        // than claiming a conflict that may not exist.
+        Err(fs::TryLockError::Error(_)) => DataClaim { _locked: None, contended: false },
+    }
+}
 
 /// The resolved locations TaskDeck reads and writes. Cheap to clone.
 #[derive(Debug, Clone)]

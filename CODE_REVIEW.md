@@ -102,8 +102,10 @@ non-100% DPI scaling or arbitrary window sizes.
 
 Worth preserving — don't regress these while hardening:
 
-- **Atomic file writes** for the critical JSON files (temp file → fsync → persist) — good durability
-  against partial writes.
+- **Atomic file writes** for the critical JSON files (temp file → fsync → persist → fsync the
+  directory) — a save is never half-applied, and survives a power cut. Note the boundary: this is
+  crash safety, not mutual exclusion between two running copies, which is a separate guard
+  (`DOCUMENTATION.md` §4.1).
 - **Weather threading** is clean: `RwLock` for data + `AtomicU64` version flag + a command channel
   with graceful `Drop`/`Stop`, plus an `EventLoopProxy` to wake the UI. The UI only re-shapes the
   data when the version actually changes (`last_weather_version`), so it's not re-cloning every
@@ -147,6 +149,37 @@ _(B4, E8 and E10 are resolved.)_
 ## Changelog — Resolved
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
+
+- **Robustness pass, and the difference between atomic and exclusive.**
+  - **An out-of-range `importance` crashed the app on startup, unrecoverably.**
+    `calendar_item_color` returned `importance as usize` with no clamp, and the calendar indexes the
+    six-entry palette with it directly at nine call sites. `importance` is a `u8` straight out of a
+    JSON file — the UI writes 0–4, but a hand-edited save (or one from a future build with more
+    levels) can hold anything, and a value of `9` panicked on the next frame that drew that day.
+    For a calendar that redraws continuously that means it could not be opened at all: quarantining
+    a *corrupt* file was handled, a *valid* file with an unexpected number in it was not. The
+    scoring tables next door had guarded against exactly this from the start (`weight_for`); the
+    colour path had not. Clamped at the source so every caller is safe by construction, with a test
+    over all 256 values. Verified by reproduction: panics before, starts after.
+  - **Two instances silently overwrote each other.** Every save is atomic, which makes it
+    crash-safe and does nothing about a second copy of the program: both keep their own picture of
+    the task list and write all of it, so the later save wins and the other's work is gone. An OS
+    lock on `taskdeck_data/.lock`, held for the process lifetime, now warns at startup — warns
+    rather than refuses, because a false positive means "cannot open my own calendar". See
+    `DOCUMENTATION.md` §4.1.
+  - **The atomic rename was not durable.** Contents were fsynced and the swap was atomic, but the
+    *directory entry* could still be in the page cache when the power went — so the save was lost
+    anyway. `tasks::sync_directory` flushes the parent after each `persist` (Unix; NTFS orders it
+    for us).
+  - **A ✓ could eat the task.** `retire_active_thing` removed the item and *then* wrote the archive
+    row, so a failed archive write left the item gone from the live set with no record anywhere. It
+    files first and only removes if that worked; a ✓ that says why it did nothing is a far better
+    failure than one that quietly loses work.
+  - **`unwrap` on a float comparator.** The palette generator sorted clusters with
+    `partial_cmp(..).unwrap()`, which panics on a NaN score — and answering "equal" instead would
+    trip the sort's own total-order check. `total_cmp` orders every float there is.
+  - **The hover tip showed only the three items the cell already showed**, which is the one thing it
+    was no use for. It is built from the live set on hover and names the whole day.
 
 - **The archive threw away everything that made it worth keeping (B4, and more).** Rebuilt as
   `archive.rs` + a ledger window + planner ghosts; the whole design is `DOCUMENTATION.md` §17.

@@ -152,6 +152,38 @@ Files inside `taskdeck_data/`:
 | `colorschemes.json` | JSON map `u32 → ColorScheme` | `color::save_colorschemes` (atomic) |
 | `notepad_text.json` | JSON string | `utilities::save_notepad_text` (atomic) |
 | `userconfig.toml` | TOML | `initialization` + `toml_edit` writers |
+| `.lock` | empty; the OS lock on it is the content | `paths::claim_data_dir` (§4.1) |
+
+### 4.1 Atomicity is not exclusion
+
+Every save here is atomic: serialize, write a temp file beside the real one, `fsync` it, rename over
+the top. That makes a save **crash-safe** — what is on disk is always either the whole previous
+version or the whole new one, never half of either — and it is worth being clear about what that
+does *not* cover.
+
+**A second copy of the program.** Two instances each read the task list at startup, keep their own
+picture of it, and write **the whole picture** on every change. Both writes are individually
+perfect; the second simply replaces the first, and everything the other instance did since it
+started is gone. No amount of atomicity helps, because nothing was ever torn — two programs
+disagreed about the truth and the later one won. (`archived.jsonl` is the one exception: appends are
+atomic, so two instances *filing* things is safe. Restoring or forgetting rewrites the whole log,
+and that clobbers like everything else.)
+
+`paths::claim_data_dir` takes an OS lock on `taskdeck_data/.lock` and holds it for the process
+lifetime. An OS lock rather than a PID in a file, because the kernel releases it however the process
+dies — there is no stale lock to reason about and no liveness check to get wrong.
+
+A second instance is **warned, not stopped**, through the same startup-error window that reports a
+quarantined file. Refusing to start is the stricter answer and the wrong one here: a false positive
+means "cannot open my own calendar", which is worse than what it prevents, and some filesystems —
+network shares especially — do not lock faithfully. A filesystem that will not lock at all is
+treated as no guard rather than as a conflict.
+
+**Durability of the rename.** The rename is atomic but, on a journalling filesystem, the *directory
+entry* can still be in the page cache when the power goes: contents fsynced, swap atomic, save lost.
+`tasks::sync_directory` flushes the parent directory after each `persist`, which is the step that
+makes the guarantee whole. Best-effort and Unix-only — Windows will not open a directory as a file,
+and NTFS orders the metadata once the file's own data is down.
 
 ---
 
@@ -801,8 +833,15 @@ It is also cheaper than what it replaces, which laid out the whole accumulated l
 
 ### 12.2 The hover tip
 
-A name that ends in `…` still has to be readable somehow. Hovering a cell names its items in full,
-with their times, plus `+N more` for the ones past the three a cell can show.
+A name that ends in `…` still has to be readable somehow. Hovering a cell names **every** item on
+that day, in time order, with their times.
+
+It is built from `active_things` on hover, not from the cell's three-item `preview`. Reading the
+preview would have the tip answer its own question with "the same three, again" — and storing the
+full list on the `DayCell` instead is exactly what the day popup used to do (a second, fully-cloned
+copy of every dated item, rebuilt on every `summarize_calendar`), which was removed for good reason.
+One scan of one hovered day costs nothing. `CELL_TIP_MAX_ROWS` is a ceiling so a pathological day
+cannot produce a tip taller than the screen, not a space constraint; past it the rest are counted.
 
 The tip's hit area is registered **after** the cards are drawn — egui hit-tests the most recently
 added widget first — and senses only hover, so the day click still belongs to the calendar's own

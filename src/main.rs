@@ -1,7 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use mimalloc::MiMalloc;
-use task_deck::{color, initialization::{self, App, Config, get_check_and_set_config}, paths::AppDirs, utilities, tasks::{self, Active}, ui::{TaskApp, TaskAppConfig}, weather::get_weather};
+use task_deck::{color, initialization::{self, App, Config, get_check_and_set_config}, paths::{self, AppDirs}, utilities, tasks::{self, Active}, ui::{TaskApp, TaskAppConfig}, weather::get_weather};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 #[global_allocator]
@@ -25,11 +25,20 @@ async fn run() {
     // which differs per platform — see `paths`).
     let dirs = AppDirs::resolve();
 
+    // Held for the whole of `run`, which is the whole of the program: the
+    // kernel drops it when this process does. See `paths::claim_data_dir` for
+    // why a second instance is warned rather than turned away.
+    let _data_claim = paths::claim_data_dir(&dirs.data);
+
     let Config { start_in_fullscreen, coordinates, background, enable_fps_counter, window_size_startup, calendar_weeks_to_show, selected_monitor_name, mut selected_colorscheme_id, three_day_weather, background_image_tint_percent, ui_scale_percent } = get_check_and_set_config(&dirs.config_file());
 
     // Collected non-fatal startup recovery messages (e.g. quarantined corrupt
     // files), surfaced in the error window once the UI is up.
     let mut startup_errors: Vec<String> = Vec::new();
+
+    if _data_claim.is_contended() {
+        startup_errors.push(_data_claim.warning());
+    }
 
     // A corrupt/unreadable active set must not abort the boot; quarantine the
     // bad file and start from an empty set instead.

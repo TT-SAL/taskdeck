@@ -516,17 +516,32 @@ impl Active {
     }
 }
 
-/// Which of the six palette entries an item wears.
+/// Number of entries in a colour scheme, and therefore the range every palette
+/// index has to stay inside.
+pub const PALETTE_LEN: usize = 6;
+
+/// Which of the six palette entries an item wears. **Always** in
+/// `0..PALETTE_LEN`.
 ///
 /// A free function rather than a method because an archived item wants the same
 /// answer and is no longer an `Active` — the planner draws a completed task's
 /// old blocks in the colour it had in life (`archive::Archived::color_id`).
+///
+/// The clamp is the load-bearing part, and it was missing. `importance` is a
+/// `u8` straight out of a JSON file: the UI only ever writes 0–4, but a
+/// hand-edited save (or one written by a future build with more levels) can
+/// hold anything, and the calendar indexes the six-entry palette with this
+/// directly — nine call sites, no bounds check between them. An `importance`
+/// of `9` panicked the app on the next frame that drew that day, which for a
+/// calendar redrawing continuously means it could not be started at all. The
+/// scoring tables next door had guarded against exactly this from the start
+/// (`weight_for`); the colour path had not.
 pub fn calendar_item_color(
     is_event: bool,
     importance: Option<u8>,
     time_importance: Option<u8>,
 ) -> usize {
-    if is_event {
+    let index = if is_event {
         5
     } else if let Some(importance) = importance {
         importance as usize
@@ -538,7 +553,8 @@ pub fn calendar_item_color(
         if horizon >= HORIZON_WHENEVER { 0 } else { horizon as usize }
     } else {
         0
-    }
+    };
+    index.min(PALETTE_LEN - 1)
 }
 
 /// Fold the pre-sessions single slot (`planned_start` + `duration_minutes`)
@@ -669,7 +685,30 @@ pub fn oversafe_activesave(payload: &Vec<Active>, data_dir: &Path) -> Result<(),
     // Atomically replace the original file
     temp_file.persist(&final_path)?;
 
+    sync_directory(data_dir);
+
     Ok(())
+}
+
+/// Flush the directory entry after an atomic rename.
+///
+/// The rename itself is atomic — the file is never half-replaced — but on a
+/// journalling filesystem the *directory entry* can still be sitting in the
+/// page cache when the power goes. The contents were fsynced and the swap was
+/// atomic, and the save is still lost, which makes the whole exercise
+/// half-finished without this.
+///
+/// Best-effort: a failure here means the save is merely as durable as it was
+/// before, which is not worth interrupting anyone over. Unix only — Windows
+/// does not let a directory be opened as a file, and NTFS metadata ordering
+/// makes the rename durable once the file's own data is.
+pub fn sync_directory(dir: &Path) {
+    #[cfg(unix)]
+    if let Ok(handle) = File::open(dir) {
+        let _ = handle.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
 }
 
 /* Writing and paging the archive lived here too — `save_inactive` and
@@ -787,6 +826,24 @@ mod tests {
         assert_eq!(active(None, Some(HORIZON_WHENEVER), false, None).calendar_item_color(), 0);
         // Nothing set falls back to 0.
         assert_eq!(active(None, None, false, None).calendar_item_color(), 0);
+    }
+
+    #[test]
+    fn a_palette_index_is_always_inside_the_palette() {
+        let dl = Some(Local.with_ymd_and_hms(2025, 6, 1, 12, 0, 0).unwrap());
+        // The UI writes 0–4, but this is a `u8` out of a JSON file and the
+        // calendar indexes a six-entry array with it at nine call sites with no
+        // check between them. An out-of-range value used to panic on the next
+        // frame that drew the day — which, for a calendar that redraws
+        // continuously, meant the app could not be opened at all.
+        for importance in 0..=u8::MAX {
+            let index = active(Some(importance), None, false, dl).calendar_item_color();
+            assert!(index < PALETTE_LEN, "importance {importance} gave index {index}");
+        }
+        for horizon in 0..=u8::MAX {
+            let index = active(None, Some(horizon), false, None).calendar_item_color();
+            assert!(index < PALETTE_LEN, "horizon {horizon} gave index {index}");
+        }
     }
 
     /// A dated task, `days` from its deadline (negative = overdue).
@@ -1157,7 +1214,6 @@ mod tests {
 
     #[test]
     fn jitter_is_small_bounded_and_actually_varies_per_task() {
-        let now = noon();
         let factors: Vec<f32> = (1..=64u64)
             .map(|id| Active { id, ..active(Some(2), None, false, None) }.tie_break_jitter(7))
             .collect();

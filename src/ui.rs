@@ -98,6 +98,12 @@ const PLANNER_NEW_TASK_HORIZON: u8 = 1;
 /// Text size in the hover tip that names a day's items in full.
 const CELL_TIP_SIZE: f32 = 14.0;
 
+/// How many of a day's items the hover tip will name before it starts counting
+/// them instead. The tip is a floating popup with the whole window to grow
+/// into, so this is not about space — it is a ceiling so that a pathological
+/// day cannot produce a tip taller than the screen.
+const CELL_TIP_MAX_ROWS: usize = 14;
+
 /* ──────────────────────────────── The archive ─────────────────────────────
  *
  * A ledger, and deliberately built like the planner rather than like the grid
@@ -2292,14 +2298,44 @@ impl TaskApp {
                                 // hover, so the day click still belongs to the
                                 // calendar's own press/drag handling.
                                 if hovered && !self.any_modal_open() {
+                                    // Built from the live set, not from the
+                                    // cell's three-item preview: the tip exists
+                                    // precisely to say what the cell had no room
+                                    // for, and capping it at what the cell shows
+                                    // would have it answer its own question with
+                                    // "the same three, again".
+                                    //
+                                    // Not stored on the `DayCell` either. That
+                                    // is how the day popup used to work — a
+                                    // second, fully-cloned copy of every dated
+                                    // item, rebuilt on every `summarize_calendar`
+                                    // — and it was removed for good reason. One
+                                    // scan of one hovered day costs nothing.
                                     let (lines, hidden) = {
-                                        let cell = &self.calendar_elements[idx];
-                                        let lines: Vec<(String, String)> = cell
-                                            .preview
+                                        let date = self.calendar_elements[idx].date;
+                                        let mut dated: Vec<&Active> = self
+                                            .active_things
                                             .iter()
-                                            .map(|item| (item.time.clone(), item.name.clone()))
+                                            .filter(|item| {
+                                                item.deadline
+                                                    .is_some_and(|when| when.date_naive() == date)
+                                            })
                                             .collect();
-                                        (lines, cell.item_count.saturating_sub(cell.preview.len()))
+                                        dated.sort_by_key(|item| item.deadline);
+                                        let lines: Vec<(String, String)> = dated
+                                            .iter()
+                                            .take(CELL_TIP_MAX_ROWS)
+                                            .map(|item| {
+                                                (
+                                                    item.deadline
+                                                        .map(|when| when.format("%H:%M").to_string())
+                                                        .unwrap_or_default(),
+                                                    item.name.clone(),
+                                                )
+                                            })
+                                            .collect();
+                                        let hidden = dated.len().saturating_sub(lines.len());
+                                        (lines, hidden)
                                     };
                                     if !lines.is_empty() {
                                         let tip = row_ui.interact(
@@ -2323,7 +2359,9 @@ impl TaskApp {
                                                     ui.label(RichText::new(name).size(CELL_TIP_SIZE));
                                                 });
                                             }
-                                            // The cell only ever shows three;
+                                            // Only past the tip's own ceiling,
+                                            // which a personal calendar will
+                                            // essentially never reach — but
                                             // leaving the rest unaccounted for
                                             // is the same silence the ellipsis
                                             // was added to break.
@@ -5066,11 +5104,23 @@ impl TaskApp {
 
         // Removed first and archived by value: the record is the item, not a
         // copy of it that could drift from the one being deleted.
-        let item = self.active_things.remove(index);
-        let record = Archived::retire(item, outcome, Local::now());
+        // Filed **before** it leaves the board, and it only leaves if the
+        // filing worked.
+        //
+        // The other order loses things. If `archived.jsonl` cannot be written
+        // — a read-only file, a full disk — an item removed first is gone from
+        // the live set with no record of it anywhere, and an error window is
+        // poor compensation for a task that no longer exists. A ✓ that reports
+        // why it did nothing is a far better failure than one that quietly eats
+        // the task, so the item stays put and the user can try again.
+        let record = Archived::retire(self.active_things[index].clone(), outcome, Local::now());
 
         if let Err(error) = self.archive.record(&self.dirs.data, record) {
-            self.show_error(format!("Could not write to the archive:\n{error}"));
+            self.show_error(format!(
+                "Could not write to the archive, so nothing was changed:\n{error}"
+            ));
+            self.dismiss_retire_confirmations();
+            return;
         }
 
         self.forget_active_thing(id);
