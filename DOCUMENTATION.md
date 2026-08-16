@@ -1687,7 +1687,33 @@ stored per occurrence. Three things follow:
 `placements_of` checks the rule **first** and answers alone. A hand-edited save that gives a routine
 a deadline and sessions as well gets the rule, not three copies of the item on its own day.
 
-### 18.4 Which days, and what a drag means
+### 18.4 Once is a perfectly good answer
+
+An empty `days` mask is **not** a broken rule — it is a one-off, and it is what a new routine
+starts as.
+
+"Tomorrow at two I walk the dog" is the same *kind* of thing as sleeping every night: time that is
+spoken for, owed to nobody, with no ✓ that would mean anything and no business on the wall calendar.
+The only difference is how often it comes round, and "once" is a perfectly good answer. So repeating
+is a **property** of this kind rather than its definition, and the footer's row is labelled
+`Repeats:` — all seven off reads "just this day".
+
+A non-repeating rule needs to know *which* day, which is `Recurrence::anchor`. For a repeating rule
+the anchor is merely where it was drawn and is ignored; `#[serde(default)]` covers routines written
+before the field existed, all of which repeat.
+
+**Unticking the last weekday re-anchors to the day being shown**, not to the anchor it had. Clearing
+the last day while looking at Thursday should leave the block on Thursday; falling back to whichever
+day it was first drawn on would make it vanish out from under the person who just unticked
+something. That is why `toggle` takes the shown day.
+
+> **A naming tension worth knowing about.** With one-off as the default, the switch's `Routine`
+> label promises something the default is not. The word still describes what the facility is *for*,
+> and "does not repeat" living inside the repeat control is what every calendar does — but if a
+> better word turns up, this is the thing it would fix. `Block` is taken (a task's session is a
+> block, and `＋ Block` adds one), which rules out the obvious candidate.
+
+### 18.5 Which days, and what a drag means
 
 A routine's one knob is *which days*, and it sits in the same footer slot a dated task's **severity**
 and an undated task's **horizon** occupy — it is the same kind of thing, the single question that
@@ -1697,17 +1723,13 @@ Seven letter toggles, not a preset combo: "Mon · Wed · Fri" is as ordinary as 
 preset list either omits it or grows a "Custom…" that opens the toggles anyway. **All** is beside
 them because the case the feature exists for is daily.
 
-**A new routine starts on the weekday you drew it on, and no other.** Tempting as "every day" is for
-that daily case, a gesture should do what you watched it do — drawing a block on Wednesday and
-silently rewriting the next six days is a surprise you only find by stepping to Thursday. It is the
-same rule the deadline follows: changed only where changing it looks like changing it (§16.1). The
-**All** button makes the daily case one further click.
+**A new routine happens once, on the day you drew it.** A gesture should do what you watched it do
+— drawing a block on Wednesday and silently filling in the next six days, or even every future
+Wednesday, is a surprise you only find by stepping to Thursday. It is the same rule the deadline
+follows: changed only where changing it looks like changing it (§16.1). **All** makes the daily case
+one further click, **Once** takes a repeating one back to a single day.
 
-`Recurrence::toggle` **refuses to clear the last day**. A rule with no days fires nowhere, which
-means it draws nothing on any timeline, which means it cannot be selected and therefore cannot be
-repaired. Deleting is how you get rid of a routine.
-
-### 18.5 How it is drawn
+### 18.6 How it is drawn
 
 A routine's block is deliberately recessive: a quieter fill, a thinner outline in a washed-out
 accent, and a `↻` in front of the time. Eight hours of sleep rendered as loud as an hour of real
@@ -1718,7 +1740,7 @@ record and takes no gestures, while a routine is live and you can pick it up. It
 `ROUTINE_COLOR_INDEX` — the calmest one — and the planner's timeline is the only place that colour
 is ever seen, since routines never reach the grid.
 
-### 18.6 In the archive
+### 18.7 In the archive
 
 Deleting a routine files it like anything else, with the rule kept (`Archived::recurrence`), so
 restoring brings back the arrangement rather than a nameless task the scorer reads as corrupt. Its
@@ -1736,7 +1758,7 @@ excludes routines alongside events.
 Ghosts explicitly **do not** generate from an archived rule (`rebuild_planner_ghosts` passes
 `recurrence: None`): a dropped routine would otherwise haunt every past Tuesday it ever fell on.
 
-### 18.7 What this version deliberately does not do
+### 18.8 What this version deliberately does not do
 
 Recurrence is the feature most likely to metastasize, so the first cut is crude on purpose and these
 are the known edges:

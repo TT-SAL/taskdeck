@@ -314,10 +314,12 @@ impl Archived {
             // A routine was never work, so there is nothing to be early or late
             // about and no time to hold against an estimate. What it *was* is
             // the standing arrangement itself, so that is what the row reports.
-            parts.push("routine dropped".to_string());
+            parts.push(
+                if rule.repeats() { "routine dropped" } else { "time dropped" }.to_string(),
+            );
             parts.push(format!(
                 "{} at {} for {}",
-                rule.summary(),
+                rule.summary_dated(),
                 format_minutes(rule.start_minutes),
                 format_duration(rule.minutes)
             ));
@@ -941,6 +943,7 @@ mod tests {
         let sleep = Active {
             recurrence: Some(Recurrence {
                 days: crate::tasks::EVERY_DAY,
+                anchor: at(2026, 8, 14, 0, 0).date_naive(),
                 start_minutes: 23 * 60,
                 minutes: 8 * 60,
             }),

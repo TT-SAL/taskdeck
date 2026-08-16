@@ -645,7 +645,7 @@ mod tests {
 
     fn routine(days: u8, start_minutes: i32, minutes: u32) -> Active {
         Active {
-            recurrence: Some(Recurrence { days, start_minutes, minutes }),
+            recurrence: Some(Recurrence { days, anchor: day(), start_minutes, minutes }),
             ..task(Vec::new(), None, None)
         }
     }
@@ -682,7 +682,7 @@ mod tests {
         // what the user set here, so it answers alone rather than the item
         // showing up twice on the day it was hand-given.
         let confused = Active {
-            recurrence: Some(Recurrence { days: crate::tasks::EVERY_DAY, start_minutes: 60, minutes: 30 }),
+            recurrence: Some(Recurrence { days: crate::tasks::EVERY_DAY, anchor: day(), start_minutes: 60, minutes: 30 }),
             deadline: Some(at(2026, 8, 14, 9, 0)),
             sessions: vec![session(at(2026, 8, 14, 15, 0), 60)],
             ..task(Vec::new(), None, None)

@@ -508,11 +508,11 @@ const PLANNER_WEEKDAY_TOGGLE: f32 = 26.0;
 /// opens the toggles anyway. **All** is there because the case this whole
 /// feature exists for — sleeping, eating, the commute — is daily, and the
 /// create gesture deliberately starts from one day (see `create_planned_item`).
-fn planner_weekday_row(ui: &mut Ui, rule: &mut tasks::Recurrence) -> bool {
+fn planner_weekday_row(ui: &mut Ui, rule: &mut tasks::Recurrence, shown_day: NaiveDate) -> bool {
     let mut changed = false;
 
-    ui.label(RichText::new("Days:").size(PLANNER_META_SIZE))
-        .on_hover_text("Which days it falls on");
+    ui.label(RichText::new("Repeats:").size(PLANNER_META_SIZE))
+        .on_hover_text("Leave every day off and it happens once, on this day");
 
     for (index, name) in tasks::WEEKDAY_NAMES.iter().enumerate() {
         let on = rule.includes(index as u32);
@@ -533,10 +533,12 @@ fn planner_weekday_row(ui: &mut Ui, rule: &mut tasks::Recurrence) -> bool {
         .selected(on);
 
         if ui.add(button).on_hover_text(*name).clicked() {
-            // `toggle` refuses to clear the last day: a rule that fires nowhere
-            // draws nothing, and a routine you cannot see is one you cannot
-            // select to repair. Deleting is how you get rid of one.
-            changed |= rule.toggle(index as u32);
+            // Turning the last one off is allowed: that is a one-off, not a
+            // broken rule. It re-anchors to the day being shown, so unticking
+            // the last weekday leaves the block where you are looking rather
+            // than sending it back to wherever it was first drawn.
+            rule.toggle(index as u32, shown_day);
+            changed = true;
         }
     }
 
@@ -549,6 +551,18 @@ fn planner_weekday_row(ui: &mut Ui, rule: &mut tasks::Recurrence) -> bool {
         .clicked()
     {
         rule.days = tasks::EVERY_DAY;
+        changed = true;
+    }
+    if ui
+        .add_enabled(
+            rule.repeats(),
+            Button::new(RichText::new("Once").size(PLANNER_META_SIZE)),
+        )
+        .on_hover_text("Just this day")
+        .clicked()
+    {
+        rule.days = 0;
+        rule.anchor = shown_day;
         changed = true;
     }
 
@@ -2968,17 +2982,23 @@ impl TaskApp {
         let is_event = kind == planner::CreateKind::Event;
         let is_routine = kind == planner::CreateKind::Routine;
 
-        // A routine starts on **the weekday you drew it on**, and no other.
+        // A new one happens **once, on the day you drew it**, and repeats only
+        // if you say so.
         //
-        // Not every day, tempting as that is for the case this feature exists
-        // for. A gesture should do what you watched it do: drawing a block on
-        // Wednesday and silently rewriting the next six days is the kind of
-        // surprise you only discover by stepping to Thursday. The footer's day
-        // row is right there, with an "All" button, so the daily case is one
-        // more click — and the same rule as elsewhere applies (a deadline is
-        // "changed only where changing it looks like changing it").
+        // A gesture should do what you watched it do: drawing a block on
+        // Wednesday and silently filling in the next six days — or even every
+        // future Wednesday — is the kind of surprise you only discover by
+        // stepping to Thursday. It is the same rule the deadline follows,
+        // changed only where changing it looks like changing it.
+        //
+        // It also makes the cheap thing cheap. "Tomorrow at two I walk the dog"
+        // is not a routine and never becomes one, but it is exactly this kind
+        // of item: time spoken for, owed to nobody, no ✓ that would mean
+        // anything, and no business on the wall calendar. Repeating is a
+        // property you add — `All` for the daily ones — not a toll you pay.
         let recurrence = is_routine.then(|| tasks::Recurrence {
-            days: tasks::weekday_bit(self.planner_day),
+            days: 0,
+            anchor: self.planner_day,
             start_minutes,
             minutes,
         });
@@ -3645,6 +3665,7 @@ impl TaskApp {
         let mut importance = item.importance;
         let mut time_importance = item.time_importance;
 
+        let shown_day = self.planner_day;
         let mut complete = false;
         let mut delete = false;
         let mut unplan = false;
@@ -3761,7 +3782,7 @@ impl TaskApp {
             if is_routine {
                 ui.add_space(10.0);
                 if let Some(rule) = recurrence.as_mut() {
-                    if planner_weekday_row(ui, rule) {
+                    if planner_weekday_row(ui, rule, shown_day) {
                         changed = true;
                     }
                 }

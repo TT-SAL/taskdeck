@@ -34,8 +34,7 @@ const WEEKDAYS: u8 = 0b0001_1111;
 /// timeline is the only place its colour is ever seen.
 pub const ROUTINE_COLOR_INDEX: usize = 0;
 
-/// A standing claim on the week: this happens on these weekdays, at this time,
-/// for this long.
+/// A claim on time: this happens at this hour, for this long, on these days.
 ///
 /// A **rule**, not a list of instances. Sleeping every night is one record that
 /// generates a block for whatever day you are looking at (`placements_of`), so
@@ -43,17 +42,41 @@ pub const ROUTINE_COLOR_INDEX: usize = 0;
 /// there is no "edit this occurrence or all of them?" question to answer
 /// because there is only ever the rule.
 ///
+/// **An empty `days` is not a broken rule — it is a one-off.** Walking the dog
+/// at two tomorrow is the same *kind* of thing as sleeping every night: time
+/// that is simply spoken for, owed to nobody, with no ✓ that would mean
+/// anything and no business on the wall calendar. The only difference is how
+/// often it comes round, and "once" is a perfectly good answer. So repeating is
+/// a property of this kind rather than its definition, and a fresh one starts
+/// at once — see `TaskApp::create_planned_item` for why that is also the least
+/// surprising thing a drag can do.
+///
 /// The times are minutes from midnight rather than `DateTime`s, which is what
-/// makes that work: "23:00" means 23:00 on every day it lands on, including the
-/// ones where the clocks changed.
+/// makes the weekly case work: "23:00" means 23:00 on every day it lands on,
+/// including the ones where the clocks changed.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Recurrence {
-    /// Which weekdays it falls on. Bit 0 is Monday, bit 6 is Sunday.
+    /// Which weekdays it falls on. Bit 0 is Monday, bit 6 is Sunday. **Zero
+    /// means it does not repeat**, and `anchor` is the one day it lands on.
     pub days: u8,
+    /// The day a non-repeating rule falls on, and the day a repeating one was
+    /// made on.
+    ///
+    /// `#[serde(default)]` for routines written before one-offs existed: those
+    /// all carry a non-empty `days`, so their anchor is never consulted and any
+    /// date will do.
+    #[serde(default = "epoch")]
+    pub anchor: NaiveDate,
     /// When it starts, in minutes from midnight.
     pub start_minutes: i32,
     /// How long it runs.
     pub minutes: u32,
+}
+
+/// Stand-in anchor for rules written before the field existed. Never consulted:
+/// every such rule repeats, and a repeating rule ignores its anchor.
+fn epoch() -> NaiveDate {
+    NaiveDate::from_ymd_opt(1970, 1, 1).unwrap_or_default()
 }
 
 /// The bit `day`'s weekday occupies in a `Recurrence::days` mask.
@@ -64,7 +87,15 @@ pub fn weekday_bit(day: NaiveDate) -> u8 {
 impl Recurrence {
     /// Whether the rule fires on `day`.
     pub fn falls_on(&self, day: NaiveDate) -> bool {
+        if !self.repeats() {
+            return day == self.anchor;
+        }
         self.days & weekday_bit(day) != 0
+    }
+
+    /// Whether this comes round again, or is just the one day.
+    pub fn repeats(&self) -> bool {
+        self.days != 0
     }
 
     /// Whether the weekday at `index` (0 = Monday) is included.
@@ -72,34 +103,33 @@ impl Recurrence {
         self.days & (1 << index) != 0
     }
 
-    /// Turn one weekday on or off, refusing to turn the last one off.
+    /// Turn one weekday on or off. Clearing the last one is allowed and turns
+    /// the rule back into a one-off on `on_day`.
     ///
-    /// A rule with no days would fire nowhere: invisible on every timeline, and
-    /// therefore impossible to select and repair. The floor of one day is what
-    /// keeps it reachable — clearing a routine entirely is what Delete is for.
-    /// Returns whether anything changed, so a caller can skip the save.
-    pub fn toggle(&mut self, index: u32) -> bool {
+    /// The day is passed in rather than left at the anchor because clearing the
+    /// last weekday while looking at Thursday should leave the block **on
+    /// Thursday** — falling back to whichever day the rule was first drawn on
+    /// would make it disappear out from under the person who just unticked
+    /// something.
+    pub fn toggle(&mut self, index: u32, on_day: NaiveDate) {
         let bit = 1 << index;
         if self.days & bit == 0 {
             self.days |= bit;
-            return true;
+        } else {
+            self.days &= !bit;
+            if !self.repeats() {
+                self.anchor = on_day;
+            }
         }
-        if self.days.count_ones() <= 1 {
-            return false;
-        }
-        self.days &= !bit;
-        true
     }
 
-    /// "every day" / "weekdays" / "weekends" / "Mon · Wed · Fri".
+    /// "just this day" / "every day" / "weekdays" / "Mon · Wed · Fri".
     pub fn summary(&self) -> String {
         match self.days {
+            0 => "just this day".to_string(),
             EVERY_DAY => "every day".to_string(),
             WEEKDAYS => "weekdays".to_string(),
             0b0110_0000 => "weekends".to_string(),
-            // Not reachable through `toggle`, but a hand-edited save can write
-            // it and "never" is a truer answer than an empty string.
-            0 => "never".to_string(),
             _ => WEEKDAY_NAMES
                 .iter()
                 .enumerate()
@@ -107,6 +137,16 @@ impl Recurrence {
                 .map(|(_, name)| *name)
                 .collect::<Vec<_>>()
                 .join(" · "),
+        }
+    }
+
+    /// The same, for somewhere that has no "this day" to refer to — the archive
+    /// ledger, which names the date instead.
+    pub fn summary_dated(&self) -> String {
+        if self.repeats() {
+            self.summary()
+        } else {
+            format!("just {}", self.anchor.format("%-d %b %Y"))
         }
     }
 }
@@ -743,10 +783,19 @@ mod tests {
         }
     }
 
+    fn a_friday() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 8, 14).unwrap()
+    }
+
     /// A routine: sleep, 23:00, eight hours, on the given days.
     fn routine(days: u8) -> Active {
         Active {
-            recurrence: Some(Recurrence { days, start_minutes: 23 * 60, minutes: 8 * 60 }),
+            recurrence: Some(Recurrence {
+                days,
+                anchor: a_friday(),
+                start_minutes: 23 * 60,
+                minutes: 8 * 60,
+            }),
             ..active(None, None, false, None)
         }
     }
@@ -775,10 +824,11 @@ mod tests {
     #[test]
     fn a_rule_fires_on_the_days_it_names() {
         // 14 Aug 2026 is a Friday.
-        let friday = NaiveDate::from_ymd_opt(2026, 8, 14).unwrap();
+        let friday = a_friday();
         let saturday = friday.succ_opt().unwrap();
 
-        let weekdays = Recurrence { days: WEEKDAYS, start_minutes: 8 * 60, minutes: 30 };
+        let weekdays =
+            Recurrence { days: WEEKDAYS, anchor: friday, start_minutes: 8 * 60, minutes: 30 };
         assert!(weekdays.falls_on(friday));
         assert!(!weekdays.falls_on(saturday));
 
@@ -787,29 +837,62 @@ mod tests {
     }
 
     #[test]
-    fn a_rule_cannot_be_emptied_down_to_nothing() {
-        // A rule with no days draws nothing on any timeline — which makes it
-        // impossible to select, and therefore impossible to fix. The last day
-        // refuses to come off; Delete is how you get rid of a routine.
-        let mut only_monday = Recurrence { days: 0b0000_0001, start_minutes: 0, minutes: 60 };
-        assert!(!only_monday.toggle(0), "the last day must hold");
-        assert_eq!(only_monday.days, 0b0000_0001);
+    fn no_days_is_a_one_off_not_a_broken_rule() {
+        // "Tomorrow at two I walk the dog" is the same *kind* of thing as
+        // sleeping every night — time spoken for, owed to nobody, no ✓ that
+        // would mean anything — and it happens once. Repeating is a property of
+        // this kind, not its definition.
+        let friday = a_friday();
+        let once = Recurrence { days: 0, anchor: friday, start_minutes: 14 * 60, minutes: 30 };
 
-        // Adding and removing others still works.
-        assert!(only_monday.toggle(2));
-        assert!(only_monday.includes(2));
-        assert!(only_monday.toggle(0));
-        assert_eq!(only_monday.days, 0b0000_0100);
+        assert!(!once.repeats());
+        assert!(once.falls_on(friday));
+        assert!(!once.falls_on(friday.succ_opt().unwrap()));
+        assert!(!once.falls_on(friday - Duration::days(7)), "not the same weekday a week back");
+    }
+
+    #[test]
+    fn clearing_the_last_day_lands_on_the_day_you_are_looking_at() {
+        let friday = a_friday();
+        let thursday = friday.pred_opt().unwrap();
+
+        // Made on Friday, set to Mondays, then unticked while looking at
+        // Thursday: it becomes a one-off *on Thursday*. Falling back to the
+        // anchor would send it back to Friday — vanishing out from under the
+        // person who just unticked something.
+        let mut rule =
+            Recurrence { days: 0, anchor: friday, start_minutes: 9 * 60, minutes: 60 };
+        rule.toggle(0, thursday);
+        assert!(rule.repeats() && rule.includes(0));
+
+        rule.toggle(0, thursday);
+        assert!(!rule.repeats());
+        assert_eq!(rule.anchor, thursday);
+        assert!(rule.falls_on(thursday));
     }
 
     #[test]
     fn a_rule_says_what_it_amounts_to() {
-        let at = |days| Recurrence { days, start_minutes: 0, minutes: 60 };
+        let at = |days| Recurrence { days, anchor: a_friday(), start_minutes: 0, minutes: 60 };
         assert_eq!(at(EVERY_DAY).summary(), "every day");
         assert_eq!(at(WEEKDAYS).summary(), "weekdays");
         assert_eq!(at(0b0110_0000).summary(), "weekends");
         assert_eq!(at(0b0001_0101).summary(), "Mon · Wed · Fri");
-        assert_eq!(at(0).summary(), "never");
+        assert_eq!(at(0).summary(), "just this day");
+        // The archive has no "this day" to point at, so it names the date.
+        assert_eq!(at(0).summary_dated(), "just 14 Aug 2026");
+        assert_eq!(at(EVERY_DAY).summary_dated(), "every day");
+    }
+
+    #[test]
+    fn a_routine_saved_before_one_offs_existed_still_loads() {
+        // Those all carry a non-empty `days`, so the anchor they never had is
+        // never consulted — but the field has to default to *something* or the
+        // whole item fails to parse and the task vanishes.
+        let line = r#"{"days":127,"start_minutes":1380,"minutes":480}"#;
+        let rule: Recurrence = serde_json::from_str(line).expect("legacy rule must load");
+        assert!(rule.repeats());
+        assert!(rule.falls_on(a_friday()));
     }
 
     #[test]
