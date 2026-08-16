@@ -124,6 +124,7 @@ On macOS the binary runs as-is. Bundling it as a `TaskDeck.app` also works — T
 ## Roadmap
 
 - Scrolling upward to look back over past events.
+- Making a day plan that survives one thing running long — a plan is "an hour on this today", a schedule is "at 14:00", and the planner currently makes you write the second when you only know the first. The reasoning and the order to do it in are in [`DOCUMENTATION.md` §20](DOCUMENTATION.md).
 
 ## Attribution
 

@@ -4,6 +4,9 @@
 > `egui` on a `wgpu` backend. Displays a long vertically-scrolling calendar, a task
 > priority list, a live weather forecast, a scratch notepad, and rich theming.
 
+> Sections 2–19 describe what the program **does**. §20 is the one exception: it is a design
+> direction for the planner, marked as such, kept here so the reasoning behind it survives.
+
 - **Crate name:** `task_deck`
 - **Binary name:** `TaskDeck`
 - **Edition:** Rust 2024
@@ -37,6 +40,7 @@
 17. The archive
 18. Routines
 19. The keyboard
+20. Planned ≠ scheduled — where the planner goes next *(design, not built)*
 
 ---
 
@@ -1057,7 +1061,7 @@ Behaviour that differs per OS, and why.
 
 The view of a single day: a timeline you lay time out on, plus a tray of everything waiting to
 be given a slot. Opened by **clicking any day on the calendar**, or from the **Planner** menu
-button (which opens it on today). `planner.rs` holds the model and geometry; `ui.rs` draws it.
+button — or `P` — which opens it on the day it was last left (§19.3). `planner.rs` holds the model and geometry; `ui.rs` draws it.
 
 It is the *only* per-day view. A read-only popup used to open on a day click and hand over to
 the planner with a **Plan day** button; §16.7 records why that went and where each of its parts
@@ -1068,6 +1072,10 @@ landed.
 A calendar answers *when is this due*. A planner answers *when will I do it*. Those are
 different facts about the same task — a report due Friday can be written on Tuesday morning —
 and conflating them is what makes most task apps annoying to plan with.
+
+> The same argument has a next line — *planned ≠ scheduled* — which this planner does not yet
+> draw. §20 is what that would mean and why it is the fix for a day plan that falls apart when
+> one thing runs long.
 
 So `Active` carries planning as its own fields:
 
@@ -1843,6 +1851,135 @@ week, come back, and each of those trips went through the calendar to get home.
 
 Within a run only. A restart opens on today, which is the right default for a program whose whole
 premise is the current date.
+
+---
+
+## 20. Planned ≠ Scheduled
+
+> **None of this is built.** Every other section of this document describes what the program does;
+> this one describes where the planner should go and why, so the reasoning survives the conversation
+> it came out of. Nothing here is a defect — `CODE_REVIEW.md` is the list of those.
+
+### 20.1 The diagnosis: a plan made of clock times is over-specified
+
+Two complaints come up about day planning, and they are the same complaint:
+
+- *"I struggle to say **this** is when I will be doing that thing."*
+- *"If one thing runs long, my whole schedule explodes."*
+
+Dropping a block at 14:00 asserts two things:
+
+1. I will spend an hour on the report today.
+2. That hour is 14:00–15:00.
+
+The first is usually known. The second is almost never known — it was invented because the timeline
+demanded a coordinate. And the second is the one that breaks, and when it breaks it takes everything
+below it with it.
+
+**The schedule explodes because it was carrying information the planner never had.** Every block is
+a claim about the clock that its author could not support, and a day made of thirty such claims will
+be wrong by lunchtime through no fault of anyone's.
+
+This is the same observation the app already made once. §16.1 separates *when it is due* from *when
+I will do it*, because they are different facts and conflating them makes an app annoying to plan
+with. The next line of that argument is:
+
+> A **plan** is "an hour on this today". A **schedule** is "at 14:00".
+
+The planner currently makes you write a schedule when all you have is a plan, and then holds you to
+it. Everything below follows from taking that seriously.
+
+### 20.2 What the app already has for this
+
+Three pieces are in place, none of them put to this use yet:
+
+| Already there | What it becomes |
+|---------------|-----------------|
+| Events and routines (§18) | The **anchor set** — the parts of a day that are genuinely fixed, as distinct from work. The dentist is at 10; sleep is at 23. Everything else can move around them. |
+| `planner::lay_out` | Already resolves overlapping spans into lanes. Flowing work into the gaps between anchors is the same geometry read the other way round. |
+| `Archived::duration_minutes` + `sessions` (§17) | Every finished task carries what it was estimated at and what was booked for it. That is a calibration signal nobody else has lying around. |
+
+The routine work is what makes the rest possible. Before it, "fixed" and "work" were not
+distinguishable in the model — a block was a block — so there was nothing to flow *around*.
+
+### 20.3 The moves, in order
+
+Ordered by payoff against cost and confidence, not by ambition.
+
+#### 1. Reflow — a button, not a model change
+
+The now-line exists. When work is booked before it and has not been ticked off, say so in the
+masthead — *"1h 20m behind"* — and offer one action: push everything unfinished down past now, in
+order, around the anchors.
+
+That turns "my schedule exploded" into "press reflow". It needs no new fields: it rewrites the
+`start` of the shown day's sessions, which every gesture in the planner already does.
+
+**Do this first**, and not only because it is cheap. It is the experiment: living with it says
+whether the flow model below is what is actually wanted, before committing to the data change that
+flow requires.
+
+#### 2. Floating sessions — the structural fix
+
+A session gets a duration and a **position in the day's order**, and no start time. The planner
+flows the floating ones from now, around the anchors, and draws them at *implied* times. Finish
+early and everything slides up; finish late and it slides down. It cannot explode, because it was
+never rigid.
+
+Pinning stays, and gains a meaning it does not currently have: dragging a floating block onto an
+hour **pins** it, and a pinned block now says *"I actually know this one."* The dentist is pinned.
+The report is not.
+
+This is the direct answer to "I struggle to say when I will do that thing": it stops asking. You say
+what, how much, and roughly in what order, and the clock is derived rather than asserted.
+
+The cost is real and it is in the data model. `Session::start` is an absolute `DateTime<Local>`,
+which is exactly the over-specification this removes — so a session becomes either pinned to an
+instant or floating on a day with a rank. That is a migration, and `#[serde(default)]` will carry
+old saves through (everything existing is pinned), but it touches the placement rule, the gestures
+and the day summary at once. Worth doing after reflow has earned it.
+
+#### 3. Estimates as a range
+
+`1–2h`, not `2h`. Book the optimistic end and draw the pessimistic end as a lighter tail on the
+block.
+
+Uncertainty becomes visible instead of being laundered into a single false number, and — more
+useful — a day where every tail runs long *looks* over-committed instead of quietly being so. One
+extra field beside `duration_minutes`, one extra rectangle in `paint_planner_entry`.
+
+#### 4. Calibration from the archive, and not from a timer
+
+The archive already holds the estimate and what was booked against it. Be careful what that
+measures, though: **booked is what was planned, not what was spent.** Holding one plan up against
+another plan says little.
+
+The honest signal already in the log is **re-booking**. A task that needed `＋ Block` twice was
+under-estimated, and `Archived::sittings()` records it for nothing. So the finding to surface is of
+the form *"tasks you re-book run about 1.8× their estimate"* — and eventually the tray could offer
+the corrected number rather than the typed one.
+
+**A timer is the trap here.** It is the obvious answer to "estimation is hard", and it measures the
+right thing — and it is a per-task ritual that gets abandoned inside a fortnight, in an application
+built to be quiet until you actually need it. The re-booking signal is worse data that costs nothing
+and is already being collected, which is what makes it the better feature.
+
+### 20.4 What to resist
+
+**Auto-scheduling the whole day.** Once flow exists it is tempting to have the app lay out all eight
+hours optimally. That is the rigid schedule again, written by a machine: wrong in exactly the same
+way, and worse to live with because it was not even chosen. The point of flowing is to stop
+asserting the clock, not to assert it more confidently.
+
+**Filling a day up.** The same instinct, one step earlier. Show committed against open honestly —
+which is what the masthead's separate `routine` figure started (§18.2) — and let an over-booked day
+look over-booked. A planner that quietly accepts sixteen hours of commitments in a day is not
+helping.
+
+**Treating a slipped plan as a failure.** The scorer already gets this right and it is worth
+keeping: a missed *deadline* escalates, a missed *plan* tops out at the task's own weight (§7.1),
+because "I meant to do that" is not the same thing as "that was due". Anything built here should
+inherit that stance rather than nagging about a plan that did not survive the day.
 
 ---
 
