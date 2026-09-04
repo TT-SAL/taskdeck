@@ -1,0 +1,240 @@
+# Running TaskDeck's board on a server
+
+`taskdeck-server` is TaskDeck's board with no window: the same data files, the same commands,
+the same phone page and calendar feed, served from a machine that is always on and may have no
+screen at all. Put it on a spare desktop in a cupboard, a mini PC or a Raspberry Pi, reach it over
+Tailscale, and the phone view works whether or not your main computer is on. The desktop app can
+then be pointed at it (see *The desktop as a client* below) so the board lives in one place.
+
+This document is the setup, start to finish, for a headless Linux box. The reasoning behind the
+design is in [`DOCUMENTATION.md` §21–22](DOCUMENTATION.md).
+
+## 1. The machine and its OS
+
+Any x86-64 or ARM64 box with a couple of gigabytes of RAM is more than enough; the server idles
+doing nothing and wakes for a few milliseconds per request. What matters is power, and the levers
+in order of effect:
+
+- **Debian or Ubuntu Server, minimal, no desktop environment.** A headless install idles lowest
+  and is the natural home for a service that must start on boot and restart on failure.
+- **Remove a discrete graphics card** if the CPU has integrated graphics. The server never touches
+  a GPU.
+- **An SSD**, not a spinning disk.
+- **BIOS:** enable the deep C-states, "ErP"/"EuP" power saving, and *power on after power loss*.
+- After installing: `sudo apt install powertop && sudo powertop --auto-tune` once, and again on
+  boot via a service if it helps (measure with a plug-in power meter — it is the only real number).
+
+A ten-year-old office desktop treated this way lands around 15–30 W; a mini PC or a Raspberry Pi
+around 5–10 W. At €0.10–0.20 per kWh that is €2–5 a month for the desktop and under €1 for the
+small boards.
+
+## 2. Tailscale
+
+Tailscale gives the server, your phone and your desktop a private network that works from
+anywhere — mobile data, hotel Wi-Fi — through any NAT, with no router configuration and nothing
+exposed to the internet. Install it on all three and sign in with the same account:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+```
+
+The server gets a stable `100.x.y.z` address and a name like `spare.tail1234.ts.net`. Do **not**
+port-forward TaskDeck instead: it speaks plain HTTP with a key in the URL, which is fine inside a
+tailnet and not fine on the open internet. If the box also sits on a LAN you would rather not
+serve, bind to the Tailscale address alone — `phone_bind_address = "100.x.y.z"` in
+`userconfig.toml`, or `--bind 100.x.y.z` for one run — and the port is not open anywhere else.
+(Not together with `tailscale serve` below, which hands requests to `127.0.0.1:7373`: with it,
+keep the default bind, or serve the tailnet address explicitly with
+`sudo tailscale serve --bg http://100.x.y.z:7373`.)
+
+**Optional: HTTPS on the tailnet name.** Tailscale can front the server with a real certificate,
+so the phone opens `https://spare.tail1234.ts.net/?token=…` instead of an IP address:
+
+```bash
+sudo tailscale serve --bg 7373
+```
+
+Everything works the same over plain HTTP; the difference is that a browser treats the HTTPS page
+as a secure context, which is what lets the phone page install its offline shell — with it, the
+page opens and shows the last day it saw even when the server is unreachable (edits made then
+are kept on the phone and sent when the server answers, over either form). The desktop's
+`server_url` can use either form.
+
+## 3. Building
+
+A Rust binary is compiled per OS, so the server needs a build on (or for) the Linux box. On the
+box itself:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+git clone <this repository> taskdeck && cd taskdeck
+cargo build --release --bin taskdeck-server
+```
+
+The result is `target/release/taskdeck-server`, one self-contained executable — no window, and
+no graphics library needed to run it. The build itself compiles the whole crate, the desktop's
+graphics crates included (they are one crate; nothing in the server calls them and the link drops
+them), so expect the first build to take a while and to want the same Rust toolchain the desktop
+does, nothing more. A plain `cargo build --release` builds `TaskDeck` too, which the box does not
+need.
+
+```bash
+sudo install -m 755 target/release/taskdeck-server /usr/local/bin/
+```
+
+## 4. The data
+
+The server keeps its data exactly where the desktop app does — a `taskdeck_data/` folder — and
+finds it the same way: `$TASKDECK_HOME` if set, else next to the executable, else the per-user
+data directory. Set `TASKDECK_HOME` in the service below and the folder lives wherever you want.
+
+To move an existing calendar onto the server, **copy the desktop's `taskdeck_data/` folder there
+whole** — `read_at_startup.json`, `archived.jsonl`, `notepad_text.json`, `colorschemes.json` and
+`userconfig.toml` — **make the service user its owner** (`sudo chown -R taskdeck:taskdeck
+/var/lib/taskdeck`; the desktop writes its files readable by their owner only, and a file the
+service cannot read stops it from starting, on purpose, rather than serving an empty board over
+it), and from then on run the desktop as a client of the server (§6), not on its own copy. Two TaskDecks writing the same board overwrite each other (`DOCUMENTATION.md` §4.1);
+`taskdeck-server` refuses to start if another TaskDeck has the folder open.
+
+`userconfig.toml` on the server needs only two keys; everything else in it is about a screen the
+server does not have and is ignored:
+
+```toml
+phone_server_port = 7373
+phone_token = "…"              # minted on first start if missing — see the log
+phone_bind_address = "0.0.0.0" # every interface; a single address serves that one only (§2)
+```
+
+`selected_colorscheme_id` is honoured if present: the phone paints in that scheme.
+
+## 5. The service
+
+Everything in this section is also one command, `sudo deploy/install.sh`, run from the repository
+after the build in §3. It creates the user and the folder if they are missing, installs the binary
+and the unit, enables and starts the service (or restarts it, on an update), and prints the phone
+link. It never touches an existing `taskdeck_data/` beyond setting its owner, so it is safe to
+run again. The steps it takes, by hand:
+
+Run it as its own user, started on boot and restarted on failure:
+
+```bash
+sudo useradd --system --home /var/lib/taskdeck --create-home --shell /usr/sbin/nologin taskdeck
+sudo mkdir -p /var/lib/taskdeck/taskdeck_data
+# (copy your taskdeck_data/ contents into /var/lib/taskdeck/taskdeck_data/ here, if migrating)
+sudo chown -R taskdeck:taskdeck /var/lib/taskdeck
+```
+
+`/etc/systemd/system/taskdeck-server.service` — a copy of this file ships in the repository as
+`deploy/taskdeck-server.service`, so `sudo install -m 644 deploy/taskdeck-server.service
+/etc/systemd/system/` is enough:
+
+```ini
+[Unit]
+Description=TaskDeck board server
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=taskdeck
+Group=taskdeck
+Environment=TASKDECK_HOME=/var/lib/taskdeck
+ExecStart=/usr/local/bin/taskdeck-server
+Restart=always
+RestartSec=3
+# Hardening: the server needs only its own folder and the network.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/taskdeck
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now taskdeck-server
+journalctl -u taskdeck-server -f
+```
+
+The log's first lines say where the data is, which port it serves, and the phone link (with the
+key) for each address the machine has — the Tailscale one is the one to put on the phone. Open it
+there once and add the page to the home screen. The calendar feed is `/calendar.ics?token=…` on
+the same host and port. On a cold boot the Tailscale address can come up after the service
+starts, in which case the first log lines show the LAN link only; `--print-link` a minute later
+shows both, and a service bound to the Tailscale address alone is simply restarted by systemd
+every three seconds until the address exists. (The key is therefore in the journal, readable by anyone who can read
+the journal on that box — the same people who can read `userconfig.toml`. **New key** is a matter
+of editing `phone_token` there and restarting the service.)
+
+`taskdeck-server --help` lists the flags: `--port N` and `--bind ADDR` override the port and
+the address for one run;
+`--print-link` prints the data directory and the phone and feed links without serving (safe to
+run beside the service, e.g. `sudo -u taskdeck TASKDECK_HOME=/var/lib/taskdeck taskdeck-server
+--print-link`); `--version` says what is built.
+
+## 6. The desktop as a client
+
+The desktop app can run against the server instead of its own files, so the wall calendar, the
+phone and any other computer all look at one board:
+
+```toml
+# in the desktop's own userconfig.toml
+server_url = "http://100.x.y.z:7373"
+server_token = "…"            # the server's phone_token
+```
+
+With those set, the desktop loads the board from the server at startup, sends every edit to it as
+the same command the phone would send, and refreshes the moment anything changes there. Its own
+`taskdeck_data/` becomes a cache of the last board it saw. **Do the copy in §4 first**: on its
+first successful connection the desktop sets any board that lived in its folder aside — dated
+files like `read_at_startup.json.local-20260904-121500`, never deleted — and tells you; if you
+forgot the copy, those files are your calendar, and copying them into the server's folder (and
+restarting the service) brings it back. **If the server is unreachable** the
+desktop keeps working on that cache and queues its edits in `taskdeck_data/outbox.json`; when the
+server is back they are replayed in order, the server's picture wins, and anything that could not
+be applied (an item finished meanwhile from the phone, say) is reported rather than silently
+dropped. The menu bar says when edits are waiting.
+
+## 7. Backups
+
+The whole board is a handful of small text files. A nightly copy is enough:
+
+```bash
+# /etc/cron.daily/taskdeck-backup
+#!/bin/sh
+tar -C /var/lib/taskdeck -czf "/var/backups/taskdeck-$(date +%F).tar.gz" taskdeck_data
+find /var/backups -name 'taskdeck-*.tar.gz' -mtime +30 -delete
+```
+
+Restoring is copying the folder back, `chown -R taskdeck:taskdeck` on it, and restarting the
+service. `archived.jsonl` is append-only and `read_at_startup.json` is written atomically, so each
+file in a backup is whole at any moment. The pair can straddle a completion by a few milliseconds
+— the archive row appended, the live set not yet rewritten — and a backup taken exactly then
+restores that task both live and in the ledger, which is visible at once and mended with one ✓.
+
+## 8. Updating
+
+Pull, rebuild, install, restart:
+
+```bash
+cd ~/taskdeck && git pull && cargo build --release --bin taskdeck-server
+sudo deploy/install.sh
+```
+
+The script notices the service is running and restarts it with the new binary; by hand, that is
+`sudo install -m 755 target/release/taskdeck-server /usr/local/bin/ && sudo systemctl restart
+taskdeck-server`.
+
+The data format is stable across versions: new fields are `#[serde(default)]`, and older files
+load unchanged (`DOCUMENTATION.md` §6). Update the server and the desktop from the same commit
+when you can: a newer desktop may send a command an older server does not know, which the
+server refuses and the desktop then reports and drops — nothing is corrupted, but that edit is
+lost.

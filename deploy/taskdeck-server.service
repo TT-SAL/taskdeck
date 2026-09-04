@@ -1,0 +1,36 @@
+# systemd unit for taskdeck-server — TaskDeck's board with no window.
+# Install: see SERVER.md §5. In short:
+#   sudo useradd --system --home /var/lib/taskdeck --create-home --shell /usr/sbin/nologin taskdeck
+#   sudo install -m 755 target/release/taskdeck-server /usr/local/bin/
+#   sudo install -m 644 deploy/taskdeck-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now taskdeck-server
+#   journalctl -u taskdeck-server -f      # the phone link is in the first lines
+
+[Unit]
+Description=TaskDeck board server
+Documentation=file:///usr/local/share/doc/taskdeck/SERVER.md
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=taskdeck
+Group=taskdeck
+# Where taskdeck_data/ lives; copy an existing calendar's folder here whole.
+Environment=TASKDECK_HOME=/var/lib/taskdeck
+ExecStart=/usr/local/bin/taskdeck-server
+Restart=always
+RestartSec=3
+
+# The server needs its own folder and the network, nothing else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/taskdeck
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

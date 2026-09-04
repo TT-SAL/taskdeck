@@ -5,7 +5,8 @@ use egui_winit::{ActionRequested, State};
 use serde::{Deserialize, Serialize};
 use crate::ui::TaskApp;
 use wgpu::{Color, ExperimentalFeatures, LoadOp};
-use winit::event::WindowEvent;
+use winit::event::{StartCause, WindowEvent};
+use winit::event_loop::ControlFlow;
 // The taskbar-icon extension trait only exists on Windows; see `window_attributes`.
 #[cfg(windows)]
 use winit::platform::windows::WindowAttributesExtWindows;
@@ -34,6 +35,11 @@ fn read_config(path: &Path) -> HashMap<String, String> {
             " ".to_string()
         },
     };
+    parse_config_text(&contents)
+}
+
+/// The settings file's text as key → value, whether or not it is valid TOML.
+fn parse_config_text(contents: &str) -> HashMap<String, String> {
     let mut config = HashMap::new();
 
     // Try parsing with the TOML crate first
@@ -146,10 +152,53 @@ pub fn clamp_ui_scale_percent(percent: u32) -> u32 {
     }
 }
 
+/// A bind address from the file: an IP address as written (trimmed), or
+/// `phone::DEFAULT_BIND` for anything that is not one — the setting narrows
+/// where the phone view listens; it never turns the view off.
+pub fn clean_bind_address(text: &str) -> String {
+    match text.trim().parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.to_string(),
+        Err(_) => crate::phone::DEFAULT_BIND.to_string(),
+    }
+}
+
+/// `frame_cap_fps = 0` means uncapped — the render loop of `DOCUMENTATION.md`
+/// §14.1, which is the default and the intended way to run on a desktop.
+pub const FRAME_CAP_UNCAPPED: u32 = 0;
+/// Bounds for a cap that is set. The floor is where the row animations stop
+/// reading as motion; the ceiling is past any display this runs on.
+pub const FRAME_CAP_MIN: u32 = 15;
+pub const FRAME_CAP_MAX: u32 = 360;
+/// What the settings slider offers when the cap is first switched on.
+pub const FRAME_CAP_DEFAULT: u32 = 60;
+
+/// Clamp a configured frame cap, preserving the `0` = uncapped sentinel.
+pub fn clamp_frame_cap(fps: u32) -> u32 {
+    if fps == FRAME_CAP_UNCAPPED {
+        FRAME_CAP_UNCAPPED
+    } else {
+        fps.clamp(FRAME_CAP_MIN, FRAME_CAP_MAX)
+    }
+}
+
 pub fn get_check_and_set_config(config_path: &Path) -> Config {
     let extracted = read_config(config_path);
+    let config = config_from(&extracted);
+    write_normalized_config(config_path, &config);
+    config
+}
 
-    let config = Config {
+/// The settings as they are in `config_path`, creating, normalising and
+/// writing nothing — for a look at a setup that is not ours to touch
+/// (`taskdeck-server --print-link`, which may run as another user).
+pub fn read_config_only(config_path: &Path) -> Config {
+    let extracted = fs::read_to_string(config_path).map(|text| parse_config_text(&text)).unwrap_or_default();
+    config_from(&extracted)
+}
+
+/// Every setting, checked and defaulted, from the file's raw key → value.
+fn config_from(extracted: &HashMap<String, String>) -> Config {
+    Config {
         window_size_startup: extracted
             .get("window_size_startup")
             .and_then(|v| {
@@ -218,11 +267,51 @@ pub fn get_check_and_set_config(config_path: &Path) -> Config {
             .get("selected_colorscheme_id")
             .and_then(|n| n.parse::<u32>().ok().and_then(|x| Some(x.clamp(0, 200000))))
             .unwrap_or(0),
-    };
+        phone_server_enabled: extracted
+            .get("phone_server_enabled")
+            .map(|s| parse_config_bool(s))
+            .unwrap_or(false),
+        phone_server_port: extracted
+            .get("phone_server_port")
+            .and_then(|n| n.parse::<u16>().ok())
+            .filter(|port| *port >= crate::phone::PORT_MIN)
+            .unwrap_or(crate::phone::DEFAULT_PORT),
+        phone_token: extracted
+            .get("phone_token")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+        phone_bind_address: extracted
+            .get("phone_bind_address")
+            .map(|s| clean_bind_address(s))
+            .unwrap_or_else(|| crate::phone::DEFAULT_BIND.to_string()),
+        frame_cap_fps: extracted
+            .get("frame_cap_fps")
+            .and_then(|n| n.parse::<u32>().ok())
+            .map(clamp_frame_cap)
+            .unwrap_or(FRAME_CAP_UNCAPPED),
+        server_url: extracted
+            .get("server_url")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+        server_token: extracted
+            .get("server_token")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+    }
+}
 
-    write_normalized_config(config_path, &config);
-
-    config
+/// Write the settings file the way every other file here is written: whole,
+/// through a temporary file renamed into place. A power cut mid-write used to
+/// leave an empty file — and an empty file means a fresh token at the next
+/// start, which locks every phone and client out.
+fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(dir)?;
+    temp.write_all(text.as_bytes())?;
+    temp.as_file_mut().sync_all()?;
+    temp.persist(path).map_err(|e| e.error)?;
+    Ok(())
 }
 
 /// Write one key into the settings file, leaving everything else in it —
@@ -239,7 +328,7 @@ pub fn write_config_value(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut doc = fs::read_to_string(path)?.parse::<toml_edit::DocumentMut>()?;
     doc[key] = toml_edit::value(value);
-    fs::write(path, doc.to_string())?;
+    write_atomically(path, &doc.to_string())?;
     Ok(())
 }
 
@@ -269,8 +358,15 @@ fn write_normalized_config(path: &Path, config: &Config) {
     doc["three_day_weather"] = value(config.three_day_weather);
     doc["background_image_tint_percent"] = value(config.background_image_tint_percent as i64);
     doc["ui_scale_percent"] = value(config.ui_scale_percent as i64);
+    doc["phone_server_enabled"] = value(config.phone_server_enabled);
+    doc["phone_server_port"] = value(config.phone_server_port as i64);
+    doc["phone_token"] = value(config.phone_token.clone());
+    doc["phone_bind_address"] = value(config.phone_bind_address.clone());
+    doc["frame_cap_fps"] = value(config.frame_cap_fps as i64);
+    doc["server_url"] = value(config.server_url.clone());
+    doc["server_token"] = value(config.server_token.clone());
 
-    let _ = fs::write(path, doc.to_string());
+    let _ = write_atomically(path, &doc.to_string());
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -288,6 +384,25 @@ pub struct Config {
     /// Percentage the whole UI is scaled by, or `UI_SCALE_AUTO` (0) to fit the
     /// layout to the window automatically.
     pub ui_scale_percent: u32,
+    /// Whether the phone view (`phone.rs`) is served while the app runs.
+    pub phone_server_enabled: bool,
+    /// Port it listens on. `phone::PORT_MIN` or above.
+    pub phone_server_port: u16,
+    /// The secret in the phone's link. Empty until `main` mints one, which
+    /// happens once and is then kept, so the link on the phone keeps working.
+    pub phone_token: String,
+    /// The address the phone view listens on: `phone::DEFAULT_BIND` (every
+    /// interface) unless the file names one address, which then serves alone.
+    /// Not on the settings sheet — a posture decided once, in the file.
+    pub phone_bind_address: String,
+    /// Frames per second the render loop is held to while awake, or
+    /// `FRAME_CAP_UNCAPPED` (0) for the flat-out loop of §14.1. For laptops on
+    /// battery; see `App::schedule_next_frame`.
+    pub frame_cap_fps: u32,
+    /// A `taskdeck-server` to keep the board on — `http://host:port` — and
+    /// its key. Empty means the board lives here. See `sync.rs`, `SERVER.md`.
+    pub server_url: String,
+    pub server_token: String,
 }
 
 pub struct AppState<'a> {
@@ -447,6 +562,9 @@ pub struct App<'a> {
     repaint_debugger_count: u32,
     last_active: Option<Instant>,
     in_sleep: bool,
+    /// When the next frame is due under a frame cap, if one is set and the
+    /// loop is waiting for it. See `schedule_next_frame`.
+    redraw_at: Option<Instant>,
     window_size_startup: [f32; 2],
     selected_monitor_name: String,
 }
@@ -463,8 +581,40 @@ impl<'a> App<'a> {
             repaint_debugger_count: 0,
             last_active: Some(std::time::Instant::now()),
             in_sleep: false,
+            redraw_at: None,
             window_size_startup,
             selected_monitor_name,
+        }
+    }
+
+    /// Ask for the frame after the one that began at `frame_start`.
+    ///
+    /// Uncapped — the default, and §14.1's deliberate choice — that is at
+    /// once, and the loop renders as fast as the GPU allows while awake. With a
+    /// cap set, the request is deferred until the frame's share of a second has
+    /// passed: the event loop is told to wake at that instant
+    /// (`ControlFlow::WaitUntil`) and `new_events` asks for the redraw when it
+    /// does. Frames still arrive continuously, only slower, so the hand-rolled
+    /// animations — which advance by measured `dt`, not by frame count — are
+    /// untouched; what changes is that a laptop on battery is not asked to draw
+    /// a calendar two hundred times a second.
+    ///
+    /// Input still draws immediately: the `CursorMoved` and friends arms call
+    /// `handle_redraw` themselves, which the cap does not gate. It only paces
+    /// the loop that would otherwise chase its own tail.
+    fn schedule_next_frame(&mut self, event_loop: &ActiveEventLoop, frame_start: Instant) {
+        let Some(window) = self.window.as_ref() else { return };
+        let cap = self.task_app.frame_cap_fps();
+        if cap == FRAME_CAP_UNCAPPED {
+            window.request_redraw();
+            return;
+        }
+        let due = frame_start + time::Duration::from_secs_f64(1.0 / cap as f64);
+        if Instant::now() >= due {
+            window.request_redraw();
+        } else {
+            self.redraw_at = Some(due);
+            event_loop.set_control_flow(ControlFlow::WaitUntil(due));
         }
     }
 
@@ -839,10 +989,11 @@ impl ApplicationHandler for App<'_> {
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::RedrawRequested => {
+                let frame_start = Instant::now();
                 self.handle_redraw(event_loop);
 
                 if !self.in_sleep {
-                    self.window.as_ref().unwrap().request_redraw();
+                    self.schedule_next_frame(event_loop, frame_start);
                 }
             }
             WindowEvent::CursorEntered { .. } => {
@@ -870,8 +1021,31 @@ impl ApplicationHandler for App<'_> {
         }
     }
 
-    //This function is implemented so that the weather thread can make the UI refresh
+    // A frame cap's timer going off: the frame it deferred is due. Back to
+    // plain waiting first, so a wake that turns out to be the last one (the
+    // app fell asleep meanwhile) does not leave a stale deadline armed.
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        if !matches!(cause, StartCause::ResumeTimeReached { .. }) {
+            return;
+        }
+        if self.redraw_at.take().is_some() {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            if !self.in_sleep {
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+        }
+    }
+
+    // The weather thread and the phone view's thread both wake the UI this way.
+    // Phone commands are served *here* rather than only inside the frame, so a
+    // phone edit lands while the window is minimized or asleep — `handle_redraw`
+    // returns before running the frame in both of those states. Nothing the
+    // commands do needs egui: they go through the same setters a gesture uses,
+    // which end in a calendar rebuild and a save.
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
+        self.task_app.serve_phone_requests();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
             window.request_redraw();
@@ -883,6 +1057,7 @@ impl ApplicationHandler for App<'_> {
     // not lost. Note: this does not run on a hard kill or on panic (panic = abort).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.task_app.flush_pending_saves();
+        self.task_app.shutdown_sync();
     }
 }
 
@@ -903,7 +1078,45 @@ mod tests {
             three_day_weather: true,
             background_image_tint_percent: 30,
             ui_scale_percent: UI_SCALE_AUTO,
+            phone_server_enabled: false,
+            phone_server_port: crate::phone::DEFAULT_PORT,
+            phone_token: "abc".to_string(),
+            phone_bind_address: crate::phone::DEFAULT_BIND.to_string(),
+            frame_cap_fps: FRAME_CAP_UNCAPPED,
+            server_url: String::new(),
+            server_token: String::new(),
         }
+    }
+
+    #[test]
+    fn frame_cap_keeps_the_uncapped_sentinel_and_clamps_the_rest() {
+        assert_eq!(clamp_frame_cap(0), FRAME_CAP_UNCAPPED);
+        assert_eq!(clamp_frame_cap(1), FRAME_CAP_MIN);
+        assert_eq!(clamp_frame_cap(60), 60);
+        assert_eq!(clamp_frame_cap(10_000), FRAME_CAP_MAX);
+    }
+
+    #[test]
+    fn a_bind_address_is_kept_when_it_is_one_and_every_interface_otherwise() {
+        assert_eq!(clean_bind_address(" 127.0.0.1 "), "127.0.0.1");
+        assert_eq!(clean_bind_address("100.64.0.7"), "100.64.0.7");
+        assert_eq!(clean_bind_address("::1"), "::1");
+        // Not an address: the phone view still comes up, everywhere, rather
+        // than not at all — the setting narrows, it never switches off.
+        for bad in ["", "kitchen", "192.168.1", "0.0.0.0:7373"] {
+            assert_eq!(clean_bind_address(bad), crate::phone::DEFAULT_BIND, "{bad:?}");
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("userconfig.toml");
+        fs::write(&path, "phone_bind_address = \" 100.64.0.7 \"\n").unwrap();
+        assert_eq!(get_check_and_set_config(&path).phone_bind_address, "100.64.0.7");
+        fs::write(&path, "phone_bind_address = \"kitchen\"\n").unwrap();
+        assert_eq!(get_check_and_set_config(&path).phone_bind_address, crate::phone::DEFAULT_BIND);
+        fs::write(&path, "phone_server_port = 7373\n").unwrap();
+        assert_eq!(get_check_and_set_config(&path).phone_bind_address, crate::phone::DEFAULT_BIND);
+        // And the normalised file carries the key from then on.
+        assert!(fs::read_to_string(&path).unwrap().contains("phone_bind_address = \"0.0.0.0\""));
     }
 
     #[test]

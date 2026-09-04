@@ -8,3 +8,6 @@ pub mod initialization;
 pub mod color;
 pub mod paths;
 pub mod planner;
+pub mod phone;
+pub mod board;
+pub mod sync;

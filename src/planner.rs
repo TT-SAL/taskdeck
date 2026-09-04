@@ -500,6 +500,38 @@ pub fn summarize(placements: &[Placement]) -> DaySummary {
     }
 }
 
+/// The masthead's line for a day — `2h 30m planned · 3 blocks · 1 due · 9h
+/// routine · 2h done` — each part only when it has something to say.
+///
+/// Routines are counted apart from planned work (§18.2): folding nine hours
+/// of sleep and meals into "planned" would make every day read as full, and
+/// leaving them out makes a day with four free hours claim thirteen. Finished
+/// work is counted apart from both, or a finished day would look like a day
+/// with everything still ahead of it. One function, because the desktop and
+/// the phone both say this and must say it the same way.
+pub fn summary_text(planned: DaySummary, routine: DaySummary, done: DaySummary) -> String {
+    if planned.blocks == 0 && planned.due == 0 && done.blocks == 0 && routine.blocks == 0 {
+        return "nothing on this day".to_string();
+    }
+    let mut parts = Vec::new();
+    if planned.blocks > 0 || (done.blocks == 0 && routine.blocks == 0) {
+        parts.push(format!("{} planned", format_duration(planned.planned_minutes.max(0) as u32)));
+    }
+    if planned.blocks > 0 {
+        parts.push(format!("{} block{}", planned.blocks, if planned.blocks == 1 { "" } else { "s" }));
+    }
+    if planned.due > 0 {
+        parts.push(format!("{} due", planned.due));
+    }
+    if routine.blocks > 0 {
+        parts.push(format!("{} routine", format_duration(routine.planned_minutes.max(0) as u32)));
+    }
+    if done.blocks > 0 {
+        parts.push(format!("{} done", format_duration(done.planned_minutes.max(0) as u32)));
+    }
+    parts.join(" · ")
+}
+
 /// Minutes past midnight for "right now", or `None` when `day` isn't today —
 /// the caller draws the now-line only when there is one to draw.
 pub fn now_marker(day: NaiveDate, now: DateTime<Local>) -> Option<i32> {
@@ -592,6 +624,99 @@ pub fn relative_due(deadline: DateTime<Local>, now: DateTime<Local>) -> String {
     }
 }
 
+/* ─────────────────────────────── Reflow ───────────────────────────────
+ *
+ * The first move of `DOCUMENTATION.md` §20.3. A plan made of clock times is
+ * over-specified: dropping a block at 14:00 asserts both "an hour on this
+ * today" (usually known) and "that hour is 14:00" (almost never known), and it
+ * is the second claim that breaks and takes everything below it with it. Until
+ * sessions can float (§20.3, move 2), the cheap answer is a button: when work
+ * is booked before the now-line and not ticked off, say how far behind the day
+ * is, and offer to slide what is left down past now — in order, around the
+ * things that are genuinely fixed.
+ */
+
+/// One work block reflow may move. `key` is whatever the caller needs to find
+/// the block again — `(task id, session index)` in practice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Flowable<K> {
+    pub key: K,
+    pub start: i32,
+    pub minutes: u32,
+}
+
+/// Round up to the snap grid, inside the day.
+fn snap_up(minutes: i32) -> i32 {
+    let step = SNAP_MINUTES;
+    ((minutes + step - 1).div_euclid(step) * step).clamp(0, DAY_MINUTES)
+}
+
+/// Minutes of booked work already gone by: the part of each block that lies
+/// before `now`. This is the masthead's "1h 20m behind" — it answers "how much
+/// of what I planned is behind me and not ticked off" — and is zero while
+/// everything is still ahead. Pass only work blocks: eight hours of sleep that
+/// have passed are not eight hours behind.
+///
+/// Overlapping time counts once, as `summarize` counts it: two blocks over
+/// the same hour are one hour behind, and the figure never exceeds the
+/// "planned" figure it sits beside.
+pub fn behind_minutes(blocks: &[Placement], now: i32) -> i32 {
+    let clipped: Vec<Placement> = blocks
+        .iter()
+        .filter_map(|placement| match *placement {
+            Placement::Block { start, minutes } => {
+                let end = now.min(start + minutes as i32);
+                (end > start).then_some(Placement::Block { start, minutes: (end - start) as u32 })
+            }
+            Placement::Marker { .. } => None,
+        })
+        .collect();
+    summarize(&clipped).planned_minutes
+}
+
+/// Slide the day's work down past `now`, keeping its order, around `anchors`
+/// — the `(start, end)` spans that are genuinely fixed: events and routines.
+///
+/// Returns a new start for every block, in the order the blocks were given;
+/// the caller applies the ones that changed. Blocks keep their length and
+/// their **order**: this is a slide, not a re-plan — the report you meant to
+/// write first is still first, it just starts now. A block still ahead stays
+/// where it was put unless one landing in front of it pushes it on, which is
+/// the "my schedule exploded" the button exists for; nothing is ever pulled
+/// *earlier*, so on a day with nothing behind, nothing moves.
+///
+/// Nothing is dropped. A day that runs out of room has its last blocks clamped
+/// inside it and left overlapping, which is what an over-booked day should
+/// look like (§20.4) rather than something to hide.
+pub fn reflow<K: Copy>(blocks: &[Flowable<K>], anchors: &[(i32, i32)], now: i32) -> Vec<(K, i32)> {
+    let mut order: Vec<usize> = (0..blocks.len()).collect();
+    order.sort_by_key(|&index| blocks[index].start);
+
+    let mut anchors: Vec<(i32, i32)> = anchors.iter().copied().filter(|(start, end)| end > start).collect();
+    anchors.sort_unstable();
+
+    let mut placed: Vec<Option<(K, i32)>> = vec![None; blocks.len()];
+    let mut cursor = snap_up(now);
+    for &index in &order {
+        let length = blocks[index].minutes.max(MIN_BLOCK_MINUTES) as i32;
+        // Behind now, or behind the block before it: moved to the cursor.
+        // Ahead of both: left where it is.
+        let mut start = cursor.max(blocks[index].start);
+        // Anchors are sorted by start and `start` only ever grows, so one pass
+        // steps past every anchor the block would land in — including one
+        // that begins inside the anchor just stepped past.
+        for &(anchor_start, anchor_end) in &anchors {
+            if start < anchor_end && anchor_start < start + length {
+                start = snap_up(anchor_end);
+            }
+        }
+        let start = start.min(DAY_MINUTES - length).max(0);
+        placed[index] = Some((blocks[index].key, start));
+        cursor = start + length;
+    }
+    placed.into_iter().flatten().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,6 +725,99 @@ mod tests {
 
     fn at(y: i32, m: u32, d: u32, hour: u32, minute: u32) -> DateTime<Local> {
         Local.with_ymd_and_hms(y, m, d, hour, minute, 0).unwrap()
+    }
+
+    fn block(start: i32, minutes: u32) -> Placement {
+        Placement::Block { start, minutes }
+    }
+
+    fn flowable(key: u32, start: i32, minutes: u32) -> Flowable<u32> {
+        Flowable { key, start, minutes }
+    }
+
+    #[test]
+    fn behind_counts_only_the_part_of_a_block_that_has_passed() {
+        let blocks = [block(540, 60), block(840, 60), Placement::Marker { at: 600, due: true }];
+        assert_eq!(behind_minutes(&blocks, 500), 0);
+        assert_eq!(behind_minutes(&blocks, 570), 30);
+        assert_eq!(behind_minutes(&blocks, 600), 60);
+        assert_eq!(behind_minutes(&blocks, 900), 120);
+        assert_eq!(behind_minutes(&[], 900), 0);
+        // Overlapping blocks count once, like the planned figure they sit beside.
+        assert_eq!(behind_minutes(&[block(540, 60), block(540, 60), block(570, 60)], 720), 90);
+    }
+
+    #[test]
+    fn summary_text_says_only_what_there_is() {
+        let none = DaySummary::default();
+        assert_eq!(summary_text(none, none, none), "nothing on this day");
+        let planned = DaySummary { planned_minutes: 150, blocks: 3, due: 1 };
+        let routine = DaySummary { planned_minutes: 540, blocks: 2, due: 0 };
+        let done = DaySummary { planned_minutes: 60, blocks: 1, due: 0 };
+        assert_eq!(summary_text(planned, routine, done), "2h 30m planned · 3 blocks · 1 due · 9h routine · 1h done");
+        // A day with only routines on it does not claim "0m planned".
+        assert_eq!(summary_text(none, routine, none), "9h routine");
+        // But a day with a due date and nothing planned says so.
+        let due_only = DaySummary { planned_minutes: 0, blocks: 0, due: 2 };
+        assert_eq!(summary_text(due_only, none, none), "0m planned · 2 due");
+        let one = DaySummary { planned_minutes: 30, blocks: 1, due: 0 };
+        assert_eq!(summary_text(one, none, none), "30m planned · 1 block");
+    }
+
+    #[test]
+    fn reflow_slides_work_past_now_in_order_and_around_anchors() {
+        // A and B are behind at 10:20; C is still ahead but gets pushed on by
+        // them. The dentist at 12:00–13:00 is an anchor nothing may land in.
+        let blocks = [flowable(1, 540, 60), flowable(2, 600, 30), flowable(3, 900, 60)];
+        let moved = reflow(&blocks, &[(720, 780)], 620);
+        // Now rounds up to the grid (10:30); A starts there, B follows; C at
+        // 15:00 is ahead of both and stays exactly where it was put.
+        assert_eq!(moved, vec![(1, 630), (2, 690), (3, 900)]);
+        // A now that is already on the grid is used as it is.
+        let moved = reflow(&blocks, &[(720, 780)], 615);
+        assert_eq!(moved, vec![(1, 615), (2, 675), (3, 900)]);
+        // Pushed on when the ones in front reach it: B grows to two hours, so
+        // it ends at 12:30 inside the dentist... and C moves to after it.
+        let long = [flowable(1, 540, 60), flowable(2, 600, 120), flowable(3, 780, 60)];
+        assert_eq!(reflow(&long, &[(720, 780)], 620), vec![(1, 630), (2, 780), (3, 900)]);
+    }
+
+    #[test]
+    fn reflow_moves_nothing_when_nothing_is_behind() {
+        // The R key is safe to press on reflex: a day still ahead is left alone.
+        let blocks = [flowable(1, 840, 60), flowable(2, 960, 30)];
+        assert_eq!(reflow(&blocks, &[(720, 780)], 600), vec![(1, 840), (2, 960)]);
+        assert_eq!(reflow(&blocks, &[], 0), vec![(1, 840), (2, 960)]);
+    }
+
+    #[test]
+    fn reflow_keeps_input_order_in_its_answer_and_steps_over_stacked_anchors() {
+        // Given out of time order; answered in the order given.
+        let blocks = [flowable(9, 700, 60), flowable(4, 500, 60)];
+        // Two overlapping anchors: stepping past the first lands in the
+        // second. The second ends off the grid (13:20), so the block that
+        // follows it lands on the next grid step (13:30), not at 13:20.
+        let moved = reflow(&blocks, &[(600, 720), (700, 800)], 600);
+        assert_eq!(moved, vec![(9, 870), (4, 810)]);
+    }
+
+    #[test]
+    fn reflow_clamps_at_the_end_of_the_day_rather_than_dropping_anything() {
+        let blocks = [flowable(1, 1380, 60), flowable(2, 1400, 60)];
+        let moved = reflow(&blocks, &[], 1400);
+        // Both end up in the last hour, overlapping — an over-booked day looks
+        // over-booked.
+        assert_eq!(moved, vec![(1, 1380), (2, 1380)]);
+    }
+
+    #[test]
+    fn reflow_ignores_empty_anchors_and_respects_the_minimum_length() {
+        let blocks = [flowable(1, 60, 5)];
+        let moved = reflow(&blocks, &[(100, 100)], 90);
+        assert_eq!(moved, vec![(1, 90)]);
+        assert_eq!(snap_up(0), 0);
+        assert_eq!(snap_up(1), 15);
+        assert_eq!(snap_up(DAY_MINUTES + 30), DAY_MINUTES);
     }
 
     fn day() -> NaiveDate {

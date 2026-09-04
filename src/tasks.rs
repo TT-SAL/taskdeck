@@ -24,6 +24,21 @@ pub const WEEKDAY_NAMES: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", 
 /// Every weekday set.
 pub const EVERY_DAY: u8 = 0b0111_1111;
 
+/// Labels for a dated task's **severity** — how bad missing the date is —
+/// indexed by `Active::importance`.
+pub const IMPORTANCE_LABELS: [&str; 5] =
+    ["Not important", "Mildly important", "Important", "Highly important", "Lethally important"];
+
+/// Labels for an undated task's **horizon** — roughly how soon it should
+/// happen — indexed by `Active::time_importance`. The index order is a
+/// serialization fact (the first three are load-compatible with the old
+/// urgency scale, "whenever" is appended); `HORIZON_DISPLAY_ORDER` is how a
+/// list presents them, soonest first.
+pub const HORIZON_LABELS: [&str; 4] = ["Within a month", "Within a week", "Within days", "Whenever"];
+
+/// Presentation order for `HORIZON_LABELS`: soonest first, the parking lot last.
+pub const HORIZON_DISPLAY_ORDER: [u8; 4] = [2, 1, 0, 3];
+
 /// Weekdays only — Monday to Friday.
 const WEEKDAYS: u8 = 0b0001_1111;
 

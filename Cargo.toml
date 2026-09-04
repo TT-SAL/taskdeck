@@ -7,6 +7,12 @@ edition = "2024"
 name = "TaskDeck"
 path = "src/main.rs"
 
+# The headless host: the board, the phone view and the feed, and no window.
+# For the always-on box in the cupboard; see SERVER.md.
+[[bin]]
+name = "taskdeck-server"
+path = "src/server_main.rs"
+
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -35,6 +41,13 @@ toml_edit = "0.23.7"
 
 palette = "0.7.6"
 kmeans_colors = "0.7.1"
+
+# The phone view (`phone.rs`): a small blocking HTTP server on its own thread,
+# in the same shape as the weather thread — no async runtime enters the tree.
+tiny_http = "0.12"
+# Paints the phone link as a QR code in Settings. Render features off: the
+# matrix is drawn with egui's painter, not turned into an image.
+qrcode = { version = "0.14", default-features = false }
 
 [build-dependencies]
 embed-resource = "3.0"

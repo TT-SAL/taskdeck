@@ -36,11 +36,45 @@ A routine is deliberately quiet. It is not in the task list, because nobody is o
 
 Moving or resizing a routine's block changes the rule, so it moves on every day it falls on — you do not reschedule Wednesday's sleep, you change what time you go to bed. Nothing is stored per day, so a routine costs one record however many years you page through.
 
+**When the day runs late**, the masthead says so — *1h 20m behind* — and offers **Reflow** (`R`): everything still booked slides down past now, in the order it was in, around the events and routines that are actually fixed. A plan written in clock times breaks the moment one thing runs long; this is the cheap repair, and the reasoning behind the proper one is in [`DOCUMENTATION.md` §20](DOCUMENTATION.md). The phone view offers the same button.
+
 **How long something takes** is the task's own number, and the planner spends it. Say the physics homework takes two hours — you can say so before deciding when to do it — and dragging its card out lands a two-hour block, not a default half-hour to be stretched by hand. Book only one of those hours and the card stays in the tray reading *takes 2h · 1h booked*; drag it out again — today, tomorrow, whenever — and it lands the missing hour. A task can be planned in as many blocks across as many days as you like, and it is still one task with one ✓, which frees them all. **＋ Block** in the bottom row books another slice without a trip through the tray.
 
 **When something is due** is set in the bottom row too. `due …` opens a small editor that sets, changes, or clears the deadline of any task — so "due Friday, and I'll do it Tuesday, takes two hours" is one drag and one dialog, in either order. With a deadline the task's knob is *severity* (how bad is missing it — the electric bill is lethal, homework merely high); without one it is the *horizon* (how soon it should roughly happen). The footer always shows whichever question applies.
 
 The important part is what it records. A deadline is when something is **due**; planned blocks are when you will **work on** it. Those are different, so TaskDeck stores them separately: a report due Friday that you plan to write on Tuesday shows as a block on Tuesday and still shows as due on Friday. A task you drag out gets time and no deadline — you have said when you will do it, not when it is owed — and it still rises up the task list as its slot comes round. Dragging blocks around never moves a deadline: a due date is a fact about the task, changed only where changing it looks like changing it.
+
+## On your phone
+
+TaskDeck can serve the day to your phone while it runs. Turn on **Phone view** in Settings and
+it shows a link (and a QR code); open that on a phone on the same Wi-Fi — or over
+[Tailscale](https://tailscale.com) from anywhere — and you get the day as a timeline, the tray of
+unplanned tasks, and a sheet for editing whatever you tap: move or resize a block, book more
+time, set a due date, change severity, make a routine repeat, add a task, tick one off. Hold a
+block to drag it to another hour. **Week** shows the whole week as seven narrow columns, a tap
+on one opening the day. When the day is running late, **Reflow** is there too, and your
+notepad is a tap away, to read or to change. Every
+change lands in the desktop app the moment you make it, through exactly the same code a drag on
+the planner uses, so there is nothing to sync and nothing to merge. Out of reach of the desktop,
+an edit made on the page is kept on the phone — shown as waiting, not as done — and sent, in
+order, when the desktop answers again; over a secure link (Tailscale's HTTPS, see `SERVER.md`)
+the page itself also opens offline and shows the last day it saw, which a plain `http://` LAN
+link cannot offer. Add the page to your home screen and it behaves like an app.
+
+The same settings section gives you a **calendar feed** link. Subscribe to it from Google
+Calendar or your phone's own calendar app and your events, due dates, day plan and routines show
+up there too — read-only, and still there when the desktop is off.
+
+The link carries a key: anyone holding it can edit your calendar, so share it like a password.
+**New key** in Settings retires every old link.
+
+The phone view exists while TaskDeck is running. If you want it — and your calendar — available
+when your computer is off, put the board on a machine that is always on: **`taskdeck-server`** is
+the same program with no window, built from this repository, that serves the phone page and the
+feed from a spare desktop, a mini PC or a Raspberry Pi. Point the desktop app at it (Settings →
+Server) and it keeps working exactly as before over a copy of the server's board, sending every
+change to the server the moment it is made — and queuing changes while the server is unreachable,
+to send them in order when it is back. [`SERVER.md`](SERVER.md) is the setup, start to finish.
 
 ## The archive
 
@@ -70,7 +104,7 @@ One rule: the topmost open thing owns the keyboard. Every window closes on the k
 |---|---|
 | `P` `A` `S` | Planner · Archive · Settings |
 | `T` `E` | New task · new event, with the caret already in the name |
-| In the planner | `←` `→` days, `T` today, `1` `2` `3` task/event/routine, `Enter` rename, `U` un-book, `Del` delete |
+| In the planner | `←` `→` days, `T` today, `1` `2` `3` task/event/routine, `Enter` rename, `U` un-book, `R` reflow, `Del` delete |
 | In the archive | `/` search |
 | `F11` | Fullscreen (`Ctrl`+`Cmd`+`F` on macOS) |
 
@@ -105,11 +139,11 @@ TaskDeck is written in Rust, with egui and wgpu doing the drawing. With a curren
 cargo build --release
 ```
 
-The executable is written to `target/release`. No system libraries are needed beyond a working graphics driver.
+Two executables are written to `target/release`: `TaskDeck`, the app, and `taskdeck-server`, the board with no window for an always-on machine (see [`SERVER.md`](SERVER.md); `cargo build --release --bin taskdeck-server` builds it alone). No system libraries are needed beyond a working graphics driver for the app; the server needs none at all.
 
 ## Settings
 
-Almost everything is adjustable from the in-app Settings panel: the background image and how strongly it is tinted, which monitor the window opens on, fullscreen on or off, how many weeks the calendar covers, the UI scale, your weather location, the two or three day forecast toggle, and an optional frame-rate readout. Your choices are saved to `taskdeck_data/userconfig.toml`.
+Almost everything is adjustable from the in-app Settings panel: the background image and how strongly it is tinted, which monitor the window opens on, fullscreen on or off, how many weeks the calendar covers, the UI scale, your weather location, the two or three day forecast toggle, an optional frame-rate readout, an optional frame-rate *cap* for laptops on battery (off by default — the calendar is meant to run as fast as it can), the phone view (on or off, its port, the link and the calendar feed), and the server this copy is a client of, if any. Your choices are saved to `taskdeck_data/userconfig.toml`.
 
 The layout wants about 1920 points of width, which is what a 1920×1080 monitor gives you at 100% display scaling. On a display that offers less — a HiDPI Mac screen, or Windows at 125% or 150% scaling — the UI scale setting shrinks everything to fit rather than letting the weather column fall off the edge. Left at `0` it works this out for itself; set it to a percentage to pin it.
 
@@ -124,7 +158,7 @@ On macOS the binary runs as-is. Bundling it as a `TaskDeck.app` also works — T
 ## Roadmap
 
 - Scrolling upward to look back over past events.
-- Making a day plan that survives one thing running long — a plan is "an hour on this today", a schedule is "at 14:00", and the planner currently makes you write the second when you only know the first. The reasoning and the order to do it in are in [`DOCUMENTATION.md` §20](DOCUMENTATION.md).
+- Making a day plan that survives one thing running long — a plan is "an hour on this today", a schedule is "at 14:00", and the planner currently makes you write the second when you only know the first. The first step, **Reflow**, is in; floating sessions — the structural fix — are next. The reasoning and the order to do it in are in [`DOCUMENTATION.md` §20](DOCUMENTATION.md), and the shape they will take in §20.5.
 
 ## Attribution
 

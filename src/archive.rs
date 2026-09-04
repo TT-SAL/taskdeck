@@ -654,6 +654,22 @@ impl ArchiveLog {
         &self.entries
     }
 
+    /// Take another copy of the log as this one — what a client does with the
+    /// rows a server hands it. Counts as loaded from then on; nothing on this
+    /// machine's disk is consulted.
+    pub fn replace_with(&mut self, mut rows: Vec<Archived>) {
+        rows.sort_by_key(|row| std::cmp::Reverse(row.archived_at));
+        self.entries = rows;
+        self.unreadable.clear();
+        self.loaded = true;
+    }
+
+    /// Write what is in memory out whole — a client keeping a cache of a
+    /// server's log. Same atomic discipline as every other write.
+    pub fn persist(&self, dir: &Path) -> Result<(), Box<dyn Error>> {
+        self.rewrite(dir)
+    }
+
     /// How many lines of the log this build could not read. Surfaced in the
     /// window rather than swallowed, because a number that is not zero is
     /// something the user should be told about their own data.
@@ -707,9 +723,12 @@ impl ArchiveLog {
         append(dir, &row)?;
         // Only mirror into memory when memory is authoritative. Pushing onto an
         // unloaded log would have the next `load` read the same row off disk
-        // and hold it twice.
+        // and hold it twice. Placed where its time puts it, newest first: a
+        // row is usually the newest, but one re-filed after a failed restore,
+        // or replayed from a client's outbox, is not.
         if self.loaded {
-            self.entries.insert(0, row);
+            let at = self.entries.iter().position(|earlier| earlier.archived_at <= row.archived_at).unwrap_or(self.entries.len());
+            self.entries.insert(at, row);
         }
         Ok(())
     }

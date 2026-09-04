@@ -1,26 +1,43 @@
-use std::{collections::HashMap, error::Error, fs, path::PathBuf, process::{Command, exit}, sync::{Arc, atomic::Ordering}, time::Instant};
+use std::{collections::HashMap, error::Error, fs, path::PathBuf, process::{Command, exit}, sync::{Arc, atomic::Ordering, mpsc::{Receiver, Sender}}, time::Instant};
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Timelike, Weekday};
 use egui::{self, Align, Button, Color32, ColorImage, ComboBox, Context, CornerRadius, Event, FontData, FontDefinitions, FontFamily, FontId, Grid, Key, Label, Layout, Margin, PointerButton, Pos2, Rect, RichText, Stroke, StrokeKind, TextureHandle, Ui, Vec2, ViewportCommand, pos2, vec2};
 use image::{ImageBuffer, Rgba};
+use winit::event_loop::EventLoopProxy;
 
-use crate::{archive::{self, ArchiveKey, ArchiveLog, Archived, KindFilter, Outcome, OutcomeFilter}, calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_ui_scale_percent}, paths::AppDirs, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active, Session}, weather::{self, WeatherService}};
+use crate::{archive::{self, ArchiveKey, ArchiveLog, Archived, KindFilter, Outcome, OutcomeFilter}, board::{self, Board}, sync, calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, FRAME_CAP_DEFAULT, FRAME_CAP_MAX, FRAME_CAP_MIN, FRAME_CAP_UNCAPPED, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_frame_cap, clamp_ui_scale_percent}, paths::AppDirs, phone, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active}, weather::{self, WeatherService}};
 
 /// The calendar's column headings. The same Monday-first list a `Recurrence`
 /// bit indexes into, so there is one place a weekday is named.
 const WEEK_DAYS: [&str; 7] = tasks::WEEKDAY_NAMES;
 
-/// Labels for an undated task's **horizon** — "roughly how soon should this
-/// happen" — indexed by `Active::time_importance`. The index order is a
-/// serialization fact (the first three are load-compatible with the old
-/// urgency scale, "whenever" is appended); `HORIZON_DISPLAY_ORDER` is how a
-/// combo presents them, soonest first.
-const HORIZON: [&str; 4] = ["Within a month", "Within a week", "Within days", "Whenever"];
+/// Labels for an undated task's **horizon** and a dated one's **severity**,
+/// and the order a combo presents the horizons in. Defined next to the model
+/// they describe (`tasks`), because the phone view names them too.
+const HORIZON: [&str; 4] = tasks::HORIZON_LABELS;
+const HORIZON_DISPLAY_ORDER: [u8; 4] = tasks::HORIZON_DISPLAY_ORDER;
+const IMPORTANCE: [&str; 5] = tasks::IMPORTANCE_LABELS;
 
-/// Presentation order for `HORIZON`: soonest first, the parking lot last.
-const HORIZON_DISPLAY_ORDER: [u8; 4] = [2, 1, 0, 3];
+/// How long a restarted phone server keeps trying to bind its port while the
+/// old socket closes, and how often it tries.
+const PHONE_RESTART_WINDOW: std::time::Duration = std::time::Duration::from_secs(4);
+const PHONE_RETRY_EVERY: std::time::Duration = std::time::Duration::from_millis(150);
+/// How long the addresses shown in Settings are trusted before being looked up
+/// again — a laptop that changes Wi-Fi should not show yesterday's address.
+const PHONE_ADDRESS_TTL: std::time::Duration = std::time::Duration::from_secs(20);
+/// Side of the QR code in Settings, and the quiet zone around it in modules.
+const PHONE_QR_SIZE: f32 = 176.0;
+const PHONE_QR_QUIET: usize = 3;
 
-const IMPORTANCE: [&str; 5] = ["Not important", "Mildly important", "Important", "Highly important", "Lethally important"];
+/// How much accumulated error text the error window will hold before it stops
+/// appending and says so. See `show_error`.
+const ERROR_TEXT_CAP: usize = 1200;
+const ERROR_TEXT_MORE: &str = "\n\n(more errors followed)";
+/// Tallest the error window's text area gets before it scrolls.
+const ERROR_TEXT_MAX_HEIGHT: f32 = 520.0;
+
+/// The masthead's "behind" figure, in the colour the phone view uses for today.
+const PLANNER_BEHIND_COLOR: Color32 = Color32::from_rgb(240, 195, 107);
 
 /* ─────────────────────────── Day planner layout ─────────────────────────── */
 
@@ -399,7 +416,7 @@ fn settings_button(ui: &mut Ui, text: &str) -> egui::Response {
 use planner::Drag as PlannerDrag;
 
 /// One row on the planner timeline: an item, and where it sits on the day being
-/// shown. Rebuilt each frame from `active_things` — the planner has no cached
+/// shown. Rebuilt each frame from `board.items` — the planner has no cached
 /// model of its own, so it can't drift out of sync with the calendar.
 struct PlannerEntry {
     id: u64,
@@ -1244,7 +1261,7 @@ struct DayCell {
     /// How many items land on the day in total. The cell's layout is chosen by
     /// this (0/1/2/3/4+), and the 4+ case shows an overflow marker. This used to
     /// be a full second copy of the day's items, built for the day popup; the
-    /// planner reads `active_things` directly, so only the count is still owed.
+    /// planner reads `board.items` directly, so only the count is still owed.
     item_count: usize,
     is_today: bool,
     date: NaiveDate,
@@ -1276,7 +1293,8 @@ impl FpsCounter {
 pub struct TaskAppConfig {
     pub colorschemes: HashMap<u32, ColorScheme>,
     pub selected_colorscheme_id: u32,
-    pub active_items: Vec<Active>,
+    /// The live set, the archive and the notepad, already read.
+    pub board: Board,
     pub dirs: AppDirs,
     pub background: String,
     pub background_options: Vec<String>,
@@ -1285,7 +1303,6 @@ pub struct TaskAppConfig {
     pub enable_fps_counter: bool,
     pub calendar_weeks_to_show: usize,
     pub selected_monitor_name: String,
-    pub textbox_text: String,
     pub three_day_weather: bool,
     pub background_image_tint_percent: u32,
     pub ui_scale_percent: u32,
@@ -1294,6 +1311,25 @@ pub struct TaskAppConfig {
     /// file that was quarantined), to surface in the error window once the UI is
     /// up. `None` when startup loaded cleanly.
     pub startup_error: Option<String>,
+    /// The phone view (`phone.rs`): whether to serve it, on which port, and
+    /// the key its link carries.
+    pub phone_enabled: bool,
+    pub phone_port: u16,
+    /// The address it listens on — `phone::DEFAULT_BIND` or one address.
+    pub phone_bind: String,
+    pub phone_token: String,
+    /// Its request queue — the server thread sends, the UI thread serves.
+    pub phone_tx: Sender<phone::PhoneRequest>,
+    pub phone_rx: Receiver<phone::PhoneRequest>,
+    /// Wakes the event loop from another thread.
+    pub event_proxy: EventLoopProxy<()>,
+    /// Frame cap while awake, or `FRAME_CAP_UNCAPPED`.
+    pub frame_cap_fps: u32,
+    /// Running against a `taskdeck-server`: the engine that keeps the replica
+    /// in step (`sync.rs`), and the setting it came from.
+    pub sync: Option<sync::SyncHandle>,
+    pub server_url: String,
+    pub server_token: String,
 }
 
 pub struct TaskApp {
@@ -1325,16 +1361,12 @@ pub struct TaskApp {
     last_textbox_edit_time: Option<Instant>,
 
     /* ───────────────────────── Tasks & Events ───────────────────────── */
-    active_things: Vec<Active>,
+    /// The data: live items, archive, notepad, and every way they change
+    /// (`board.rs`). The UI reads it every frame and changes it only through
+    /// `apply`.
+    board: Board,
     list_tasks: Vec<Active>,
-    /// Everything that has left the board, and what became of it. Read from
-    /// disk the first time something asks to see it and kept from then on —
-    /// the window, the planner's ghosts and the summary all read the same copy.
-    archive: ArchiveLog,
     archive_view: ArchiveView,
-    /// Next stable id to hand out to a newly created item. Seeded past the
-    /// highest id present at startup (see `tasks::assign_missing_ids`).
-    next_id: u64,
 
     calendar_elements: Vec<DayCell>,
 
@@ -1360,8 +1392,6 @@ pub struct TaskApp {
     day_input: i32,
     hour_input: i32,
     minute_input: i32,
-
-    textbox_text: String,
 
     /* ───────────────────────── Flags ───────────────────────── */
     new_task_flag: bool,
@@ -1449,6 +1479,13 @@ pub struct TaskApp {
     /// Points-per-pixel the text styles were last snapped for. See
     /// `apply_ui_scale` and `snap_font_points`.
     last_font_ppp: f32,
+    /// Frames per second the loop is held to while awake, or
+    /// `FRAME_CAP_UNCAPPED`. Read by `App::schedule_next_frame` every frame,
+    /// so a change in Settings applies at once.
+    frame_cap_fps: u32,
+    /// The rate the settings slider edits, kept while the cap is off so
+    /// switching it on has a number to switch on *to*.
+    frame_cap_input: u32,
 
     /* ───────────────────────── Errors & Confirmations ───────────────────────── */
     /// Id of the item awaiting a complete/delete confirmation. The dialog looks
@@ -1494,6 +1531,43 @@ pub struct TaskApp {
     /* ───────────────────────── Calendar ───────────────────────── */
     row_contains_month_switch: Vec<Option<(String, String)>>,
 
+    /* ───────────────────────── Phone view ───────────────────────── */
+    phone_enabled: bool,
+    phone_port: u16,
+    /// Where it listens; from the file only (§21.7).
+    phone_bind: String,
+    /// The port the settings sheet is offering; applied when it settles.
+    phone_port_input: u16,
+    phone_token: String,
+    /// The listening server while the view is on. `None` while it is off —
+    /// and briefly after a restart, while the old socket closes.
+    phone_server: Option<phone::PhoneServer>,
+    /// Why the server is not running when it should be.
+    phone_error: Option<String>,
+    /// While set, `tend_phone_server` keeps trying to bind until this instant
+    /// before giving up and reporting the failure.
+    phone_retry_until: Option<Instant>,
+    phone_last_attempt: Option<Instant>,
+    phone_tx: Sender<phone::PhoneRequest>,
+    phone_rx: Receiver<phone::PhoneRequest>,
+    event_proxy: EventLoopProxy<()>,
+    /// The board's version, published to the server's threads so a phone
+    /// waiting on `/api/wait` is answered the moment it moves (§21.2).
+    phone_pulse: Arc<phone::Pulse>,
+    /// The addresses Settings points the phone at, and when they were looked up.
+    phone_addresses: Vec<String>,
+    phone_addresses_checked: Option<Instant>,
+    /// The QR code last painted, keyed by the link it encodes.
+    phone_qr: Option<(String, usize, Vec<bool>)>,
+
+    /* ───────────────────────── Server ───────────────────────── */
+    /// The sync engine, when this copy is a client of a `taskdeck-server`.
+    sync: Option<sync::SyncHandle>,
+    /// The settings sheet's fields. Applied at the next start: the board is
+    /// fetched, and the engine started, before there is a window.
+    server_url_input: String,
+    server_token_input: String,
+
     /* ───────────────────────── Misc ───────────────────────── */
     use_date_for_addable: bool,
 }
@@ -1511,16 +1585,11 @@ impl TaskApp {
             .position(|b| b == &config.background)
             .unwrap_or(0);
 
-        // Backfill stable ids onto any items from a pre-id / hand-edited save and
-        // seed the id counter past the highest one in use; fold any pre-sessions
-        // single slot into a session while we're at it.
-        let mut active_items = config.active_items;
-        let next_id = tasks::assign_missing_ids(&mut active_items);
-        tasks::migrate_legacy_plans(&mut active_items);
+        let board = config.board;
 
         let userconfig_path = config.dirs.config_file();
 
-        Self {
+        let mut app = Self {
             /* Animation */
             row_anim: Vec::new(),
             last_anim_time: 0.0,
@@ -1544,18 +1613,9 @@ impl TaskApp {
             last_textbox_edit_time: None,
 
             /* Tasks */
-            list_tasks: active_items
-                .iter()
-                .filter(|t| !t.is_event)
-                .cloned()
-                .collect(),
-            active_things: active_items,
-            // Not read here: the archive is only ever wanted by a window
-            // somebody opened, and booting is not the moment to walk a log
-            // that may be years long.
-            archive: ArchiveLog::new(),
+            list_tasks: board.items.iter().filter(|t| !t.is_event).cloned().collect(),
+            board,
             archive_view: ArchiveView::default(),
-            next_id,
             calendar_elements: Vec::new(),
 
             /* Weather */
@@ -1577,8 +1637,6 @@ impl TaskApp {
             day_input: now.day() as i32,
             hour_input: now.hour() as i32,
             minute_input: now.minute() as i32,
-
-            textbox_text: config.textbox_text,
 
             /* Flags */
             new_task_flag: false,
@@ -1623,6 +1681,12 @@ impl TaskApp {
                 config.ui_scale_percent
             },
             last_font_ppp: 0.0,
+            frame_cap_fps: config.frame_cap_fps,
+            frame_cap_input: if config.frame_cap_fps == FRAME_CAP_UNCAPPED {
+                FRAME_CAP_DEFAULT
+            } else {
+                config.frame_cap_fps
+            },
 
             /* Errors */
             confirm_complete_task: None,
@@ -1659,11 +1723,40 @@ impl TaskApp {
             /* Calendar */
             row_contains_month_switch: Vec::new(),
 
+            /* Phone view */
+            phone_enabled: config.phone_enabled,
+            phone_port: config.phone_port,
+            phone_bind: config.phone_bind,
+            phone_port_input: config.phone_port,
+            phone_token: config.phone_token,
+            phone_server: None,
+            phone_error: None,
+            phone_retry_until: None,
+            phone_last_attempt: None,
+            phone_tx: config.phone_tx,
+            phone_rx: config.phone_rx,
+            event_proxy: config.event_proxy,
+            phone_pulse: Arc::new(phone::Pulse::new()),
+            phone_addresses: Vec::new(),
+            phone_addresses_checked: None,
+            phone_qr: None,
+
+            /* Server */
+            sync: config.sync,
+            server_url_input: config.server_url,
+            server_token_input: config.server_token,
+
             /* Misc */
             use_date_for_addable: true,
-        }
+        };
+
+        // Listening from the first moment rather than the first frame: a phone
+        // asking while the window is still coming up gets an answer as soon
+        // as the event loop is running.
+        app.tend_phone_server();
+        app
     }
-    
+
     fn sync_calendar_caches(&mut self) {
         if self.row_anim.len() != self.calendar_weeks_to_show {
             self.row_anim.resize(self.calendar_weeks_to_show, 0.0);
@@ -1692,7 +1785,7 @@ impl TaskApp {
         // not work you owe, and a routine is a standing arrangement that would
         // sit there forever with no ✓ that could ever clear it.
         self.list_tasks = self
-            .active_things
+            .board.items
             .iter()
             .filter(|task| !task.is_event && !task.is_routine())
             .cloned()
@@ -1960,7 +2053,7 @@ impl TaskApp {
                         .max_width(NOTEPAD_WIDTH)
                         .show(ui, |ui| {
                             let response = ui.add(
-                                egui::TextEdit::multiline(&mut self.textbox_text)
+                                egui::TextEdit::multiline(&mut self.board.notes)
                                     // The card is the frame; a second one drawn
                                     // inside it is just a box in a box.
                                     .frame(egui::Frame::NONE)
@@ -1980,8 +2073,8 @@ impl TaskApp {
                                 // Nothing inserts one any more — the field is no
                                 // longer a code editor, so Tab leaves it — but
                                 // a paste still can.
-                                if self.textbox_text.contains('\t') {
-                                    self.textbox_text = utilities::detab(&self.textbox_text);
+                                if self.board.notes.contains('\t') {
+                                    self.board.notes = utilities::detab(&self.board.notes);
                                 }
                                 self.should_save_textbox_text = true;
                                 self.last_textbox_edit_time = Some(Instant::now());
@@ -2328,7 +2421,7 @@ impl TaskApp {
                                     let (lines, hidden) = {
                                         let date = self.calendar_elements[idx].date;
                                         let mut dated: Vec<&Active> = self
-                                            .active_things
+                                            .board.items
                                             .iter()
                                             .filter(|item| {
                                                 item.deadline
@@ -2496,47 +2589,132 @@ impl TaskApp {
         });
     }
 
-    /// Hand out the next stable item id. See `tasks::assign_missing_ids`.
-    fn next_item_id(&mut self) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
+    /* ─────────────────────────── Changing the board ─────────────────────────── */
+
+    /// Every change to the data goes through here: the board carries the
+    /// command out and saves, the calendar and task list are rebuilt so they
+    /// agree with it a frame later, the phone is told, and the planner's
+    /// ghosts follow the archive when the archive moved. Nothing in the UI
+    /// changes an item any other way — which is what lets the same command be
+    /// sent to a server instead, or queued while one is unreachable.
+    fn apply(&mut self, command: board::Command) -> Result<board::Reply, board::BoardError> {
+        // Stamped with this clock before anything else sees it, so the copy
+        // a server gets carries the same instant this board applied.
+        let now = Local::now();
+        let command = command.stamped(now);
+        let touches_archive = command.touches_archive();
+        let creates = command.creates_item();
+        // The notepad is not in the calendar: its autosave rebuilds nothing.
+        let only_notes = matches!(command, board::Command::SetNotes { .. });
+        // Kept for the server: the replica has applied it, the server must too.
+        let sent = self.sync.is_some().then(|| command.clone());
+        let result = self.board.apply(command, now);
+        if !only_notes {
+            self.summarize_calendar();
+        }
+        self.phone_changed();
+        if touches_archive {
+            self.rebuild_planner_ghosts();
+        }
+        if let (Some(command), Some(sync), Ok(reply)) = (sent, &self.sync, &result) {
+            sync.queue(command, if creates { reply.id } else { None });
+        }
+        result
     }
 
-    /// Add a fully-formed item, then rebuild the calendar and persist. Every
-    /// creation path — the New Task/New Event modals and the planner — funnels
-    /// through here, so "add" means the same thing (and saves once) everywhere.
-    fn push_active_thing(&mut self, item: Active) {
-        self.active_things.push(item);
-        self.summarize_calendar();
-        self.save_active_things();
-    }
-
-    /// Persist the active set, routing a failure to the error window. Shared by
-    /// every mutation so none of them can quietly skip the save.
-    fn save_active_things(&mut self) {
-        if let Err(text) = tasks::oversafe_activesave(&self.active_things, &self.dirs.data) {
-            self.show_error(format!("Saving error:\n{}", text.to_string()));
+    /// Take in what the sync engine has to say: the server's board, an id
+    /// that became real, a change the server refused, a change of touch.
+    fn drain_sync_events(&mut self) {
+        let Some(sync) = &self.sync else { return };
+        let mut events = Vec::new();
+        while let Ok(event) = sync.events.try_recv() {
+            events.push(event);
+        }
+        for event in events {
+            match event {
+                sync::SyncEvent::Board(state) => {
+                    // A board fetched before an edit made here in the same
+                    // frame would undo that edit until the next round trip;
+                    // with anything pending it is left, and the fetch after
+                    // the send brings a board that has it.
+                    if self.sync.as_ref().is_some_and(|sync| sync.status().pending > 0) {
+                        continue;
+                    }
+                    // The server's picture wins: the replica is replaced whole,
+                    // then kept on this disk for a start without the server.
+                    // The archive — the one file that grows — is rewritten
+                    // only when it actually differs.
+                    let archive_changed = {
+                        let mine = self.board.archive.entries();
+                        mine.len() != state.archive.len()
+                            || mine.first().map(|row| row.key()) != state.archive.first().map(|row| row.key())
+                    };
+                    // Notes being typed here are not written over by the
+                    // server's copy of them: the debounced save sends ours in
+                    // a moment, and last writer wins as everywhere else.
+                    let notes = if self.should_save_textbox_text { self.board.notes.clone() } else { state.notes };
+                    self.board.replace(state.items, Some(state.archive), notes);
+                    let kept = if archive_changed { self.board.save_all() } else { self.board.save_items_and_notes() };
+                    if let Err(why) = kept {
+                        self.show_error(format!("Could not keep a local copy of the server's board:\n{why}"));
+                    }
+                    self.summarize_calendar();
+                    self.rebuild_planner_ghosts();
+                    self.phone_changed();
+                }
+                sync::SyncEvent::Remapped { local, server } => {
+                    // Whatever the UI was pointing at follows the item to
+                    // its real id, so a block named right after it was made
+                    // is still the block under the editor.
+                    self.board.renumber(local, server);
+                    for slot in [
+                        &mut self.planner_selection,
+                        &mut self.planner_naming,
+                        &mut self.planner_due_edit,
+                        &mut self.confirm_complete_task,
+                        &mut self.confirm_delete_task,
+                    ] {
+                        if *slot == Some(local) {
+                            *slot = Some(server);
+                        }
+                    }
+                    if let Some(
+                        PlannerDrag::Move { id, .. } | PlannerDrag::Resize { id, .. } | PlannerDrag::FromBacklog { id },
+                    ) = self.planner_drag.as_mut()
+                        && *id == local
+                    {
+                        *id = server;
+                    }
+                    // The task list names items by id too.
+                    self.summarize_calendar();
+                }
+                sync::SyncEvent::Rejected { what, message } => {
+                    self.show_error(format!(
+                        "A change made here could not be applied on the server and was dropped — {what}:\n{message}"
+                    ));
+                }
+                sync::SyncEvent::Online(_) => {}
+            }
         }
     }
 
-    fn add_active_thing(&mut self, name: String, deadline: Option<DateTime<Local>>, importance: Option<u8>, is_event: bool, time_importance: Option<u8>) {
-        let id = self.next_item_id();
-        self.push_active_thing(Active {
-            id,
-            name,
-            deadline,
-            importance,
-            time_importance,
-            is_event,
-            created: chrono::Local::now(),
-            // Nothing created through the modals is placed on the planner yet;
-            // the planner adds sessions when the user gives it time.
-            sessions: Vec::new(),
-            planned_start: None,
-            duration_minutes: None,
-            recurrence: None,
-        });
+    /// `apply`, with a failure shown in the error window. The reply when it
+    /// worked.
+    fn apply_or_report(&mut self, command: board::Command) -> Option<board::Reply> {
+        match self.apply(command) {
+            Ok(reply) => Some(reply),
+            Err(error) => {
+                self.show_error(error.message);
+                None
+            }
+        }
+    }
+
+    /// A task or event as the New Task / New Event dialogs make one. Returns
+    /// the new item's id.
+    fn add_active_thing(&mut self, name: String, deadline: Option<DateTime<Local>>, importance: Option<u8>, is_event: bool, time_importance: Option<u8>) -> Option<u64> {
+        self.apply_or_report(board::Command::Add { name, deadline, importance, is_event, time_importance })
+            .and_then(|reply| reply.id)
     }
 
     /// Drop an item from the live set without recording anything.
@@ -2549,14 +2727,19 @@ impl TaskApp {
     /// dropped a moment after it was written down" in the ledger would be
     /// noise, not history. See `discard_planner_naming`.
     fn forget_active_thing(&mut self, id: u64) {
-        self.active_things.retain(|task| task.id != id);
+        // A silent undo stays silent when there is nothing left to undo: the
+        // block was already removed from the phone, or a server board arrived
+        // without it.
+        if let Err(error) = self.apply(board::Command::Forget { id })
+            && error.status != 410
+        {
+            self.show_error(error.message);
+        }
         // A removed item must not stay selected on the planner.
         if self.planner_selection == Some(id) {
             self.planner_selection = None;
             self.planner_selected_session = None;
         }
-        self.summarize_calendar();
-        self.save_active_things();
     }
 
     /// Seed for the task list's tie-break jitter: **today's date**.
@@ -2581,7 +2764,7 @@ impl TaskApp {
 
     pub fn summarize_calendar(&mut self) {
         // 1) Sort and separate active things
-        let (mut events, tasks): (Vec<_>, Vec<_>) = self.active_things
+        let (mut events, tasks): (Vec<_>, Vec<_>) = self.board.items
             .drain(..)
             .partition(|a| a.is_event);
 
@@ -2589,7 +2772,7 @@ impl TaskApp {
         // but a hand-edited / corrupted save could violate that. Sorting on the
         // `Option` (which orders `None` first) keeps this panic-free; the per-day
         // filtering below never places a deadline-less event on the grid, and such
-        // items are still retained in `active_things` rather than dropped.
+        // items are still retained in `board.items` rather than dropped.
         events.sort_by_key(|e| e.deadline);
 
         // Sort tasks by importance score, highest first. The score is evaluated
@@ -2614,16 +2797,16 @@ impl TaskApp {
         // 2) Bucket dated items by day once, so each calendar cell is an O(1) map
         // lookup instead of a linear scan over every event/task (the old
         // O(days × items) rebuild). Build the buckets before moving the vecs into
-        // active_things; iterating the already-sorted vecs keeps each bucket in
+        // board.items; iterating the already-sorted vecs keeps each bucket in
         // order — events by deadline, tasks by importance score (which the "take
         // 3" preview selection below relies on).
         let events_by_date = tasks::bucket_by_deadline_day(&events);
         let tasks_by_date = tasks::bucket_by_deadline_day(&deadline_tasks);
 
-        // 3) Rebuild active_things sorted (if you need to keep the order)
-        self.active_things.clear();
-        self.active_things.extend(events.iter().cloned());
-        self.active_things.extend(tasks);
+        // 3) Rebuild board.items sorted (if you need to keep the order)
+        self.board.items.clear();
+        self.board.items.extend(events.iter().cloned());
+        self.board.items.extend(tasks);
 
         // 4) Determine the starting Monday
         let today = self.date;
@@ -2686,7 +2869,7 @@ impl TaskApp {
                 // day, so the count is all that is needed here. This used to
                 // build a second, fully-cloned copy of every dated item for the
                 // day popup to list; the planner that replaced the popup reads
-                // `active_things` directly, so the clones are gone.
+                // `board.items` directly, so the clones are gone.
                 let item_count = day_events.len() + day_tasks.len();
 
                 calendar.push(DayCell {
@@ -2781,7 +2964,7 @@ impl TaskApp {
     /// other.
     fn planner_entries(&self) -> Vec<PlannerEntry> {
         let mut entries: Vec<PlannerEntry> = Vec::new();
-        for item in &self.active_things {
+        for item in &self.board.items {
             for placed in planner::placements_for(item, self.planner_day) {
                 entries.push(PlannerEntry {
                     id: item.id,
@@ -2814,7 +2997,7 @@ impl TaskApp {
     fn planner_backlog_items(&self) -> (Vec<BacklogCard>, Vec<BacklogCard>) {
         let now = Local::now();
         let mut items: Vec<(f32, &Active)> = self
-            .active_things
+            .board.items
             .iter()
             .filter(|item| item.wants_planning())
             .map(|item| (item.importance_score(now, self.shuffle_seed()), item))
@@ -2849,75 +3032,53 @@ impl TaskApp {
     /// deadline is when it is **due**, which planning must never touch — the
     /// gesture edits the addressed session and nothing else.
     fn plan_item(&mut self, id: u64, session: Option<usize>, start_minutes: i32, minutes: u32) {
-        let Some(when) = planner::resolve_on_day(self.planner_day, start_minutes) else {
-            self.show_error("That time doesn't exist on this day (daylight saving).".to_string());
-            return;
-        };
-        let minutes = minutes.max(planner::MIN_BLOCK_MINUTES);
+        let day = self.planner_day;
+        self.apply_or_report(board::Command::MoveBlock { id, session, day, start: start_minutes, minutes });
+    }
 
-        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
-            return;
-        };
+    /// Minutes of `day`'s booked work already behind the now-line — the
+    /// masthead's "behind" figure. Zero on any day but today, which has no now.
+    fn planner_behind_minutes(&self, day: NaiveDate) -> i32 {
+        self.board.behind_minutes(day, Local::now())
+    }
 
-        if let Some(rule) = item.recurrence.as_mut() {
-            // Moving or resizing a routine edits **the rule**, so it moves on
-            // every day it falls on. That is what a routine is: you do not
-            // reschedule Wednesday's sleep, you change what time you go to bed.
-            // The footer names the days so the reach of the gesture is on
-            // screen while you make it.
-            rule.start_minutes = start_minutes.clamp(0, planner::DAY_MINUTES - 1);
-            rule.minutes = minutes;
-        } else if item.is_event {
-            item.deadline = Some(when);
-            item.duration_minutes = Some(minutes);
-        } else if let Some(slot) = session.and_then(|index| item.sessions.get_mut(index)) {
-            *slot = Session { start: when, minutes };
-        } else {
-            return;
-        }
-
-        self.summarize_calendar();
-        self.save_active_things();
+    /// Slide `day`'s remaining work past now, in order, around events and
+    /// routines — the first move of §20.3. Returns how many blocks moved.
+    /// Only today has a now to slide past; any other day is left alone.
+    fn reflow_day(&mut self, day: NaiveDate) -> usize {
+        // With this desk's own now, so a copy queued for a server slides the
+        // day the way it slid here, however much later it is replayed.
+        let from = planner::now_marker(day, Local::now());
+        self.apply_or_report(board::Command::Reflow { day, from })
+            .and_then(|reply| reply.moved)
+            .unwrap_or(0)
     }
 
     /// Add a fresh session to a task, dropped from the tray or the footer's
     /// ＋ block button. The deadline and the estimate are untouched: this books
-    /// more time, it doesn't re-describe the task.
+    /// more time, it doesn't re-describe the task. The new block is selected,
+    /// ready to be dragged where it belongs.
     fn add_session(&mut self, id: u64, start_minutes: i32, minutes: u32) {
-        let Some(when) = planner::resolve_on_day(self.planner_day, start_minutes) else {
-            self.show_error("That time doesn't exist on this day (daylight saving).".to_string());
-            return;
-        };
-
-        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
-            return;
-        };
-        if item.is_event {
-            return;
+        let day = self.planner_day;
+        if let Some(index) = self
+            .apply_or_report(board::Command::AddBlock { id, day, start: start_minutes, minutes: Some(minutes) })
+            .and_then(|reply| reply.session)
+        {
+            self.planner_selected_session = Some(index);
         }
-        item.sessions.push(Session {
-            start: when,
-            minutes: minutes.max(planner::MIN_BLOCK_MINUTES),
-        });
-        self.planner_selected_session = Some(item.sessions.len() - 1);
-
-        self.summarize_calendar();
-        self.save_active_things();
     }
 
     /// Remove one session from a task — the block-level undo of `add_session`.
     /// Cheap and unconfirmed: the task, its deadline and its estimate all stay,
     /// and the freed time goes back onto the card in the tray.
     fn remove_session(&mut self, id: u64, session: usize) {
-        if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
-            if item.is_event || session >= item.sessions.len() {
-                return;
-            }
-            item.sessions.remove(session);
+        self.apply_or_report(board::Command::RemoveBlock { id, session });
+        // Only the selection that pointed at this task's blocks is stale. The
+        // phone can remove a block of a task the desktop isn't looking at, and
+        // that should not disturb whatever the desktop *is* looking at.
+        if self.planner_selection == Some(id) {
+            self.planner_selected_session = None;
         }
-        self.planner_selected_session = None;
-        self.summarize_calendar();
-        self.save_active_things();
     }
 
     /// Set or clear a task's deadline from the footer's due editor.
@@ -2926,43 +3087,21 @@ impl TaskApp {
     /// their own items, on the right day, through a mode switch — rather than
     /// simply attached to the task they describe. A dated task is scored by
     /// severity, so setting a first deadline also seeds a middling importance
-    /// for the footer to adjust.
+    /// for the footer to adjust (`Board::apply`).
     fn set_item_deadline(&mut self, id: u64, deadline: Option<DateTime<Local>>) {
-        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
-            return;
-        };
-        if item.is_event {
-            return;
-        }
-        item.deadline = deadline;
-        if deadline.is_some() && item.importance.is_none() {
-            item.importance = Some(PLANNER_NEW_TASK_IMPORTANCE);
-        }
-        self.summarize_calendar();
-        self.save_active_things();
+        self.apply_or_report(board::Command::SetDeadline { id, deadline });
     }
 
     /// Return a task to the tray whole, dropping every session but keeping the
     /// task itself, its deadline, and its estimate. Only tasks can be unplanned
     /// — an event with no time isn't an event, so its block offers delete
     /// instead.
-    ///
-    /// The estimate survives on purpose: giving up on the slots is not
-    /// forgetting that the homework takes two hours, and the card goes back to
-    /// being worth its full length.
     fn unplan_item(&mut self, id: u64) {
-        if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
-            if item.is_event {
-                return;
-            }
-            item.sessions.clear();
-        }
+        self.apply_or_report(board::Command::Unplan { id });
         if self.planner_selection == Some(id) {
             self.planner_selection = None;
             self.planner_selected_session = None;
         }
-        self.summarize_calendar();
-        self.save_active_things();
     }
 
     /// Create an item directly on the timeline and put its title into edit mode,
@@ -2974,63 +3113,421 @@ impl TaskApp {
     /// date of its own — the footer's due editor adds one when there is one to
     /// add — while an event *is* its time, so the slot is its deadline.
     fn create_planned_item(&mut self, start_minutes: i32, minutes: u32, kind: planner::CreateKind) {
-        let Some(when) = planner::resolve_on_day(self.planner_day, start_minutes) else {
-            self.show_error("That time doesn't exist on this day (daylight saving).".to_string());
+        let day = self.planner_day;
+        let command = board::Command::Create {
+            kind: board::Kind::from_create_kind(kind),
+            name: String::new(),
+            day,
+            start: start_minutes,
+            minutes,
+        };
+        let Some(id) = self.apply_or_report(command).and_then(|reply| reply.id) else {
             return;
         };
 
         let is_event = kind == planner::CreateKind::Event;
         let is_routine = kind == planner::CreateKind::Routine;
-
-        // A new one happens **once, on the day you drew it**, and repeats only
-        // if you say so.
-        //
-        // A gesture should do what you watched it do: drawing a block on
-        // Wednesday and silently filling in the next six days — or even every
-        // future Wednesday — is the kind of surprise you only discover by
-        // stepping to Thursday. It is the same rule the deadline follows,
-        // changed only where changing it looks like changing it.
-        //
-        // It also makes the cheap thing cheap. "Tomorrow at two I walk the dog"
-        // is not a routine and never becomes one, but it is exactly this kind
-        // of item: time spoken for, owed to nobody, no ✓ that would mean
-        // anything, and no business on the wall calendar. Repeating is a
-        // property you add — `All` for the daily ones — not a toll you pay.
-        let recurrence = is_routine.then(|| tasks::Recurrence {
-            days: 0,
-            anchor: self.planner_day,
-            start_minutes,
-            minutes,
-        });
-
-        let id = self.next_item_id();
-        self.push_active_thing(Active {
-            id,
-            name: String::new(),
-            deadline: is_event.then_some(when),
-            sessions: if is_event || is_routine {
-                Vec::new()
-            } else {
-                vec![Session { start: when, minutes }]
-            },
-            planned_start: None,
-            // The dragged-out length doubles as the first estimate. A routine's
-            // length lives in its rule instead, so it has no estimate at all.
-            duration_minutes: (!is_routine).then_some(minutes),
-            // A task born on the timeline is undated, and undated tasks carry a
-            // horizon, not a severity — it gets one the moment the due editor
-            // gives it a deadline. A routine is never ranked, so it carries
-            // neither knob.
-            importance: None,
-            time_importance: (!is_event && !is_routine).then_some(PLANNER_NEW_TASK_HORIZON),
-            is_event,
-            recurrence,
-            created: Local::now(),
-        });
-
         self.planner_selection = Some(id);
         self.planner_selected_session = (!is_event && !is_routine).then_some(0);
         self.begin_planner_naming(id, true);
+        // The board gave it a placeholder name; the editor starts empty so the
+        // first keystroke is the name, not a correction.
+        self.planner_name_input.clear();
+    }
+
+    /* ─────────────────────────── The phone view ─────────────────────────── */
+
+    /// Something the phone shows has changed: publish the board's version so
+    /// a phone waiting on `/api/wait` is answered now. Called after every
+    /// `apply`, and by a colour-scheme change — which is not a change to the
+    /// board, so the board is nudged first.
+    fn phone_changed(&mut self) {
+        self.phone_pulse.publish(self.board.version());
+    }
+
+    /// A change the phone should see that is not a change to the data — the
+    /// colour scheme. Moves the version so waiters wake.
+    fn phone_repaint(&mut self) {
+        self.board.touch();
+        self.phone_changed();
+    }
+
+    /// Serve whatever the phone has asked since the last call.
+    ///
+    /// Called from `App::user_event` — the phone's thread pokes the event loop
+    /// after every request, so this runs even while the window is minimized or
+    /// asleep — and again at the top of each frame. Each command goes through
+    /// the same setter a desktop gesture uses, so the calendar, the task list
+    /// and the disk agree about it a moment later, and nothing the phone does
+    /// is a second way of changing a task.
+    pub fn serve_phone_requests(&mut self) {
+        self.drain_sync_events();
+        self.tend_phone_server();
+        while let Ok(request) = self.phone_rx.try_recv() {
+            let reply = self.execute_phone_command(request.command);
+            let _ = request.reply.send(reply);
+        }
+    }
+
+    /// Bring the server in line with the setting: start it when it should be
+    /// running and isn't, drop it when it shouldn't be.
+    ///
+    /// A restart (new port, new key, toggled off and on) cannot bind the same
+    /// port until the old socket has closed, which happens on the worker
+    /// thread a moment later — so for `PHONE_RESTART_WINDOW` a failed bind is
+    /// retried quietly, and only after that is it reported.
+    fn tend_phone_server(&mut self) {
+        if !self.phone_enabled {
+            self.phone_server = None;
+            self.phone_retry_until = None;
+            return;
+        }
+        if self.phone_server.is_some() {
+            return;
+        }
+        let retrying = self.phone_retry_until.is_some_and(|until| Instant::now() < until);
+        if self.phone_error.is_some() && !retrying {
+            return;
+        }
+        if self.phone_last_attempt.is_some_and(|at| at.elapsed() < PHONE_RETRY_EVERY) {
+            return;
+        }
+        self.phone_last_attempt = Some(Instant::now());
+
+        // The wake pokes the event loop: `App::user_event` serves the queue,
+        // even while the window is minimized or asleep.
+        let proxy = self.event_proxy.clone();
+        let wake: phone::Wake = Arc::new(move || {
+            let _ = proxy.send_event(());
+        });
+        match phone::PhoneServer::start(
+            &self.phone_bind,
+            self.phone_port,
+            self.phone_token.clone(),
+            self.phone_tx.clone(),
+            wake,
+            Arc::clone(&self.phone_pulse),
+        ) {
+            Ok(server) => {
+                self.phone_server = Some(server);
+                self.phone_error = None;
+                self.phone_retry_until = None;
+                self.refresh_phone_addresses(true);
+            }
+            Err(error) => {
+                if !retrying {
+                    self.phone_error = Some(error);
+                    self.phone_retry_until = None;
+                }
+            }
+        }
+    }
+
+    /// Stop the server and start it again with the current port and key.
+    fn restart_phone_server(&mut self) {
+        self.phone_server = None;
+        self.phone_error = None;
+        self.phone_last_attempt = None;
+        self.phone_retry_until = Some(Instant::now() + PHONE_RESTART_WINDOW);
+        self.tend_phone_server();
+    }
+
+    fn set_phone_port(&mut self) {
+        let port = self.phone_port_input.max(phone::PORT_MIN);
+        self.phone_port_input = port;
+        if port == self.phone_port {
+            return;
+        }
+        self.phone_port = port;
+        self.persist_config_value("phone_server_port", port as i64);
+        self.restart_phone_server();
+    }
+
+    /// Mint a new key. Every link and feed subscription made with the old one
+    /// stops working, which is the point.
+    fn renew_phone_token(&mut self) {
+        self.phone_token = phone::generate_token();
+        self.persist_config_value("phone_token", self.phone_token.clone());
+        self.restart_phone_server();
+    }
+
+    fn refresh_phone_addresses(&mut self, force: bool) {
+        let stale = self.phone_addresses_checked.is_none_or(|at| at.elapsed() > PHONE_ADDRESS_TTL);
+        if force || stale {
+            self.phone_addresses = phone::addresses_for(&self.phone_bind);
+            self.phone_addresses_checked = Some(Instant::now());
+        }
+    }
+
+    /// The selected colour scheme's own bytes, for the phone. Not
+    /// `active_colorscheme`: `Color32` is premultiplied, and a translucent
+    /// tint read back through it has its RGB scaled down by its alpha — amber
+    /// arrives as brown.
+    fn phone_palette(&self) -> [[u8; 4]; 6] {
+        self.colorschemes
+            .get(&self.selected_colorscheme_id)
+            .map(|scheme| scheme.colors)
+            .unwrap_or([[0; 4]; 6])
+    }
+
+    /// Answer one request from the phone: the two queries from the board as
+    /// it stands, everything else through `apply` like a desktop gesture. A
+    /// bad request becomes a message for the phone, not an error window at
+    /// the desk — a mistyped time on the phone is the phone's to hear about.
+    fn execute_phone_command(&mut self, command: phone::Command) -> phone::PhoneReply {
+        if command.is_query() {
+            let palette = self.phone_palette();
+            // `list_tasks` is the left column exactly as drawn: filtered and
+            // sorted by `summarize_calendar`, jitter and all.
+            let ranked = self.list_tasks.iter().map(|task| task.id).collect();
+            return phone::answer_query(&mut self.board, palette, Some(ranked), &command, Local::now());
+        }
+        self.apply(command).map(|reply| phone::reply_json(&reply, self.board.version()))
+    }
+
+    /// The phone view: on or off, where to point the phone, and the feed.
+    fn settings_phone(&mut self, ui: &mut Ui, ctx: &Context) {
+        settings_section(ui, "PHONE", "settings_phone", |ui| {
+            if let Some(sync) = &self.sync {
+                // This copy is a client: the phone belongs on the server,
+                // which is on when this computer is not. Serving from here
+                // still works — a phone edit here is queued like any other.
+                let server = sync.server().to_string();
+                settings_row(ui, "", |ui| {
+                    settings_note(ui, format!("the board lives on {server}; point the phone at the server's own link"));
+                });
+            }
+            settings_row(ui, "Phone view", |ui| {
+                let previous = self.phone_enabled;
+                ui.checkbox(
+                    &mut self.phone_enabled,
+                    RichText::new("Serve it while TaskDeck runs").size(SETTINGS_LABEL_SIZE),
+                );
+                if previous != self.phone_enabled {
+                    self.persist_config_value("phone_server_enabled", self.phone_enabled);
+                    self.restart_phone_server();
+                }
+                let status = if !self.phone_enabled {
+                    "off".to_string()
+                } else if self.phone_server.is_some() {
+                    if self.phone_bind == phone::DEFAULT_BIND {
+                        format!("on port {}", self.phone_port)
+                    } else {
+                        format!("on {}:{} only", phone::host_for_url(&self.phone_bind), self.phone_port)
+                    }
+                } else if let Some(error) = &self.phone_error {
+                    error.clone()
+                } else {
+                    "starting…".to_string()
+                };
+                settings_note(ui, status);
+            });
+
+            settings_row(ui, "Port", |ui| {
+                let port = ui.add(
+                    egui::DragValue::new(&mut self.phone_port_input)
+                        .range(phone::PORT_MIN..=u16::MAX)
+                        .speed(1.0),
+                );
+                if port.drag_stopped() || port.lost_focus() {
+                    self.set_phone_port();
+                }
+                if self.phone_enabled && self.phone_error.is_some() && settings_button(ui, "Try again").clicked() {
+                    self.restart_phone_server();
+                }
+            });
+
+            if self.phone_enabled && self.phone_server.is_some() {
+                self.refresh_phone_addresses(false);
+                let addresses = self.phone_addresses.clone();
+                if addresses.is_empty() {
+                    settings_row(ui, "Open on the phone", |ui| {
+                        settings_note(ui, "no network address found — is this machine on a network?");
+                    });
+                } else {
+                    for (index, address) in addresses.iter().enumerate() {
+                        let url = phone::page_url(address, self.phone_port, &self.phone_token);
+                        settings_row(ui, if index == 0 { "Open on the phone" } else { "" }, |ui| {
+                            self.phone_link(ui, ctx, &url);
+                            // A look at it without reaching for the phone.
+                            if index == 0
+                                && settings_button(ui, "Open here").clicked()
+                                && let Err(error) = phone::open_in_browser(&url)
+                            {
+                                self.show_error(error);
+                            }
+                        });
+                    }
+                    let first = phone::page_url(&addresses[0], self.phone_port, &self.phone_token);
+                    settings_row(ui, "", |ui| self.paint_phone_qr(ui, &first));
+                    settings_row(ui, "", |ui| {
+                        settings_note(
+                            ui,
+                            "same Wi-Fi, or a Tailscale address from anywhere.\nThe link is the key: share it like a password.",
+                        );
+                    });
+
+                    let feed = phone::feed_url(&addresses[0], self.phone_port, &self.phone_token);
+                    settings_row(ui, "Calendar feed", |ui| self.phone_link(ui, ctx, &feed));
+                    settings_row(ui, "", |ui| {
+                        settings_note(
+                            ui,
+                            "subscribe from Google Calendar or the phone's own calendar\napp — read-only; events, due dates, the plan and routines",
+                        );
+                    });
+                }
+
+                settings_row(ui, "Key", |ui| {
+                    if settings_button(ui, "New key").clicked() {
+                        self.renew_phone_token();
+                    }
+                    settings_note(ui, "every old link and subscription stops working");
+                });
+            }
+        });
+    }
+
+    /// Where the board lives when it is not here: a `taskdeck-server`.
+    ///
+    /// Applied at the next start rather than live. The board is fetched, and
+    /// the engine started, before there is a window — switching a running
+    /// copy from its own board to a server's (or back) would mean deciding
+    /// what happens to the edits in between, and a restart answers that
+    /// honestly: the outbox goes with you.
+    fn settings_server(&mut self, ui: &mut Ui) {
+        settings_section(ui, "SERVER", "settings_server", |ui| {
+            settings_row(ui, "Board on", |ui| {
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut self.server_url_input)
+                        .hint_text("http://100.x.y.z:7373 — empty: this computer")
+                        .desired_width(SETTINGS_CONTROL_WIDTH * 1.4),
+                );
+                if field.lost_focus() {
+                    let value = self.server_url_input.trim().to_string();
+                    self.server_url_input = value.clone();
+                    self.persist_config_value("server_url", value);
+                }
+            });
+            settings_row(ui, "Its key", |ui| {
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut self.server_token_input)
+                        .password(true)
+                        .hint_text("the server's phone_token")
+                        .desired_width(SETTINGS_CONTROL_WIDTH * 1.4),
+                );
+                if field.lost_focus() {
+                    let value = self.server_token_input.trim().to_string();
+                    self.server_token_input = value.clone();
+                    self.persist_config_value("server_token", value);
+                }
+            });
+            settings_row(ui, "", |ui| {
+                settings_note(ui, "takes effect at the next start");
+                if settings_button(ui, "Restart now").clicked() {
+                    self.restart_self();
+                }
+            });
+            match &self.sync {
+                Some(sync) => {
+                    let status = sync.status();
+                    settings_row(ui, "Now", |ui| {
+                        let mut text = if status.online {
+                            format!("in touch with {}", sync.server())
+                        } else {
+                            format!("out of touch with {}", sync.server())
+                        };
+                        if status.pending > 0 {
+                            text.push_str(&format!(" · {} change{} waiting", status.pending, if status.pending == 1 { "" } else { "s" }));
+                        }
+                        settings_note(ui, text);
+                    });
+                    if let Some(error) = status.last_error.filter(|_| !status.online) {
+                        settings_row(ui, "", |ui| settings_note(ui, error));
+                    }
+                }
+                None => {
+                    settings_row(ui, "Now", |ui| settings_note(ui, "the board is on this computer"));
+                }
+            }
+        });
+    }
+
+    /// The menu bar's word on the server: in touch, sending, or out of touch
+    /// with changes waiting. Absent when the board is local — nothing to say.
+    fn sync_indicator(&mut self, ui: &mut Ui) {
+        let Some(sync) = &self.sync else { return };
+        let status = sync.status();
+        let (mut text, mut color) = match (status.online, status.pending) {
+            (true, 0) => ("● server".to_string(), Color32::from_rgb(120, 190, 140)),
+            (true, n) => (format!("↑ {n} sending…"), PLANNER_BEHIND_COLOR),
+            (false, 0) => ("○ offline".to_string(), Color32::from_white_alpha(120)),
+            (false, n) => (format!("○ offline · {n} waiting"), PLANNER_BEHIND_COLOR),
+        };
+        let mut hover = format!("The board lives on {}.", sync.server());
+        if status.pending > 0 {
+            hover.push_str("\nChanges made here are kept and sent when the server answers.");
+        }
+        if let Some(error) = status.last_error.filter(|_| !status.online) {
+            hover.push_str(&format!("\n\n{error}"));
+        }
+        if let Some(problem) = &status.storage_error {
+            // About this disk, not the network: said whether or not the
+            // server is in touch, because it is what the next start loses.
+            text.push_str(" · outbox not saved");
+            color = PLANNER_BEHIND_COLOR;
+            hover.push_str(&format!(
+                "\n\n{problem}\nChanges are still sent while the server answers, but would be lost at a restart while it does not."
+            ));
+        }
+        ui.add_space(12.0);
+        ui.label(RichText::new(text).color(color)).on_hover_text(hover);
+    }
+
+    /// A link on the settings sheet: the text, wrapped to the sheet, and a
+    /// button that copies it.
+    fn phone_link(&self, ui: &mut Ui, ctx: &Context, url: &str) {
+        let width = ui.available_width().min(SETTINGS_CONTROL_WIDTH * 1.5);
+        ui.scope(|ui| {
+            ui.set_max_width(width);
+            ui.add(
+                Label::new(
+                    RichText::new(url)
+                        .font(FontId::new(SETTINGS_FINE_SIZE, FontFamily::Name("space".into())))
+                        .color(Color32::from_white_alpha(200)),
+                )
+                .wrap(),
+            );
+        });
+        if settings_button(ui, "Copy").clicked() {
+            ctx.copy_text(url.to_string());
+        }
+    }
+
+    /// The phone link as a QR code, painted module by module. Cached per link:
+    /// encoding is cheap, but not once a frame.
+    fn paint_phone_qr(&mut self, ui: &mut Ui, url: &str) {
+        if self.phone_qr.as_ref().map(|(encoded, _, _)| encoded.as_str()) != Some(url) {
+            self.phone_qr = phone::qr_modules(url).map(|(width, cells)| (url.to_string(), width, cells));
+        }
+        let Some((_, width, cells)) = &self.phone_qr else {
+            settings_note(ui, "could not draw the QR code");
+            return;
+        };
+        let modules = width + PHONE_QR_QUIET * 2;
+        // Whole points per module, so every module is the same size on screen.
+        let module = (PHONE_QR_SIZE / modules as f32).floor().max(1.0);
+        let side = module * modules as f32;
+        let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
+        let painter = ui.painter();
+        painter.rect_filled(rect, 4.0, Color32::WHITE);
+        for y in 0..*width {
+            for x in 0..*width {
+                if cells[y * width + x] {
+                    let min = rect.min + vec2((x + PHONE_QR_QUIET) as f32 * module, (y + PHONE_QR_QUIET) as f32 * module);
+                    painter.rect_filled(Rect::from_min_size(min, vec2(module, module)), 0.0, Color32::BLACK);
+                }
+            }
+        }
     }
 
     /// Add an undated, unplanned task from the tray's quick-add field. It lands
@@ -3042,9 +3539,10 @@ impl TaskApp {
             return;
         }
         self.planner_quick_add_input.clear();
-        // The middle horizon — "within a week" — matching the New Task dialog's
-        // default, so where a task was typed doesn't change what it is.
-        self.add_active_thing(name, None, None, false, Some(1));
+        // Undated, with the middle horizon — the same shape the New Task
+        // dialog's default makes, so where a task was typed doesn't change
+        // what it is (`Board::apply`).
+        self.apply_or_report(board::Command::QuickAdd { name, deadline: None });
     }
 
     /// Open the in-place title editor on `id`.
@@ -3058,7 +3556,7 @@ impl TaskApp {
         self.planner_naming_created = created;
         self.planner_naming_focus = true;
         self.planner_name_input = self
-            .active_things
+            .board.items
             .iter()
             .find(|item| item.id == id)
             .map(|item| item.name.clone())
@@ -3078,14 +3576,13 @@ impl TaskApp {
         self.planner_name_input.clear();
         self.planner_naming_created = false;
 
-        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
+        // Nothing typed keeps what the item has — the placeholder the board
+        // gave a fresh block, or the old name on a rename.
+        let unchanged = typed.is_empty() || self.board.item(id).is_none_or(|item| item.name == typed);
+        if unchanged {
             return;
-        };
-        let placeholder = if item.is_event { "New event" } else { "New task" };
-        item.name = if typed.is_empty() { placeholder.to_string() } else { typed };
-
-        self.summarize_calendar();
-        self.save_active_things();
+        }
+        self.apply_or_report(board::Command::Rename { id, name: typed });
     }
 
     /// Throw the title edit away — Escape.
@@ -3337,7 +3834,7 @@ impl TaskApp {
             return;
         }
 
-        let (previous, next, today, rename, delete, unplan, close) = ctx.input(|i| {
+        let (previous, next, today, rename, delete, unplan, close, reflow) = ctx.input(|i| {
             (
                 i.key_pressed(Key::ArrowLeft),
                 i.key_pressed(Key::ArrowRight),
@@ -3346,8 +3843,15 @@ impl TaskApp {
                 i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace),
                 i.key_pressed(Key::U),
                 i.key_pressed(Key::P),
+                i.key_pressed(Key::R),
             )
         });
+
+        // The masthead's Reflow. A no-op on any day but today, and on a day
+        // with nothing behind — so the key is safe to press on reflex.
+        if reflow {
+            self.reflow_day(self.planner_day);
+        }
 
         // What a drag makes, on the number row — the switch is at the far right
         // of the masthead and choosing with it costs a round trip across the
@@ -3528,6 +4032,28 @@ impl TaskApp {
                         .color(Color32::from_white_alpha(190)),
                 )
                 .on_hover_text("Overlapping blocks counted once");
+
+                // Work booked before the now-line and not ticked off is the
+                // day running late, and it gets one verb: slide what is left
+                // down past now, in order, around the events and routines.
+                // Only today can be behind — no other day has a now.
+                let behind = self.planner_behind_minutes(self.planner_day);
+                if behind > 0 {
+                    ui.add_space(18.0);
+                    if ui
+                        .add(Button::new(RichText::new("Reflow").size(PLANNER_META_SIZE)))
+                        .on_hover_text("Push what is unfinished past now, in order, around events and routines  (R)")
+                        .clicked()
+                    {
+                        self.reflow_day(self.planner_day);
+                    }
+                    ui.label(
+                        RichText::new(format!("{} behind", planner::format_duration(behind as u32)))
+                            .size(PLANNER_META_SIZE)
+                            .color(PLANNER_BEHIND_COLOR),
+                    )
+                    .on_hover_text("Booked work that is already behind the now-line");
+                }
             });
         });
     }
@@ -3556,37 +4082,8 @@ impl TaskApp {
             self.planner_ghosts.iter().map(|ghost| ghost.placement).collect();
         let done = planner::summarize(&ghost_placements);
 
-        if summary.blocks == 0 && summary.due == 0 && done.blocks == 0 && routine_summary.blocks == 0
-        {
-            return "nothing on this day".to_string();
-        }
-
-        let mut parts = Vec::new();
-        if summary.blocks > 0 || (done.blocks == 0 && routine_summary.blocks == 0) {
-            parts.push(format!(
-                "{} planned",
-                planner::format_duration(summary.planned_minutes.max(0) as u32)
-            ));
-        }
-        if summary.blocks > 0 {
-            parts.push(format!("{} block{}", summary.blocks, if summary.blocks == 1 { "" } else { "s" }));
-        }
-        if summary.due > 0 {
-            parts.push(format!("{} due", summary.due));
-        }
-        if routine_summary.blocks > 0 {
-            parts.push(format!(
-                "{} routine",
-                planner::format_duration(routine_summary.planned_minutes.max(0) as u32)
-            ));
-        }
-        if done.blocks > 0 {
-            parts.push(format!(
-                "{} done",
-                planner::format_duration(done.planned_minutes.max(0) as u32)
-            ));
-        }
-        parts.join(" · ")
+        // One wording, shared with the phone view's masthead.
+        planner::summary_text(summary, routine_summary, done)
     }
 
     /// The footer: controls for whatever is selected on the timeline, and the
@@ -3636,7 +4133,7 @@ impl TaskApp {
             return;
         };
 
-        let Some(item) = self.active_things.iter().find(|item| item.id == id) else {
+        let Some(item) = self.board.items.iter().find(|item| item.id == id) else {
             // The selection outlived its item — completing or deleting one from
             // this very row is the usual way. Drop it and show the hints.
             self.planner_selection = None;
@@ -3893,15 +4390,18 @@ impl TaskApp {
         }
 
         if changed {
-            if let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) {
-                item.importance = importance;
-                item.time_importance = time_importance;
-                item.recurrence = recurrence;
+            // The row edited copies; say which knob moved. Importance drives
+            // both the task order and the palette colour, and `apply` rebuilds
+            // the calendar and task list for it.
+            if let Some(rule) = recurrence {
+                self.apply_or_report(board::Command::SetRepeat { id, days: rule.days, day: shown_day });
+            } else if deadline.is_some() {
+                if let Some(level) = importance {
+                    self.apply_or_report(board::Command::SetSeverity { id, level });
+                }
+            } else if let Some(level) = time_importance {
+                self.apply_or_report(board::Command::SetHorizon { id, level });
             }
-            // Importance drives both the task order and the palette colour, so
-            // the calendar and task list have to be rebuilt, not just saved.
-            self.summarize_calendar();
-            self.save_active_things();
         }
         if open_due_editor {
             self.open_due_editor(id);
@@ -3982,37 +4482,7 @@ impl TaskApp {
     /// exactly as dragging its edge would. A task's estimate is not a block, so
     /// there is nothing to clamp against the day.
     fn set_item_duration(&mut self, id: u64, minutes: u32) {
-        let Some(item) = self.active_things.iter_mut().find(|item| item.id == id) else {
-            return;
-        };
-
-        // A routine's length is part of its rule, not an estimate of work — so
-        // it is set there and `duration_minutes` stays empty.
-        if let Some(rule) = item.recurrence.as_mut() {
-            let (start, length) =
-                planner::clamp_block(rule.start_minutes as f32, minutes as f32);
-            rule.start_minutes = start;
-            rule.minutes = length;
-            self.summarize_calendar();
-            self.save_active_things();
-            return;
-        }
-
-        item.duration_minutes = Some(minutes.max(planner::MIN_BLOCK_MINUTES));
-
-        if item.is_event {
-            if let Some(anchor) = item.deadline {
-                let start = anchor.hour() as i32 * 60 + anchor.minute() as i32;
-                let (start, length) = planner::clamp_block(start as f32, minutes as f32);
-                item.duration_minutes = Some(length);
-                if let Some(when) = planner::resolve_on_day(anchor.date_naive(), start) {
-                    item.deadline = Some(when);
-                }
-            }
-        }
-
-        self.summarize_calendar();
-        self.save_active_things();
+        self.apply_or_report(board::Command::SetEstimate { id, minutes });
     }
 
     /// Book another block for a task on the shown day, from the footer's
@@ -4024,24 +4494,14 @@ impl TaskApp {
     /// so "split it over two days" never needs the card to leave the tray and
     /// come back.
     fn add_block_on_shown_day(&mut self, id: u64) {
-        let day_end = planner::DAY_MINUTES - planner::DEFAULT_BLOCK_MINUTES as i32;
-        let start = self
-            .planner_entries()
-            .iter()
-            .map(|entry| entry.placement.end())
-            .max()
-            .unwrap_or((PLANNER_DEFAULT_SCROLL_HOUR * 60.0) as i32)
-            .clamp(0, day_end);
-
-        let minutes = self
-            .active_things
-            .iter()
-            .find(|item| item.id == id)
-            .map(planner::drop_length_for)
-            .unwrap_or(planner::DEFAULT_BLOCK_MINUTES);
-
-        let (start, minutes) = planner::clamp_block(start as f32, minutes as f32);
-        self.add_session(id, start, minutes);
+        let day = self.planner_day;
+        let start = self.board.next_free_start(day);
+        if let Some(index) = self
+            .apply_or_report(board::Command::AddBlock { id, day, start, minutes: None })
+            .and_then(|reply| reply.session)
+        {
+            self.planner_selected_session = Some(index);
+        }
     }
 
     /// The footer with nothing selected: what the timeline responds to.
@@ -4078,7 +4538,7 @@ impl TaskApp {
     /// until **Set**.
     fn open_due_editor(&mut self, id: u64) {
         let deadline = self
-            .active_things
+            .board.items
             .iter()
             .find(|item| item.id == id)
             .and_then(|item| item.deadline);
@@ -4113,7 +4573,7 @@ impl TaskApp {
     fn show_due_editor(&mut self, ctx: &Context) {
         let Some(id) = self.planner_due_edit else { return };
         let Some(name) = self
-            .active_things
+            .board.items
             .iter()
             .find(|item| item.id == id)
             .map(|item| item.name.clone())
@@ -4371,7 +4831,7 @@ impl TaskApp {
     }
 
     /// The timeline: hour grid, blocks, and every pointer gesture that edits the
-    /// day. Rebuilt from `active_things` each frame; the only persistent state is
+    /// day. Rebuilt from `board.items` each frame; the only persistent state is
     /// the in-flight drag.
     fn planner_timeline(&mut self, ui: &mut Ui, body_height: f32) {
         let mut scroll = egui::ScrollArea::vertical()
@@ -4422,7 +4882,7 @@ impl TaskApp {
                         None => {
                             let (name, color_id) = match &drag {
                                 PlannerDrag::FromBacklog { id } => self
-                                    .active_things
+                                    .board.items
                                     .iter()
                                     .find(|item| item.id == *id)
                                     .map(|item| (item.name.clone(), item.calendar_item_color()))
@@ -4596,7 +5056,7 @@ impl TaskApp {
         self.load_archive();
 
         let day = self.planner_day;
-        for row in self.archive.entries() {
+        for row in self.board.archive.entries() {
             // Blocks only, and so events — which have no sessions — never
             // appear. A deleted appointment is not something the day was spent
             // on; it is something that was taken off the calendar.
@@ -5059,7 +5519,7 @@ impl TaskApp {
 
         let default_minutes = match drag {
             PlannerDrag::FromBacklog { id } => self
-                .active_things
+                .board.items
                 .iter()
                 .find(|item| item.id == *id)
                 .map(planner::drop_length_for)
@@ -5070,7 +5530,30 @@ impl TaskApp {
         Some(planner::preview(drag, minutes_at_pointer, default_minutes))
     }
 
+    /// Show an error.
+    ///
+    /// A second error raised before the first has been read is **appended
+    /// under it**, not written over it. There is one error window, and an
+    /// unread error that quietly vanished — a failed save replaced by the
+    /// failed config write that followed it — is the worst kind, because the
+    /// first one is usually the explanation of the second. Bounded, so a
+    /// failure that repeats every frame cannot grow the window past the
+    /// screen; and the same message twice in a row is shown once.
     fn show_error(&mut self, errortext: String) {
+        if self.error_flag && !self.error_text.is_empty() {
+            if self.error_text.ends_with(&errortext) {
+                return;
+            }
+            if self.error_text.len() >= ERROR_TEXT_CAP {
+                if !self.error_text.ends_with(ERROR_TEXT_MORE) {
+                    self.error_text.push_str(ERROR_TEXT_MORE);
+                }
+                return;
+            }
+            self.error_text.push_str("\n\n");
+            self.error_text.push_str(&errortext);
+            return;
+        }
         self.error_flag = true;
         self.error_text = errortext;
     }
@@ -5118,42 +5601,39 @@ impl TaskApp {
     /// succeeded: refusing to complete a task because the disk is full is the
     /// wrong trade, so the failure is reported and the removal stands.
     fn retire_active_thing(&mut self, id: u64, outcome: Outcome) {
-        let Some(index) = self.active_things.iter().position(|item| item.id == id) else {
-            self.dismiss_retire_confirmations();
-            return;
+        // The board files first and only removes if the filing worked: a ✓
+        // that reports why it did nothing is a far better failure than one
+        // that quietly eats the task. A stale confirmation for an item that
+        // is already gone is simply dismissed, not reported.
+        let command = match outcome {
+            Outcome::Finished => board::Command::Complete { id, at: Some(Local::now()) },
+            Outcome::Dropped => board::Command::Delete { id, at: Some(Local::now()) },
         };
-
-        // Removed first and archived by value: the record is the item, not a
-        // copy of it that could drift from the one being deleted.
-        // Filed **before** it leaves the board, and it only leaves if the
-        // filing worked.
-        //
-        // The other order loses things. If `archived.jsonl` cannot be written
-        // — a read-only file, a full disk — an item removed first is gone from
-        // the live set with no record of it anywhere, and an error window is
-        // poor compensation for a task that no longer exists. A ✓ that reports
-        // why it did nothing is a far better failure than one that quietly eats
-        // the task, so the item stays put and the user can try again.
-        let record = Archived::retire(self.active_things[index].clone(), outcome, Local::now());
-
-        if let Err(error) = self.archive.record(&self.dirs.data, record) {
-            self.show_error(format!(
-                "Could not write to the archive, so nothing was changed:\n{error}"
-            ));
-            self.dismiss_retire_confirmations();
-            return;
+        if let Err(error) = self.apply(command)
+            && error.status != 410
+        {
+            self.show_error(error.message);
         }
-
-        self.forget_active_thing(id);
-        self.rebuild_planner_ghosts();
-        self.dismiss_retire_confirmations();
+        if self.planner_selection == Some(id) {
+            self.planner_selection = None;
+            self.planner_selected_session = None;
+        }
+        self.dismiss_retire_confirmations_for(id);
     }
 
-    fn dismiss_retire_confirmations(&mut self) {
-        self.confirm_complete_task = None;
-        self.user_wants_to_complete_task_flag = false;
-        self.confirm_delete_task = None;
-        self.user_wants_to_delete_task_flag = false;
+    /// Close a complete/delete confirmation that is asking about `id` — and
+    /// only that one. The phone retires items too now, and a ✓ tapped there
+    /// must not answer a "delete this?" the desk is still looking at about
+    /// something else.
+    fn dismiss_retire_confirmations_for(&mut self, id: u64) {
+        if self.confirm_complete_task == Some(id) {
+            self.confirm_complete_task = None;
+            self.user_wants_to_complete_task_flag = false;
+        }
+        if self.confirm_delete_task == Some(id) {
+            self.confirm_delete_task = None;
+            self.user_wants_to_delete_task_flag = false;
+        }
     }
 
     /// Open or close the archive window.
@@ -5177,7 +5657,7 @@ impl TaskApp {
     /// Make sure the log is in memory, reporting a read failure rather than
     /// showing an empty archive as though nothing had ever been finished.
     fn load_archive(&mut self) {
-        if let Err(error) = self.archive.load(&self.dirs.data) {
+        if let Err(error) = self.board.load_archive() {
             self.show_error(format!("Could not read the archive:\n{error}"));
         }
     }
@@ -5193,50 +5673,27 @@ impl TaskApp {
     /// play*, and a task you are doing again is not out of play — leaving the
     /// row behind would have the ledger claim it was finished while it sat in
     /// the task list.
-    fn restore_archived(&mut self, key: ArchiveKey) {
-        let taken = match self.archive.take(&self.dirs.data, key) {
-            Ok(taken) => taken,
-            Err(error) => {
-                self.show_error(format!("Could not update the archive:\n{error}"));
-                return;
-            }
-        };
-        let Some(record) = taken else { return };
-
-        let mut item = record.to_active();
-
-        // The id it had may not be free. `next_id` is seeded past the highest
-        // id in the *live* set, so archiving the highest-numbered item and
-        // restarting leaves the counter behind it — and a legacy row carries
-        // the `0` sentinel, which is nobody's id. Either way it gets a new one,
-        // and the counter is pushed past whatever came back so the next fresh
-        // item cannot collide either.
-        self.next_id = self.next_id.max(item.id.saturating_add(1));
-        if item.id == 0 || self.active_things.iter().any(|live| live.id == item.id) {
-            item.id = self.next_item_id();
-        }
-
+    /// Returns the id the item is live under — its old one when that was
+    /// free, a fresh one otherwise.
+    fn restore_archived(&mut self, key: ArchiveKey) -> Option<u64> {
+        let restored = self
+            .apply_or_report(board::Command::Restore { id: key.id, archived_at: key.archived_at })
+            .and_then(|reply| reply.id);
         if self.archive_view.selected == Some(key) {
             self.archive_view.selected = None;
         }
         self.archive_view.confirm_forget = None;
-
-        self.push_active_thing(item);
-        self.rebuild_planner_ghosts();
+        restored
     }
 
     /// Delete an archived row for good. The one irreversible act in the app,
     /// which is why it is the only one in the archive that asks first.
     fn forget_archived(&mut self, key: ArchiveKey) {
-        if let Err(error) = self.archive.take(&self.dirs.data, key) {
-            self.show_error(format!("Could not update the archive:\n{error}"));
-            return;
-        }
+        self.apply_or_report(board::Command::ForgetArchived { id: key.id, archived_at: key.archived_at });
         if self.archive_view.selected == Some(key) {
             self.archive_view.selected = None;
         }
         self.archive_view.confirm_forget = None;
-        self.rebuild_planner_ghosts();
     }
 
     /// The archive window.
@@ -5259,11 +5716,13 @@ impl TaskApp {
         // the archive stands down for it rather than closing underneath the
         // message the key was meant to dismiss.
         let owns_keys = !self.error_flag;
-        let action = archive_window(ctx, &self.archive, &mut self.archive_view, palette, owns_keys);
+        let action = archive_window(ctx, &self.board.archive, &mut self.archive_view, palette, owns_keys);
 
         match action {
             Some(ArchiveAction::Close) => self.toggle_archive(),
-            Some(ArchiveAction::Restore(key)) => self.restore_archived(key),
+            Some(ArchiveAction::Restore(key)) => {
+                self.restore_archived(key);
+            }
             Some(ArchiveAction::Forget(key)) => self.forget_archived(key),
             None => {}
         }
@@ -5682,7 +6141,57 @@ impl TaskApp {
                     self.persist_config_value("enable_fps_counter", self.enable_fps_counter);
                 }
             });
+
+            // Off by default, and off is the design (§14.1): on a desktop with a
+            // spare monitor the uncapped loop is wanted. On a laptop on battery
+            // it is a fan, and this is the one knob for that.
+            settings_row(ui, "Frame rate", |ui| {
+                let mut capped = self.frame_cap_fps != FRAME_CAP_UNCAPPED;
+                if ui
+                    .checkbox(&mut capped, RichText::new("Cap it").size(SETTINGS_LABEL_SIZE))
+                    .changed()
+                {
+                    self.set_frame_cap(capped);
+                }
+                settings_note(
+                    ui,
+                    if capped { "easier on a laptop battery" } else { "uncapped: as fast as the GPU allows" },
+                );
+            });
+
+            settings_row(ui, "", |ui| {
+                let capped = self.frame_cap_fps != FRAME_CAP_UNCAPPED;
+                let slider = ui.add_enabled(
+                    capped,
+                    egui::Slider::new(&mut self.frame_cap_input, FRAME_CAP_MIN..=FRAME_CAP_MAX)
+                        .suffix(" fps")
+                        .trailing_fill(true),
+                );
+                if slider.drag_stopped() || slider.lost_focus() {
+                    self.set_frame_cap(true);
+                }
+            });
         });
+    }
+
+    /// Apply the frame-rate setting: the slider's value when `capped`, else
+    /// uncapped. Takes effect on the next frame — `App` reads it every time it
+    /// schedules one.
+    fn set_frame_cap(&mut self, capped: bool) {
+        let value = if capped { clamp_frame_cap(self.frame_cap_input.max(FRAME_CAP_MIN)) } else { FRAME_CAP_UNCAPPED };
+        if capped {
+            self.frame_cap_input = value;
+        }
+        if value == self.frame_cap_fps {
+            return;
+        }
+        self.frame_cap_fps = value;
+        self.persist_config_value("frame_cap_fps", value as i64);
+    }
+
+    /// The frame cap while awake, or `FRAME_CAP_UNCAPPED`. For `App`.
+    pub fn frame_cap_fps(&self) -> u32 {
+        self.frame_cap_fps
     }
 
     /// One row of the colour-scheme list: the name, and the palette itself as
@@ -5913,16 +6422,21 @@ impl TaskApp {
         };
 
         match Command::new(exe).args(std::env::args().skip(1)).spawn() {
-            Ok(_) => exit(0),
+            Ok(_) => {
+                self.flush_pending_saves();
+                self.shutdown_sync();
+                exit(0)
+            }
             Err(e) => self.show_error(format!("Could not restart:\n{}", e)),
         }
     }
     fn save_textbox_text(&mut self) {
         if self.should_save_textbox_text {
-            // A silent failure here loses the user's notes; surface it instead.
-            if let Err(e) = utilities::save_notepad_text(self.textbox_text.clone(), &self.dirs.data) {
-                self.show_error(format!("Could not save notepad text:\n{}", e));
-            }
+            // Through the board like every other change: it saves, and tells
+            // the phone, which shows the notepad too (§21.5). A silent failure
+            // would lose the user's notes; `apply_or_report` surfaces it.
+            let text = self.board.notes.clone();
+            self.apply_or_report(board::Command::SetNotes { text });
             self.should_save_textbox_text = false;
             self.last_textbox_edit_time = None;
         }
@@ -5932,6 +6446,15 @@ impl TaskApp {
     /// Currently only the notepad text is buffered; this is a no-op when clean.
     pub fn flush_pending_saves(&mut self) {
         self.save_textbox_text();
+    }
+
+    /// On the way out: the sync engine files whatever it still holds and
+    /// stops, so an edit made in the last second is in `outbox.json` before
+    /// the process is gone.
+    pub fn shutdown_sync(&mut self) {
+        if let Some(sync) = &self.sync {
+            sync.shutdown();
+        }
     }
     fn set_colorscheme(&mut self) {
         let selected_scheme = if let Some(scheme) = self.colorschemes.get(&self.selected_colorscheme_id) {
@@ -5943,6 +6466,8 @@ impl TaskApp {
         self.active_colorscheme = selected_scheme;
 
         self.persist_config_value("selected_colorscheme_id", self.selected_colorscheme_id as i64);
+        // The phone paints in the selected scheme's colours (§21.4).
+        self.phone_repaint();
     }
     fn rename_current_colorscheme(&mut self) {
         self.colorschemes.entry(self.selected_colorscheme_id).or_insert(ColorScheme::default_scheme()).rename(self.colorscheme_rename_input.clone());
@@ -5981,6 +6506,8 @@ impl TaskApp {
     fn save_colorscheme_edits(&mut self) {
         if let Some(scheme) = self.colorscheme_being_edited.take() {
             self.colorschemes.insert(self.selected_colorscheme_id, scheme);
+            // The phone paints in these colours (§21.4).
+            self.phone_repaint();
         }
     }
     fn try_to_generate_colorscheme(&mut self) {
@@ -6055,6 +6582,10 @@ impl TaskApp {
             self.next_three_weekdays = next_three_weekdays(self.date);
         }
 
+        // Usually already served from `App::user_event`; this catches anything
+        // that arrived since, before the frame draws it.
+        self.serve_phone_requests();
+
         // Debounced notepad autosave: persist ~2s after the last edit. This uses
         // wall-clock time so the cadence does not depend on the (uncapped) frame
         // rate. A final flush also runs on exit (App::exiting), so edits made just
@@ -6127,6 +6658,7 @@ impl TaskApp {
                     if ui.button("Quit").clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
+                    self.sync_indicator(ui);
 
                     ui.add_space(45.0);
 
@@ -6177,7 +6709,7 @@ impl TaskApp {
             if let Some(id) = self.confirm_complete_task {
                 // Resolve the cosmetic name for display; if the item is gone
                 // (e.g. removed underneath the dialog), dismiss instead of acting.
-                if let Some(name) = self.active_things.iter().find(|x| x.id == id).map(|x| x.name.clone()) {
+                if let Some(name) = self.board.items.iter().find(|x| x.id == id).map(|x| x.name.clone()) {
                     egui::Window::new("Confirm Complete")
                         .collapsible(false)
                         .resizable(false)
@@ -6206,7 +6738,7 @@ impl TaskApp {
 
         if self.user_wants_to_delete_task_flag {
             if let Some(id) = self.confirm_delete_task {
-                if let Some(name) = self.active_things.iter().find(|x| x.id == id).map(|x| x.name.clone()) {
+                if let Some(name) = self.board.items.iter().find(|x| x.id == id).map(|x| x.name.clone()) {
                     egui::Window::new("Confirm Delete")
                         .collapsible(false)
                         .resizable(false)
@@ -6405,6 +6937,8 @@ impl TaskApp {
                             self.settings_window_section(ui, ctx);
                             self.settings_calendar(ui);
                             self.settings_weather(ui);
+                            self.settings_phone(ui, ctx);
+                            self.settings_server(ui);
                             ui.add_space(4.0);
                         });
 
@@ -7063,7 +7597,15 @@ impl TaskApp {
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(5.0);
-                        ui.colored_label(Color32::from_white_alpha(180), &self.error_text);
+                        // Scrolls rather than grows: errors accumulate here
+                        // now (`show_error`), and a window taller than the
+                        // screen has its Ok button somewhere off it.
+                        egui::ScrollArea::vertical()
+                            .max_height(ERROR_TEXT_MAX_HEIGHT)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                ui.colored_label(Color32::from_white_alpha(180), &self.error_text);
+                            });
 
                         ui.add_space(15.0);
 

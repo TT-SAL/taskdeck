@@ -1,0 +1,1739 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1113">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TaskDeck">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="icon" href="/icon.png">
+<title>TaskDeck</title>
+<style>
+  :root {
+    --bg: #0f1113;
+    --surface: #171a1e;
+    --surface-2: #1f2328;
+    --line: #2a2f36;
+    --text: #e8e6e1;
+    --muted: #9a9891;
+    --faint: #6b6a66;
+    --danger: #d1495b;
+    --ok: #4f9a94;
+    --hour: 56px;
+    --gutter: 46px;
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-top: env(safe-area-inset-top, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+  body {
+    font: 16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overscroll-behavior-y: contain;
+    padding-bottom: calc(72px + var(--safe-bottom));
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { background: none; border: 0; padding: 0; cursor: pointer; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+
+  /* ── Masthead ── */
+  .mast {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+    padding: calc(10px + var(--safe-top)) 14px 8px;
+  }
+  .mast .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .nav { display: flex; gap: 6px; }
+  .nav button, .chip {
+    min-width: 44px; height: 40px; padding: 0 14px; border-radius: 12px;
+    background: var(--surface); color: var(--text); font-weight: 600;
+  }
+  .nav button:active, .chip:active { background: var(--surface-2); }
+  .nav button:disabled { opacity: 0.45; }
+  .date { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+  .weekday { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+  .weekday.today { color: #f0c36b; }
+  .daylabel { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .summary { color: var(--muted); font-size: 13px; margin-top: 8px; min-height: 1.3em; }
+  .week { display: flex; gap: 4px; margin-top: 10px; }
+  .week button {
+    flex: 1; height: 44px; border-radius: 10px; background: transparent; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1;
+  }
+  .week button .wd { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .week button .dn { font-size: 15px; font-weight: 700; color: var(--text); }
+  .week button.today .dn { color: #f0c36b; }
+  .week button.shown { background: var(--surface); }
+  .week button.shown .dn { color: var(--text); }
+  .week button.shown.today .dn { color: #f0c36b; }
+  .week button:active { background: var(--surface-2); }
+  .week .dots { display: flex; gap: 3px; height: 4px; margin-top: 3px; }
+  .week .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--c); display: block; }
+  textarea.notes {
+    width: 100%; min-height: 40vh; background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 12px; color: var(--text); font: inherit; line-height: 1.4; resize: vertical;
+  }
+  .behind { margin-top: 8px; }
+  .behind button {
+    height: 36px; padding: 0 12px; border-radius: 10px; font-weight: 700; font-size: 14px;
+    background: #2a2416; color: #f0c36b; border: 1px solid #4a3d1f;
+  }
+  .behind button:active { filter: brightness(1.2); }
+
+  /* ── Timeline ── */
+  .timeline { position: relative; margin: 6px 12px 0 8px; height: calc(var(--hour) * 24); }
+  .hourline {
+    position: absolute; left: 0; right: 0; height: var(--hour);
+    border-top: 1px solid var(--line);
+  }
+  .hourline.small { opacity: 0.55; }
+  .hourline span {
+    position: absolute; left: 0; top: -0.6em; width: var(--gutter);
+    padding-left: 4px; font-size: 12px; color: var(--faint);
+  }
+  .lanes { position: absolute; top: 0; bottom: 0; left: var(--gutter); right: 0; }
+  .entry {
+    position: absolute; border-radius: 8px; overflow: hidden;
+    padding: 4px 8px; font-size: 14px; line-height: 1.25;
+    border-left: 3px solid var(--accent);
+    background: var(--tint);
+    color: var(--text);
+  }
+  .entry .time { font-size: 11px; color: var(--muted); }
+  .entry .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .entry.short { display: flex; gap: 8px; align-items: baseline; padding-top: 2px; }
+  .entry.short .name { flex: 1; }
+  .entry.routine {
+    background: transparent; border: 1px dashed var(--accent); border-left-width: 3px;
+    color: var(--muted);
+  }
+  .entry.routine .name::before { content: "↻ "; }
+  .entry.selected { outline: 2px solid var(--text); outline-offset: 1px; }
+  .entry:active { filter: brightness(1.2); }
+  .entry.dragging {
+    z-index: 4; opacity: 0.95; filter: brightness(1.25);
+    box-shadow: 0 10px 28px rgba(0,0,0,0.55); outline: 2px solid var(--text); outline-offset: 1px;
+    transition: none;
+  }
+  .ghost {
+    position: absolute; border-radius: 8px; padding: 3px 8px;
+    border: 1px solid var(--accent); background: rgba(0,0,0,0.25);
+    color: var(--faint); font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    pointer-events: none; opacity: 0.8;
+  }
+  .marker {
+    position: absolute; height: 22px; display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text); padding-right: 6px; overflow: hidden;
+  }
+  .marker::before { content: ""; position: absolute; left: 0; right: 0; top: 10px; border-top: 2px solid var(--accent); }
+  .marker .label {
+    position: relative; margin-left: 6px; padding: 1px 7px; border-radius: 6px;
+    background: var(--accent); color: #0f1113; font-weight: 700; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+  .marker.due .label::before { content: "⚑ "; }
+  .nowline { position: absolute; left: calc(var(--gutter) - 8px); right: 0; height: 0; border-top: 2px solid #e5484d; z-index: 2; pointer-events: none; }
+  .nowline::before { content: ""; position: absolute; left: -4px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; }
+  .empty-tap { position: absolute; inset: 0; }
+
+  /* ── Week ── */
+  .weekgrid { margin: 6px 6px 0 4px; }
+  .weekhead { display: flex; padding-left: 26px; position: sticky; top: 0; z-index: 4; background: var(--bg); }
+  .weekhead button {
+    flex: 1; min-width: 0; padding: 4px 0 6px; text-align: center; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; line-height: 1.1;
+  }
+  .weekhead button .wd { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .weekhead button .dn { font-size: 15px; font-weight: 700; color: var(--text); }
+  .weekhead button.today .dn { color: #f0c36b; }
+  .weekhead button.shown { background: var(--surface); border-radius: 8px; }
+  .weekbody { display: flex; position: relative; height: calc(var(--hour) * 24); }
+  .weekgutter { width: 26px; flex: 0 0 26px; position: relative; }
+  .weekgutter span { position: absolute; left: 0; font-size: 10px; color: var(--faint); transform: translateY(-0.6em); }
+  .weekcol {
+    flex: 1; min-width: 0; position: relative; border-left: 1px solid var(--line);
+    background: repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px var(--hour));
+  }
+  .weekcol.today { background-color: rgba(240, 195, 107, 0.05); }
+  .weekcol .empty-tap { position: absolute; inset: 0; }
+  .wentry {
+    position: absolute; border-radius: 3px; overflow: hidden; padding: 1px 3px;
+    font-size: 9px; line-height: 1.15; color: var(--text); white-space: nowrap; text-overflow: ellipsis;
+    background: var(--tint); border-left: 2px solid var(--accent); pointer-events: none;
+  }
+  .wentry.routine { background: transparent; border: 1px dashed var(--accent); border-left-width: 2px; color: var(--muted); }
+  .wentry.marker { height: 2px; padding: 0; border: 0; background: var(--accent); }
+  .wentry.ghost { background: rgba(0,0,0,0.25); border: 1px solid var(--accent); color: var(--faint); opacity: 0.8; }
+  .weeknow { position: absolute; left: 0; right: 0; border-top: 2px solid #e5484d; pointer-events: none; z-index: 2; }
+
+  /* ── Bottom bar ── */
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+    display: flex; gap: 10px; padding: 10px 14px calc(10px + var(--safe-bottom));
+    background: linear-gradient(rgba(15,17,19,0), var(--bg) 40%);
+  }
+  .bar button {
+    flex: 1; height: 50px; border-radius: 14px; font-weight: 700; font-size: 16px;
+    background: var(--surface); color: var(--text); border: 1px solid var(--line);
+  }
+  .bar button.primary { background: #e8e6e1; color: #0f1113; border-color: transparent; flex: 0 0 120px; }
+  .bar button:active { filter: brightness(1.2); }
+  .count { display: inline-block; min-width: 22px; padding: 0 6px; margin-left: 6px; border-radius: 11px; background: var(--surface-2); font-size: 13px; }
+  .count.urgent { background: #f0c36b; color: #0f1113; }
+
+  /* ── Sheets ── */
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 8; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 9;
+    max-height: 88vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    background: var(--surface); border-radius: 18px 18px 0 0;
+    padding: 8px 16px calc(16px + var(--safe-bottom));
+    box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
+  }
+  .grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 6px auto 12px; }
+  .sheet h2 { margin: 0 0 2px; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; word-break: break-word; }
+  .sheet h2 button { text-align: left; width: 100%; }
+  .sheet h2 input { width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 18px; font-weight: 700; }
+  .kindline { color: var(--muted); font-size: 13px; margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); display: inline-block; }
+  .section { border-top: 1px solid var(--line); padding: 12px 0; }
+  .section h3 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); font-weight: 700; }
+  .field { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; }
+  .field label { color: var(--muted); font-size: 14px; }
+  .field input, .field select {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 10px; min-height: 40px; color: var(--text); max-width: 60%;
+  }
+  .field input[type="time"], .field input[type="datetime-local"] { color-scheme: dark; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .actions button, .btn {
+    height: 44px; padding: 0 14px; border-radius: 12px; font-weight: 700;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--text);
+    flex: 1 1 auto;
+  }
+  .actions button.ok { background: var(--ok); color: #0f1113; border-color: transparent; }
+  .actions button.danger { color: var(--danger); }
+  .actions button.primary { background: #e8e6e1; color: #0f1113; border-color: transparent; }
+  .actions button:active { filter: brightness(1.2); }
+  .weekdays { display: flex; gap: 6px; flex-wrap: wrap; }
+  .weekdays button {
+    width: 40px; height: 40px; border-radius: 10px; background: var(--surface-2);
+    border: 1px solid var(--line); font-weight: 700; color: var(--muted);
+  }
+  .weekdays button.on { background: var(--text); color: #0f1113; border-color: transparent; }
+  .seg { display: flex; background: var(--surface-2); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
+  .seg button { flex: 1; height: 38px; border-radius: 9px; font-weight: 700; color: var(--muted); }
+  .seg button.on { background: var(--text); color: #0f1113; }
+
+  /* ── Tray ── */
+  .quickadd { display: flex; gap: 8px; margin-bottom: 8px; }
+  .quickadd input { flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; height: 46px; }
+  .quickadd button { width: 64px; height: 46px; border-radius: 12px; background: var(--text); color: #0f1113; font-weight: 800; }
+  .quickadd button.chip { width: auto; height: 46px; background: var(--surface-2); color: var(--muted); font-weight: 600; padding: 0 12px; }
+  .quickadd + .field input { max-width: 100%; }
+  .card {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    padding: 10px 10px 10px 12px; border-radius: 12px; margin: 6px 0;
+    background: var(--surface-2); border-left: 3px solid var(--accent);
+  }
+  .card .chip { flex: 0 0 auto; min-width: 44px; padding: 0 10px; }
+  .card .meta { white-space: normal; }
+  .card .body { flex: 1; min-width: 0; }
+  .card .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .card .due-in { font-size: 12px; color: var(--muted); }
+  .card .due-in.overdue { color: var(--danger); font-weight: 700; }
+  .tray-heading { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); font-weight: 700; margin: 14px 0 4px; }
+  .tray-heading.urgent { color: #f0c36b; }
+  .nothing { color: var(--faint); font-size: 14px; padding: 10px 0; }
+
+  /* ── Banners ── */
+  .banner {
+    position: fixed; left: 12px; right: 12px; top: calc(12px + var(--safe-top)); z-index: 20;
+    background: #2b1d1f; color: #f3c7cc; border: 1px solid #5a2d34; border-radius: 12px;
+    padding: 10px 14px; font-size: 14px; display: flex; gap: 10px; align-items: center;
+  }
+  .banner.info { background: #1d2530; color: #cfe0f3; border-color: #2f4a63; }
+  .banner .actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
+  .banner button { font-weight: 700; padding: 4px 8px; }
+  .sheet .waiting {
+    margin: 10px 0 2px; padding: 8px 12px; border-radius: 10px; font-size: 13px;
+    background: #1d2530; color: #cfe0f3; border: 1px solid #2f4a63;
+  }
+  .toast {
+    position: fixed; left: 50%; bottom: calc(84px + var(--safe-bottom)); transform: translateX(-50%);
+    background: var(--text); color: #0f1113; padding: 8px 14px; border-radius: 10px; font-weight: 600; font-size: 14px;
+    z-index: 30; max-width: 90vw; text-align: center;
+  }
+  .gate { padding: 24px 18px; max-width: 420px; margin: 40px auto; }
+  .gate p { color: var(--muted); }
+  .gate input { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 8px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="row">
+    <div class="nav">
+      <button id="prev" aria-label="Previous day">‹</button>
+      <button id="todayBtn">Today</button>
+      <button id="next" aria-label="Next day">›</button>
+      <button id="modeBtn" title="Day or week">Week</button>
+    </div>
+    <div class="date">
+      <div class="weekday" id="weekday">…</div>
+      <div class="daylabel" id="daylabel"></div>
+    </div>
+  </div>
+  <div class="summary" id="summary"></div>
+  <div class="week" id="week"></div>
+  <div class="behind" id="behind" hidden><button id="reflowBtn" title="Push what is unfinished past now, in order, around events and routines"></button></div>
+</header>
+
+<main class="timeline" id="timeline">
+  <div id="hours"></div>
+  <div class="lanes" id="lanes"><div class="empty-tap" id="emptyTap"></div></div>
+  <div class="nowline" id="nowline" hidden></div>
+</main>
+
+<section class="weekgrid" id="weekgrid" hidden>
+  <div class="weekhead" id="weekhead"></div>
+  <div class="weekbody" id="weekbody"></div>
+</section>
+
+<nav class="bar" id="bar">
+  <button id="trayBtn">Tray<span class="count" id="trayCount">0</span></button>
+  <button id="notesBtn">Notes</button>
+  <button id="newBtn" class="primary">＋ New</button>
+</nav>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="sheet" id="sheet" hidden role="dialog"></div>
+<div class="banner" id="banner" hidden></div>
+<div class="gate" id="gate" hidden>
+  <h2>TaskDeck</h2>
+  <p>This page needs the link from TaskDeck's settings — it carries a token that lets the phone edit your calendar. If you have the token, paste it here.</p>
+  <p id="gateNote" hidden></p>
+  <input id="gateToken" placeholder="token" autocapitalize="off" autocomplete="off" spellcheck="false">
+  <div class="actions"><button class="primary" id="gateGo">Open</button></div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ───────────────────────────── State ───────────────────────────── */
+
+  const HOUR = 56;
+  const SNAP = 15;
+  const DURATIONS = [15, 30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 420, 480, 600];
+  // Used when the desktop's colour scheme is COLORSCHEME ZERO (all transparent):
+  // slots 0–4 are urgency, calm to loud; 5 is events.
+  const FALLBACK = ['#7a8b96', '#4f9a94', '#c9a227', '#d97b3a', '#d1495b', '#8b7fd6'];
+  const TOKEN_KEY = 'taskdeck-token';
+  // The board's `NAME_MAX_CHARS`: the inputs stop where the board would refuse.
+  const NAME_MAX = 200;
+
+  const state = {
+    token: null,
+    day: todayIso(),
+    snap: null,
+    items: new Map(),
+    selected: null,      // { id, session }
+    sheet: null,         // 'item' | 'tray' | 'new' | 'notes' | null
+    newDraft: null,      // { kind, start, minutes, name }
+    notesDraft: null,    // unsaved notepad text while the Notes sheet is open
+    renaming: false,
+    pollTimer: null,
+    quickAddDraft: '',
+    quickAddDue: null,      // the quick-add's optional due date while shown
+    trayTab: 'unplanned',   // 'unplanned' | 'all' | 'done'
+    week: { key: null, marks: {}, days: null },   // the shown day's week, keyed by monday + version
+    mode: 'day',            // 'day' | 'week'
+    notice: null,           // a refusal to show in the banner until acknowledged
+  };
+  // A refusal is kept until it is acknowledged, reload or not: it is the only
+  // trace of an edit that was made here and is not on the board.
+  const NOTICE_KEY = 'taskdeck-notice';
+  try { state.notice = localStorage.getItem(NOTICE_KEY); } catch (_) {}
+  function rememberNotice(text) {
+    state.notice = text;
+    try {
+      if (text) localStorage.setItem(NOTICE_KEY, text);
+      else localStorage.removeItem(NOTICE_KEY);
+    } catch (_) {}
+  }
+  try { if (localStorage.getItem('taskdeck-mode') === 'week') state.mode = 'week'; } catch (_) {}
+
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, attrs = {}, children = []) => {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'class') node.className = v;
+      else if (k === 'text') node.textContent = v;
+      else if (k === 'html') node.innerHTML = v;
+      else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+      else if (v !== null && v !== undefined && v !== false) node.setAttribute(k, v === true ? '' : v);
+    }
+    for (const child of [].concat(children)) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  };
+
+  /* ───────────────────────────── Helpers ───────────────────────────── */
+
+  function todayIso() {
+    const d = new Date();
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function shiftDay(iso, days) {
+    const [y, m, d] = iso.split('-').map(Number);
+    const date = new Date(y, m - 1, d + days);
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+  function hhmm(minutes) {
+    minutes = Math.max(0, Math.min(24 * 60, minutes));
+    return `${pad(Math.floor(minutes / 60) % 24)}:${pad(minutes % 60)}`;
+  }
+  function timeValue(minutes) {
+    // <input type="time"> cannot hold 24:00; clamp it to the last quarter hour.
+    return hhmm(Math.min(minutes, 24 * 60 - SNAP));
+  }
+  function minutesOf(timeText) {
+    if (!timeText) return null;
+    const [h, m] = timeText.split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    return h * 60 + m;
+  }
+  function dur(minutes) {
+    const h = Math.floor(minutes / 60), m = minutes % 60;
+    if (h === 0) return `${m}m`;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}m`;
+  }
+  function snap(minutes) { return Math.round(minutes / SNAP) * SNAP; }
+  function nowMinutes() { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
+  function nextQuarter() { return Math.min(24 * 60 - 30, Math.ceil((nowMinutes() + 1) / SNAP) * SNAP); }
+  function colorOf(index) {
+    const p = state.snap && state.snap.palette && state.snap.palette[index];
+    if (p && p[3] > 0) return `rgb(${p[0]}, ${p[1]}, ${p[2]})`;
+    return FALLBACK[Math.min(index, 5)];
+  }
+  function tintOf(index) {
+    const p = state.snap && state.snap.palette && state.snap.palette[index];
+    if (p && p[3] > 0) return `rgba(${p[0]}, ${p[1]}, ${p[2]}, 0.32)`;
+    const hex = FALLBACK[Math.min(index, 5)];
+    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, 0.30)`;
+  }
+  function durationOptions(current) {
+    const list = DURATIONS.slice();
+    if (current && !list.includes(current)) { list.push(current); list.sort((a, b) => a - b); }
+    return list;
+  }
+  function localToText(text) {
+    // "2026-09-04T17:00" → "Fri 4 Sep 17:00"
+    if (!text) return '';
+    const [date, time] = text.split('T');
+    const [y, m, d] = date.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    return `${dt.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`;
+  }
+
+  /* ───────────────────────────── API ───────────────────────────── */
+
+  function readToken() {
+    const fromUrl = new URLSearchParams(location.search).get('token');
+    if (fromUrl) {
+      try { localStorage.setItem(TOKEN_KEY, fromUrl); } catch (_) {}
+      return fromUrl;
+    }
+    try { return localStorage.getItem(TOKEN_KEY); } catch (_) { return null; }
+  }
+
+  function installManifest() {
+    // The manifest is asked for with the token so a home-screen shortcut opens
+    // with it (iOS gives such an app storage of its own).
+    const link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = `/manifest.webmanifest?token=${encodeURIComponent(state.token)}`;
+    document.head.append(link);
+  }
+
+  async function api(path, options = {}) {
+    const headers = Object.assign({ 'X-TaskDeck-Token': state.token }, options.headers || {});
+    if (options.body) headers['Content-Type'] = 'application/json';
+    let response;
+    try {
+      response = await fetch(path, Object.assign({}, options, { headers, cache: 'no-store' }));
+    } catch (error) {
+      throw new ApiError(0, "Can't reach TaskDeck. Is it running on the desktop, and is this phone on the same network?");
+    }
+    let payload = null;
+    try { payload = await response.json(); } catch (_) {}
+    if (!response.ok) {
+      const message = (payload && payload.error) || `TaskDeck answered ${response.status}.`;
+      throw new ApiError(response.status, message);
+    }
+    return payload;
+  }
+  class ApiError extends Error {
+    constructor(status, message) { super(message); this.status = status; }
+  }
+
+  // The last snapshot of each day is kept on the phone, so a day can still be
+  // read — marked as of when — while the server cannot be reached.
+  const SNAP_KEY = (day) => `taskdeck-snap-${day}`;
+  // How many days' snapshots are kept. A snapshot carries every item and the
+  // notepad, so a day browsed months ago is not worth the storage the outbox
+  // needs; the oldest go when a new one comes.
+  const SNAPS_KEPT = 14;
+  function snapKeysOldestLast() {
+    const kept = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('taskdeck-snap-')) continue;
+      let at = 0;
+      try { at = (JSON.parse(localStorage.getItem(key)) || {}).at || 0; } catch (_) {}
+      kept.push({ key, at });
+    }
+    return kept.sort((a, b) => b.at - a.at);
+  }
+  function remember(day, snap) {
+    try {
+      // Never over a newer picture of the same day: two answers can cross.
+      const have = recall(day);
+      if (have && have.snap && have.snap.version > snap.version) return;
+      // Room is made *before* the write, and the outbox's room comes first:
+      // a full store would refuse the new day and, worse, the next edit.
+      const others = snapKeysOldestLast().filter((entry) => entry.key !== SNAP_KEY(day));
+      others.slice(SNAPS_KEPT - 1).forEach((old) => localStorage.removeItem(old.key));
+      const text = JSON.stringify({ at: Date.now(), snap });
+      try {
+        localStorage.setItem(SNAP_KEY(day), text);
+      } catch (_) {
+        // Still no room: every other day goes, and one more try.
+        others.forEach((old) => localStorage.removeItem(old.key));
+        localStorage.setItem(SNAP_KEY(day), text);
+      }
+    } catch (_) {}
+  }
+  function recall(day) {
+    try {
+      const raw = localStorage.getItem(SNAP_KEY(day));
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+  }
+  function takeSnapshot(snap) {
+    state.snap = snap;
+    state.items = new Map(snap.items.map((item) => [item.id, item]));
+  }
+
+  // Edits made while TaskDeck cannot be reached are kept here, in order, and
+  // sent the next time it answers — before anything newer. Nothing is applied
+  // on the phone meanwhile: the page has no board of its own to apply them
+  // to, so they are shown as waiting, not as done. A later edit can only name
+  // an item the page has seen in a snapshot, so a queued create needs no
+  // temporary id — nothing queued after it can refer to it.
+  const OUTBOX_KEY = 'taskdeck-outbox';
+  function outbox() {
+    try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); } catch (_) { return []; }
+  }
+  function keepOutbox(queue) {
+    try {
+      if (queue.length) localStorage.setItem(OUTBOX_KEY, JSON.stringify(queue));
+      else localStorage.removeItem(OUTBOX_KEY);
+      return true;
+    } catch (_) { return false; }
+  }
+  // How many waiting edits name this item — shown in its sheet, since the
+  // sheet otherwise reads as if nothing had been done.
+  const waitingFor = (id) => outbox().filter((entry) => entry.command.id === id).length;
+  // "TaskDeck is not there" rather than "TaskDeck said no": only that keeps
+  // an edit waiting. A 5xx is the desk's own trouble — mid-shutdown, its
+  // board not answering in time, a disk refusing — never a verdict on the edit.
+  const unreachable = (error) => error.status === 0 || error.status >= 500;
+
+  // Every command travels under a key that is the same on each retry of it:
+  // TaskDeck keeps its last replies by key and answers a repeat with the
+  // first reply rather than applying the command twice — which is what a
+  // lost answer, or a 503 from a board that answered late, would otherwise
+  // cost (a second task, a second block).
+  const REQUEST_HEADER = 'X-TaskDeck-Request';
+  function requestKey() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  }
+  const post = (command, key) => api('/api/command', { method: 'POST', body: JSON.stringify(command), headers: { [REQUEST_HEADER]: key } });
+
+  // A queued edit in words, for the banner. Named while the item is still in
+  // the snapshot, since it may not be by the time the words are read.
+  function describe(command) {
+    // A restore names an archived row, which the tray's Done list knows.
+    const named = command.op === 'restore'
+      ? ((state.snap && state.snap.done) || []).find((row) => row.id === command.id && row.archived_at === command.archived_at)
+      : state.items.get(command.id);
+    const who = named ? `“${named.name}”` : (command.id != null ? `#${command.id}` : 'it');
+    switch (command.op) {
+      case 'create': case 'quick_add': case 'add': return `add “${command.name}”`;
+      case 'rename': return `rename ${who}`;
+      case 'complete': return `finish ${who}`;
+      case 'delete': return `delete ${who}`;
+      case 'move_block': return `move a block of ${who}`;
+      case 'add_block': return `book a block for ${who}`;
+      case 'remove_block': return `remove a block of ${who}`;
+      case 'unplan': return `unplan ${who}`;
+      case 'set_estimate': return `change the length of ${who}`;
+      case 'set_deadline': return `change the due date of ${who}`;
+      case 'set_severity': return `change the severity of ${who}`;
+      case 'set_horizon': return `change the horizon of ${who}`;
+      case 'set_repeat': return `change the weekdays of ${who}`;
+      case 'reflow': return `reflow ${command.day}`;
+      case 'set_notes': return 'save the notes';
+      case 'restore': return `put back ${who}`;
+      default: return command.op;
+    }
+  }
+
+  function queueEdit(command, key) {
+    const queue = outbox();
+    queue.push({ command, label: describe(command), at: Date.now(), key: key || requestKey() });
+    if (!keepOutbox(queue)) {
+      // A browser that allows no storage cannot keep it; say so rather than
+      // "kept".
+      toast("Can't reach TaskDeck, and this browser lets the page keep nothing — that change is lost");
+      return;
+    }
+    showPending(queue);
+    toast('Kept — it is sent when TaskDeck answers');
+  }
+
+  let flushing = null;
+  // Send what is waiting, in order. Stops at the first sign TaskDeck is still
+  // away; anything it refuses is dropped and said, never retried for ever.
+  // Answers with how many went and how many are still waiting.
+  async function flush() {
+    if (flushing) return flushing;
+    flushing = replay();
+    try { return await flushing; } finally { flushing = null; }
+  }
+  async function replay() {
+    const refused = [];
+    let sent = 0;
+    let queue = outbox();
+    while (queue.length) {
+      const next = queue[0];
+      try {
+        await post(next.command, next.key || '');
+        sent += 1;
+      } catch (error) {
+        if (unreachable(error)) break;
+        if (error.status === 401) { showGate(); break; }
+        refused.push(`${next.label} — ${error.message}`);
+      }
+      // Storage is read again before the head is dropped: a Discard, or an
+      // edit kept from another path, may have changed it while the POST ran,
+      // and neither may be undone by writing a stale copy back.
+      const now = outbox();
+      if (now.length && now[0].at === next.at && now[0].key === next.key && !keepOutbox(now.slice(1))) {
+        // The head cannot be dropped from storage: stop rather than send it
+        // for ever (each repeat would be answered, not applied — the key —
+        // but nothing else would ever run).
+        break;
+      }
+      queue = outbox();
+    }
+    if (refused.length) {
+      const lead = refused.length === 1 ? 'A change made here could not be applied' : `${refused.length} changes made here could not be applied`;
+      const shown = refused.slice(0, 3).join('; ') + (refused.length > 3 ? `; and ${refused.length - 3} more` : '');
+      // An earlier, unacknowledged notice is kept in front of this one.
+      rememberNotice(state.notice ? `${state.notice} · ${lead}: ${shown}` : `${lead}: ${shown}`);
+    }
+    return { sent, waiting: queue.length };
+  }
+
+  const discardAction = ['Discard', () => {
+    if (!confirm('Drop the changes waiting to be sent?')) return;
+    keepOutbox([]);
+    load();
+  }];
+  function showPending(queue) {
+    const n = queue.length;
+    const named = queue.slice(0, 3).map((entry) => entry.label).join(', ') + (n > 3 ? ', …' : '');
+    showBanner(`${n} change${n === 1 ? '' : 's'} waiting to be sent: ${named}`, {
+      info: true,
+      actions: [['Retry', () => load()], discardAction],
+    });
+  }
+  // What the banner says when the day itself loaded: a refusal to
+  // acknowledge, edits still waiting, or nothing.
+  function settleBanner() {
+    if (state.notice) {
+      showBanner(state.notice, { actions: [['OK', () => { rememberNotice(null); settleBanner(); }]] });
+    } else {
+      const queue = outbox();
+      if (queue.length) showPending(queue); else hideBanner();
+    }
+  }
+
+  let loadSeq = 0;
+  // Set when a replay sent something, cleared by whichever load draws the
+  // board next: the redraw must not be lost with a load that was overtaken.
+  let sheetStale = false;
+  async function load({ quiet = false } = {}) {
+    const replayed = outbox().length ? await flush() : null;
+    if (replayed && replayed.sent) sheetStale = true;
+    // Two loads can be in flight — › tapped twice, a poll under a swipe. Only
+    // the latest one's answer is shown, and a day's cache is keyed by the day
+    // the answer is actually for, never by the day selected when it arrived.
+    const mine = ++loadSeq;
+    const asked = state.day;
+    try {
+      const snap = await api(`/api/state?from=${asked}&days=1`);
+      remember(snap.days[0].date, snap);
+      if (mine !== loadSeq || asked !== state.day) return;
+      takeSnapshot(snap);
+      settleBanner();
+      render();
+      loadWeek();
+      // A sheet is never redrawn under someone's fingers by a background
+      // load — except when edits made from it have just gone through, so
+      // that it shows what the board now says rather than what it said
+      // before them.
+      if (sheetStale && state.sheet && !state.renaming) { sheetStale = false; renderSheet(); }
+    } catch (error) {
+      if (error.status === 401) { showGate(); return; }
+      if (mine !== loadSeq || asked !== state.day) return;
+      const cached = (!state.snap || state.snap.days[0].date !== state.day) ? recall(state.day) : null;
+      const waiting = outbox().length;
+      const suffix = waiting ? ` · ${waiting} change${waiting === 1 ? '' : 's'} waiting to be sent` : '';
+      const actions = waiting ? [discardAction] : [];
+      if (cached) {
+        takeSnapshot(cached.snap);
+        render();
+        const when = new Date(cached.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        showBanner(`Showing this day as of ${when} — ${error.message}${suffix}`, { retry: true, actions });
+      } else {
+        showBanner(error.message + suffix, { retry: true, actions });
+      }
+    }
+  }
+
+  async function send(command, { refreshSheet = true } = {}) {
+    // Kept for later, and the sheet redrawn as the success path would redraw
+    // it — so it shows the board as it still is, with the waiting line, not a
+    // control that looks applied.
+    const key = requestKey();
+    const keep = (kept) => {
+      queueEdit(kept, key);
+      if (refreshSheet && state.sheet) renderSheet();
+      // Kept while the gate is up: the gate's own line says so, not a banner
+      // over it.
+      if (!$('gate').hidden) showGate();
+    };
+    // Older edits go first, so the order things were done in is the order
+    // TaskDeck sees; if they still cannot go, this one waits behind them.
+    if (outbox().length && (await flush()).waiting) { keep(command); return null; }
+    try {
+      const result = await post(command, key);
+      await load({ quiet: true });
+      if (refreshSheet && state.sheet) renderSheet();
+      return result;
+    } catch (error) {
+      if (unreachable(error)) {
+        keep(command);
+      } else if (error.status === 401) {
+        // Refused for the key, not for the edit: kept, and the gate says so.
+        keep(command);
+        showGate();
+      } else if (error.status === 410) {
+        // Gone from the desk: refresh and let go of it.
+        toast(error.message);
+        state.selected = null;
+        closeSheet();
+        await load({ quiet: true });
+      } else if (error.status === 401) {
+        showGate();
+      } else {
+        toast(error.message);
+      }
+      return null;
+    }
+  }
+
+  /* ───────────────────────────── Rendering ───────────────────────────── */
+
+  function render() {
+    const snap = state.snap;
+    if (!snap) return;
+    const day = snap.days[0];
+
+    $('weekday').textContent = day.weekday;
+    $('weekday').classList.toggle('today', day.is_today);
+    $('daylabel').textContent = day.label + (day.is_today ? ' · today' : '');
+    $('summary').textContent = day.summary;
+
+    // Work booked before the now-line and not ticked off: the day is running
+    // late, and it gets one verb — the same Reflow as the desktop masthead.
+    const behind = $('behind');
+    if (day.behind_minutes > 0) {
+      behind.hidden = false;
+      $('reflowBtn').textContent = `⟳ Reflow · ${dur(day.behind_minutes)} behind`;
+    } else {
+      behind.hidden = true;
+    }
+
+    const trayCount = snap.tray.due.length + snap.tray.later.length;
+    const count = $('trayCount');
+    count.textContent = String(trayCount);
+    count.classList.toggle('urgent', snap.tray.due.length > 0);
+
+    $('todayBtn').title = day.is_today ? 'Scroll to now' : 'Jump to today';
+    renderWeek(day);
+    $('modeBtn').textContent = state.mode === 'week' ? 'Day' : 'Week';
+
+    if (state.mode === 'week') {
+      // The week's span in the masthead, the grid for the body.
+      const monday = mondayOf(day.date);
+      const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+      const fmt = (d) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      $('weekday').textContent = `Week`;
+      $('weekday').classList.remove('today');
+      $('daylabel').textContent = `${fmt(monday)} – ${fmt(sunday)}`;
+      $('summary').textContent = state.week.days ? weekSummary(state.week.days) : '…';
+      $('behind').hidden = true;
+      $('timeline').hidden = true;
+      $('week').hidden = true;
+      renderWeekGrid();
+      return;
+    }
+    $('weekgrid').hidden = true;
+    $('timeline').hidden = false;
+    $('week').hidden = false;
+    renderHours();
+    renderLanes(day);
+    renderNow(day);
+  }
+
+  function isoOf(date) {
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+  function mondayOf(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    const shown = new Date(y, m - 1, d);
+    const monday = new Date(shown);
+    monday.setDate(shown.getDate() - ((shown.getDay() + 6) % 7));
+    return monday;
+  }
+
+  // The shown day's week, Monday first like the calendar, as seven taps. Under
+  // each day, up to three dots for what the wall calendar would show on it —
+  // events and due dates, in their own colours — the same budget a calendar
+  // cell has.
+  function renderWeek(day) {
+    const week = $('week');
+    week.replaceChildren();
+    const monday = mondayOf(day.date);
+    const today = todayIso();
+    const marks = state.week.key && state.week.key.startsWith(isoOf(monday)) ? state.week.marks : {};
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + i);
+      const iso = isoOf(date);
+      const dots = el('span', { class: 'dots' });
+      for (const color of (marks[iso] || []).slice(0, 3)) dots.append(el('i', { style: `--c:${colorOf(color)}` }));
+      const node = el('button', {
+        class: (iso === day.date ? 'shown' : '') + (iso === today ? ' today' : ''),
+        onclick: () => { if (iso !== state.day) goTo(iso); },
+        'aria-label': date.toDateString(),
+      }, [
+        el('span', { class: 'wd', text: date.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2) }),
+        el('span', { class: 'dn', text: String(date.getDate()) }),
+        dots,
+      ]);
+      week.append(node);
+    }
+  }
+
+  // One extra request per week and per change, for the strip's dots.
+  async function loadWeek() {
+    if (!state.snap) return;
+    const monday = isoOf(mondayOf(state.day));
+    const key = `${monday}#${state.snap.version}`;
+    if (state.week.key === key) return;
+    try {
+      const snap = await api(`/api/state?from=${monday}&days=7`);
+      const marks = {};
+      for (const d of snap.days) {
+        marks[d.date] = d.entries.filter((e) => e.kind === 'event' || e.due).map((e) => e.color);
+      }
+      state.week = { key, marks, days: snap.days };
+      if (state.snap) {
+        renderWeek(state.snap.days[0]);
+        if (state.mode === 'week') renderWeekGrid();
+      }
+    } catch (_) {
+      // The dots are a nicety; the day itself already loaded.
+    }
+  }
+
+  /* ───────────────────────────── Week view ─────────────────────────────
+   *
+   * The same week the strip names, as seven columns at the day view's own
+   * hour scale, each laid out by the server exactly as the day is (lanes and
+   * all), too narrow to read a name in but wide enough to see the shape of a
+   * week: where the blocks are, which days are full, what is due when. A tap
+   * on a column opens that day.
+   */
+  function setMode(mode) {
+    state.mode = mode;
+    try { localStorage.setItem('taskdeck-mode', mode); } catch (_) {}
+    $('modeBtn').textContent = mode === 'week' ? 'Day' : 'Week';
+    $('prev').setAttribute('aria-label', mode === 'week' ? 'Previous week' : 'Previous day');
+    $('next').setAttribute('aria-label', mode === 'week' ? 'Next week' : 'Next day');
+    render();
+    scrollToUsefulHour();
+  }
+
+  function renderWeekGrid() {
+    const grid = $('weekgrid');
+    const days = state.week.days;
+    const shown = state.snap && state.snap.days[0];
+    if (!days || !shown || !state.week.key.startsWith(isoOf(mondayOf(state.day)))) return;
+
+    const head = $('weekhead');
+    head.replaceChildren();
+    // Sticky *under* the masthead, which is sticky too and taller.
+    head.style.top = `${document.querySelector('.mast').getBoundingClientRect().height}px`;
+    for (const day of days) {
+      const [y, m, d] = day.date.split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      head.append(el('button', {
+        class: (day.date === state.day ? 'shown' : '') + (day.is_today ? ' today' : ''),
+        onclick: () => { state.day = day.date; setMode('day'); load().then(scrollToUsefulHour); },
+        'aria-label': date.toDateString(),
+      }, [
+        el('span', { class: 'wd', text: date.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2) }),
+        el('span', { class: 'dn', text: String(date.getDate()) }),
+      ]));
+    }
+
+    const body = $('weekbody');
+    body.replaceChildren();
+    const gutter = el('div', { class: 'weekgutter' });
+    for (let h = 0; h < 24; h += 2) gutter.append(el('span', { class: 'mono', style: `top:${h * HOUR}px`, text: pad(h) }));
+    body.append(gutter);
+
+    for (const day of days) {
+      const col = el('div', { class: 'weekcol' + (day.is_today ? ' today' : '') });
+      // Tapping empty space in a column opens that day at that hour.
+      col.append(el('button', { class: 'empty-tap', 'aria-label': `Open ${day.label}`, onclick: () => {
+        state.day = day.date; setMode('day'); load().then(scrollToUsefulHour);
+      } }));
+      for (const ghost of day.ghosts) {
+        col.append(el('div', { class: 'wentry ghost', style: `${laneStyle(ghost)}; --accent:${colorOf(ghost.color)}`, text: ghost.name }));
+      }
+      for (const entry of day.entries) {
+        const accent = colorOf(entry.color);
+        if (entry.marker) {
+          col.append(el('div', { class: 'wentry marker', style: `${laneStyle(entry, 2)}; --accent:${accent}` }));
+          continue;
+        }
+        const node = el('div', {
+          class: 'wentry' + (entry.kind === 'routine' ? ' routine' : ''),
+          style: `${laneStyle(entry)}; --accent:${accent}; --tint:${tintOf(entry.color)}`,
+          title: `${hhmm(entry.start)}–${hhmm(entry.start + entry.minutes)} ${entry.name}`,
+        });
+        if (entry.minutes / 60 * HOUR >= 16) node.textContent = entry.name;
+        col.append(node);
+      }
+      if (day.is_today) col.append(el('div', { class: 'weeknow', style: `top:${nowMinutes() / 60 * HOUR}px` }));
+      body.append(col);
+    }
+    grid.hidden = false;
+  }
+
+  // The masthead in week mode: the week's span, and what it adds up to.
+  function weekSummary(days) {
+    let blocks = 0, due = 0, events = 0, minutes = 0;
+    for (const day of days) {
+      for (const e of day.entries) {
+        if (e.marker) { if (e.due) due += 1; else events += 1; continue; }
+        if (e.kind === 'event') { events += 1; continue; }
+        if (e.kind === 'task') { blocks += 1; minutes += e.minutes; }
+      }
+    }
+    const parts = [];
+    if (minutes) parts.push(`${dur(minutes)} planned`);
+    if (blocks) parts.push(`${blocks} block${blocks === 1 ? '' : 's'}`);
+    if (due) parts.push(`${due} due`);
+    if (events) parts.push(`${events} event${events === 1 ? '' : 's'}`);
+    return parts.length ? parts.join(' · ') : 'nothing this week';
+  }
+
+  let hoursDrawn = false;
+  function renderHours() {
+    if (hoursDrawn) return;
+    hoursDrawn = true;
+    const hours = $('hours');
+    for (let h = 0; h < 24; h++) {
+      const line = el('div', { class: 'hourline' + ((h < 7 || h >= 22) ? ' small' : ''), style: `top:${h * HOUR}px` });
+      line.append(el('span', { class: 'mono', text: pad(h) }));
+      hours.append(line);
+    }
+  }
+
+  function renderLanes(day) {
+    // Never pull a block out from under a finger that is dragging it; the
+    // drag's own finish redraws.
+    if (drag && drag.active) return;
+    const lanes = $('lanes');
+    for (const node of Array.from(lanes.children)) {
+      if (node.id !== 'emptyTap') node.remove();
+    }
+
+    for (const ghost of day.ghosts) {
+      const node = el('div', {
+        class: 'ghost',
+        style: `${laneStyle(ghost)}; --accent:${colorOf(ghost.color)}`,
+        text: `${ghost.finished ? '✓' : '✗'} ${ghost.name}`,
+      });
+      lanes.append(node);
+    }
+
+    for (const entry of day.entries) {
+      const accent = colorOf(entry.color);
+      const selected = state.selected && state.selected.id === entry.id
+        && (state.selected.session === entry.session || (state.selected.session == null && entry.session == null));
+      if (entry.marker) {
+        const node = el('button', {
+          class: 'marker' + (entry.due ? ' due' : '') + (selected ? ' selected' : ''),
+          style: `${laneStyle(entry, 22)}; --accent:${accent}`,
+          onclick: () => openItem(entry.id, entry.session),
+        });
+        node.append(el('span', { class: 'label', text: `${hhmm(entry.start)} · ${entry.name}` }));
+        lanes.append(node);
+        continue;
+      }
+      const height = Math.max(22, entry.minutes / 60 * HOUR);
+      const short = height < 46;
+      const node = el('button', {
+        class: 'entry' + (entry.kind === 'routine' ? ' routine' : '') + (short ? ' short' : '') + (selected ? ' selected' : ''),
+        style: `${laneStyle(entry)}; --accent:${accent}; --tint:${tintOf(entry.color)}`,
+        onclick: () => { if (!suppressClick) openItem(entry.id, entry.session); },
+      });
+      node.append(
+        el('div', { class: 'time mono', text: `${hhmm(entry.start)}–${hhmm(entry.start + entry.minutes)}` }),
+        el('div', { class: 'name', text: entry.name }),
+      );
+      attachDrag(node, entry);
+      lanes.append(node);
+    }
+  }
+
+  /* ───────────────────────────── Dragging ─────────────────────────────
+   *
+   * Hold a block and it lifts; move the finger and it follows, snapped to
+   * the quarter hour; let go and it is moved — the same `move_block` the
+   * sheet's time input sends, so a routine's block moves its rule and an
+   * event's block moves the event, exactly as on the desktop. A plain tap
+   * still opens the sheet, and a finger that moves before the hold elapses
+   * is a scroll and is left to the page.
+   */
+  const HOLD_MS = 350;
+  const HOLD_SLOP_PX = 8;
+  let drag = null;
+  let suppressClick = false;
+
+  function pointerMinutes(e) {
+    const rect = $('lanes').getBoundingClientRect();
+    return (e.clientY - rect.top) / HOUR * 60;
+  }
+
+  function endDrag(node, { redraw }) {
+    const d = drag;
+    drag = null;
+    if (!d) return null;
+    clearTimeout(d.timer);
+    node.classList.remove('dragging');
+    if (d.active) {
+      // The click that follows the release must not open the sheet.
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 400);
+      if (redraw) render();
+    }
+    return d;
+  }
+
+  function attachDrag(node, entry) {
+    node.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (drag) endDrag(drag.node, { redraw: true });
+      drag = {
+        node, entry, pointerId: e.pointerId,
+        grabOffset: pointerMinutes(e) - entry.start,
+        start: entry.start, origin: { x: e.clientX, y: e.clientY },
+        active: false, moved: false, timer: null,
+      };
+      drag.timer = setTimeout(() => {
+        if (!drag || drag.node !== node) return;
+        // A redraw during the hold replaced this node: nothing the finger
+        // does now can reach it, so the hold is let go rather than left
+        // armed for ever with the page unable to scroll or redraw.
+        if (!node.isConnected) { endDrag(node, { redraw: true }); return; }
+        drag.active = true;
+        node.classList.add('dragging');
+        try { node.setPointerCapture(e.pointerId); } catch (_) {}
+        if (navigator.vibrate) navigator.vibrate(10);
+      }, HOLD_MS);
+    });
+
+    node.addEventListener('pointermove', (e) => {
+      if (!drag || drag.node !== node) return;
+      if (!drag.active) {
+        // Moved before the hold elapsed: a scroll, not a drag.
+        if (Math.hypot(e.clientX - drag.origin.x, e.clientY - drag.origin.y) > HOLD_SLOP_PX) endDrag(node, { redraw: false });
+        return;
+      }
+      const start = Math.max(0, Math.min(24 * 60 - entry.minutes, snap(pointerMinutes(e) - drag.grabOffset)));
+      if (start === drag.start) return;
+      drag.start = start;
+      drag.moved = start !== entry.start;
+      node.style.top = `${start / 60 * HOUR}px`;
+      const time = node.querySelector('.time');
+      if (time) time.textContent = `${hhmm(start)}–${hhmm(start + entry.minutes)}`;
+    });
+
+    node.addEventListener('pointerup', async () => {
+      if (!drag || drag.node !== node) return;
+      const d = endDrag(node, { redraw: false });
+      if (!d || !d.active) return;
+      if (d.moved) {
+        await send({ op: 'move_block', id: entry.id, session: entry.session, day: state.snap.days[0].date, start: d.start, minutes: entry.minutes });
+      } else {
+        render();
+      }
+    });
+
+    node.addEventListener('pointercancel', () => {
+      if (drag && drag.node === node) endDrag(node, { redraw: true });
+    });
+  }
+
+  // Once a block is lifted the finger must move it, not the page. The
+  // listener has to be non-passive to be allowed to say so.
+  document.addEventListener('touchmove', (e) => {
+    if (drag && drag.active) e.preventDefault();
+  }, { passive: false });
+
+  function laneStyle(placed, fixedHeight) {
+    const top = placed.start / 60 * HOUR;
+    const height = fixedHeight != null ? fixedHeight : Math.max(22, placed.minutes / 60 * HOUR - 2);
+    const width = 100 / placed.columns;
+    const left = placed.column * width;
+    return `top:${top}px; height:${height}px; left:calc(${left}% + 2px); width:calc(${width}% - 4px)`;
+  }
+
+  function renderNow(day) {
+    const line = $('nowline');
+    if (!day.is_today) { line.hidden = true; return; }
+    line.hidden = false;
+    line.style.top = `${nowMinutes() / 60 * HOUR}px`;
+  }
+
+  function scrollToUsefulHour() {
+    const day = state.snap && state.snap.days[0];
+    if (!day) return;
+    let hour;
+    if (state.mode === 'week') {
+      hour = 7;
+    } else if (day.is_today) {
+      hour = Math.max(0, nowMinutes() / 60 - 1);
+    } else {
+      const starts = day.entries.map((e) => e.start);
+      hour = starts.length ? Math.min(7, Math.max(0, Math.min(...starts) / 60 - 1)) : 7;
+    }
+    const mast = document.querySelector('.mast').getBoundingClientRect().height;
+    const body = state.mode === 'week' ? $('weekbody') : $('timeline');
+    window.scrollTo({ top: body.offsetTop + hour * HOUR - mast, behavior: 'auto' });
+  }
+
+  /* ───────────────────────────── Sheets ───────────────────────────── */
+
+  function openSheet(kind) {
+    // Every sheet draws from the snapshot; before the first one there is
+    // nothing to draw, and a half-opened sheet over a dark scrim is worse
+    // than a word.
+    if (!state.snap) { toast("Nothing to show yet — TaskDeck hasn't answered."); return; }
+    state.sheet = kind;
+    $('scrim').hidden = false;
+    $('sheet').hidden = false;
+    renderSheet();
+  }
+  function closeSheet() {
+    state.sheet = null;
+    state.renaming = false;
+    state.notesDraft = null;
+    $('scrim').hidden = true;
+    $('sheet').hidden = true;
+    $('sheet').replaceChildren();
+    if (state.selected) { state.selected = null; render(); }
+  }
+  function renderSheet() {
+    const sheet = $('sheet');
+    sheet.replaceChildren(el('div', { class: 'grip' }));
+    if (state.sheet === 'item') renderItemSheet(sheet);
+    else if (state.sheet === 'tray') renderTraySheet(sheet);
+    else if (state.sheet === 'new') renderNewSheet(sheet);
+    else if (state.sheet === 'notes') renderNotesSheet(sheet);
+  }
+
+  // The desktop notepad. Read here, and replaced whole with Save — never per
+  // keystroke, so the desk and the phone cannot fight over a sentence.
+  function renderNotesSheet(sheet) {
+    sheet.append(el('h2', { text: 'Notes' }));
+    sheet.append(el('div', { class: 'kindline', text: 'The notepad on the desktop. Saved when you press Save.' }));
+    const area = el('textarea', { class: 'notes', rows: 12, spellcheck: 'true', 'aria-label': 'Notes' });
+    area.value = state.notesDraft == null ? state.snap.notes : state.notesDraft;
+    area.addEventListener('input', () => { state.notesDraft = area.value; });
+    sheet.append(area);
+    sheet.append(el('div', { class: 'section actions' }, [
+      el('button', { text: 'Close', onclick: closeSheet }),
+      el('button', { class: 'primary', text: 'Save', onclick: async () => {
+        const result = await send({ op: 'set_notes', text: area.value }, { refreshSheet: false });
+        if (result) { toast('Notes saved'); closeSheet(); }
+      } }),
+    ]));
+  }
+
+  function openItem(id, session) {
+    state.selected = { id, session: session == null ? null : session };
+    state.renaming = false;
+    render();
+    openSheet('item');
+  }
+
+  function field(labelText, control) {
+    return el('div', { class: 'field' }, [el('label', { text: labelText }), control]);
+  }
+  function select(options, current, onchange) {
+    const node = el('select', { onchange: (e) => onchange(e.target.value) });
+    for (const option of options) {
+      node.append(el('option', { value: option.value, selected: String(option.value) === String(current), text: option.label }));
+    }
+    return node;
+  }
+  function durationSelect(current, onchange) {
+    return select(durationOptions(current).map((m) => ({ value: m, label: dur(m) })), current, (v) => onchange(Number(v)));
+  }
+
+  function renderItemSheet(sheet) {
+    const sel = state.selected;
+    const item = sel && state.items.get(sel.id);
+    if (!item) { closeSheet(); return; }
+    const day = state.snap.days[0];
+    const entry = day.entries.find((e) => e.id === item.id && (e.session === sel.session || (sel.session == null && e.session == null)));
+    const accent = colorOf(item.color);
+    const isTask = item.kind === 'task', isEvent = item.kind === 'event', isRoutine = item.kind === 'routine';
+
+    // Name — tap to rename.
+    const heading = el('h2');
+    if (state.renaming) {
+      const input = el('input', { value: item.name, 'aria-label': 'Name', maxlength: NAME_MAX });
+      // Enter commits, and the blur that follows the redraw must not commit
+      // again; Escape cancels, and its blur must not commit at all.
+      let settled = false;
+      const commit = async () => {
+        if (settled) return;
+        settled = true;
+        const name = input.value.trim();
+        state.renaming = false;
+        if (name && name !== item.name) await send({ op: 'rename', id: item.id, name });
+        else renderSheet();
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { settled = true; state.renaming = false; renderSheet(); }
+      });
+      input.addEventListener('blur', commit);
+      heading.append(input);
+      setTimeout(() => { input.focus(); input.select(); }, 0);
+    } else {
+      heading.append(el('button', { text: item.name || '(unnamed)', onclick: () => { state.renaming = true; renderSheet(); } }));
+    }
+    sheet.append(heading);
+
+    const kindBits = [];
+    if (isTask) {
+      if (item.duration) kindBits.push(`takes ${dur(item.duration)}${item.planned ? ` · ${dur(item.planned)} booked` : ''}`);
+      else if (item.planned) kindBits.push(`${dur(item.planned)} booked`);
+      if (item.deadline) kindBits.push(`due ${localToText(item.deadline)}`);
+    }
+    if (isEvent && item.deadline) kindBits.push(localToText(item.deadline) + (item.duration ? ` for ${dur(item.duration)}` : ''));
+    if (isRoutine && item.repeat) kindBits.push(`${item.repeat.summary} at ${hhmm(item.repeat.start)} for ${dur(item.repeat.minutes)}`);
+    sheet.append(el('div', { class: 'kindline', style: `--accent:${accent}` }, [
+      el('span', { class: 'dot' }),
+      el('span', { text: item.kind[0].toUpperCase() + item.kind.slice(1) }),
+      kindBits.length ? el('span', { text: '· ' + kindBits.join(' · ') }) : null,
+    ]));
+    // What this sheet shows is the board as last seen; edits made here that
+    // could not be sent yet are not in it, and it says so.
+    const waiting = waitingFor(item.id);
+    if (waiting) {
+      sheet.append(el('div', { class: 'waiting', text: `${waiting} change${waiting === 1 ? '' : 's'} to this ${waiting === 1 ? 'is' : 'are'} waiting to be sent — what is shown here is from before ${waiting === 1 ? 'it' : 'them'}.` }));
+    }
+
+    // The block on this day, if one is selected.
+    if (entry && !entry.marker) {
+      const section = el('div', { class: 'section' });
+      section.append(el('h3', { text: isRoutine ? 'This block (moves the rule)' : 'This block' }));
+      // The other half of a move — the length when the start changes, the
+      // start when the length does — is read at the moment of the tap, not
+      // from when the sheet was drawn: the desk may have moved the block
+      // since, and a stale half would move it back.
+      const live = () => ((state.snap && state.snap.days[0].entries) || []).find((e) => e.id === entry.id && e.session === entry.session) || entry;
+      const start = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(entry.start) });
+      start.addEventListener('change', () => {
+        const minutes = minutesOf(start.value);
+        if (minutes == null) return;
+        send({ op: 'move_block', id: item.id, session: entry.session, day: day.date, start: snap(minutes), minutes: live().minutes });
+      });
+      section.append(field('Starts', start));
+      section.append(field('Length', durationSelect(entry.minutes, (minutes) =>
+        send({ op: 'move_block', id: item.id, session: entry.session, day: day.date, start: live().start, minutes }))));
+      if (isTask && entry.session != null) {
+        section.append(el('div', { class: 'actions' }, [
+          el('button', { text: '↩ Remove this block', onclick: () => send({ op: 'remove_block', id: item.id, session: entry.session }) }),
+        ]));
+      }
+      section.append(el('div', { class: 'nothing', text: 'Or hold the block on the timeline and drag it.' }));
+      sheet.append(section);
+    }
+
+    if (isTask) {
+      const section = el('div', { class: 'section' });
+      section.append(el('h3', { text: 'Task' }));
+
+      const due = el('input', { type: 'datetime-local', value: item.deadline || '', step: String(SNAP * 60) });
+      due.addEventListener('change', () => {
+        if (due.value) send({ op: 'set_deadline', id: item.id, deadline: due.value });
+      });
+      const dueRow = el('div', { class: 'field' }, [
+        el('label', { text: 'Due' }),
+        el('div', { style: 'display:flex; gap:6px; align-items:center; max-width:70%' }, [
+          due,
+          item.deadline ? el('button', { class: 'chip', text: '✕', title: 'No deadline', onclick: () => send({ op: 'set_deadline', id: item.id, deadline: null }) }) : null,
+        ]),
+      ]);
+      section.append(dueRow);
+
+      const labels = state.snap.labels;
+      if (item.deadline) {
+        section.append(field('Severity', select(
+          labels.severity.map((label, i) => ({ value: i, label })),
+          item.severity == null ? 2 : item.severity,
+          (v) => send({ op: 'set_severity', id: item.id, level: Number(v) }))));
+      } else {
+        section.append(field('Horizon', select(
+          labels.horizon_order.map((i) => ({ value: i, label: labels.horizon[i] })),
+          item.horizon == null ? 1 : item.horizon,
+          (v) => send({ op: 'set_horizon', id: item.id, level: Number(v) }))));
+      }
+
+      section.append(field('Takes', durationSelect(item.duration || null, (minutes) => send({ op: 'set_estimate', id: item.id, minutes }))));
+
+      const remaining = item.remaining == null ? 30 : Math.max(SNAP, item.remaining);
+      const planAt = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(day.is_today ? nextQuarter() : 9 * 60) });
+      section.append(el('div', { class: 'field' }, [
+        el('label', { text: '＋ Block', title: 'Book another block on this day' }),
+        el('div', { style: 'display:flex; gap:6px; align-items:center; white-space:nowrap' }, [
+          planAt,
+          el('button', { class: 'chip', text: `Book ${dur(remaining || 30)}`, onclick: () => {
+            const minutes = minutesOf(planAt.value);
+            if (minutes == null) return;
+            send({ op: 'add_block', id: item.id, day: day.date, start: snap(minutes) });
+          } }),
+        ]),
+      ]));
+
+      const actions = el('div', { class: 'actions' });
+      if (item.sessions.length) actions.append(el('button', { text: '↩ Unplan', onclick: () => send({ op: 'unplan', id: item.id }) }));
+      actions.append(el('button', { class: 'ok', text: '✓ Done', onclick: async () => {
+        if (!confirm(`Mark "${item.name}" as finished?`)) return;
+        await send({ op: 'complete', id: item.id }, { refreshSheet: false });
+        closeSheet();
+      } }));
+      section.append(actions);
+      sheet.append(section);
+    }
+
+    if (isEvent) {
+      const section = el('div', { class: 'section' });
+      section.append(el('h3', { text: 'Event' }));
+      const when = el('input', { type: 'datetime-local', value: item.deadline || '', step: String(SNAP * 60) });
+      when.addEventListener('change', () => {
+        if (!when.value) return;
+        const [d, t] = when.value.split('T');
+        const minutes = minutesOf(t);
+        if (minutes == null) return;
+        send({ op: 'move_block', id: item.id, day: d, start: snap(minutes), minutes: item.duration || 30 });
+      });
+      section.append(field('When', when));
+      section.append(field('For', durationSelect(item.duration || null, (minutes) => send({ op: 'set_estimate', id: item.id, minutes }))));
+      sheet.append(section);
+    }
+
+    if (isRoutine && item.repeat) {
+      const section = el('div', { class: 'section' });
+      section.append(el('h3', { text: 'Repeats' }));
+      const row = el('div', { class: 'weekdays' });
+      const names = state.snap.labels.weekdays;
+      for (let i = 0; i < 7; i++) {
+        const on = (item.repeat.days >> i) & 1;
+        row.append(el('button', { class: on ? 'on' : '', text: names[i][0], title: names[i], onclick: () => {
+          // Toggled against the rule as it is now, not as it was drawn.
+          const current = state.items.get(item.id);
+          const base = current && current.repeat ? current.repeat.days : item.repeat.days;
+          send({ op: 'set_repeat', id: item.id, days: base ^ (1 << i), day: day.date });
+        } }));
+      }
+      row.append(el('button', { style: 'width:auto; padding:0 12px', text: 'All', onclick: () => send({ op: 'set_repeat', id: item.id, days: 127, day: day.date }) }));
+      row.append(el('button', { style: 'width:auto; padding:0 12px', text: 'Once', onclick: () => send({ op: 'set_repeat', id: item.id, days: 0, day: day.date }) }));
+      section.append(row);
+      section.append(el('div', { class: 'nothing', text: item.repeat.days ? item.repeat.summary : 'just this day' }));
+      sheet.append(section);
+    }
+
+    const footer = el('div', { class: 'section actions' });
+    footer.append(el('button', { class: 'danger', text: 'Delete', onclick: async () => {
+      if (!confirm(`Delete "${item.name}"? It goes to the archive.`)) return;
+      await send({ op: 'delete', id: item.id }, { refreshSheet: false });
+      closeSheet();
+    } }));
+    footer.append(el('button', { text: 'Close', onclick: closeSheet }));
+    sheet.append(footer);
+  }
+
+  function renderTraySheet(sheet) {
+    const tray = state.snap.tray;
+    const day = state.snap.days[0];
+    sheet.append(el('h2', { text: 'Tasks' }));
+
+    // Two views of the same tasks: what still wants a slot on this day (the
+    // desktop tray), and everything, in the order the desktop's left column
+    // ranks it.
+    const seg = el('div', { class: 'seg' });
+    for (const [tab, label] of [['unplanned', `Unplanned · ${tray.due.length + tray.later.length}`], ['all', `All · ${state.snap.ranked.length}`], ['done', 'Done']]) {
+      seg.append(el('button', { class: state.trayTab === tab ? 'on' : '', text: label, onclick: () => { state.trayTab = tab; renderSheet(); } }));
+    }
+    sheet.append(seg);
+
+    if (state.trayTab === 'done') {
+      // The tail of the archive: what left the board lately, and a way back
+      // for the row that should not have.
+      sheet.append(el('div', { class: 'kindline', text: 'What left the board lately. Put back anything that should not have.' }));
+      if (!state.snap.done.length) sheet.append(el('div', { class: 'nothing', text: 'nothing archived yet' }));
+      for (const row of state.snap.done) {
+        sheet.append(el('div', { class: 'card', style: `--accent:${colorOf(row.color)}` }, [
+          el('div', { class: 'body' }, [
+            el('div', { class: 'name', text: `${row.finished ? '✓' : '✗'} ${row.name}` }),
+            el('div', { class: 'meta', text: `${row.when} · ${row.verdict}` }),
+          ]),
+          el('button', { class: 'chip', text: '↩', title: 'Put it back', 'aria-label': 'Put it back', onclick: async () => {
+            const result = await send({ op: 'restore', id: row.id, archived_at: row.archived_at });
+            if (result) toast(`"${row.name}" is back on the board`);
+          } }),
+        ]));
+      }
+      sheet.append(el('div', { class: 'section actions' }, [el('button', { text: 'Close', onclick: closeSheet })]));
+      return;
+    }
+
+    if (state.trayTab === 'all') {
+      sheet.append(el('div', { class: 'kindline', text: 'Most pressing first, as on the desktop.' }));
+      if (!state.snap.ranked.length) sheet.append(el('div', { class: 'nothing', text: 'no tasks on the board' }));
+      for (const id of state.snap.ranked) {
+        const item = state.items.get(id);
+        if (!item) continue;
+        const meta = [];
+        if (item.deadline) meta.push(`due ${localToText(item.deadline)}`);
+        if (item.duration) meta.push(`takes ${dur(item.duration)}`);
+        if (item.planned) meta.push(`${dur(item.planned)} booked`);
+        if (!item.deadline && item.horizon != null) meta.push(state.snap.labels.horizon[item.horizon].toLowerCase());
+        sheet.append(el('button', { class: 'card', style: `--accent:${colorOf(item.color)}`, onclick: () => openItem(item.id, null) }, [
+          el('div', { class: 'body' }, [
+            el('div', { class: 'name', text: item.name }),
+            meta.length ? el('div', { class: 'meta', text: meta.join(' · ') }) : null,
+          ]),
+        ]));
+      }
+      sheet.append(el('div', { class: 'section actions' }, [el('button', { text: 'Close', onclick: closeSheet })]));
+      return;
+    }
+
+    sheet.append(el('div', { class: 'kindline', text: 'Still waiting for a slot. Tap one to put it on this day.' }));
+
+    const input = el('input', { placeholder: 'Add a task…', value: state.quickAddDraft, autocapitalize: 'sentences', maxlength: NAME_MAX });
+    input.addEventListener('input', () => { state.quickAddDraft = input.value; });
+    // An optional due date, folded away until asked for: most captures are
+    // just a name, but "dentist form, due Friday" is the other common one.
+    const due = el('input', { type: 'datetime-local', step: String(SNAP * 60), 'aria-label': 'Due', hidden: !state.quickAddDue });
+    if (state.quickAddDue) due.value = state.quickAddDue;
+    due.addEventListener('change', () => { state.quickAddDue = due.value || null; });
+    const dueToggle = el('button', { class: 'chip', text: 'due…', title: 'Give it a due date', onclick: () => {
+      due.hidden = !due.hidden;
+      if (!due.hidden) { if (!due.value) due.value = `${day.date}T17:00`; state.quickAddDue = due.value; due.focus(); }
+      else { due.value = ''; state.quickAddDue = null; }
+    } });
+    const add = async () => {
+      const name = input.value.trim();
+      if (!name) return;
+      const deadline = due.hidden ? null : (due.value || null);
+      state.quickAddDraft = '';
+      input.value = '';
+      await send({ op: 'quick_add', name, deadline });
+      const again = sheet.querySelector('.quickadd input');
+      if (again) again.focus();
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    sheet.append(el('div', { class: 'quickadd' }, [input, dueToggle, el('button', { text: 'Add', onclick: add })]));
+    sheet.append(el('div', { class: 'field', style: 'min-height:0' }, [due]));
+
+    const group = (title, cards, urgent) => {
+      sheet.append(el('div', { class: 'tray-heading' + (urgent ? ' urgent' : '') }, [el('span', { text: title }), el('span', { text: String(cards.length) })]));
+      if (!cards.length) { sheet.append(el('div', { class: 'nothing', text: urgent ? 'nothing owed by this day is unplanned' : 'nothing else waiting' })); return; }
+      for (const card of cards) {
+        const meta = [];
+        if (card.duration) meta.push(`takes ${dur(card.duration)}${card.planned ? ` · ${dur(card.planned)} booked` : ''}`);
+        else if (card.planned) meta.push(`${dur(card.planned)} booked`);
+        if (card.deadline) meta.push(`due ${localToText(card.deadline)}`);
+        const node = el('button', { class: 'card', style: `--accent:${colorOf(card.color)}`, onclick: () => openItem(card.id, null) }, [
+          el('div', { class: 'body' }, [
+            el('div', { class: 'name', text: card.name }),
+            meta.length ? el('div', { class: 'meta', text: meta.join(' · ') }) : null,
+          ]),
+          card.due_in ? el('span', { class: 'due-in' + (card.due_in === 'overdue' ? ' overdue' : ''), text: card.due_in }) : null,
+        ]);
+        sheet.append(node);
+      }
+    };
+    group(`Due by ${day.is_today ? 'today' : day.weekday}`, tray.due, true);
+    group('Backlog', tray.later, false);
+    sheet.append(el('div', { class: 'section actions' }, [el('button', { text: 'Close', onclick: closeSheet })]));
+  }
+
+  function renderNewSheet(sheet) {
+    const draft = state.newDraft;
+    const day = state.snap.days[0];
+    sheet.append(el('h2', { text: 'New' }));
+    sheet.append(el('div', { class: 'kindline', text: `On ${day.weekday}, ${day.label}` }));
+
+    const seg = el('div', { class: 'seg' });
+    for (const [kind, label] of [['task', 'Task'], ['event', 'Event'], ['routine', 'Routine']]) {
+      seg.append(el('button', { class: draft.kind === kind ? 'on' : '', text: label, onclick: () => { draft.kind = kind; renderSheet(); } }));
+    }
+    sheet.append(seg);
+
+    const hint = { task: 'Time set aside to work on something. Undated until you give it a due date.',
+                   event: 'Something that happens at this time. It goes on the calendar.',
+                   routine: 'Time that is simply spoken for — sleep, meals, the commute. Once, unless you make it repeat.' }[draft.kind];
+    sheet.append(el('div', { class: 'nothing', text: hint }));
+
+    const name = el('input', { placeholder: draft.kind === 'event' ? 'What happens' : 'What', value: draft.name, autocapitalize: 'sentences', maxlength: NAME_MAX });
+    name.addEventListener('input', () => { draft.name = name.value; });
+    sheet.append(el('div', { class: 'quickadd' }, [name]));
+
+    const start = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(draft.start) });
+    start.addEventListener('change', () => { const m = minutesOf(start.value); if (m != null) draft.start = snap(m); });
+    sheet.append(field('Starts', start));
+    sheet.append(field('Length', durationSelect(draft.minutes, (m) => { draft.minutes = m; })));
+
+    sheet.append(el('div', { class: 'section actions' }, [
+      el('button', { text: 'Cancel', onclick: closeSheet }),
+      el('button', { class: 'primary', text: 'Create', onclick: async () => {
+        const result = await send({ op: 'create', kind: draft.kind, name: draft.name.trim(), day: day.date, start: draft.start, minutes: draft.minutes }, { refreshSheet: false });
+        if (result && result.id != null) openItem(result.id, draft.kind === 'task' ? 0 : null);
+        else closeSheet();
+      } }),
+    ]));
+    setTimeout(() => name.focus(), 0);
+  }
+
+  function openNew(startMinutes) {
+    state.newDraft = { kind: 'task', name: '', start: startMinutes, minutes: 30 };
+    openSheet('new');
+  }
+
+  /* ───────────────────────────── Banners ───────────────────────────── */
+
+  function showBanner(message, { retry = false, info = false, actions = [] } = {}) {
+    const banner = $('banner');
+    banner.className = 'banner' + (info ? ' info' : '');
+    const buttons = (retry ? [['Retry', () => load()]] : []).concat(actions);
+    banner.replaceChildren(
+      el('span', { text: message }),
+      buttons.length ? el('span', { class: 'actions' }, buttons.map(([text, onclick]) => el('button', { text, onclick }))) : null,
+    );
+    banner.hidden = false;
+  }
+  function hideBanner() { $('banner').hidden = true; }
+  let toastTimer = null;
+  function toast(message) {
+    let node = document.querySelector('.toast');
+    if (!node) { node = el('div', { class: 'toast' }); document.body.append(node); }
+    node.textContent = message;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => node.remove(), 3200);
+  }
+  function showGate() {
+    // Nothing else stays up: a sheet would sit over the token field, and the
+    // banner over the heading. Edits waiting to be sent are safe in storage
+    // and go with the first load after the link is entered — the gate says so.
+    closeSheet();
+    hideBanner();
+    const waiting = outbox().length;
+    const note = $('gateNote');
+    note.textContent = waiting ? `${waiting} change${waiting === 1 ? '' : 's'} made here ${waiting === 1 ? 'is' : 'are'} kept and sent once the page is open again.` : '';
+    note.hidden = !waiting;
+    $('gate').hidden = false;
+    document.querySelector('.mast').hidden = true;
+    $('timeline').hidden = true;
+    $('bar').hidden = true;
+  }
+
+  /* ───────────────────────────── Wiring ───────────────────────────── */
+
+  function goTo(day) {
+    state.day = day;
+    state.selected = null;
+    closeSheet();
+    load().then(scrollToUsefulHour);
+  }
+
+  const step = () => (state.mode === 'week' ? 7 : 1);
+  $('prev').addEventListener('click', () => goTo(shiftDay(state.day, -step())));
+  $('next').addEventListener('click', () => goTo(shiftDay(state.day, step())));
+  $('modeBtn').addEventListener('click', () => setMode(state.mode === 'week' ? 'day' : 'week'));
+  // On today already, Today brings the now-line back into view — the thing
+  // you want after scrolling off to look at the evening.
+  $('todayBtn').addEventListener('click', () => {
+    if (state.day === todayIso() && state.snap) scrollToUsefulHour();
+    else goTo(todayIso());
+  });
+  $('trayBtn').addEventListener('click', () => openSheet('tray'));
+  $('notesBtn').addEventListener('click', () => openSheet('notes'));
+  $('reflowBtn').addEventListener('click', async () => {
+    const result = await send({ op: 'reflow', day: state.day });
+    if (result) toast(result.moved ? `Moved ${result.moved} block${result.moved === 1 ? '' : 's'} past now` : 'Nothing to move');
+  });
+  $('newBtn').addEventListener('click', () => openNew(state.snap && state.snap.days[0].is_today ? nextQuarter() : 9 * 60));
+  $('scrim').addEventListener('click', closeSheet);
+  $('emptyTap').addEventListener('click', (e) => {
+    const rect = $('lanes').getBoundingClientRect();
+    const minutes = snap((e.clientY - rect.top) / HOUR * 60);
+    openNew(Math.max(0, Math.min(24 * 60 - 30, minutes)));
+  });
+  $('gateGo').addEventListener('click', () => {
+    const token = $('gateToken').value.trim();
+    if (!token) return;
+    location.href = `/?token=${encodeURIComponent(token)}`;
+  });
+
+  // A swipe across the day steps it, like the arrow keys on the desktop.
+  let touchStart = null;
+  document.addEventListener('touchstart', (e) => {
+    if (state.sheet) return;
+    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if (!touchStart || state.sheet) return;
+    const dx = e.changedTouches[0].clientX - touchStart.x;
+    const dy = e.changedTouches[0].clientY - touchStart.y;
+    touchStart = null;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) goTo(shiftDay(state.day, dx < 0 ? step() : -step()));
+  }, { passive: true });
+
+  document.addEventListener('keydown', (e) => {
+    if (state.sheet || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+      if (e.key === 'Escape' && state.sheet) closeSheet();
+      return;
+    }
+    if (e.key === 'ArrowLeft') goTo(shiftDay(state.day, -step()));
+    if (e.key === 'ArrowRight') goTo(shiftDay(state.day, step()));
+    if (e.key === 't' || e.key === 'T') goTo(todayIso());
+    if (e.key === 'w' || e.key === 'W') setMode(state.mode === 'week' ? 'day' : 'week');
+  });
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Listen rather than poll: `/api/wait` answers the moment anything changes
+  // at the desk (or after ~25 s with nothing new), so a drag on the desktop
+  // shows here within a second. A slow poll stays underneath as a net.
+  async function watch() {
+    let failures = 0;
+    for (;;) {
+      if (document.visibilityState !== 'visible') { await sleep(1000); continue; }
+      if (!state.snap) {
+        // Nothing loaded yet — the desktop was off when the page opened.
+        // Keep trying, gently, so it comes alive on its own when TaskDeck does.
+        await sleep(5000);
+        await load({ quiet: true });
+        continue;
+      }
+      const seen = state.snap.version;
+      try {
+        const answer = await api(`/api/wait?version=${seen}`);
+        failures = 0;
+        // Compared with what the page holds *now*, not with `seen`: an edit
+        // made from this page already refetched, and its own wake-up must
+        // not fetch the same day again.
+        if (answer && state.snap && answer.version !== state.snap.version) await load({ quiet: true });
+      } catch (error) {
+        if (error.status === 401) { showGate(); return; }
+        failures += 1;
+        await sleep(Math.min(30000, 2000 * failures));
+      }
+    }
+  }
+
+  function startPolling() {
+    clearInterval(state.pollTimer);
+    state.pollTimer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      // Never redraw a sheet someone is typing into.
+      load({ quiet: true });
+    }, 60000);
+    setInterval(() => { if (state.snap) renderNow(state.snap.days[0]); }, 60000);
+    watch();
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') load({ quiet: true });
+  });
+  // The network coming back is the moment to send what waited.
+  window.addEventListener('online', () => load({ quiet: true }));
+
+  state.token = readToken();
+  if (!state.token) {
+    showGate();
+  } else {
+    installManifest();
+    load().then(scrollToUsefulHour);
+    startPolling();
+  }
+
+  // The offline shell. Refused on a plain-http LAN address (not a secure
+  // context) — then the page simply has no offline mode, as before.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>
