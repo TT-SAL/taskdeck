@@ -192,6 +192,35 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **Every control was in the hardest place to reach** (`phone.html`, §21.5): all four navigation
+  buttons sat 10px from the top of the screen, taking 237px of a 347px row, while the three easiest
+  targets on the whole surface went to Tray, Notes and ＋ New. The masthead is read-only now and the
+  bar carries everything; the rule is checkable in one question, where "move some controls down" is
+  not. Both mastheads measure 76px, so a mode change no longer tears down and rebuilds the two
+  IntersectionObservers.
+- **A touch taken by the system disabled the agenda's pruning for the session** (`phone.html`): the
+  document had `touchstart` and `touchend` but no `touchcancel`, and `pruneAgenda` refuses to mutate
+  the list while `touchStart` is set. One OS-stolen touch left it set for ever, after which the DOM
+  grew past its four-month budget with no symptom except a phone that gradually got slower.
+- **A pinch could step the day** (`phone.html`): a second finger's `touchstart` reports finger
+  *one's* current position, so a pinch re-based the swipe and lifting the second finger far from the
+  first read as a 70px horizontal swipe.
+- **Nudging a block could move it and step the day at once** (`phone.html`): the swipe handler
+  checked neither `drag` nor `suppressClick`, so a quarter-hour nudge with a sideways arc sent
+  `move_block` *and* stepped the day — and if the step won the race, `state.snap` had already been
+  replaced and the move was booked on the day it stepped to. Both flags are checked, because
+  `endDrag` sets them together and nothing here can rely on whether `pointerup` or `touchend`
+  arrives first.
+- **The all-day chip row lived inside the masthead** (`phone.html`): it added its height to every
+  sticky offset on the page, and since only the day view populates it and nothing cleared it, its
+  chips followed you into the agenda. It sits in normal flow now, below the masthead, where it
+  scrolls away with the day it belongs to.
+- **The gate left the schedule showing behind it** (`phone.html`, `showGate`): it hid the masthead,
+  the timeline and the bar — written when the timeline was the only view. With the agenda as the
+  default, a 401 put the token field over a month of somebody's calendar.
+- **`replaceChildren` renders a `null` as the word** (`phone.html`): unlike `el`, which skips them.
+  The pinned line read `Today · Sunday, September 6null`.
+
 - **Every jump in the agenda landed 213 pixels low** (`phone.html`, `jumpToDate`): it scrolled to
   `node.offsetTop - stickyHeight()`, but a day's offset parent is `#weekbody`, which is
   `position: relative` — so `offsetTop` is measured from the body, not the document, and was short by

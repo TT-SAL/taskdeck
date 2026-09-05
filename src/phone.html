@@ -26,13 +26,18 @@
     --gutter: 46px;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
     --safe-top: env(safe-area-inset-top, 0px);
+    /* 1 border + 6 top + 44 scrubber + 6 gap + 60 deck + 16 of keep-out below
+       the buttons, so a thumb resting at the bottom edge of the screen is not
+       already on one. The page's own bottom padding and the toast both sit off
+       this number rather than guessing at it. */
+    --bar-h: 133px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
   body {
     font: 16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     overscroll-behavior-y: contain;
-    padding-bottom: calc(72px + var(--safe-bottom));
+    padding-bottom: calc(var(--bar-h) + var(--safe-bottom) + 8px);
   }
   button, input, select { font: inherit; color: inherit; }
   button { background: none; border: 0; padding: 0; cursor: pointer; }
@@ -43,31 +48,34 @@
     position: sticky; top: 0; z-index: 5;
     background: var(--bg);
     border-bottom: 1px solid var(--line);
-    padding: calc(10px + var(--safe-top)) 14px 8px;
+    padding: calc(8px + var(--safe-top)) 14px 8px;
   }
-  .mast .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .nav { display: flex; gap: 6px; }
-  .nav button, .chip {
+  .chip {
     min-width: 44px; height: 40px; padding: 0 14px; border-radius: 12px;
     background: var(--surface); color: var(--text); font-weight: 600;
   }
-  .nav button:active, .chip:active { background: var(--surface-2); }
-  .nav button:disabled { opacity: 0.45; }
-  /* `min-width: 0` so it can never push itself off the screen: a flex item
-     will not shrink below its content without it, and "Wednesday" at 26px is
-     wider than the room left beside four buttons on a phone. */
-  .date { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; min-width: 0; }
-  .weekday { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chip:active { background: var(--surface-2); }
+  /* One row now that the buttons have gone, so the weekday has the whole width
+     instead of the hundred pixels left beside four of them — where six of the
+     seven names were being silently ellipsised. `min-height` and never
+     `height`: a raised system font should shorten the date, not guillotine it. */
+  .date { display: flex; align-items: baseline; gap: 8px; min-height: 35px; }
+  .weekday { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .weekday.today { color: #f0c36b; }
-  .daylabel { color: var(--muted); font-size: 13px; margin-top: 2px; }
-  .summary { color: var(--muted); font-size: 13px; margin-top: 8px; min-height: 1.3em; }
+  /* Gives way before the weekday does: the weekday is the headline. */
+  .daylabel { color: var(--muted); font-size: 13px; flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Which day the buttons below act on, in the agenda, where there is no big
+     date to say it and the list under your thumb is showing some other month. */
+  .pinned { font-size: 12px; line-height: 15px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .behindnote { color: #f0c36b; font-weight: 700; }
+  .summary { color: var(--muted); font-size: 13px; margin-top: 6px; min-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* The line that answers the question before anything is read. Two rows of
      fixed height, because the masthead is sticky and everything below it is
      positioned from its height — a line that grew and shrank would move the
      whole list under the reader's thumb. */
   .summary.glance {
     display: grid; grid-template-columns: 10px 1fr; gap: 0 8px;
-    align-items: center; margin-top: 9px; min-height: 38px;
+    align-items: center; margin-top: 6px; min-height: 38px;
   }
   .summary.glance .gdot {
     grid-row: 1 / span 2; width: 10px; height: 10px; border-radius: 50%;
@@ -82,7 +90,7 @@
     font-size: 12px; color: var(--muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .week { display: flex; gap: 4px; margin-top: 10px; }
+  .week { display: flex; gap: 4px; height: 44px; }
   .week button {
     flex: 1; height: 44px; border-radius: 10px; background: transparent; color: var(--muted);
     display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1;
@@ -100,12 +108,15 @@
     width: 100%; min-height: 40vh; background: var(--surface-2); border: 1px solid var(--line);
     border-radius: 12px; padding: 10px 12px; color: var(--text); font: inherit; line-height: 1.4; resize: vertical;
   }
-  .behind { margin-top: 8px; }
-  .behind button {
-    height: 36px; padding: 0 12px; border-radius: 10px; font-weight: 700; font-size: 14px;
+  /* Reflow moves what is unfinished. It is not reversible, so it does not live
+     under a resting thumb — it lives at the top of the Tray sheet, one
+     deliberate tap in, and the deck only points at it. */
+  .reflow {
+    width: 100%; height: 44px; padding: 0 14px; margin: 0 0 12px; border-radius: 12px;
+    font-weight: 700; font-size: 14px;
     background: #2a2416; color: #f0c36b; border: 1px solid #4a3d1f;
   }
-  .behind button:active { filter: brightness(1.2); }
+  .reflow:active { filter: brightness(1.2); }
 
   /* ── Timeline ── */
   .timeline { position: relative; margin: 6px 12px 0 8px; height: calc(var(--hour) * 24); }
@@ -208,13 +219,18 @@
      about 250px, a screen holds three of them, so a hard flick is roughly a
      week and next February is twenty flicks. Seven month cells and two taps
      get there instead, and take nothing away from the scroll. */
-  .rail { position: sticky; top: var(--mast-h); z-index: 4; background: var(--bg); display: flex; }
+  .rail { display: flex; gap: 4px; height: 44px; }
   .rail button {
-    flex: 1; min-width: 0; padding: 5px 0 6px; text-align: center; color: var(--muted);
-    display: flex; flex-direction: column; align-items: center; line-height: 1.1;
+    flex: 1; min-width: 0; height: 44px; border-radius: 10px; text-align: center; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1;
     font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
   }
-  .rail button.here { background: var(--surface); border-radius: 8px; color: var(--text); font-weight: 700; }
+  /* Where today is, when today is not where you are reading — the Today button
+     sits directly under this cell. */
+  .rail button.hastoday::after {
+    content: ""; width: 4px; height: 4px; border-radius: 50%; background: #f0c36b; margin-top: 3px;
+  }
+  .rail button.here { background: var(--surface); color: var(--text); font-weight: 700; }
   .rail button .yr { font-size: 9px; letter-spacing: 0; opacity: 0.55; text-transform: none; }
   .rail button.beyond { opacity: 0.4; }
   /* The reading position is moved by `holdPlace` and by nothing else. Anything
@@ -252,7 +268,7 @@
      prepend while a sticky heading leaves the section itself eligible. */
   .aday > button {
     display: flex; align-items: baseline; gap: 8px; width: 100%;
-    position: sticky; top: calc(var(--mast-h) + var(--rail-h)); z-index: 3;
+    position: sticky; top: var(--mast-h); z-index: 3;
     background: var(--bg); border: 0; border-bottom: 1px solid var(--line);
     color: var(--muted); padding: 9px 4px 5px; text-align: left; font: inherit;
   }
@@ -282,16 +298,29 @@
 
   /* ── Bottom bar ── */
   .bar {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
-    display: flex; gap: 10px; padding: 10px 14px calc(10px + var(--safe-bottom));
-    background: linear-gradient(rgba(15,17,19,0), var(--bg) 40%);
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: block;
+    height: calc(var(--bar-h) + var(--safe-bottom));
+    padding: 6px 14px calc(16px + var(--safe-bottom));
+    background: var(--bg); border-top: 1px solid var(--line);
+    user-select: none; -webkit-user-select: none;
   }
-  .bar button {
-    flex: 1; height: 50px; border-radius: 14px; font-weight: 700; font-size: 16px;
+  /* Holds its height whichever scrubber is showing — and before the first
+     render, when neither is — so the bar never jumps under a thumb. */
+  .scrub { height: 44px; }
+  .deck { display: flex; gap: 8px; margin-top: 6px; height: 60px; }
+  .deck button {
+    flex: 1; min-width: 0; height: 60px; border-radius: 14px; font-weight: 700; font-size: 15px;
     background: var(--surface); color: var(--text); border: 1px solid var(--line);
   }
-  .bar button.primary { background: #e8e6e1; color: #0f1113; border-color: transparent; flex: 0 0 120px; }
-  .bar button:active { filter: brightness(1.2); }
+  .deck button.primary { background: #e8e6e1; color: #0f1113; border-color: transparent; }
+  .deck button:active { filter: brightness(1.2); }
+  /* The day is running behind. The fact is in the masthead; this only points
+     at where the verb lives. */
+  .deck button.late { box-shadow: inset 0 -3px 0 #f0c36b; }
+  /* Kills the 300ms tap delay on the things that are only ever tapped. Never
+     `.entry`, which is a button too and carries the press-and-hold that lifts
+     a block. */
+  .deck button, .aday > button, .actions button, .btn { touch-action: manipulation; }
   .count { display: inline-block; min-width: 22px; padding: 0 6px; margin-left: 6px; border-radius: 11px; background: var(--surface-2); font-size: 13px; }
   .count.urgent { background: #f0c36b; color: #0f1113; }
 
@@ -301,10 +330,26 @@
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 9;
     max-height: 88vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
     background: var(--surface); border-radius: 18px 18px 0 0;
-    padding: 8px 16px calc(16px + var(--safe-bottom));
+    padding: 8px 16px 0;
     box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
   }
-  .grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 6px auto 12px; }
+  /* A target, not a decoration: tap it to close, or drag it down. `touch-action:
+     none` only over these 32px, so it costs the sheet almost no scroll. */
+  .grip { display: block; width: 100%; height: 32px; padding: 0; background: none; touch-action: none; }
+  .grip i { display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 14px auto 0; }
+  .sheet.springing { transition: transform 180ms ease-out; }
+  /* Every sheet ends with a way out, and it stays on screen however long the
+     list above it is. A Close at the bottom of 88vh of scrolling tasks is not a
+     way out of anything one-handed. */
+  .sheetfoot {
+    position: sticky; bottom: 0; display: flex; gap: 8px;
+    background: var(--surface); border-top: 1px solid var(--line);
+    padding: 10px 0 calc(16px + var(--safe-bottom));
+  }
+  .sheetfoot button {
+    flex: 1; height: 52px; border-radius: 12px; font-weight: 700;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--text);
+  }
   .sheet h2 { margin: 0 0 2px; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; word-break: break-word; }
   .sheet h2 button { text-align: left; width: 100%; }
   .sheet h2 input { width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 18px; font-weight: 700; }
@@ -375,7 +420,7 @@
     background: #1d2530; color: #cfe0f3; border: 1px solid #2f4a63;
   }
   .toast {
-    position: fixed; left: 50%; bottom: calc(84px + var(--safe-bottom)); transform: translateX(-50%);
+    position: fixed; left: 50%; bottom: calc(var(--bar-h) + var(--safe-bottom) + 12px); transform: translateX(-50%);
     background: var(--text); color: #0f1113; padding: 8px 14px; border-radius: 10px; font-weight: 600; font-size: 14px;
     z-index: 30; max-width: 90vw; text-align: center;
   }
@@ -387,25 +432,24 @@
 </head>
 <body>
 
+<!-- Nothing in here is tappable, and that is the rule the layout hangs on: the
+     masthead is what you read, the bar at the bottom is what you touch. It
+     keeps every control inside a thumb's arc, and it keeps this box a fixed
+     height per view — which matters because its height is the sticky offset
+     every day heading below it is positioned from. -->
 <header class="mast">
-  <div class="row">
-    <div class="nav">
-      <button id="prev" aria-label="Previous day">‹</button>
-      <button id="todayBtn">Today</button>
-      <button id="next" aria-label="Next day">›</button>
-      <button id="modeBtn" title="Day or week">Week</button>
-    </div>
-    <div class="date">
-      <div class="weekday" id="weekday">…</div>
-      <div class="daylabel" id="daylabel"></div>
-    </div>
+  <div class="date">
+    <div class="weekday" id="weekday">…</div>
+    <div class="daylabel" id="daylabel"></div>
   </div>
+  <div class="pinned" id="pinned" hidden></div>
   <div class="summary" id="summary"></div>
-  <div class="week" id="week"></div>
-  <div class="behind" id="behind" hidden><button id="reflowBtn" title="Push what is unfinished past now, in order, around events and routines"></button></div>
-  <!-- All-day events off subscribed calendars: chips, not blocks (§23). -->
-  <div class="alldayrow" id="alldayRow" hidden></div>
 </header>
+
+<!-- All-day events off subscribed calendars: chips, not blocks (§23). In flow
+     rather than in the masthead, so they scroll away with the day they belong
+     to and cannot add their height to every sticky offset on the page. -->
+<div class="alldayrow" id="alldayRow" hidden></div>
 
 <noscript><p style="padding:18px;font:15px/1.5 system-ui;color:#c9c9c9">TaskDeck needs JavaScript. This page is one file and does all its drawing in the browser.</p></noscript>
 
@@ -416,7 +460,6 @@
 </main>
 
 <section class="weekgrid" id="weekgrid" hidden>
-  <div class="rail" id="rail"></div>
   <!-- Both ends are permanent children, so nothing has to be re-observed when
        the list grows. The head carries a button and the tail a sentinel: see
        `armSentinel`. -->
@@ -425,10 +468,21 @@
   <div class="aend" id="agendaTail"></div>
 </section>
 
-<nav class="bar" id="bar">
-  <button id="trayBtn">Tray<span class="count" id="trayCount">0</span></button>
-  <button id="notesBtn">Notes</button>
-  <button id="newBtn" class="primary">＋ New</button>
+<!-- Two rows. The scrubber says where you are and takes you a few days or a
+     few months either way; the deck holds the four verbs. Both are within reach
+     of the hand already holding the phone, which is the whole point: navigation
+     used to live in the top row, which is the furthest thing from a thumb. -->
+<nav class="bar" id="bar" aria-label="Navigation and actions">
+  <div class="scrub">
+    <div class="week" id="week" role="group" aria-label="This week" hidden></div>
+    <div class="rail" id="rail" role="group" aria-label="Months" hidden></div>
+  </div>
+  <div class="deck">
+    <button id="trayBtn" aria-label="Tray">Tray<span class="count" id="trayCount" aria-hidden="true">0</span></button>
+    <button id="todayBtn" aria-label="Today">Today</button>
+    <button id="modeBtn">Day</button>
+    <button id="newBtn" class="primary" aria-label="New">＋ New</button>
+  </div>
 </nav>
 
 <div class="scrim" id="scrim" hidden></div>
@@ -1128,66 +1182,89 @@
     const snap = state.snap;
     if (!snap) return;
     const day = snap.days[0];
-
-    $('weekday').textContent = day.weekday;
-    $('weekday').classList.toggle('today', day.is_today);
-    $('daylabel').textContent = day.label + (day.is_today ? ' · today' : '');
-    $('summary').classList.remove('glance');
-    $('summary').textContent = day.summary;
-
-    // Work booked before the now-line and not ticked off: the day is running
-    // late, and it gets one verb — the same Reflow as the desktop masthead.
-    const behind = $('behind');
-    if (day.behind_minutes > 0) {
-      behind.hidden = false;
-      $('reflowBtn').textContent = `⟳ Reflow · ${dur(day.behind_minutes)} behind`;
-    } else {
-      behind.hidden = true;
-    }
+    const late = day.behind_minutes > 0;
 
     const trayCount = snap.tray.due.length + snap.tray.later.length;
     const count = $('trayCount');
     count.textContent = String(trayCount);
     count.classList.toggle('urgent', snap.tray.due.length > 0);
-
-    $('todayBtn').title = day.is_today ? 'Scroll to now' : 'Jump to today';
-    $('modeBtn').textContent = state.mode === 'agenda' ? 'Day' : 'Agenda';
+    // The badge keeps meaning exactly one thing — how much is waiting, urgent
+    // when something is due. A day running behind is a different fact and gets
+    // its own mark, or an empty tray on a late day would show an urgent zero.
+    $('trayBtn').classList.toggle('late', late);
+    $('trayBtn').setAttribute(
+      'aria-label',
+      `Tray, ${trayCount} waiting, ${snap.tray.due.length} due` + (late ? ', running behind' : ''),
+    );
+    const todayLabel = day.is_today ? 'Scroll to now' : 'Jump to today';
+    $('todayBtn').title = todayLabel;
+    $('todayBtn').setAttribute('aria-label', todayLabel);
 
     if (state.mode === 'agenda') {
-      // The behind-schedule row stays: it is today's, and so is everything the
-      // bottom bar does. Only the week strip goes — the rail says where you are
-      // reading, and the sticky day headings say it again as you pass them.
       $('timeline').hidden = true;
+      $('alldayRow').hidden = true;
       $('week').hidden = true;
+      $('rail').hidden = false;
       $('weekgrid').hidden = false;
-      // The big date comes off: the rail directly below already says which
-      // month you are reading, in the same words, and the room it frees is
-      // where the answer goes.
+      // The big date comes off: the rail already names the month you are
+      // reading, and `#pinned` names the day the buttons act on.
       document.querySelector('.date').hidden = true;
+      $('pinned').hidden = false;
       railAndMasthead();
       measureSticky();
       return;
     }
-    renderWeek(day);
+
+    $('pinned').hidden = true;
     document.querySelector('.date').hidden = false;
+    $('weekday').textContent = day.weekday;
+    $('weekday').classList.toggle('today', day.is_today);
+    $('daylabel').textContent = day.label + (day.is_today ? ' · today' : '');
+    $('summary').classList.remove('glance');
+    $('summary').replaceChildren(...bits(day.summary, late && day.behind_minutes));
+    $('rail').hidden = true;
+    $('week').hidden = false;
+    renderWeek(day);
     $('weekgrid').hidden = true;
     $('timeline').hidden = false;
-    $('week').hidden = false;
     renderHours();
     renderLanes(day);
     renderNow(day);
     measureSticky();
   }
 
-  function isoOf(date) {
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  // The mode button's label, written outside `render()` on purpose: `render()`
+  // returns at its first line when there is no snapshot, which is exactly the
+  // offline cold open the boot block exists for — and a button labelled from
+  // there would be wrong for as long as the desk stayed unreachable.
+  function labelChrome() {
+    const toAgenda = state.mode !== 'agenda';
+    $('modeBtn').textContent = toAgenda ? 'Agenda' : 'Day';
+    $('modeBtn').setAttribute('aria-label', toAgenda ? 'Show the agenda' : 'Show the day');
   }
-  function mondayOf(iso) {
+
+  // Text, and the behind-schedule note when there is one. `replaceChildren`
+  // takes nodes rather than the child list `el` takes, and stringifies a `null`
+  // into the word — so the choice is made here rather than at the call.
+  function bits(text, behindMinutes) {
+    const out = [document.createTextNode(text)];
+    if (behindMinutes > 0) out.push(el('span', { class: 'behindnote', text: ` · ${dur(behindMinutes)} behind` }));
+    return out;
+  }
+
+  function longDay(iso) {
     const [y, m, d] = iso.split('-').map(Number);
-    const shown = new Date(y, m - 1, d);
-    const monday = new Date(shown);
-    monday.setDate(shown.getDate() - ((shown.getDay() + 6) % 7));
-    return monday;
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+
+  // Which day ＋ New, Tray and Reflow act on. Always today, by the agenda's own
+  // rule — and worth saying out loud there, because the list under your thumb
+  // may be showing November. The date comes off the clock rather than out of
+  // the snapshot, so it is right on a first-ever open with the desk off.
+  function renderPinned() {
+    const day = state.snap && state.snap.days[0];
+    const late = day && day.date === todayIso() && day.behind_minutes > 0;
+    $('pinned').replaceChildren(...bits(`Today · ${longDay(todayIso())}`, late && day.behind_minutes));
   }
 
   // The shown day's week, Monday first like the calendar, as seven taps. Under
@@ -1197,12 +1274,15 @@
   function renderWeek(day) {
     const week = $('week');
     week.replaceChildren();
-    const monday = mondayOf(day.date);
     const today = todayIso();
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(monday);
-      date.setDate(monday.getDate() + i);
-      const iso = isoOf(date);
+    // Centred on the day you are looking at, three either way, rather than
+    // anchored to Monday. A week that starts on Monday offers a Sunday reader
+    // seven days that have already happened; centring means the strip always
+    // reaches the same distance forward as back, whichever day it is.
+    for (let i = -3; i <= 3; i++) {
+      const iso = shiftDay(day.date, i);
+      const [dy, dm, dd] = iso.split('-').map(Number);
+      const date = new Date(dy, dm - 1, dd);
       // Off the same store the agenda reads, so the seven-day request that used
       // to exist only for these dots is gone: the day fetch brings the week.
       const held = state.agenda.days.get(iso);
@@ -1210,9 +1290,10 @@
       const dots = el('span', { class: 'dots' });
       for (const color of marks.slice(0, 3)) dots.append(el('i', { style: `--c:${colorOf(color)}` }));
       const node = el('button', {
-        class: (iso === day.date ? 'shown' : '') + (iso === today ? ' today' : ''),
+        class: (i === 0 ? 'shown' : '') + (iso === today ? ' today' : ''),
         onclick: () => { if (iso !== state.day) goTo(iso); },
         'aria-label': date.toDateString(),
+        'aria-current': i === 0 ? 'date' : null,
       }, [
         el('span', { class: 'wd', text: date.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2) }),
         el('span', { class: 'dn', text: String(date.getDate()) }),
@@ -1247,11 +1328,9 @@
   function setMode(mode) {
     state.mode = mode;
     try { localStorage.setItem('taskdeck-mode', mode); } catch (_) {}
-    $('modeBtn').textContent = mode === 'agenda' ? 'Day' : 'Agenda';
-    $('prev').setAttribute('aria-label', mode === 'agenda' ? 'Previous month' : 'Previous day');
-    $('next').setAttribute('aria-label', mode === 'agenda' ? 'Next month' : 'Next day');
+    labelChrome();
     // Entering the agenda pins the shown day to today. This is the invariant
-    // that lets the verbs under the masthead keep meaning something exact.
+    // that lets the verbs in the bar keep meaning something exact.
     if (mode === 'agenda') state.day = todayIso();
     render();
     if (mode === 'agenda') {
@@ -1437,9 +1516,11 @@
     const at = new Date(y, m - 1, 1);
     const known = state.agenda.known;
     const beyond = known && (`${key}-31` < known.from || firstOfMonth(key) > known.until);
+    const hasToday = !here && key === monthOf(todayIso());
     return el('button', {
-      class: (here ? 'here' : '') + (beyond ? ' beyond' : ''),
-      'aria-label': at.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+      class: (here ? 'here' : '') + (beyond ? ' beyond' : '') + (hasToday ? ' hastoday' : ''),
+      'aria-label': at.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) + (hasToday ? ' — today is here' : ''),
+      'aria-current': here ? 'true' : null,
       onclick: () => jumpToDate(firstOfMonth(key)),
     }, [
       at.toLocaleDateString(undefined, { month: 'short' }),
@@ -1564,6 +1645,7 @@
     // height under them.
     if (state.mode !== 'agenda') return;
     const at = state.agenda.month || monthOf(state.day);
+    renderPinned();
     renderGlance();
     if (state.railFor !== at) { state.railFor = at; renderRail(); }
   }
@@ -1859,15 +1941,13 @@
   // The two sticky layers, measured once and written as custom properties.
   // Everything that needs the offset reads them, so nothing else in the file
   // forces a layout to find out how tall the masthead is today.
-  let stickyKnown = { mast: -1, rail: -1 };
-  function stickyHeight() { return Math.max(0, stickyKnown.mast) + Math.max(0, stickyKnown.rail); }
+  let stickyKnown = -1;
+  function stickyHeight() { return Math.max(0, stickyKnown); }
   function measureSticky() {
     const mast = Math.round(document.querySelector('.mast').getBoundingClientRect().height);
-    const rail = state.mode === 'agenda' ? Math.round($('rail').getBoundingClientRect().height) : 0;
-    if (mast === stickyKnown.mast && rail === stickyKnown.rail) return;
-    stickyKnown = { mast, rail };
+    if (mast === stickyKnown) return;
+    stickyKnown = mast;
     document.documentElement.style.setProperty('--mast-h', `${mast}px`);
-    document.documentElement.style.setProperty('--rail-h', `${rail}px`);
     armObservers();
   }
 
@@ -2213,18 +2293,65 @@
     state.sheet = null;
     state.renaming = false;
     state.notesDraft = null;
+    $('sheet').style.transform = '';
+    $('sheet').classList.remove('springing');
     $('scrim').hidden = true;
     $('sheet').hidden = true;
     $('sheet').replaceChildren();
     if (state.selected) { state.selected = null; render(); }
   }
+  function grip() {
+    const node = el('button', { class: 'grip', 'aria-label': 'Close' }, [el('i')]);
+    let held = null;
+    const spring = () => {
+      const sheet = $('sheet');
+      sheet.classList.add('springing');
+      sheet.style.transform = '';
+      setTimeout(() => sheet.classList.remove('springing'), 200);
+    };
+    node.addEventListener('pointerdown', (e) => {
+      held = { y: e.clientY, dy: 0 };
+      $('sheet').classList.remove('springing');
+      try { node.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    node.addEventListener('pointermove', (e) => {
+      if (!held) return;
+      held.dy = Math.max(0, e.clientY - held.y);
+      $('sheet').style.transform = `translateY(${held.dy}px)`;
+    });
+    node.addEventListener('pointerup', () => {
+      if (!held) return;
+      const { dy } = held;
+      held = null;
+      // Far enough down is a dismissal; barely moved at all is a tap. In
+      // between, it goes back — a half-committed drag should not decide.
+      if (dy > 60 || dy <= 8) closeSheet();
+      else spring();
+    });
+    node.addEventListener('pointercancel', () => { held = null; spring(); });
+    // Only the synthetic click Enter and Space produce, so a real pointer never
+    // fires twice against the decision `pointerup` already made.
+    node.addEventListener('click', (e) => { if (e.detail === 0) closeSheet(); });
+    return node;
+  }
+
+  function sheetFoot() {
+    return el('div', { class: 'sheetfoot' }, [
+      // Notes used to be a third of the bottom bar, for something opened once a
+      // week. It lives beside the tasks it is about instead.
+      state.sheet === 'tray' ? el('button', { text: 'Notes', onclick: () => openSheet('notes') }) : null,
+      el('button', { text: 'Close', onclick: closeSheet }),
+    ]);
+  }
+
   function renderSheet() {
     const sheet = $('sheet');
-    sheet.replaceChildren(el('div', { class: 'grip' }));
+    sheet.replaceChildren(grip());
     if (state.sheet === 'item') renderItemSheet(sheet);
     else if (state.sheet === 'tray') renderTraySheet(sheet);
     else if (state.sheet === 'new') renderNewSheet(sheet);
     else if (state.sheet === 'notes') renderNotesSheet(sheet);
+    sheet.append(sheetFoot());
   }
 
   // The desktop notepad. Read here, and replaced whole with Save — never per
@@ -2237,7 +2364,6 @@
     area.addEventListener('input', () => { state.notesDraft = area.value; });
     sheet.append(area);
     sheet.append(el('div', { class: 'section actions' }, [
-      el('button', { text: 'Close', onclick: closeSheet }),
       el('button', { class: 'primary', text: 'Save', onclick: async () => {
         const result = await send({ op: 'set_notes', text: area.value }, { refreshSheet: false });
         if (result) { toast('Notes saved'); closeSheet(); }
@@ -2449,7 +2575,6 @@
       await send({ op: 'delete', id: item.id }, { refreshSheet: false });
       closeSheet();
     } }));
-    footer.append(el('button', { text: 'Close', onclick: closeSheet }));
     sheet.append(footer);
   }
 
@@ -2457,6 +2582,18 @@
     const tray = state.snap.tray;
     const day = state.snap.days[0];
     sheet.append(el('h2', { text: 'Tasks' }));
+
+    // Work booked before the now-line and not ticked off. Above the tabs, so it
+    // is on all three of them — and here rather than in the bar, because it is
+    // not reversible and nothing irreversible belongs under a resting thumb.
+    if (day.behind_minutes > 0) {
+      sheet.append(el('button', {
+        class: 'reflow',
+        text: `⟳ Reflow · ${dur(day.behind_minutes)} behind`,
+        title: 'Push what is unfinished past now, in order, around events and routines',
+        onclick: reflow,
+      }));
+    }
 
     // Two views of the same tasks: what still wants a slot on this day (the
     // desktop tray), and everything, in the order the desktop's left column
@@ -2484,7 +2621,6 @@
           } }),
         ]));
       }
-      sheet.append(el('div', { class: 'section actions' }, [el('button', { text: 'Close', onclick: closeSheet })]));
       return;
     }
 
@@ -2506,7 +2642,6 @@
           ]),
         ]));
       }
-      sheet.append(el('div', { class: 'section actions' }, [el('button', { text: 'Close', onclick: closeSheet })]));
       return;
     }
 
@@ -2558,7 +2693,6 @@
     };
     group(`Due by ${day.is_today ? 'today' : day.weekday}`, tray.due, true);
     group('Backlog', tray.later, false);
-    sheet.append(el('div', { class: 'section actions' }, [el('button', { text: 'Close', onclick: closeSheet })]));
   }
 
   function renderNewSheet(sheet) {
@@ -2637,6 +2771,10 @@
     $('gate').hidden = false;
     document.querySelector('.mast').hidden = true;
     $('timeline').hidden = true;
+    // The agenda is the default view now, so hiding the timeline alone left a
+    // month of somebody's schedule showing behind the token field.
+    $('weekgrid').hidden = true;
+    $('alldayRow').hidden = true;
     $('bar').hidden = true;
   }
 
@@ -2658,8 +2796,9 @@
   // unit the agenda is paged and cached and railed in.
   const stepBack = () => (state.mode === 'agenda' ? jumpToMonth(-1) : goTo(shiftDay(state.day, -1)));
   const stepOn = () => (state.mode === 'agenda' ? jumpToMonth(1) : goTo(shiftDay(state.day, 1)));
-  $('prev').addEventListener('click', stepBack);
-  $('next').addEventListener('click', stepOn);
+  // ‹ › are gone from the screen: the scrubber in the bar reaches three days or
+  // three months either way in one tap, which is further than a step and nearer
+  // the thumb. These two survive as what the arrow keys and the swipe call.
   $('modeBtn').addEventListener('click', () => setMode(state.mode === 'agenda' ? 'day' : 'agenda'));
   // On today already, Today brings the now-line back into view — the thing
   // you want after scrolling off to look at the evening.
@@ -2669,11 +2808,12 @@
     else goTo(todayIso());
   });
   $('trayBtn').addEventListener('click', () => openSheet('tray'));
-  $('notesBtn').addEventListener('click', () => openSheet('notes'));
-  $('reflowBtn').addEventListener('click', async () => {
+  // A declaration rather than a listener, because the button that calls it is
+  // now drawn inside the Tray sheet.
+  async function reflow() {
     const result = await send({ op: 'reflow', day: state.day });
     if (result) toast(result.moved ? `Moved ${result.moved} block${result.moved === 1 ? '' : 's'} past now` : 'Nothing to move');
-  });
+  }
   $('newBtn').addEventListener('click', () => openNew(state.snap && state.snap.days[0].is_today ? nextQuarter() : 9 * 60));
   $('scrim').addEventListener('click', closeSheet);
   $('emptyTap').addEventListener('click', (e) => {
@@ -2688,24 +2828,54 @@
   });
 
   // A swipe across the day steps it, like the arrow keys on the desktop.
+  //
+  // `touchStart` is also how `pruneAgenda` knows a finger is down and refuses
+  // to mutate the list mid-fling, so it is recorded in both views and it has to
+  // be cleared on every path a touch can end by.
   let touchStart = null;
   document.addEventListener('touchstart', (e) => {
-    if (state.sheet) return;
+    // A second finger's touchstart reports finger *one's* current position, so
+    // without this a pinch re-baselines the gesture and lifting the second
+    // finger far from the first steps the day.
+    if (e.touches.length > 1) { touchStart = null; return; }
     touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
   }, { passive: true });
+  // Without this, one touch taken by the system leaves `touchStart` set for the
+  // rest of the session — after which `pruneAgenda` never trims again and the
+  // list grows past its budget with no symptom but a phone that gets slow.
+  document.addEventListener('touchcancel', () => { touchStart = null; }, { passive: true });
   document.addEventListener('touchend', (e) => {
-    if (!touchStart || state.sheet) return;
+    const start = touchStart;
+    touchStart = null;
+    if (!start || state.sheet) return;
+    // Not while a block is being moved, or has just been. Both flags are
+    // checked because `endDrag` sets them together and nothing here can rely on
+    // whether `pointerup` or `touchend` arrives first: a quarter-hour nudge
+    // with a sideways arc would otherwise send the move *and* step the day —
+    // and if the step won the race, book the move on the day it stepped to.
+    if (drag || suppressClick) return;
     // Only in the day view. In the agenda a sideways flick during a long scroll
     // is a slip of the thumb, not a request to travel a month.
-    if (state.mode !== 'day') { touchStart = null; return; }
-    const dx = e.changedTouches[0].clientX - touchStart.x;
-    const dy = e.changedTouches[0].clientY - touchStart.y;
-    touchStart = null;
+    if (state.mode !== 'day') return;
+    const dx = e.changedTouches[0].clientX - start.x;
+    const dy = e.changedTouches[0].clientY - start.y;
     if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) goTo(shiftDay(state.day, dx < 0 ? 1 : -1));
   }, { passive: true });
+  // The bar is a control surface, and the fence is the element rather than a
+  // threshold — so nothing added to it later has to remember to opt out of the
+  // swipe. The finger is still recorded, because dragging on a fixed bar can
+  // still fling the list underneath it.
+  for (const type of ['touchstart', 'touchend', 'touchcancel']) {
+    $('bar').addEventListener(type, (e) => {
+      e.stopPropagation();
+      touchStart = type === 'touchstart' && e.touches.length === 1
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        : null;
+    }, { passive: true });
+  }
 
   document.addEventListener('keydown', (e) => {
-    if (state.sheet || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+    if (state.sheet || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) {
       if (e.key === 'Escape' && state.sheet) closeSheet();
       return;
     }
@@ -2806,6 +2976,7 @@
     showGate();
   } else {
     installManifest();
+    labelChrome();
     pruneMonths();
     // Whatever storage holds, in both modes. The agenda draws its first frame
     // from it; the day view's seven-tap strip takes its dots from the same

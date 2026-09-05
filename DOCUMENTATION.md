@@ -2379,11 +2379,42 @@ parked phone, which is the one thing the digest exists to prevent.
 
 ### 21.5 The page
 
-One file, no dependencies, dark, sized for a thumb. A masthead with the day and its figure — and,
-when today is running late, the same **Reflow · 1h 20m behind** the desktop masthead shows (§16.8);
-the day as a timeline (routines dashed and recessive, ghosts outlined, due times as flagged
-markers, a now-line on today); a bottom bar with **Tray** and **＋ New**. Swiping across the day
-steps it; arrow keys and `T` work too.
+One file, no dependencies, dark, sized for a thumb — and laid out around one rule: **the masthead
+is what you read, and the bar at the bottom is everything you touch.** Nothing in the masthead is
+tappable. That started as ergonomics and turned out to be structural: navigation used to be four
+buttons in the top row, which on a phone held in one hand is the furthest thing from a thumb, while
+the three easiest targets on the screen were spent on Tray, Notes and ＋ New — of which only the
+last is used often. Two properties fall out of the rule rather than having to be maintained. The
+masthead becomes a fixed height per view (76px in both), so a mode change re-measures to the same
+number and the two IntersectionObservers are not torn down and rebuilt; and every control left
+under a resting thumb is reversible — Tray, Today, the mode toggle and ＋ New only move you or open
+something you can cancel.
+
+The masthead holds the day and its figure in the day view, and in the agenda one muted line naming
+the day the buttons act on (**Today · Sunday 6 September**, with **· 1h 20m behind** in amber when
+it is, §16.8) above the glance line. The body is the day as a timeline (routines dashed and
+recessive, ghosts outlined, due times as flagged markers, a now-line on today) or the agenda ribbon.
+
+The bar is two rows. A **scrubber** — the seven-tap week strip in the day view, the seven-cell month
+rail in the agenda — and a **deck** of four: Tray, Today, the mode toggle, ＋ New. `‹ ›` are gone
+from the screen entirely: the scrubber reaches three days or three months either way in one tap,
+which is further than a step and nearer the hand. They survive as what `←` `→` and the swipe call.
+`T` and `W` work as before. The week strip is **centred on the shown day**, three either way, rather
+than anchored to Monday — a Monday-anchored week offers a Sunday reader seven days that have already
+happened.
+
+Two things moved out of the bar. **Notes** is a third of the width for something opened once a week;
+it is now a button in the Tray sheet's footer, beside the tasks it is about. And **Reflow** is not
+reversible, so it does not sit under a resting thumb: it is a chip at the top of the Tray sheet, on
+all three tabs, and the deck only points at it — the Tray button takes an amber underline when the
+day is behind. The badge on that button keeps meaning exactly one thing, how much is waiting, urgent
+when something is due; otherwise an empty tray on a late day would have shown an urgent zero.
+
+**Every sheet ends in a way out that is on screen.** The footer is sticky, so Close is reachable
+however long the list above it is — a Close at the bottom of 88vh of scrolling tasks is not a way
+out of anything one-handed, and the ＋ New sheet had none at all. The grip at the top is a real
+button: tap it to close, or drag it down past 60px. Anything in between springs back, because a
+half-committed drag should not decide.
 
 Under the figure, the shown day's week as seven taps, Monday first like the calendar, each with up
 to three dots for what the wall calendar would show on it — events and due dates, in their own
