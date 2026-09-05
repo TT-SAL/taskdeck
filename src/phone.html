@@ -771,6 +771,26 @@
     } catch (_) {}
   }
 
+  // When the oldest thing currently on screen was last written, or `null` if
+  // nothing on screen came out of storage. The day view has one day and one
+  // answer; the agenda has months fetched at different times, and naming the
+  // oldest is the only "as of" that cannot overstate how fresh the list is.
+  function keptSince() {
+    if (state.mode !== 'agenda') {
+      const held = recall(state.day);
+      return held ? held.at : null;
+    }
+    let oldest = null;
+    const months = new Set();
+    for (const date of state.agenda.onScreen) months.add(monthOf(date));
+    if (!months.size && state.agenda.first) months.add(monthOf(state.agenda.first));
+    for (const key of months) {
+      const held = recallMonth(key);
+      if (held && (oldest === null || held.at < oldest)) oldest = held.at;
+    }
+    return oldest;
+  }
+
   // Everything a fetch said, into the one store. Returns the dates whose
   // content actually moved.
   //
@@ -1020,11 +1040,16 @@
       const waiting = outbox().length;
       const suffix = waiting ? ` · ${waiting} change${waiting === 1 ? '' : 's'} waiting to be sent` : '';
       const actions = waiting ? [discardAction] : [];
-      if (cached) {
-        takeSnapshot(cached.snap);
-        render();
-        const when = new Date(cached.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-        showBanner(`Showing this day as of ${when} — ${error.message}${suffix}`, { retry: true, actions });
+      if (cached) takeSnapshot(cached.snap);
+      if (cached) render();
+      const kept = keptSince();
+      if (kept) {
+        const when = new Date(kept).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        // "This day" in the day view, where there is one. The agenda is a
+        // patchwork of months last written at different times, so the only
+        // claim that cannot be wrong there is the oldest of them.
+        const what = state.mode === 'agenda' ? 'Showing kept days — the oldest here is from' : 'Showing this day as of';
+        showBanner(`${what} ${when} — ${error.message}${suffix}`, { retry: true, actions });
       } else {
         showBanner(error.message + suffix, { retry: true, actions });
       }
@@ -1200,7 +1225,11 @@
     if (mode === 'agenda') state.day = todayIso();
     render();
     if (mode === 'agenda') {
-      if (!state.agenda.first) renderAgenda();
+      // The store may have grown since boot — a day view fetches seven days of
+      // its own — so the run is derived again here rather than assumed.
+      if (!state.agenda.first) seedRun(todayIso());
+      if (!state.agenda.first || !state.agenda.nodes.size) renderAgenda();
+      drawEnds();
       jumpToDate(todayIso(), { load: false });
       growIfShort();
     } else {
@@ -1542,7 +1571,18 @@
     const tail = $('agendaTail');
     head.replaceChildren();
     tail.replaceChildren();
-    if (!agenda.first) return;
+    if (!agenda.first) {
+      // Nothing kept for any day — a first-ever open with no answer yet. Say
+      // which of the two it is rather than showing an empty page.
+      tail.append(agenda.stalled
+        ? el('button', {
+            class: 'card',
+            text: "Couldn't reach TaskDeck, and nothing is kept for these days yet — tap to try again",
+            onclick: () => { agenda.stalled = false; drawEnds(); load({ span: 31 }); },
+          })
+        : el('div', { class: 'waiting', text: 'Loading…' }));
+      return;
+    }
 
     head.append(el('button', {
       class: 'card',
@@ -1769,7 +1809,11 @@
       if (!held) continue;
       for (const day of held.days) if (!state.agenda.days.has(day.date)) state.agenda.days.set(day.date, day);
     }
-    if (state.mode === 'agenda') seedRun(todayIso());
+    // Always, whichever view is open. These are two dates derived from what is
+    // already in memory — and leaving them unset in day mode meant that tapping
+    // through to the agenda afterwards rendered an empty run, with nothing on
+    // any later path to notice or repair it.
+    seedRun(todayIso());
   }
 
   // One way to change the day on screen, from anywhere.

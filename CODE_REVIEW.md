@@ -192,6 +192,24 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **Opening in the day view left the agenda unable to draw itself** (`phone.html`, `seedAgenda`,
+  `setMode`): the run's two ends were derived from the store only when the *stored mode* was the
+  agenda. Boot into the day view — which is what a reload does after you have tapped through to a
+  day — and `state.agenda.first` stayed `null`, so the first tap on **Agenda** ran `renderAgenda()`
+  against an empty run, cleared the body and returned. Nothing on any later path noticed: the patch
+  path only replaces existing nodes and the growth path returns early with no run, so it stayed
+  blank until the next reload, which is exactly how it looked — "it comes back when I close and
+  reopen it". Reported as an offline symptom, because a pull-to-refresh reloads; it happened with
+  the server running too. The ends are now always derived, `setMode` derives them again in case the
+  store grew after boot, and it draws the ends it had also been skipping.
+- **The offline banner claimed one "as of" for a patchwork** (`phone.html`): it read *"Showing this
+  day as of 14:20"* in the agenda, wording inherited from the day view. The agenda is months last
+  written at different times, so the only claim that cannot overstate its freshness is the oldest
+  of the ones on screen, which is what `keptSince()` returns and what the banner now names.
+- **Nothing kept at all was a blank page** (`phone.html`, `drawEnds`): a first-ever open with no
+  answer yet returned before drawing either end. It now says whether it is waiting or whether it
+  gave up, and offers the retry in the second case.
+
 - **Subscribed events were opaque blocks on a translucent wall** (`ui.rs`, `preview_color`): the
   colour schemes carry alpha 74–136 so the background photo shows through, and COLORSCHEME ZERO
   carries none at all — but `preview_color` built a subscribed event's colour with
