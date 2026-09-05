@@ -2402,6 +2402,30 @@ you are reading; a sentinel at the top would fire on every cold open, since the 
 reading position, and an automatic *prepend* is the one mutation that can land in the middle of a
 fling. A tap has no fling in flight.
 
+**The masthead answers the question before anything is read.** The line under the buttons says one
+of five things: what you are in and when it ends (*AG Board Game Night — until 03:30*), how long
+until the next thing when it is close (*In 40m — KEK101 · 15:15 · Chemicum, sali A110*), how long
+you are free for when it is not (*Free for 4h 10m — then MS-C1350 at 10:15*), that a task falls due
+rather than a place to be, or that there is nothing left today and what tomorrow starts with. A
+filled dot means something is on or nearly on; a hollow one means you are free. It is drawn from
+today's snapshot, which is already in hand, and re-drawn every minute and whenever the app comes
+back to the front — *in 25 min* is true for one minute, and a phone out of a pocket must not show a
+twenty-minute-old answer for as long as a round trip takes, or on a dead network for ever.
+
+It replaces the day figure in this view, deliberately. "1h planned · 2 blocks" is a fact about a day
+rather than an answer about it, and on a day made entirely of lectures it read *nothing on this day*,
+because the figure counts only the board's own things. The names are shortened to the part anyone
+actually uses — a university feed writes `MS-C1350, Partial Differential Equations, Lähiopetus
+1.9.–7.12.2026 - Luento - L01`, and the answer to *what am I in* is `MS-C1350`. Long spans and
+all-day bands take no part in it: they describe a day rather than occupying it, so they cannot say
+when you are free.
+
+The big date comes off the masthead here, because the rail immediately below already names the month
+in the same words, and the room it frees is where the answer goes. (It also could not fit: a flex
+item will not shrink below its content without `min-width: 0`, so `Wednesday` at 26px had been
+running off the right edge of the screen next to four buttons, in both views, since the masthead was
+written.)
+
 **Nothing about scrolling changes anything.** It is a reading motion: it never moves the shown day,
 never sends a command, and is never reachable from `load()` — which runs from the long poll, a
 sixty-second timer, the tab becoming visible and the network returning, and would otherwise fetch a

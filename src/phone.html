@@ -53,11 +53,35 @@
   }
   .nav button:active, .chip:active { background: var(--surface-2); }
   .nav button:disabled { opacity: 0.45; }
-  .date { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
-  .weekday { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+  /* `min-width: 0` so it can never push itself off the screen: a flex item
+     will not shrink below its content without it, and "Wednesday" at 26px is
+     wider than the room left beside four buttons on a phone. */
+  .date { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; min-width: 0; }
+  .weekday { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .weekday.today { color: #f0c36b; }
   .daylabel { color: var(--muted); font-size: 13px; margin-top: 2px; }
   .summary { color: var(--muted); font-size: 13px; margin-top: 8px; min-height: 1.3em; }
+  /* The line that answers the question before anything is read. Two rows of
+     fixed height, because the masthead is sticky and everything below it is
+     positioned from its height — a line that grew and shrank would move the
+     whole list under the reader's thumb. */
+  .summary.glance {
+    display: grid; grid-template-columns: 10px 1fr; gap: 0 8px;
+    align-items: center; margin-top: 9px; min-height: 38px;
+  }
+  .summary.glance .gdot {
+    grid-row: 1 / span 2; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent); align-self: center;
+  }
+  .summary.glance .gdot.hollow { background: none; border: 2px solid var(--accent); }
+  .summary.glance .glead {
+    font-size: 16px; font-weight: 700; color: var(--text); letter-spacing: -0.01em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .summary.glance .gdetail {
+    font-size: 12px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .week { display: flex; gap: 4px; margin-top: 10px; }
   .week button {
     flex: 1; height: 44px; border-radius: 10px; background: transparent; color: var(--muted);
@@ -1108,6 +1132,7 @@
     $('weekday').textContent = day.weekday;
     $('weekday').classList.toggle('today', day.is_today);
     $('daylabel').textContent = day.label + (day.is_today ? ' · today' : '');
+    $('summary').classList.remove('glance');
     $('summary').textContent = day.summary;
 
     // Work booked before the now-line and not ticked off: the day is running
@@ -1135,11 +1160,16 @@
       $('timeline').hidden = true;
       $('week').hidden = true;
       $('weekgrid').hidden = false;
+      // The big date comes off: the rail directly below already says which
+      // month you are reading, in the same words, and the room it frees is
+      // where the answer goes.
+      document.querySelector('.date').hidden = true;
       railAndMasthead();
       measureSticky();
       return;
     }
     renderWeek(day);
+    document.querySelector('.date').hidden = false;
     $('weekgrid').hidden = true;
     $('timeline').hidden = false;
     $('week').hidden = false;
@@ -1417,17 +1447,119 @@
     ]);
   }
 
+  /* ─────────────────────── The answer, before you read ───────────────────
+   *
+   * The question this app exists to answer, on the move, one-handed, is *am I
+   * free, and where am I going next*. Everything else on the screen answers it
+   * eventually; this line answers it immediately, and it costs nothing to draw
+   * because today's snapshot is already here.
+   *
+   * It replaces the day figure in this view. "1h planned · 2 blocks" is a fact
+   * about the day, not an answer about it — and on a day made entirely of
+   * lectures it said "nothing on this day", because the figure counts only the
+   * board's own things.
+   */
+
+  // A name short enough to recognise at a glance. University feeds put the
+  // course code first and then a hundred characters of itinerary, and the code
+  // is how anyone actually refers to the thing.
+  function shortName(name) {
+    const cut = name.indexOf(',');
+    if (cut > 1 && cut <= 30 && cut < name.length - 1) return name.slice(0, cut);
+    return name;
+  }
+
+  // Everything on a day that takes time or falls due, in clock order. All-day
+  // bands and day-long spans are left out: they describe the day rather than
+  // occupying it, so they cannot answer "when am I free".
+  function commitments(day) {
+    if (!day) return [];
+    const out = [];
+    for (const entry of day.entries) {
+      out.push({
+        start: entry.start,
+        end: entry.start + (entry.marker ? 0 : entry.minutes),
+        name: entry.name,
+        where: '',
+        due: !!entry.marker && !!entry.due,
+        accent: colorOf(entry.color),
+      });
+    }
+    for (const event of (day.subscribed || [])) {
+      if (event.all_day || event.background) continue;
+      out.push({ start: event.start, end: event.end, name: event.name, where: event.where || '', due: false, accent: event.color });
+    }
+    return out.sort((a, b) => a.start - b.start || a.end - b.end);
+  }
+
+  function glanceFor(day, tomorrow, now) {
+    const all = commitments(day);
+    const here = all.filter((c) => c.end > c.start && c.start <= now && now < c.end);
+    if (here.length) {
+      // The one finishing first: it is the one whose ending changes what you
+      // can do next, and it is what "until" has to be about.
+      const soonest = here.reduce((a, b) => (a.end <= b.end ? a : b));
+      const more = here.length > 1 ? ` +${here.length - 1}` : '';
+      return {
+        lead: shortName(soonest.name) + more,
+        detail: [`until ${hhmm(soonest.end)}`, soonest.where].filter(Boolean).join(' · '),
+        accent: soonest.accent,
+        hollow: false,
+      };
+    }
+    const next = all.find((c) => c.start > now);
+    if (next) {
+      const away = next.start - now;
+      const what = shortName(next.name);
+      if (away <= 90) {
+        return {
+          lead: `In ${dur(away)}`,
+          detail: [next.due ? `${what} due` : what, hhmm(next.start), next.where].filter(Boolean).join(' · '),
+          accent: next.accent,
+          hollow: false,
+        };
+      }
+      return {
+        lead: `Free for ${dur(away)}`,
+        detail: `then ${what}${next.due ? ' due' : ''} at ${hhmm(next.start)}`,
+        accent: next.accent,
+        hollow: true,
+      };
+    }
+    // Nothing left today, so the useful next fact is tomorrow's first thing —
+    // which the store already holds, because the ribbon fetched it.
+    const first = commitments(tomorrow)[0];
+    return {
+      lead: 'Nothing else today',
+      detail: first ? `Tomorrow · ${shortName(first.name)} at ${hhmm(first.start)}` : '',
+      accent: first ? first.accent : 'var(--faint)',
+      hollow: true,
+    };
+  }
+
+  function renderGlance() {
+    const box = $('summary');
+    const day = state.snap && state.snap.days[0];
+    box.classList.add('glance');
+    if (!day || day.date !== todayIso()) {
+      // Between midnight and the first answer of the new day. Say nothing
+      // rather than something about yesterday.
+      box.replaceChildren(el('span', { class: 'gdot hollow', style: '--accent:var(--faint)' }), el('span', { class: 'glead', text: '…' }), el('span', { class: 'gdetail' }));
+      return;
+    }
+    const at = glanceFor(day, state.agenda.days.get(shiftDay(day.date, 1)), nowMinutes());
+    box.replaceChildren(
+      el('span', { class: 'gdot' + (at.hollow ? ' hollow' : ''), style: `--accent:${at.accent}` }),
+      el('span', { class: 'glead', text: at.lead }),
+      el('span', { class: 'gdetail', text: at.detail }),
+    );
+  }
+
   // The masthead in the agenda: where you are reading on the left, and what
   // the verbs below will act on — which is today, always — on the right.
   function railAndMasthead() {
     const at = state.agenda.month || monthOf(state.day);
-    const [y, m] = at.split('-').map(Number);
-    const when = new Date(y, m - 1, 1);
-    $('weekday').textContent = when.toLocaleDateString(undefined, { month: 'long' });
-    $('weekday').classList.toggle('today', at === monthOf(todayIso()));
-    $('daylabel').textContent = String(y);
-    const today = state.snap && state.snap.days[0];
-    $('summary').textContent = today ? `Today · ${today.summary}` : '';
+    renderGlance();
     if (state.railFor !== at) { state.railFor = at; renderRail(); }
   }
 
@@ -2633,11 +2765,22 @@
       // Never redraw a sheet someone is typing into.
       load({ quiet: true });
     }, 60000);
-    setInterval(() => { if (state.snap && state.mode === 'day') renderNow(state.snap.days[0]); }, 60000);
+    setInterval(() => {
+      if (!state.snap) return;
+      // "In 25 min" is only true for a minute. The now-line and the glance line
+      // are the two things on this page that are wrong the moment they are old.
+      if (state.mode === 'day') renderNow(state.snap.days[0]);
+      else renderGlance();
+    }, 60000);
     watch();
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') load({ quiet: true });
+    if (document.visibilityState !== 'visible') return;
+    // Straight away, off what is already here: a phone that has been in a
+    // pocket for twenty minutes must not show a twenty-minute-old answer for
+    // as long as a round trip takes, or on a dead network for ever.
+    if (state.mode === 'agenda' && state.snap) renderGlance();
+    load({ quiet: true });
   });
   // The network coming back is the moment to send what waited.
   window.addEventListener('online', () => {

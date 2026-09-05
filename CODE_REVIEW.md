@@ -192,6 +192,17 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **The masthead stated the day rather than answering about it** (`phone.html`, §21.5): in the
+  agenda it read `Today · 1h planned · 2 blocks`, a figure that counts only the board's own things —
+  so on a day made entirely of lectures it said *nothing on this day*. It is now the answer to the
+  question the app exists for: what you are in and until when, how long until the next thing, or how
+  long you are free. Drawn from the snapshot already in hand, and re-drawn every minute and on
+  return to the front, because *in 25 min* is true for exactly one minute.
+- **`Wednesday` ran off the right edge of the screen** (`phone.html`, `.date`): a flex item will not
+  shrink below its content without `min-width: 0`, and the masthead's date had neither that nor an
+  ellipsis, so beside four buttons on a phone it overflowed the row and the viewport. Present since
+  the masthead was written, in both views; found because a month name is exactly as long.
+
 - **Nothing the phone server sent was compressed** (`phone.rs`, `Encoding`): every response is text
   — a 127 KB page, a 25 KB snapshot, an iCalendar feed — sent uncompressed to a phone usually on
   mobile data. `flate2` was already in the tree under `image`. The page is now 37,142 bytes instead
