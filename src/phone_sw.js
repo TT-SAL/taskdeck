@@ -1,8 +1,8 @@
 // TaskDeck's service worker: keeps the phone page's shell so it opens with
 // the server unreachable. The page then shows the last snapshot it kept and
-// says as of when. Only the shell and the icon are cached, network-first so
-// an update to the page arrives the next time it can; the API, the feed and
-// the manifest are never cached — a stale answer to "what is on today" is
+// says as of when. Only the shell and the icon are cached, and cache-first —
+// see the fetch handler for why, and for the one-launch lag that buys; the
+// API, the feed and the manifest are never cached — a stale answer to "what is on today" is
 // worse than no answer, and the page has its own memory of the day.
 //
 // A service worker needs a secure context: https, or localhost. Over plain
