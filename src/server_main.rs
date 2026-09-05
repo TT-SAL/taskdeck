@@ -38,7 +38,8 @@ otherwise next to the executable, otherwise the per-user data directory.
 userconfig.toml there; --port and --bind override the first two for this run
 (--bind 100.x.y.z serves the tailnet alone; the default 0.0.0.0 is every
 interface). The token is minted on first start.
---print-link shows the phone links and the data directory, then exits — for
+--print-link shows the phone links, the data directory and the time zone, then
+exits, and draws the first link as a QR code when a terminal is watching — for
 checking a setup, or for a link when the service is already running; it reads
 the settings and writes nothing. --version prints the version and build date.
 ";
@@ -97,6 +98,19 @@ fn parse_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Opti
     Ok(options)
 }
 
+/// Whether to draw the QR at all.
+///
+/// A terminal on the other end, and nobody having asked for plain text. Piped
+/// output stays a link and nothing else, so `--print-link | awk` keeps working
+/// and the journal does not fill with block characters every time systemd
+/// restarts the unit. `NO_COLOR` skips it rather than printing it uncoloured:
+/// without the explicit colours the polarity is the terminal theme's guess,
+/// and half the time that is an inverted code no phone will read.
+fn show_qr() -> bool {
+    use std::io::IsTerminal;
+    std::env::var_os("NO_COLOR").is_none() && std::io::stdout().is_terminal() && std::io::stderr().is_terminal()
+}
+
 fn main() {
     let options = match parse_args(std::env::args_os().skip(1)) {
         Ok(options) => options,
@@ -138,6 +152,18 @@ fn main() {
         for address in phone::addresses_for(&bind) {
             println!("phone: {}", phone::page_url(&address, port, &config.phone_token));
             println!("feed:  {}", phone::feed_url(&address, port, &config.phone_token));
+        }
+        // And the first of those links as something a phone camera can take
+        // straight off the screen, since the alternative is typing a
+        // thirty-two character token. Only when a person is watching: this
+        // path is piped by `install.sh` and by anyone scripting it, and a
+        // screenful of escape codes in the middle of that is not a link.
+        if show_qr()
+            && let Some(address) = phone::addresses_for(&bind).first()
+            && let Some(code) = phone::qr_text(&phone::page_url(address, port, &config.phone_token))
+        {
+            println!();
+            print!("{code}");
         }
         return;
     }
@@ -235,6 +261,18 @@ fn main() {
         eprintln!("  phone link:  {}", phone::page_url(&address, port, &config.phone_token));
     }
     eprintln!("  feed:        /calendar.ics?token=…   (same host and port)");
+    // Started by hand in a terminal, with the phone in the other hand: draw
+    // the link so the camera can take it. Under systemd this is a journal
+    // socket rather than a terminal, so the journal stays readable — which
+    // matters because the unit restarts every three seconds while a bound
+    // address has not come up (SERVER.md §5).
+    if show_qr()
+        && let Some(address) = phone::addresses_for(&bind).first()
+        && let Some(code) = phone::qr_text(&phone::page_url(address, port, &config.phone_token))
+    {
+        eprintln!();
+        eprint!("{code}");
+    }
 
     // The whole program: take a request, answer it, publish if it changed
     // anything. The saves inside `Board::apply` are atomic, so a SIGTERM from

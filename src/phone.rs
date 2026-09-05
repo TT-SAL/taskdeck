@@ -1102,6 +1102,72 @@ pub fn qr_modules(text: &str) -> Option<(usize, Vec<bool>)> {
     Some((width, cells))
 }
 
+/// Four light modules on every side. RFC-mandated, and the reason a QR with no
+/// margin will not scan: the decoder isolates the finder patterns by the light
+/// ground around them, and in a terminal that ground is whatever colour the
+/// theme happens to be.
+const QR_QUIET: usize = 4;
+/// The extremes of the xterm-256 cube. Not the basic eight: a theme is free to
+/// decide its own "black" is #073642, and Solarized does — these two are fixed.
+const QR_INK: u8 = 16;
+const QR_PAPER: u8 = 231;
+
+/// The phone link as a QR code a terminal can print and a camera can read.
+///
+/// `None` when the text will not encode, which for a link means never; the
+/// caller prints nothing extra rather than unwrapping.
+///
+/// Two things here are not obvious and are the whole reason this is not three
+/// lines of the `qrcode` crate's own renderer:
+///
+/// **Polarity.** A QR is dark-on-light by specification, and the ZXing family
+/// that Android's scanners come from declines to decode an inverted one rather
+/// than spend half its time looking. The crate's `Dense1x2` default paints a
+/// *dark* module as a printed glyph, which takes the terminal's foreground
+/// colour — correct on a light terminal and inverted on a dark one, and a
+/// server is usually read over ssh on a dark one. So the colours are written
+/// out explicitly, and the code carries its own contrast whatever the theme.
+///
+/// **The glyph.** Only `▄` and a space, never `█` or `▀`: several terminal
+/// fonts leave a hairline gap above a full or upper block, which stacks into
+/// stripes through the code and breaks the scan. A lower half block with the
+/// colours swapped draws the same pixels with no gap — the trick `qr2term`
+/// documents.
+pub fn qr_text(text: &str) -> Option<String> {
+    let (width, cells) = qr_modules(text)?;
+    let side = width + QR_QUIET * 2;
+    // A light module outside the code, a real one inside it.
+    let dark_at = |x: usize, y: usize| -> bool {
+        let (Some(x), Some(y)) = (x.checked_sub(QR_QUIET), y.checked_sub(QR_QUIET)) else {
+            return false;
+        };
+        if x >= width || y >= width {
+            return false;
+        }
+        cells.get(y * width + x).copied().unwrap_or(false)
+    };
+    let paint = |dark: bool| if dark { QR_INK } else { QR_PAPER };
+
+    let mut out = String::new();
+    // Two module rows to a text row: a terminal cell is about twice as tall as
+    // it is wide, so this is what makes the modules square.
+    for pair in (0..side).step_by(2) {
+        for x in 0..side {
+            let top = dark_at(x, pair);
+            // An odd number of rows leaves the last half light, which is quiet
+            // zone either way.
+            let bottom = dark_at(x, pair + 1);
+            if top == bottom {
+                out.push_str(&format!("\x1b[48;5;{}m ", paint(top)));
+            } else {
+                out.push_str(&format!("\x1b[38;5;{}m\x1b[48;5;{}m▄", paint(bottom), paint(top)));
+            }
+        }
+        out.push_str("\x1b[0m\n");
+    }
+    Some(out)
+}
+
 /* ─────────────────────────────── Snapshots ─────────────────────────────── */
 
 /// Everything the page needs to draw a day and its tray, in one answer.
@@ -2150,6 +2216,95 @@ mod tests {
     fn manifest_keeps_the_token_for_home_screen_shortcuts() {
         assert!(manifest(Some("abc")).contains(r#""start_url":"/?token=abc""#));
         assert!(manifest(None).contains(r#""start_url":"/""#));
+    }
+
+    /// Read the rendered ANSI back into a module grid.
+    ///
+    /// The point of the test below: a QR that is transposed, off by a row, or
+    /// inverted still *looks* like a QR, and only a round trip catches it.
+    fn modules_from_ansi(text: &str) -> Vec<Vec<bool>> {
+        let mut grid: Vec<Vec<bool>> = Vec::new();
+        let ink_bg = format!("48;5;{QR_INK}");
+        let ink_fg = format!("38;5;{QR_INK}");
+        for line in text.lines() {
+            let (mut top, mut bottom) = (Vec::new(), Vec::new());
+            // A cell may carry two escapes before its glyph, so the codes are
+            // gathered until one actually arrives.
+            let mut pending = String::new();
+            let mut chars = line.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == '\u{1b}' {
+                    let mut code = String::new();
+                    for next in chars.by_ref() {
+                        if next == 'm' {
+                            break;
+                        }
+                        code.push(next);
+                    }
+                    pending.push_str(&code);
+                    continue;
+                }
+                match ch {
+                    // A space paints only its background: both halves alike.
+                    ' ' => {
+                        let dark = pending.contains(&ink_bg);
+                        top.push(dark);
+                        bottom.push(dark);
+                    }
+                    // `▄`: foreground is the lower half, background the upper.
+                    '\u{2584}' => {
+                        top.push(pending.contains(&ink_bg));
+                        bottom.push(pending.contains(&ink_fg));
+                    }
+                    _ => {}
+                }
+                pending.clear();
+            }
+            if !top.is_empty() {
+                grid.push(top);
+                grid.push(bottom);
+            }
+        }
+        grid
+    }
+
+    #[test]
+    fn a_printed_qr_is_the_same_code_the_screen_would_have_drawn() {
+        // The longest thing this ever encodes: a tailnet host and a
+        // thirty-two character token. Spelled out rather than taken from a
+        // real machine, so the test carries nobody's network in it.
+        let url = "http://a-laptop.tailnet-example.ts.net:7373/?token=abcdefghijkmnpqrstuvwxyz23456789";
+        let (width, cells) = qr_modules(url).expect("a link encodes");
+        let text = qr_text(url).expect("and renders");
+        let grid = modules_from_ansi(&text);
+
+        let side = width + QR_QUIET * 2;
+        assert_eq!(text.lines().count(), side.div_ceil(2), "two module rows to a text row");
+        assert!(grid.len() >= side, "every module row is accounted for");
+        assert!(grid.iter().all(|row| row.len() == side), "and every row is the full width");
+
+        // The quiet zone is light ink, not merely absent — the decoder finds
+        // the corners by it, and a terminal's own background is whatever the
+        // theme says.
+        for x in 0..side {
+            assert!(!grid[0][x] && !grid[QR_QUIET - 1][x], "the top margin is light");
+        }
+        for row in grid.iter().take(side) {
+            assert!(!row[0] && !row[QR_QUIET - 1], "and so are the sides");
+        }
+
+        // And every module came back where it went in, the right way round.
+        // Inverted, transposed or shifted by one, this is the assertion that
+        // fails; by eye, all three still look like a QR code.
+        for y in 0..width {
+            for x in 0..width {
+                assert_eq!(
+                    grid[y + QR_QUIET][x + QR_QUIET],
+                    cells[y * width + x],
+                    "module ({x}, {y}) came back different"
+                );
+            }
+        }
     }
 
     #[test]

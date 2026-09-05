@@ -2511,7 +2511,11 @@ version if anything changed. Everything the phone view is (§21) it serves uncha
 `TaskApp` and a winit proxy. It stops on `SIGTERM` like any service; the saves inside `apply` are
 atomic, so a stop at any instant leaves the files whole. `--print-link` prints the data directory
 and the phone and feed links without taking the lock or binding the port, so it can be run beside
-the service to read its link — and it creates no folders either (`AppDirs::locate`, §4), so a look
+the service to read its link. It also draws the first link as a QR code, so a phone camera can take
+it off the screen rather than someone typing a thirty-two character token; that appears only when
+stdout and stderr are both terminals, so piping the output stays a clean parseable link and a
+`NO_COLOR` environment suppresses it. The startup banner does the same on the same terms, which
+means under systemd it never does. It creates no folders either (`AppDirs::locate`, §4), so a look
 taken as the wrong user leaves nothing behind that the service cannot then write. `--port N`
 overrides the port for one run. The arguments are read as OS strings by a small `parse_args`:
 a flag it does not know, a value it cannot read, or an

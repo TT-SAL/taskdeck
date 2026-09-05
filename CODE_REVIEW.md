@@ -216,6 +216,27 @@ Fixes already landed (newest first). Kept here as history so the open list above
   that overlaps nothing still gets the lane, and none of them takes room from your own work. The
   phone is laid out server-side and drawn from `column`/`columns` like every other entry, so the
   page still decides nothing. Test `two_meetings_at_the_same_hour_are_given_a_column_each`.
+- **The server draws its own QR code** (`phone::qr_text`, `server_main.rs`): getting the phone link
+  onto a phone was the one genuinely awkward step left, and every obvious answer is worse than it
+  sounds — the link is a bearer credential travelling over plain HTTP, so email, a messenger or
+  Chrome's send-to-your-devices each park it in somebody's log; Quick Share has no macOS client at
+  all; Taildrop works but wants a first-run folder picker on Android and simply hung here; and
+  typing thirty-two random characters is about a coin flip per attempt against a 401 that cannot
+  say which character was wrong. The encoder was already in the tree for the Settings panel, so
+  this is a renderer, not a feature: eight lines of half-blocks over `qr_modules`.
+  Two things a first attempt gets wrong, both found by reading rather than by scanning failures.
+  **Polarity**: a QR is dark-on-light by specification and the ZXing family that Android scanners
+  come from declines an inverted one by design, but the `qrcode` crate's own renderer paints a
+  *dark* module as a printed glyph, which takes the terminal's foreground colour — right on a light
+  terminal, inverted on the dark one an ssh session usually is. The colours are written out
+  explicitly instead, in the 256-colour extremes rather than the basic eight, which a theme is free
+  to redefine and Solarized does. **The glyph**: only `▄` and a space, never `█` or `▀`, because
+  several terminal fonts leave a hairline gap above those which stacks into stripes through the
+  code. Test `a_printed_qr_is_the_same_code_the_screen_would_have_drawn` reads the ANSI back into a
+  module grid and compares it against the encoder — inverted, transposed or shifted by one row it
+  all still *looks* like a QR, and only a round trip catches it. Printed only when stdout and
+  stderr are both terminals and `NO_COLOR` is unset, so `--print-link | awk` stays parseable and
+  the journal does not fill with block characters each time systemd restarts the unit.
 - **The server run on a Mac, over Tailscale, against a real board** (SERVER.md, new *Trying it on
   a Mac first*): the whole deployment document assumed the Linux box, and the cheapest way to find
   out whether that box is wanted is to run the binary on the machine already there. Four things

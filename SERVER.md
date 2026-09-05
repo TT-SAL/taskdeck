@@ -267,6 +267,13 @@ first log lines show the LAN link only; `--print-link` a minute later shows both
 bound to the Tailscale address alone is simply restarted by systemd every three seconds until the
 address exists.
 
+Getting the link onto the phone is the one fiddly part, and the server does it for you: run
+`--print-link` **in a terminal** and it draws the first link as a QR code under the text. Point the
+phone's camera at it. On a Samsung the scanner is a one-time toggle behind the Camera app's gear
+("Scan QR codes"); Google Lens works otherwise. Piping the output suppresses the code and leaves a
+plain link, so scripts are unaffected. Never send the link through email or a messenger: it is a
+bearer credential, it travels over plain HTTP, and every hop keeps a copy.
+
 `taskdeck-server --help` lists the flags: `--port N` and `--bind ADDR` override the port and
 the address for one run;
 `--print-link` prints the data directory and the phone and feed links without serving (safe to
