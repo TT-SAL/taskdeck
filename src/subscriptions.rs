@@ -386,6 +386,14 @@ impl Overlay {
             hash = fold(hash, &event.end.to_le_bytes());
             hash = fold(hash, &[event.all_day as u8, event.free as u8]);
             hash = fold(hash, event.summary.as_bytes());
+            // Where it is and what it says are part of what the calendar told
+            // us, so a room that moved is a change. Leaving them out meant a
+            // cache written before this field existed was never displaced by
+            // a fetch that had it — the events matched, so nothing looked
+            // different, and the rooms stayed blank until something else on
+            // the day happened to move.
+            hash = fold(hash, event.location.as_bytes());
+            hash = fold(hash, event.description.as_bytes());
         }
         hash
     }
@@ -791,6 +799,16 @@ mod tests {
         // A real change is a change.
         let changed = Overlay::sealed(vec![event(1, day(2026, 9, 10), 600, 660, "A renamed")], Vec::new());
         assert_ne!(one.digest(), changed.digest());
+
+        // Including a room that moved. Left out of the digest, a cache written
+        // before the field existed is never displaced by a fetch that has it:
+        // the events match, so nothing looks different, and the room stays
+        // blank. Found in use rather than in a test.
+        let mut relocated = one.events.clone();
+        if let Some(first) = relocated.first_mut() {
+            first.location = "Chemicum, sali A110".into();
+        }
+        assert_ne!(one.digest(), Overlay::sealed(relocated, Vec::new()).digest());
     }
 
     #[test]

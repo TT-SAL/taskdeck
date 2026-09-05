@@ -216,6 +216,13 @@ Fixes already landed (newest first). Kept here as history so the open list above
   that overlaps nothing still gets the lane, and none of them takes room from your own work. The
   phone is laid out server-side and drawn from `column`/`columns` like every other entry, so the
   page still decides nothing. Test `two_meetings_at_the_same_hour_are_given_a_column_each`.
+- **A new field that never displaced the cache** (`subscriptions.rs`): `Overlay::digest` hashed the
+  subscription, day, start, end, all-day and free flags and the summary — and nothing else. So the
+  first fetch carrying a `LOCATION` compared equal to the cache written before that field existed,
+  `adopt_overlay` declined it as unchanged, and the rooms stayed blank until something else on the
+  day happened to move. The digest now covers the location and the description too, which is what
+  it always should have meant: it answers "is this the same calendar", and a room that moved is
+  not. Found in use rather than in a test — the events matched, so nothing looked wrong.
 - **Where it is, off its own field** (`ics.rs`, `phone.html`, `ui.rs`): the first real complaint
   once this was in daily use was that names were cut off with an ellipsis, and the thing being cut
   was the classroom. Reading the feed answered it: a university event's `SUMMARY` runs to a median
