@@ -166,6 +166,23 @@ pub fn clean_bind_address(text: &str) -> String {
     }
 }
 
+/// The address to hand out, from the file: an `http://` or `https://` origin
+/// with the trailing slash taken off, or empty for anything else.
+///
+/// Empty is the ordinary case and means "use this machine's own addresses".
+/// Anything that is not a URL is treated as empty rather than refused: the
+/// consequence of a typo here should be the links this app already knew how to
+/// build, not no links at all.
+pub fn clean_public_url(text: &str) -> String {
+    let text = text.trim().trim_end_matches('/');
+    let looks_right = (text.starts_with("https://") || text.starts_with("http://"))
+        && text.split("://").nth(1).is_some_and(|rest| {
+            let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+            !host.is_empty() && host.contains('.')
+        });
+    if looks_right { text.to_string() } else { String::new() }
+}
+
 /// `frame_cap_fps = 0` means uncapped — the render loop of `DOCUMENTATION.md`
 /// §14.1, which is the default and the intended way to run on a desktop.
 pub const FRAME_CAP_UNCAPPED: u32 = 0;
@@ -292,6 +309,10 @@ fn config_from(extracted: &HashMap<String, String>) -> Config {
             .get("phone_bind_address")
             .map(|s| clean_bind_address(s))
             .unwrap_or_else(|| crate::phone::DEFAULT_BIND.to_string()),
+        phone_public_url: extracted
+            .get("phone_public_url")
+            .map(|s| clean_public_url(s))
+            .unwrap_or_default(),
         frame_cap_fps: extracted
             .get("frame_cap_fps")
             .and_then(|n| n.parse::<u32>().ok())
@@ -372,6 +393,7 @@ fn write_normalized_config(path: &Path, config: &Config) {
     doc["phone_server_port"] = value(config.phone_server_port as i64);
     doc["phone_token"] = value(config.phone_token.clone());
     doc["phone_bind_address"] = value(config.phone_bind_address.clone());
+    doc["phone_public_url"] = value(config.phone_public_url.clone());
     doc["frame_cap_fps"] = value(config.frame_cap_fps as i64);
     doc["server_url"] = value(config.server_url.clone());
     doc["server_token"] = value(config.server_token.clone());
@@ -405,6 +427,16 @@ pub struct Config {
     /// interface) unless the file names one address, which then serves alone.
     /// Not on the settings sheet — a posture decided once, in the file.
     pub phone_bind_address: String,
+    /// The address to *hand out*, when it is not the one to listen on.
+    ///
+    /// Empty by default, and then the links are built from this machine's own
+    /// addresses. Set it when something in front of the server owns the name a
+    /// phone should use — `tailscale serve`, a reverse proxy, a real domain —
+    /// and the printed links and the QR code use it verbatim. Without it, a
+    /// Tailscale setup hands out a bare `http://100.x.y.z:7373`, which works
+    /// but arrives with a browser warning and no offline shell, because it is
+    /// not a secure context.
+    pub phone_public_url: String,
     /// Frames per second the render loop is held to while awake, or
     /// `FRAME_CAP_UNCAPPED` (0) for the flat-out loop of §14.1. For laptops on
     /// battery; see `App::schedule_next_frame`.
@@ -1092,6 +1124,7 @@ mod tests {
             phone_server_port: crate::phone::DEFAULT_PORT,
             phone_token: "abc".to_string(),
             phone_bind_address: crate::phone::DEFAULT_BIND.to_string(),
+            phone_public_url: String::new(),
             frame_cap_fps: FRAME_CAP_UNCAPPED,
             server_url: String::new(),
             server_token: String::new(),
@@ -1127,6 +1160,32 @@ mod tests {
         assert_eq!(get_check_and_set_config(&path).phone_bind_address, crate::phone::DEFAULT_BIND);
         // And the normalised file carries the key from then on.
         assert!(fs::read_to_string(&path).unwrap().contains("phone_bind_address = \"0.0.0.0\""));
+    }
+
+    #[test]
+    fn an_address_to_hand_out_is_taken_as_given_or_left_empty() {
+        // What goes on the QR when something in front of the server owns the
+        // name — `tailscale serve`, a proxy, a domain. Taken verbatim: the
+        // thing in front chose the scheme, host and port, and guessing at any
+        // of them is how a link that looks right stops working.
+        assert_eq!(clean_public_url(" https://a-laptop.tailnet.ts.net/ "), "https://a-laptop.tailnet.ts.net");
+        assert_eq!(clean_public_url("https://cal.example.com:8443"), "https://cal.example.com:8443");
+        // http is allowed here, unlike a calendar subscription: this one is
+        // the user's own server on their own network, and they may not have a
+        // certificate yet.
+        assert_eq!(clean_public_url("http://box.local.example.com"), "http://box.local.example.com");
+        // Anything that is not a URL falls back to the links the app already
+        // knew how to build, rather than to no links at all.
+        for bad in ["", "  ", "a-laptop.tailnet.ts.net", "https://", "ftp://x.example.com", "https://nodots"] {
+            assert_eq!(clean_public_url(bad), "", "{bad:?}");
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("userconfig.toml");
+        fs::write(&path, "phone_public_url = \"https://a-laptop.tailnet.ts.net/\"\n").unwrap();
+        assert_eq!(get_check_and_set_config(&path).phone_public_url, "https://a-laptop.tailnet.ts.net");
+        // And it is written back, so the key is discoverable in the file.
+        assert!(fs::read_to_string(&path).unwrap().contains("phone_public_url"));
     }
 
     #[test]

@@ -98,6 +98,15 @@ fn parse_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Opti
     Ok(options)
 }
 
+/// The link a phone should be given: the address in front of the server when
+/// there is one, else the most reachable of this machine's own.
+fn link_for_phone(config: &initialization::Config, bind: &str, port: u16) -> Option<String> {
+    if !config.phone_public_url.is_empty() {
+        return Some(phone::public_page_url(&config.phone_public_url, &config.phone_token));
+    }
+    phone::addresses_for(bind).first().map(|address| phone::page_url(address, port, &config.phone_token))
+}
+
 /// Whether to draw the QR at all.
 ///
 /// A terminal on the other end, and nobody having asked for plain text. Piped
@@ -141,7 +150,7 @@ fn main() {
         // that the service then cannot write.
         let config = initialization::read_config_only(&dirs.config_file());
         let port = port_override.unwrap_or(config.phone_server_port);
-        let bind = bind_override.unwrap_or(config.phone_bind_address);
+        let bind = bind_override.unwrap_or_else(|| config.phone_bind_address.clone());
         println!("data:  {}", dirs.data.display());
         // The runbook in SERVER.md tells people to check this here.
         println!("zone:  {}", Local::now().format("%Y-%m-%d %H:%M %Z (UTC%:z)"));
@@ -149,9 +158,20 @@ fn main() {
             println!("key:   not minted yet — it is, on the first start");
             return;
         }
-        for address in phone::addresses_for(&bind) {
-            println!("phone: {}", phone::page_url(&address, port, &config.phone_token));
-            println!("feed:  {}", phone::feed_url(&address, port, &config.phone_token));
+        // When something in front of this owns the name a phone should use —
+        // `tailscale serve`, a proxy, a real domain — that is the only link
+        // worth printing, and the QR should carry it rather than a raw address
+        // that arrives with a browser warning and no offline shell.
+        if !config.phone_public_url.is_empty() {
+            println!("phone: {}", phone::public_page_url(&config.phone_public_url, &config.phone_token));
+            println!("feed:  {}", phone::public_feed_url(&config.phone_public_url, &config.phone_token));
+        } else {
+            for address in phone::addresses_for(&bind) {
+                let reach =
+                    if phone::is_tailnet(&address) { "  (tailnet — anywhere)" } else { "  (this network only)" };
+                println!("phone: {}{reach}", phone::page_url(&address, port, &config.phone_token));
+                println!("feed:  {}", phone::feed_url(&address, port, &config.phone_token));
+            }
         }
         // And the first of those links as something a phone camera can take
         // straight off the screen, since the alternative is typing a
@@ -159,8 +179,8 @@ fn main() {
         // path is piped by `install.sh` and by anyone scripting it, and a
         // screenful of escape codes in the middle of that is not a link.
         if show_qr()
-            && let Some(address) = phone::addresses_for(&bind).first()
-            && let Some(code) = phone::qr_text(&phone::page_url(address, port, &config.phone_token))
+            && let Some(link) = link_for_phone(&config, &bind, port)
+            && let Some(code) = phone::qr_text(&link)
         {
             println!();
             print!("{code}");
@@ -257,8 +277,13 @@ fn main() {
     // wrong is the quiet failure: everything works, both desktops look right,
     // and only the phone's dates are off at the edges of the day (SERVER.md §4).
     eprintln!("  local time:  {}", Local::now().format("%Y-%m-%d %H:%M %Z (UTC%:z)"));
-    for address in phone::addresses_for(&bind) {
-        eprintln!("  phone link:  {}", phone::page_url(&address, port, &config.phone_token));
+    if !config.phone_public_url.is_empty() {
+        eprintln!("  phone link:  {}", phone::public_page_url(&config.phone_public_url, &config.phone_token));
+    } else {
+        for address in phone::addresses_for(&bind) {
+            let reach = if phone::is_tailnet(&address) { "  (tailnet — anywhere)" } else { "  (this network only)" };
+            eprintln!("  phone link:  {}{reach}", phone::page_url(&address, port, &config.phone_token));
+        }
     }
     eprintln!("  feed:        /calendar.ics?token=…   (same host and port)");
     // Started by hand in a terminal, with the phone in the other hand: draw
@@ -267,8 +292,8 @@ fn main() {
     // matters because the unit restarts every three seconds while a bound
     // address has not come up (SERVER.md §5).
     if show_qr()
-        && let Some(address) = phone::addresses_for(&bind).first()
-        && let Some(code) = phone::qr_text(&phone::page_url(address, port, &config.phone_token))
+        && let Some(link) = link_for_phone(&config, &bind, port)
+        && let Some(code) = phone::qr_text(&link)
     {
         eprintln!();
         eprint!("{code}");

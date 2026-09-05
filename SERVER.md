@@ -105,6 +105,19 @@ sudo tailscale serve --bg 7373
 Leave `phone_bind_address` at `0.0.0.0` when you do. `serve` hands requests to `127.0.0.1`, and a
 single-address bind refuses them — the same trap §2 records for the Linux side.
 
+Then tell the server the name, so the printed links and the QR carry it instead of a raw address:
+
+```toml
+phone_public_url = "https://your-machine.your-tailnet.ts.net"
+```
+
+Without it the links are built from the machine's own addresses, and the QR gets the first of them.
+That is a working link on the LAN and a **link that hangs forever** on a phone with no Wi-Fi — it
+connects to nothing rather than failing, which is worse than an error. The addresses are now
+ordered with the tailnet one first for exactly that reason, but a `tailscale serve` name beats it
+anyway: no port, no browser warning, and a secure context, which is what lets the offline shell
+install at all.
+
 ## 1. The machine and its OS
 
 Any x86-64 or ARM64 box with a couple of gigabytes of RAM is more than enough; the server idles

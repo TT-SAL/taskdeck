@@ -1002,7 +1002,38 @@ fn manifest(token: Option<&str>) -> String {
 /// A private-range destination yields the LAN interface; Tailscale's
 /// `100.100.100.100` yields the tailnet address when one is up, and the LAN
 /// address again when it is not — so duplicates are dropped.
+/// Whether this is a Tailscale address — the `100.64.0.0/10` range Tailscale
+/// hands out (RFC 6598, carrier-grade NAT space).
+///
+/// Worth telling apart from an ordinary LAN address because the two are not
+/// equally useful: a tailnet address answers from the sofa, from a train and
+/// from the office, while a LAN address answers only from this network. When
+/// there is one of each, the tailnet one is the link to give somebody.
+pub fn is_tailnet(address: &str) -> bool {
+    match address.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => {
+            let [a, b, ..] = ip.octets();
+            a == 100 && (64..128).contains(&b)
+        }
+        _ => false,
+    }
+}
+
+/// Every address this machine can be reached on, **the most reachable first**.
+///
+/// The order is the whole point rather than a tidiness: whatever comes first
+/// is what the QR code encodes and what a person scans. A phone away from the
+/// house cannot reach `192.168.x.x`, so a QR carrying it does not fail — it
+/// spins, forever, which is worse than failing.
 pub fn local_addresses() -> Vec<String> {
+    let mut out = raw_local_addresses();
+    // A stable sort, so two addresses of the same kind keep the order the
+    // probes found them in.
+    out.sort_by_key(|address| !is_tailnet(address));
+    out
+}
+
+fn raw_local_addresses() -> Vec<String> {
     let mut out = Vec::new();
     for probe in ["10.255.255.255:1", "100.100.100.100:1"] {
         let Ok(socket) = UdpSocket::bind("0.0.0.0:0") else { continue };
@@ -1035,6 +1066,20 @@ pub fn addresses_for(bind: &str) -> Vec<String> {
 /// The link to open on the phone.
 pub fn page_url(address: &str, port: u16, token: &str) -> String {
     format!("http://{}:{port}/?token={}", host_for_url(address), encode_token(token))
+}
+
+/// The page, at an address somebody else owns — `phone_public_url`.
+///
+/// Taken as given rather than rebuilt: whatever is in front of the server
+/// decided the scheme, the host and the port, and guessing at any of them is
+/// how a link that looks right stops working.
+pub fn public_page_url(base: &str, token: &str) -> String {
+    format!("{}/?token={}", base.trim_end_matches('/'), encode_token(token))
+}
+
+/// The same for the feed.
+pub fn public_feed_url(base: &str, token: &str) -> String {
+    format!("{}/calendar.ics?token={}", base.trim_end_matches('/'), encode_token(token))
 }
 
 /// The calendar-feed link to subscribe to.
@@ -2315,6 +2360,25 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_address_that_works_from_anywhere_is_the_one_offered_first() {
+        // The QR encodes whatever comes first, and a phone away from the house
+        // cannot reach 192.168.x.x — a code carrying it does not fail, it
+        // spins forever, which is worse. Found by scanning one.
+        assert!(is_tailnet("100.101.102.103"));
+        assert!(is_tailnet("100.64.0.1") && is_tailnet("100.127.255.254"), "the ends of 100.64/10");
+        assert!(!is_tailnet("100.63.255.255") && !is_tailnet("100.128.0.0"), "and just outside it");
+        assert!(!is_tailnet("192.168.1.10"));
+        assert!(!is_tailnet("10.0.0.4"));
+        // 100.x that is not in the CGNAT block is somebody's public address.
+        assert!(!is_tailnet("100.200.1.1"));
+        assert!(!is_tailnet("not an address"));
+
+        let mut addresses = vec!["192.168.1.10".to_string(), "100.101.102.103".to_string()];
+        addresses.sort_by_key(|address| !is_tailnet(address));
+        assert_eq!(addresses.first().map(String::as_str), Some("100.101.102.103"));
     }
 
     #[test]

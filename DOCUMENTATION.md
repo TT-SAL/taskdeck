@@ -1,3 +1,4 @@
+| `phone_public_url` | string | `""` | the address to **hand out** when something in front of the server owns it — `tailscale serve`, a proxy, a real domain. Empty means build the links from this machine's own addresses. Taken verbatim, trailing slash trimmed; anything that is not an `http(s)` URL with a host falls back to empty. File only, read at start |
 # TaskDeck — Technical Documentation
 
 > A native desktop calendar / task-deck application written in Rust, rendered with

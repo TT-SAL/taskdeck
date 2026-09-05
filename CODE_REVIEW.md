@@ -216,6 +216,20 @@ Fixes already landed (newest first). Kept here as history so the open list above
   that overlaps nothing still gets the lane, and none of them takes room from your own work. The
   phone is laid out server-side and drawn from `column`/`columns` like every other entry, so the
   page still decides nothing. Test `two_meetings_at_the_same_hour_are_given_a_column_each`.
+- **The QR carried the one address the phone could not reach** (`phone.rs`, `server_main.rs`,
+  `initialization.rs`): `--print-link` listed this machine's addresses in the order two UDP probes
+  happened to find them, and the QR encoded the first — which on an ethernet-connected desktop is
+  the LAN address. Scanned from a phone with no Wi-Fi, that link does not fail, it **hangs**: it
+  connects to nothing and spins, which is worse than an error because there is nothing to read.
+  Two fixes. The addresses are now ordered most-reachable-first, tailnet before LAN, because a
+  `100.64.0.0/10` address answers from a train and a `192.168.x.x` one does not; both are printed
+  with which is which. And a new `phone_public_url` names the address to hand out when something in
+  front of the server owns it — `tailscale serve`, a proxy, a real domain — in which case the links
+  and the QR carry that instead. That is the better answer even when the raw one works: no port, no
+  browser warning, and a secure context, which is the only way the offline shell installs. Taken
+  verbatim rather than rebuilt, since the thing in front chose the scheme, host and port. Tests
+  `the_address_that_works_from_anywhere_is_the_one_offered_first` and
+  `an_address_to_hand_out_is_taken_as_given_or_left_empty`.
 - **Two floors under the phone page, and the settings that break it from outside** (`phone.html`,
   SERVER.md): a read of what the page actually asks of a browser turned up one hard floor and one
   silent trap. `replaceChildren` is the newest thing in the file — Firefox 78, Chrome 86, Safari

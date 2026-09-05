@@ -32,7 +32,7 @@ async fn run() {
     // why a second instance is warned rather than turned away.
     let _data_claim = paths::claim_data_dir(&dirs.data);
 
-    let Config { start_in_fullscreen, coordinates, background, enable_fps_counter, window_size_startup, calendar_weeks_to_show, selected_monitor_name, mut selected_colorscheme_id, three_day_weather, background_image_tint_percent, ui_scale_percent, phone_server_enabled, phone_server_port, mut phone_token, phone_bind_address, frame_cap_fps, server_url, server_token } = get_check_and_set_config(&dirs.config_file());
+    let Config { start_in_fullscreen, coordinates, background, enable_fps_counter, window_size_startup, calendar_weeks_to_show, selected_monitor_name, mut selected_colorscheme_id, three_day_weather, background_image_tint_percent, ui_scale_percent, phone_server_enabled, phone_server_port, mut phone_token, phone_bind_address, phone_public_url: _, frame_cap_fps, server_url, server_token } = get_check_and_set_config(&dirs.config_file());
 
     // Collected non-fatal startup recovery messages (e.g. quarantined corrupt
     // files), surfaced in the error window once the UI is up.
