@@ -259,7 +259,15 @@ fn main() {
     let pulse = Arc::new(Pulse::new());
     // Nothing to wake: this thread is only ever waiting on the queue.
     let wake: phone::Wake = Arc::new(|| {});
-    let _server = match PhoneServer::start(&bind, port, config.phone_token.clone(), tx, wake, Arc::clone(&pulse)) {
+    let _server = match PhoneServer::start(
+        &bind,
+        port,
+        config.phone_token.clone(),
+        tx,
+        wake,
+        Arc::clone(&pulse),
+        board.version(),
+    ) {
         Ok(server) => server,
         Err(error) => {
             eprintln!("taskdeck-server: {error}");

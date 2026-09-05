@@ -192,6 +192,20 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **A freshly started server made the phone ask sixteen thousand times a second** (`phone.rs`,
+  `server_main.rs`, `ui.rs`): `/api/wait` answers the instant the pulse's version differs from the
+  one the phone sends, and the phone sends the version off its last snapshot — the board's, which a
+  server seeds from the clock so a restart never reuses a number a client has taken for the latest.
+  The pulse, meanwhile, started at zero and was published only *after* something changed. So from
+  the moment a server started until the first edit anybody made, every wait came back immediately
+  carrying `0`, the page refetched, found the same version it already had, and asked again — as fast
+  as the link allowed. Measured in a browser against the real board: 16,364 requests in ten seconds.
+  Nothing was wrong at either end except that they never agreed about a number. The board's version
+  is now a **parameter of `PhoneServer::start`** rather than something a caller is trusted to publish
+  first, because forgetting it is silent and costs somebody their battery. The page also refuses to
+  spin: if a refetch does not move it to the version a wake-up announced, the two ends disagree about
+  a number rather than a day, and it waits five seconds before asking again.
+
 - **One unsent edit held the whole opening screen blank** (`phone.html`, `load()`): the first statement
   in `load()` replayed the offline outbox, and only after that did the page paint the day it already
   had in storage. `flush()` awaits each queued command at the 15-second request timeout, so a single

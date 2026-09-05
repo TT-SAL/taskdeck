@@ -3380,6 +3380,7 @@ impl TaskApp {
             self.phone_tx.clone(),
             wake,
             Arc::clone(&self.phone_pulse),
+            self.board.version(),
         ) {
             Ok(server) => {
                 self.phone_server = Some(server);

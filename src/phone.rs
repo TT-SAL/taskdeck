@@ -570,6 +570,17 @@ impl PhoneServer {
     /// is what guards the door in both cases. Binding one address is the
     /// narrower posture for a box that also sits on a network it should not
     /// serve (`SERVER.md` §2).
+    /// `version` is the board's, as it stands right now.
+    ///
+    /// It is a parameter rather than something the caller is trusted to publish
+    /// beforehand, because forgetting it is silent and expensive. `/api/wait`
+    /// answers the instant its version differs from the one the phone sends,
+    /// and the phone sends the version off its last snapshot — the board's,
+    /// which a server seeds from the clock. A pulse still at zero therefore
+    /// answers *every* wait immediately with a number no snapshot will ever
+    /// carry, and the page refetches and asks again as fast as the link
+    /// allows: thousands of requests a second, on a phone, in a pocket, with
+    /// nothing wrong at either end except that they never agree.
     pub fn start(
         bind: &str,
         port: u16,
@@ -577,10 +588,12 @@ impl PhoneServer {
         tx: Sender<PhoneRequest>,
         wake: Wake,
         pulse: Arc<Pulse>,
+        version: u64,
     ) -> Result<Self, String> {
         if token.is_empty() {
             return Err("The phone view has no token to guard it with.".to_string());
         }
+        pulse.publish(version);
         let ip: IpAddr = bind
             .trim()
             .parse()
@@ -1998,6 +2011,22 @@ mod tests {
         assert_eq!(exact.days.last().map(|d| d.date), Some(from + ChronoDuration::days(30)));
     }
 
+    #[test]
+    fn a_listener_waiting_on_the_version_the_board_is_at_is_not_answered_at_once() {
+        // A pulse that starts at zero while the board's version starts at the
+        // clock answers every single wait immediately, with a number no
+        // snapshot carries — and the page refetches and asks again as fast as
+        // the link allows. `PhoneServer::start` takes the board's version for
+        // exactly this reason; here is the property that made it a parameter.
+        let seeded = 1_788_639_208_669_u64;
+        let pulse = Pulse::new();
+        pulse.publish(seeded);
+        assert_eq!(pulse.current(), seeded);
+
+        // Fresh, it would have said zero — which is the bug, stated.
+        assert_eq!(Pulse::new().current(), 0);
+    }
+
     fn headers(pairs: &[(&str, &str)]) -> Vec<Header> {
         pairs.iter().map(|(k, v)| header(k, v)).collect()
     }
@@ -2304,7 +2333,7 @@ mod tests {
 
         let (tx, _rx) = channel();
         let wake: Wake = Arc::new(|| {});
-        let Err(error) = PhoneServer::start("kitchen", 0, "k".to_string(), tx, wake, Arc::new(Pulse::new())) else { panic!("a bad bind must not listen") };
+        let Err(error) = PhoneServer::start("kitchen", 0, "k".to_string(), tx, wake, Arc::new(Pulse::new()), 0) else { panic!("a bad bind must not listen") };
         assert!(error.contains("not an address"), "{error}");
     }
 
