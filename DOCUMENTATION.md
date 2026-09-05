@@ -1970,9 +1970,9 @@ ambiguity: they are never live at the same time, and each is the obvious mnemoni
 | | `A` | Close |
 | Settings | `S` / `Esc` | Close |
 | Dialogs | `Enter` / `Esc` | Accept / cancel |
-| Phone page (§21.5) | `←` `→` | Previous / next day (or week, in the week view) |
+| Phone page (§21.5) | `←` `→` | Previous / next day (or month, in the agenda) |
 | | `T` | Today |
-| | `W` | Day ↔ week |
+| | `W` | Day ↔ agenda |
 
 The shortcuts are named in the menu buttons' hover text and in the planner's own hint line, because
 a single-letter shortcut nobody knows about is not a feature.
@@ -2370,20 +2370,67 @@ steps it; arrow keys and `T` work too.
 
 Under the figure, the shown day's week as seven taps, Monday first like the calendar, each with up
 to three dots for what the wall calendar would show on it — events and due dates, in their own
-colours, the same budget a calendar cell has (one extra seven-day request per week and per
-change). **Week** (`W`) turns that same seven-day answer into a view: seven days one under the
-other as a **list**, each day a heading with a count and the day's things beneath it in clock
-order — the start over the end in the left column, the name, and the room under it when the event
-came from a subscribed calendar. ‹ › and a swipe step a week at a time, and a tap on a day's
-heading opens it. The choice of view is remembered on the phone.
+colours, the same budget a calendar cell has. The dots are drawn from the same store the agenda
+fills, so the week costs no request of its own; a day the page has not been told about yet simply
+has no dots.
 
-It was a seven-column time grid until it met a real week. The arithmetic is unkind: at 380
-device-independent pixels a column is 51 wide, and a lecture called *MS-C1350, Partial Differential
-Equations, L01* in a room called *U4 NORDEA - U142* has nothing to say in 51 pixels. Turning the
-grid on its side does not help — 24 hours across 380px gives a 90-minute lecture 28 pixels, and
-clipping the night away to 07:00–22:00 only gets to 44. A grid spends its width on *when*, which
-seven columns cannot afford; a list spends it on *what*, and the clock survives as two small
-numbers. The day view keeps its hour scale, because one column can pay for it. **Notes** in the bottom bar opens the desktop notepad's text, and **Save** replaces it
+**The agenda** (`W`) is the other view, and the one the page opens in — a continuous list of days,
+each a heading with a count and the day's things beneath it in clock order: the start over the end
+in the left column, the name, and the room under it when the event came from a subscribed calendar.
+It is one run, not a week: it grows a month at a time downward on its own as you reach the end, and
+upward when you tap **▲ Earlier**.
+
+The asymmetry is deliberate. A sentinel at the bottom is safe because appending never moves what
+you are reading; a sentinel at the top would fire on every cold open, since the run starts at the
+reading position, and an automatic *prepend* is the one mutation that can land in the middle of a
+fling. A tap has no fling in flight.
+
+**Nothing about scrolling changes anything.** It is a reading motion: it never moves the shown day,
+never sends a command, and is never reachable from `load()` — which runs from the long poll, a
+sixty-second timer, the tab becoming visible and the network returning, and would otherwise fetch a
+page a minute with the phone in a pocket. In this view the shown day is pinned to **today**, so
+**＋ New**, **Reflow** and **Tray** all mean today and the masthead says so in words. That is not a
+limitation working around a problem; a scroll position quietly retargeting an edit is how work gets
+booked on the wrong date. To act on another day, tap its heading, which opens it in the day view.
+
+A **month rail** replaces the week strip inside this view: seven cells, the month you are reading
+in the middle, a tap on an end cell three months away. Pure scrolling is O(distance) in
+thumb-flicks — a day is about 250px and a screen holds three, so a flick is roughly a week and next
+February is twenty flicks — and the rail makes anywhere within half a year two taps for seven nodes
+and one function.
+
+Three numbers bound it. The **DOM holds four months** and settles back to three: whole months are
+dropped from the far end at idle, never while a finger is down, and never from below unless the
+reader is two screens clear of it — trimming the bottom near the bottom clamps the scroll offset
+and throws the list a screenful. The **cache holds six months** as one blob per month under
+`taskdeck-month-*`, deliberately outside the `taskdeck-snap-` prefix so the day cache's scan of the
+whole store does not grow, and bounded to what the boot actually reads back so a month scrolled
+past once is never written and left. **One request is ever in flight**, through a promise chain:
+every one of them serialises on the desk's UI thread anyway, and a fan-out would only starve the
+fetch for the day someone is looking at.
+
+Two things hold the reading position still. Everything that inserts or removes days above it goes
+through one helper that **measures** a surviving day's real screen position before and after the
+change and puts back the difference — which is right whether the engine's own scroll anchoring
+compensated fully, partly or not at all, and cannot land on top of an adjustment the engine already
+made. And every programmatic scroll is `auto` and never `smooth`, because anchor adjustments are
+skipped for the whole duration of a scripted animation.
+
+A day past the far edge of the subscribed calendars (§21.4's `known`) is drawn with a dashed rule
+and says **nothing of yours** rather than *nothing*, with one card at the end saying where the line
+is. This is not a gate — it was one, and the gate was wrong twice over: a page is a whole month, so
+the boundary falls *inside* one and there is no step to stop at, and a rail jump steps over it
+without asking. What a reader needs is to know why those days look empty, and each of them says so
+for itself.
+
+The day view was the only view until the week became a seven-column time grid, and the grid did
+not survive meeting a real week. The arithmetic is unkind: at 380 device-independent pixels a
+column is 51 wide, and a lecture called *MS-C1350, Partial Differential Equations, L01* in a room
+called *U4 NORDEA - U142* has nothing to say in 51 pixels. Turning the grid on its side does not
+help — 24 hours across 380px gives a 90-minute lecture 28 pixels, and clipping the night away to
+07:00–22:00 only gets to 44. A grid spends its width on *when*, which seven columns cannot afford;
+a list spends it on *what*, and the clock survives as two small numbers. The day view keeps its
+hour scale, because one column can pay for it. **Notes** in the bottom bar opens the desktop notepad's text, and **Save** replaces it
 whole (`Command::SetNotes`, tabs removed as on the desktop) — explicit rather than per keystroke,
 so the desk and the phone cannot fight over a sentence.
 

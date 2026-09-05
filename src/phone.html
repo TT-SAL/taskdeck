@@ -180,15 +180,34 @@
 
   /* ── Week ── */
   .weekgrid { margin: 6px 6px 0 4px; }
-  .weekhead { display: flex; padding-left: 26px; position: sticky; top: 0; z-index: 4; background: var(--bg); }
-  .weekhead button {
-    flex: 1; min-width: 0; padding: 4px 0 6px; text-align: center; color: var(--muted);
+  /* Scrolling to a date months away is O(distance) in thumb-flicks: a day is
+     about 250px, a screen holds three of them, so a hard flick is roughly a
+     week and next February is twenty flicks. Seven month cells and two taps
+     get there instead, and take nothing away from the scroll. */
+  .rail { position: sticky; top: var(--mast-h); z-index: 4; background: var(--bg); display: flex; }
+  .rail button {
+    flex: 1; min-width: 0; padding: 5px 0 6px; text-align: center; color: var(--muted);
     display: flex; flex-direction: column; align-items: center; line-height: 1.1;
+    font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
   }
-  .weekhead button .wd { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
-  .weekhead button .dn { font-size: 15px; font-weight: 700; color: var(--text); }
-  .weekhead button.today .dn { color: #f0c36b; }
-  .weekhead button.shown { background: var(--surface); border-radius: 8px; }
+  .rail button.here { background: var(--surface); border-radius: 8px; color: var(--text); font-weight: 700; }
+  .rail button .yr { font-size: 9px; letter-spacing: 0; opacity: 0.55; text-transform: none; }
+  .rail button.beyond { opacity: 0.4; }
+  /* The reading position is moved by `holdPlace` and by nothing else. Anything
+     inserted above it that skips `holdPlace` will jump the list by its full
+     height, silently, and only on a phone. */
+  .weekgrid { overflow-anchor: none; }
+  .aend { min-height: 1px; }
+  .aend .card {
+    margin: 10px 4px 14px; padding: 12px 14px; border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.45;
+  }
+  .aend .card b { color: var(--text); font-weight: 700; }
+  .aend .card button {
+    margin-top: 10px; padding: 8px 12px; border-radius: 10px;
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--line); font: inherit; font-weight: 700;
+  }
+  .aend .waiting { padding: 14px 4px 20px; color: var(--faint); font-size: 12px; }
   /* The week is a list, not a grid.
      Seven columns on a phone gives each day about fifty pixels, and a course is
      called "MOLE-101, Biokemia, Biokemia 3.9.–20.10.2026 - Luentokurssi" and
@@ -199,12 +218,22 @@
      reading what is on is what a week is for. The shape of the hours lives in
      the day view, which is one column wide and can afford it. */
   .weekbody { display: block; position: relative; }
-  .aday { margin: 0 0 4px; }
+  /* `contain` and not `content-visibility: auto`: skipping the layout of
+     off-screen days makes their height a guess, the document height drifts by
+     a fifth over a year of them, and landing on a named date — which is the
+     whole point of this view — misses by a screenful. */
+  .aday { margin: 0 0 4px; contain: layout style; }
+  /* Sticky on the heading and never on the section. Gecko refuses a sticky
+     frame as a scroll anchor, so a sticky section would compensate none of a
+     prepend while a sticky heading leaves the section itself eligible. */
   .aday > button {
     display: flex; align-items: baseline; gap: 8px; width: 100%;
+    position: sticky; top: calc(var(--mast-h) + var(--rail-h)); z-index: 3;
     background: var(--bg); border: 0; border-bottom: 1px solid var(--line);
     color: var(--muted); padding: 9px 4px 5px; text-align: left; font: inherit;
   }
+  /* A day the calendars were never read for. Not the same as a free one. */
+  .aday.unknown > button { border-bottom-style: dashed; }
   .aday > button .adate { font-size: 14px; font-weight: 700; color: var(--text); }
   .aday > button .acount { margin-left: auto; font-size: 11px; color: var(--faint); }
   .aday.today > button .adate { color: #f0c36b; }
@@ -225,6 +254,7 @@
   .arow.sub .an { color: var(--muted); }
   .arow.done .an { color: var(--faint); text-decoration: line-through; }
   .anothing { padding: 4px 4px 8px; font-size: 12px; color: var(--faint); }
+  .aday.unknown .anothing { font-style: italic; }
 
   /* ── Bottom bar ── */
   .bar {
@@ -362,8 +392,13 @@
 </main>
 
 <section class="weekgrid" id="weekgrid" hidden>
-  <div class="weekhead" id="weekhead"></div>
+  <div class="rail" id="rail"></div>
+  <!-- Both ends are permanent children, so nothing has to be re-observed when
+       the list grows. The head carries a button and the tail a sentinel: see
+       `armSentinel`. -->
+  <div class="aend" id="agendaHead"></div>
   <div class="weekbody" id="weekbody"></div>
+  <div class="aend" id="agendaTail"></div>
 </section>
 
 <nav class="bar" id="bar">
@@ -425,8 +460,23 @@
     quickAddDraft: '',
     quickAddDue: null,      // the quick-add's optional due date while shown
     trayTab: 'unplanned',   // 'unplanned' | 'all' | 'done'
-    week: { key: null, marks: {}, days: null },   // the shown day's week, keyed by monday + version
-    mode: 'day',            // 'day' | 'week'
+    // The agenda ribbon: one contiguous run of days, and everything needed to
+    // grow it, keep it and put it back where it was.
+    agenda: {
+      days: new Map(),      // 'YYYY-MM-DD' -> DaySnapshot; the only copy of a day
+      months: new Map(),    // 'YYYY-MM' -> { at }, what the month cache holds
+      first: null,          // the run's ends, inclusive; null when nothing is drawn
+      last: null,
+      nodes: new Map(),     // date -> its .aday element
+      onScreen: new Set(),  // dates the place observer currently sees
+      month: null,          // the month at the reading position, for the rail
+      known: null,          // { from, until } the calendars were read for
+      chain: Promise.resolve(),  // one request at a time, in order
+      gen: 0,               // bumped to abandon growth that is no longer wanted
+      pending: null,        // 'after' | 'before' when the sentinel fired mid-flight
+      stalled: false,       // the network failed; the sentinel waits for a tap
+    },
+    mode: 'agenda',         // 'day' | 'agenda'
     notice: null,           // a refusal to show in the banner until acknowledged
   };
   // A refusal is kept until it is acknowledged, reload or not: it is the only
@@ -440,7 +490,13 @@
       else localStorage.removeItem(NOTICE_KEY);
     } catch (_) {}
   }
-  try { if (localStorage.getItem('taskdeck-mode') === 'week') state.mode = 'week'; } catch (_) {}
+  // An install that explicitly chose the day view keeps it; one that chose the
+  // old week grid gets the agenda that replaced it; one that never touched the
+  // button gets the agenda, which is what this page is mostly for.
+  try {
+    const stored = localStorage.getItem('taskdeck-mode');
+    if (stored === 'day') state.mode = 'day';
+  } catch (_) {}
 
   const $ = (id) => document.getElementById(id);
   const el = (tag, attrs = {}, children = []) => {
@@ -623,6 +679,120 @@
       return raw ? JSON.parse(raw) : null;
     } catch (_) { return null; }
   }
+
+  // The agenda's own store, one entry per calendar month.
+  //
+  // A whole snapshot is about five kilobytes and most of it — every item, the
+  // tray, the notepad — is the same in all of them; one day's slice of it is
+  // under a tenth of that. Keeping months rather than snapshots is what makes
+  // an offline cold open possible at all, and it is why these keys deliberately
+  // do NOT share the `taskdeck-snap-` prefix: `snapKeysOldestLast` walks the
+  // whole store and parses every value it matches, on every successful load,
+  // and it must not grow.
+  const MONTH_KEY = (key) => `taskdeck-month-${key}`;
+  // Two back and four forward. Forward is where a term is; back is far enough
+  // to cover last month, which is as far as anyone looks the other way.
+  const CACHE_MONTHS_BACK = 2;
+  const CACHE_MONTHS_FORWARD = 4;
+  const monthOf = (iso) => iso.slice(0, 7);
+  function shiftMonth(key, by) {
+    const [y, m] = key.split('-').map(Number);
+    const at = new Date(y, m - 1 + by, 1);
+    return `${at.getFullYear()}-${pad(at.getMonth() + 1)}`;
+  }
+  // Only months near today are worth keeping. The cache exists for one thing —
+  // that the first frame after tapping the icon has the list in it — and the
+  // boot only ever reads the months around today. A month in two years' time
+  // scrolled past once would be written, never read, and never swept, because
+  // the sweep works by computed key name over a bounded range.
+  function worthCaching(key) {
+    const away = monthsBetween(monthOf(todayIso()), key);
+    return away >= -CACHE_MONTHS_BACK && away <= CACHE_MONTHS_FORWARD;
+  }
+  function keepMonth(key) {
+    if (!worthCaching(key)) return;
+    const days = [];
+    for (const [date, day] of state.agenda.days) if (monthOf(date) === key) days.push(day);
+    if (!days.length) return;
+    days.sort((a, b) => (a.date < b.date ? -1 : 1));
+    const text = JSON.stringify({ at: Date.now(), days });
+    try {
+      localStorage.setItem(MONTH_KEY(key), text);
+      state.agenda.months.set(key, { at: Date.now() });
+    } catch (_) {
+      // Out of room. The furthest month from today is the one nobody will open
+      // next, so it goes, and one more try — then it is dropped in silence,
+      // because a cache that cannot be written is a slower open and not a
+      // broken one. The outbox's room is never taken for this.
+      const here = monthOf(todayIso());
+      let furthest = null, worst = -1;
+      for (const held of state.agenda.months.keys()) {
+        const away = Math.abs(monthsBetween(here, held));
+        if (away > worst) { worst = away; furthest = held; }
+      }
+      if (!furthest || furthest === key) return;
+      try {
+        localStorage.removeItem(MONTH_KEY(furthest));
+        state.agenda.months.delete(furthest);
+        localStorage.setItem(MONTH_KEY(key), text);
+        state.agenda.months.set(key, { at: Date.now() });
+      } catch (_) {}
+    }
+  }
+  function monthsBetween(a, b) {
+    const [ay, am] = a.split('-').map(Number);
+    const [by, bm] = b.split('-').map(Number);
+    return (by - ay) * 12 + (bm - am);
+  }
+  function recallMonth(key) {
+    try {
+      const raw = localStorage.getItem(MONTH_KEY(key));
+      if (!raw) return null;
+      const held = JSON.parse(raw);
+      return held && Array.isArray(held.days) ? held : null;
+    } catch (_) { return null; }
+  }
+  // By computed key name, never by walking the store: the walk is the thing
+  // this cache was shaped to stay out of.
+  function pruneMonths() {
+    try {
+      // A walk of the store, once, at boot — not on every write. It is the one
+      // place that can find a blob left by a build with different bounds, and
+      // it is cheap because it reads no values, only names.
+      const doomed = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith('taskdeck-month-')) continue;
+        const month = key.slice('taskdeck-month-'.length);
+        if (worthCaching(month)) state.agenda.months.set(month, { at: 0 });
+        else doomed.push(key);
+      }
+      doomed.forEach((key) => localStorage.removeItem(key));
+    } catch (_) {}
+  }
+
+  // Everything a fetch said, into the one store. Returns the dates whose
+  // content actually moved.
+  //
+  // Content and not `version`: the board bumps its version on every save it
+  // makes, so every day in every refresh answer carries a new one, and a
+  // version-keyed diff would replace all thirty-one sections because somebody
+  // renamed one task.
+  function absorb(snap) {
+    if (snap.known !== undefined) state.agenda.known = snap.known || null;
+    const moved = [];
+    const months = new Set();
+    for (const day of snap.days) {
+      const had = state.agenda.days.get(day.date);
+      const text = JSON.stringify(day);
+      if (had && JSON.stringify(had) === text) continue;
+      state.agenda.days.set(day.date, day);
+      moved.push(day.date);
+      months.add(monthOf(day.date));
+    }
+    for (const key of months) keepMonth(key);
+    return moved;
+  }
   function takeSnapshot(snap) {
     state.snap = snap;
     state.items = new Map(snap.items.map((item) => [item.id, item]));
@@ -776,13 +946,18 @@
   }
 
   let loadSeq = 0;
-  // The same, for the week's own request: two of them can be in flight and
-  // land out of order.
-  let weekSeq = 0;
   // Set when a replay sent something, cleared by whichever load draws the
   // board next: the redraw must not be lost with a load that was overtaken.
   let sheetStale = false;
-  async function load({ quiet = false } = {}) {
+  // The whole snapshot is for the shown day; a wider answer contributes only
+  // its days. Fourteen places read `state.snap.days[0]` as "the day on screen",
+  // and one of them puts that date on a command, so `state.snap` stays a
+  // one-day object however many days were asked for.
+  function anchorOf(snap) {
+    return snap.days.length === 1 ? snap : Object.assign({}, snap, { days: snap.days.slice(0, 1) });
+  }
+
+  async function load({ quiet = false, span = 1 } = {}) {
     // Two loads can be in flight — › tapped twice, a poll under a swipe. Only
     // the latest one's answer is shown, and a day's cache is keyed by the day
     // the answer is actually for, never by the day selected when it arrived.
@@ -819,13 +994,20 @@
     if (replayed && replayed.sent) sheetStale = true;
 
     try {
-      const snap = await api(`/api/state?from=${asked}&days=1`);
-      remember(snap.days[0].date, snap);
+      const snap = await api(`/api/state?from=${asked}&days=${span}`);
+      remember(snap.days[0].date, anchorOf(snap));
+      // The days go into the store whatever else happens: they are true, and a
+      // load that has been overtaken still fetched real days.
+      const moved = absorb(snap);
       if (mine !== loadSeq || asked !== state.day) return;
-      takeSnapshot(snap);
+      takeSnapshot(anchorOf(snap));
       settleBanner();
       render();
-      loadWeek();
+      // Absorb and patch, and NEVER grow the ribbon from here. `load({quiet})`
+      // runs from the long poll, from a sixty-second timer, from the tab
+      // becoming visible and from the network returning — a pager on this line
+      // would fetch a page a minute with nobody scrolling.
+      if (state.mode === 'agenda') { patchAgenda(moved); railAndMasthead(); }
       // A sheet is never redrawn under someone's fingers by a background
       // load — except when edits made from it have just gone through, so
       // that it shows what the board now says rather than what it said
@@ -919,30 +1101,27 @@
     count.classList.toggle('urgent', snap.tray.due.length > 0);
 
     $('todayBtn').title = day.is_today ? 'Scroll to now' : 'Jump to today';
-    renderWeek(day);
-    $('modeBtn').textContent = state.mode === 'week' ? 'Day' : 'Week';
+    $('modeBtn').textContent = state.mode === 'agenda' ? 'Day' : 'Agenda';
 
-    if (state.mode === 'week') {
-      // The week's span in the masthead, the grid for the body.
-      const monday = mondayOf(day.date);
-      const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
-      const fmt = (d) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-      $('weekday').textContent = `Week`;
-      $('weekday').classList.remove('today');
-      $('daylabel').textContent = `${fmt(monday)} – ${fmt(sunday)}`;
-      $('summary').textContent = state.week.days ? weekSummary(state.week.days) : '…';
-      $('behind').hidden = true;
+    if (state.mode === 'agenda') {
+      // The behind-schedule row stays: it is today's, and so is everything the
+      // bottom bar does. Only the week strip goes — the rail says where you are
+      // reading, and the sticky day headings say it again as you pass them.
       $('timeline').hidden = true;
       $('week').hidden = true;
-      renderWeekGrid();
+      $('weekgrid').hidden = false;
+      railAndMasthead();
+      measureSticky();
       return;
     }
+    renderWeek(day);
     $('weekgrid').hidden = true;
     $('timeline').hidden = false;
     $('week').hidden = false;
     renderHours();
     renderLanes(day);
     renderNow(day);
+    measureSticky();
   }
 
   function isoOf(date) {
@@ -965,13 +1144,16 @@
     week.replaceChildren();
     const monday = mondayOf(day.date);
     const today = todayIso();
-    const marks = state.week.key && state.week.key.startsWith(isoOf(monday)) ? state.week.marks : {};
     for (let i = 0; i < 7; i++) {
       const date = new Date(monday);
       date.setDate(monday.getDate() + i);
       const iso = isoOf(date);
+      // Off the same store the agenda reads, so the seven-day request that used
+      // to exist only for these dots is gone: the day fetch brings the week.
+      const held = state.agenda.days.get(iso);
+      const marks = held ? held.entries.filter((e) => e.kind === 'event' || e.due).map((e) => e.color) : [];
       const dots = el('span', { class: 'dots' });
-      for (const color of (marks[iso] || []).slice(0, 3)) dots.append(el('i', { style: `--c:${colorOf(color)}` }));
+      for (const color of marks.slice(0, 3)) dots.append(el('i', { style: `--c:${colorOf(color)}` }));
       const node = el('button', {
         class: (iso === day.date ? 'shown' : '') + (iso === today ? ' today' : ''),
         onclick: () => { if (iso !== state.day) goTo(iso); },
@@ -985,86 +1167,56 @@
     }
   }
 
-  // One extra request per week and per change, for the strip's dots.
-  async function loadWeek() {
-    if (!state.snap) return;
-    const monday = isoOf(mondayOf(state.day));
-    const key = `${monday}#${state.snap.version}`;
-    if (state.week.key === key) return;
-    // Swiping fast, or a poll landing under a tap, starts a second of these
-    // before the first answers. Out of order they leave `state.week` holding a
-    // week that is not the shown day's, and both drawing guards then refuse to
-    // draw — so the phone keeps showing the *previous* week, silently, until
-    // something else moves.
-    const mine = ++weekSeq;
-    try {
-      const snap = await api(`/api/state?from=${monday}&days=7`);
-      if (mine !== weekSeq) return;
-      const marks = {};
-      for (const d of snap.days) {
-        marks[d.date] = d.entries.filter((e) => e.kind === 'event' || e.due).map((e) => e.color);
-      }
-      state.week = { key, marks, days: snap.days };
-      // The whole masthead, not just the body: the week's summary line is set
-      // to `…` by `render()` before this answer exists, and drawing only the
-      // grid left it that way for as long as the view stayed open.
-      if (state.snap) render();
-    } catch (_) {
-      // The dots are a nicety; the day itself already loaded.
-    }
-  }
-
-  /* ───────────────────────────── Week view ─────────────────────────────
+  /* ─────────────────────────── The agenda ribbon ───────────────────────────
    *
-   * The same week the strip names, as seven columns at the day view's own
-   * hour scale, each laid out by the server exactly as the day is (lanes and
-   * all), too narrow to read a name in but wide enough to see the shape of a
-   * week: where the blocks are, which days are full, what is due when. A tap
-   * on a column opens that day.
+   * One continuous list of days, newest at the top of nothing in particular:
+   * it simply runs, from whatever the reader has scrolled back to down through
+   * whatever they have scrolled forward to, a month at a time. Each day is a
+   * heading and its things in clock order — the board's blocks, its ghosts, and
+   * whatever the subscribed calendars say — because reading *what is on* is
+   * what a week is for, and a phone's width can only afford to say one of
+   * "what" and "when" properly.
+   *
+   * Two rules hold the whole thing together.
+   *
+   * **Scrolling changes nothing.** It is a reading motion. It never moves the
+   * shown day, never sends a command, and never runs from `load()`. In this
+   * view the shown day is pinned to today, so ＋ New, Reflow and Tray all mean
+   * today and the masthead says so — a scroll position quietly retargeting an
+   * edit is how work gets booked on the wrong date.
+   *
+   * **Nothing moves the reading position except `holdPlace`.** Everything that
+   * inserts or removes days above where someone is reading goes through it.
    */
+
   function setMode(mode) {
     state.mode = mode;
     try { localStorage.setItem('taskdeck-mode', mode); } catch (_) {}
-    $('modeBtn').textContent = mode === 'week' ? 'Day' : 'Week';
-    $('prev').setAttribute('aria-label', mode === 'week' ? 'Previous week' : 'Previous day');
-    $('next').setAttribute('aria-label', mode === 'week' ? 'Next week' : 'Next day');
+    $('modeBtn').textContent = mode === 'agenda' ? 'Day' : 'Agenda';
+    $('prev').setAttribute('aria-label', mode === 'agenda' ? 'Previous month' : 'Previous day');
+    $('next').setAttribute('aria-label', mode === 'agenda' ? 'Next month' : 'Next day');
+    // Entering the agenda pins the shown day to today. This is the invariant
+    // that lets the verbs under the masthead keep meaning something exact.
+    if (mode === 'agenda') state.day = todayIso();
     render();
-    scrollToUsefulHour();
+    if (mode === 'agenda') {
+      if (!state.agenda.first) renderAgenda();
+      jumpToDate(todayIso(), { load: false });
+      growIfShort();
+    } else {
+      scrollToUsefulHour();
+    }
   }
 
-  function renderWeekGrid() {
-    const grid = $('weekgrid');
-    const days = state.week.days;
-    const shown = state.snap && state.snap.days[0];
-    if (!days || !shown || !state.week.key.startsWith(isoOf(mondayOf(state.day)))) return;
-
-    const head = $('weekhead');
-    head.replaceChildren();
-    // Sticky *under* the masthead, which is sticky too and taller.
-    head.style.top = `${document.querySelector('.mast').getBoundingClientRect().height}px`;
-    for (const day of days) {
-      const [y, m, d] = day.date.split('-').map(Number);
-      const date = new Date(y, m - 1, d);
-      head.append(el('button', {
-        class: (day.date === state.day ? 'shown' : '') + (day.is_today ? ' today' : ''),
-        onclick: () => { state.day = day.date; setMode('day'); load().then(scrollToUsefulHour); },
-        'aria-label': date.toDateString(),
-      }, [
-        el('span', { class: 'wd', text: date.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2) }),
-        el('span', { class: 'dn', text: String(date.getDate()) }),
-      ]));
-    }
-
-    const body = $('weekbody');
-    body.replaceChildren();
-
-    for (const day of days) {
-      const [dy, dm, dd] = day.date.split('-').map(Number);
-      const when = new Date(dy, dm - 1, dd);
-
-      // Everything on the day, the board's and the subscribed calendars', in
-      // one list ordered by the clock — which is the order you read a day in.
-      const rows = [];
+  // One day, as a section. Lifted whole out of the week grid it was written
+  // for; the only things it learns here are its date, that today is decided at
+  // paint time rather than baked into a cached day, and that a day the
+  // calendars never reached is not the same as a day with nothing on it.
+  function dayNode(iso, day) {
+    const [dy, dm, dd] = iso.split('-').map(Number);
+    const when = new Date(dy, dm - 1, dd);
+    const rows = [];
+    if (day) {
       for (const entry of day.entries) {
         rows.push({
           at: entry.start,
@@ -1097,56 +1249,533 @@
         });
       }
       rows.sort((a, b) => a.at - b.at);
-
-      const section = el('div', {
-        class: 'aday' + (day.is_today ? ' today' : '') + (rows.length ? '' : ' empty'),
-      });
-      section.append(el('button', {
-        'aria-label': `Open ${day.label}`,
-        onclick: () => { state.day = day.date; setMode('day'); load().then(scrollToUsefulHour); },
-      }, [
-        el('span', { class: 'adate', text: when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }),
-        el('span', { class: 'acount', text: rows.length ? `${rows.length}` : '' }),
-      ]));
-
-      if (!rows.length) {
-        section.append(el('div', { class: 'anothing', text: 'nothing' }));
-      }
-      for (const row of rows) {
-        const line = el('div', {
-          class: 'arow' + (row.sub ? ' sub' : '') + (row.done ? ' done' : ''),
-          style: `--accent:${row.accent}; --tint:${row.tint}`,
-        });
-        const at = el('span', { class: 'at', text: row.label });
-        if (row.until) at.append(el('span', { class: 'ae', text: row.until }));
-        line.append(at);
-        const bodyCell = el('div', { class: 'abody' });
-        bodyCell.append(el('span', { class: 'an', text: row.name }));
-        if (row.where) bodyCell.append(el('span', { class: 'aw', text: row.where }));
-        line.append(bodyCell);
-        section.append(line);
-      }
-      body.append(section);
     }
-    grid.hidden = false;
+
+    // A day past the far edge of the calendars is not a free day. The board's
+    // own blocks on it are real; the absence of lectures on it means only that
+    // nobody has looked.
+    const unread = !day || !isKnown(iso);
+    const section = el('div', {
+      class: 'aday' + (iso === todayIso() ? ' today' : '') + (rows.length ? '' : ' empty') + (unread ? ' unknown' : ''),
+      'data-date': iso,
+    });
+    section.append(el('button', {
+      'aria-label': `Open ${when.toDateString()}`,
+      onclick: () => openDay(iso),
+    }, [
+      el('span', { class: 'adate', text: when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }),
+      el('span', { class: 'acount', text: rows.length ? `${rows.length}` : '' }),
+    ]));
+
+    if (!rows.length) {
+      section.append(el('div', { class: 'anothing', text: unread ? 'nothing of yours' : 'nothing' }));
+    }
+    for (const row of rows) {
+      const line = el('div', {
+        class: 'arow' + (row.sub ? ' sub' : '') + (row.done ? ' done' : ''),
+        style: `--accent:${row.accent}; --tint:${row.tint}`,
+      });
+      const at = el('span', { class: 'at', text: row.label });
+      if (row.until) at.append(el('span', { class: 'ae', text: row.until }));
+      line.append(at);
+      const bodyCell = el('div', { class: 'abody' });
+      bodyCell.append(el('span', { class: 'an', text: row.name }));
+      if (row.where) bodyCell.append(el('span', { class: 'aw', text: row.where }));
+      line.append(bodyCell);
+      section.append(line);
+    }
+    return section;
   }
 
-  // The masthead in week mode: the week's span, and what it adds up to.
-  function weekSummary(days) {
-    let blocks = 0, due = 0, events = 0, minutes = 0;
-    for (const day of days) {
-      for (const e of day.entries) {
-        if (e.marker) { if (e.due) due += 1; else events += 1; continue; }
-        if (e.kind === 'event') { events += 1; continue; }
-        if (e.kind === 'task') { blocks += 1; minutes += e.minutes; }
-      }
-    }
+  // Whether the subscribed calendars were read for this day. With nothing
+  // subscribed there is no span, no ignorance, and no edge to draw.
+  function isKnown(iso) {
+    const known = state.agenda.known;
+    return !known || (known.from <= iso && iso <= known.until);
+  }
+
+  // Put the reading position back where it was.
+  //
+  // It *measures* the displacement rather than predicting it: a surviving
+  // element's real screen position before and after, and the difference put
+  // back. That is right whether the engine's own scroll anchoring compensated
+  // fully, partly or not at all — and unlike a `scrollHeight` delta it cannot
+  // land on top of an adjustment the engine already made and jump a page.
+  function holdPlace(keep, mutate) {
+    if (!keep) { mutate(); return; }
+    const was = keep.getBoundingClientRect().top;
+    mutate();
+    const now = keep.getBoundingClientRect().top;
+    if (now !== was) window.scrollBy(0, now - was);
+  }
+
+  // The whole run, from scratch. The only caller of `replaceChildren` on the
+  // body: on boot, on entering the agenda, and on a jump that lands outside
+  // what is drawn. Never on a data path — see `patchAgenda`.
+  function renderAgenda() {
+    const body = $('weekbody');
+    for (const node of state.agenda.nodes.values()) unwatchDay(node);
+    state.agenda.nodes.clear();
+    state.agenda.onScreen.clear();
+    body.replaceChildren();
+    const { first, last } = state.agenda;
+    if (!first || !last) { $('weekgrid').hidden = false; return; }
     const parts = [];
-    if (minutes) parts.push(`${dur(minutes)} planned`);
-    if (blocks) parts.push(`${blocks} block${blocks === 1 ? '' : 's'}`);
-    if (due) parts.push(`${due} due`);
-    if (events) parts.push(`${events} event${events === 1 ? '' : 's'}`);
-    return parts.length ? parts.join(' · ') : 'nothing this week';
+    for (let iso = first; iso <= last; iso = shiftDay(iso, 1)) {
+      const node = dayNode(iso, state.agenda.days.get(iso));
+      state.agenda.nodes.set(iso, node);
+      parts.push(node);
+    }
+    body.append(...parts);
+    for (const node of state.agenda.nodes.values()) watchDay(node);
+    $('weekgrid').hidden = false;
+  }
+
+  // Only the days that actually changed, in place. One section is a fraction
+  // of a millisecond against a rebuild's fifteen, and this runs on the path
+  // `/api/wait` makes hot — every edit at the desk lands here.
+  function patchAgenda(dates) {
+    for (const iso of dates) {
+      const node = state.agenda.nodes.get(iso);
+      if (!node) continue;
+      const fresh = dayNode(iso, state.agenda.days.get(iso));
+      const above = node.getBoundingClientRect().bottom <= 0;
+      holdPlace(above ? nextDayNode(iso) : null, () => {
+        unwatchDay(node);
+        node.replaceWith(fresh);
+        state.agenda.nodes.set(iso, fresh);
+        watchDay(fresh);
+      });
+    }
+  }
+
+  // The first drawn day after this one — something below the change to measure
+  // against when the change itself is above the reading position.
+  function nextDayNode(iso) {
+    for (let at = shiftDay(iso, 1); at <= state.agenda.last; at = shiftDay(at, 1)) {
+      const node = state.agenda.nodes.get(at);
+      if (node) return node;
+    }
+    return null;
+  }
+
+  /* ─────────────────────────── The month rail ─────────────────────────── */
+
+  // Seven cells, the month you are reading in the middle. So an end cell is
+  // three months away and anywhere within half a year is two taps — against
+  // twenty thumb-flicks, which is what a day-at-a-time scroll costs.
+  const RAIL_SLOTS = 7;
+  function firstOfMonth(key) { return `${key}-01`; }
+  function renderRail() {
+    const rail = $('rail');
+    const here = state.agenda.month || monthOf(state.day);
+    rail.replaceChildren();
+    const half = (RAIL_SLOTS - 1) / 2;
+    for (let i = -half; i <= half; i++) rail.append(railCell(shiftMonth(here, i), i === 0));
+  }
+  function railCell(key, here) {
+    const [y, m] = key.split('-').map(Number);
+    const at = new Date(y, m - 1, 1);
+    const known = state.agenda.known;
+    const beyond = known && (`${key}-31` < known.from || firstOfMonth(key) > known.until);
+    return el('button', {
+      class: (here ? 'here' : '') + (beyond ? ' beyond' : ''),
+      'aria-label': at.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+      onclick: () => jumpToDate(firstOfMonth(key)),
+    }, [
+      at.toLocaleDateString(undefined, { month: 'short' }),
+      here ? el('span', { class: 'yr', text: String(y) }) : null,
+    ]);
+  }
+
+  // The masthead in the agenda: where you are reading on the left, and what
+  // the verbs below will act on — which is today, always — on the right.
+  function railAndMasthead() {
+    const at = state.agenda.month || monthOf(state.day);
+    const [y, m] = at.split('-').map(Number);
+    const when = new Date(y, m - 1, 1);
+    $('weekday').textContent = when.toLocaleDateString(undefined, { month: 'long' });
+    $('weekday').classList.toggle('today', at === monthOf(todayIso()));
+    $('daylabel').textContent = String(y);
+    const today = state.snap && state.snap.days[0];
+    $('summary').textContent = today ? `Today · ${today.summary}` : '';
+    if (state.railFor !== at) { state.railFor = at; renderRail(); }
+  }
+
+  /* ───────────────────────── Growing the ribbon ─────────────────────────
+   *
+   * A month at a time, one request ever in flight. Every request serialises on
+   * the desk's UI thread behind the same two workers anyway, and that thread
+   * drains the whole queue in one frame — so a fan-out of page fetches buys
+   * nothing and can starve the fetch for the day someone is actually looking
+   * at. Forward growth is a sentinel; backward growth is a tap, deliberately.
+   */
+
+  // How far ahead of the reader the tail sentinel reaches. A screen is about
+  // 800px and a hard fling covers two or three thousand, so this is roughly
+  // two and a half screens of warning — a round trip's worth. It is also short
+  // enough that a first page, which is a month and thousands of pixels tall,
+  // never trips it on opening.
+  const SENTINEL_LEAD = '2000px';
+  // The DOM holds four months and settles back to three, so a trim only ever
+  // follows travel nobody does by accident.
+  const DOM_MONTHS_MAX = 4;
+  const DOM_MONTHS_TARGET = 3;
+  // The desk bumps its version on every save, so a drag over there arrives as a
+  // burst. One second collapses a burst and is under what anyone notices.
+  const REVALIDATE_DEBOUNCE = 1000;
+
+  function serial(job) {
+    state.agenda.chain = state.agenda.chain.then(job, job);
+    return state.agenda.chain;
+  }
+
+  function daysInMonthOf(iso) {
+    const [y, m] = iso.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+  }
+
+  // Extend the run to the end of the month the next day falls in, so that every
+  // page after the unaligned first one ends on a month boundary — which makes a
+  // request, a cache key and a rail slot the same unit.
+  // Whether the run has run out past what the subscribed calendars cover.
+  //
+  // Nothing is stopped for this. It was a gate at first, and the gate was
+  // wrong twice over: a page is a whole month, so the boundary falls *inside*
+  // one and there is no step to stop at; and a jump straight to a distant
+  // month steps over it without ever asking. What the reader actually needs is
+  // to know why those days look empty — and every one of them says so for
+  // itself, in words, on its own line. The card at the end only explains where
+  // the line is.
+  function pastCalendars() {
+    const { known, last } = state.agenda;
+    return !!known && !!last && last > known.until;
+  }
+
+  async function extendAfter() {
+    const agenda = state.agenda;
+    if (!agenda.last) return;
+    const from = shiftDay(agenda.last, 1);
+    const days = daysInMonthOf(from) - Number(from.slice(8, 10)) + 1;
+    await fetchPage(from, days, 'after');
+  }
+
+  async function extendBefore() {
+    const agenda = state.agenda;
+    if (!agenda.first) return;
+    const before = shiftDay(agenda.first, -1);
+    const from = `${monthOf(before)}-01`;
+    const days = Number(before.slice(8, 10));
+    await fetchPage(from, days, 'before');
+  }
+
+  async function fetchPage(from, days, side) {
+    const mine = state.agenda.gen;
+    state.agenda.stalled = false;
+    drawEnds(side);
+    try {
+      const snap = await api(`/api/state?from=${from}&days=${days}`);
+      absorb(snap);
+      if (mine !== state.agenda.gen) return;
+      // Never the number asked for: the server clamps quietly and identically,
+      // so a page served from an old cached shell against a newer binary — or
+      // the other way about — simply gets fewer days and the sentinel fires
+      // again. The run grows by however many contiguous days the store now has.
+      growRun();
+    } catch (error) {
+      if (error.status === 401) { showGate(); return; }
+      if (mine !== state.agenda.gen) return;
+      // One wait, not a queue of them: the sentinel stays disarmed until this
+      // is tapped or the network comes back.
+      state.agenda.stalled = true;
+    }
+    drawEnds();
+  }
+
+  // Grow the drawn run to cover every contiguous day the store holds, in both
+  // directions. Days appended below are free; days prepended above go through
+  // `holdPlace`, because that is the mutation that moves the reading position.
+  function growRun() {
+    const agenda = state.agenda;
+    const body = $('weekbody');
+    if (!agenda.first) return;
+
+    let last = agenda.last;
+    const after = [];
+    while (agenda.days.has(shiftDay(last, 1))) {
+      last = shiftDay(last, 1);
+      const node = dayNode(last, agenda.days.get(last));
+      agenda.nodes.set(last, node);
+      after.push(node);
+    }
+    if (after.length) {
+      body.append(...after);
+      after.forEach(watchDay);
+      agenda.last = last;
+    }
+
+    let first = agenda.first;
+    const before = [];
+    while (agenda.days.has(shiftDay(first, -1))) {
+      first = shiftDay(first, -1);
+      const node = dayNode(first, agenda.days.get(first));
+      agenda.nodes.set(first, node);
+      before.unshift(node);
+    }
+    if (before.length) {
+      const keep = agenda.nodes.get(agenda.first);
+      holdPlace(keep, () => {
+        body.prepend(...before);
+        before.forEach(watchDay);
+      });
+      agenda.first = first;
+    }
+    if (after.length || before.length) requestPrune();
+  }
+
+  // The cards at each end: what is happening, what went wrong, or how far the
+  // calendars reach. In the agenda these are the only things that can put
+  // anything new on screen once the list is drawn.
+  function drawEnds(busy) {
+    const agenda = state.agenda;
+    const head = $('agendaHead');
+    const tail = $('agendaTail');
+    head.replaceChildren();
+    tail.replaceChildren();
+    if (!agenda.first) return;
+
+    head.append(el('button', {
+      class: 'card',
+      text: busy === 'before' ? 'Loading…' : '▲ Earlier',
+      onclick: () => { if (!busy) serial(extendBefore); },
+    }));
+
+    if (busy === 'after') { tail.append(el('div', { class: 'waiting', text: 'Loading…' })); return; }
+    if (agenda.stalled) {
+      tail.append(el('button', {
+        class: 'card',
+        text: "Couldn't reach TaskDeck — tap to try again",
+        onclick: () => { agenda.stalled = false; serial(extendAfter); },
+      }));
+      return;
+    }
+    if (pastCalendars()) {
+      tail.append(el('div', { class: 'card' }, [
+        el('span', { text: 'Your calendars are read as far as ' }),
+        el('b', { text: agenda.known.until }),
+        el('span', { text: '. Days after that show your own blocks and nothing else — not because they are free, but because nobody has looked.' }),
+      ]));
+    }
+  }
+
+  // Drop whole months off the far end once the DOM holds more than it needs.
+  // Deferred to idle and skipped while a finger is down: a mutation landing
+  // mid-fling is the one hazard that cannot be tested anywhere but on a phone.
+  let pruneQueued = false;
+  function requestPrune() {
+    if (pruneQueued) return;
+    pruneQueued = true;
+    const run = () => { pruneQueued = false; pruneAgenda(); };
+    if (window.requestIdleCallback) requestIdleCallback(run, { timeout: 2000 });
+    else setTimeout(run, 500);
+  }
+  function pruneAgenda() {
+    const agenda = state.agenda;
+    if (touchStart || !agenda.first) return;
+    const months = new Set();
+    for (let iso = agenda.first; iso <= agenda.last; iso = shiftDay(iso, 1)) months.add(monthOf(iso));
+    if (months.size <= DOM_MONTHS_MAX) return;
+
+    const here = agenda.month || monthOf(state.day);
+    const ordered = [...months].sort((a, b) => Math.abs(monthsBetween(here, a)) - Math.abs(monthsBetween(here, b)));
+    const keep = new Set(ordered.slice(0, DOM_MONTHS_TARGET));
+    // Only ever a whole run from one end: the drawn days must stay contiguous.
+    let first = agenda.first, last = agenda.last;
+    while (first < last && !keep.has(monthOf(first))) first = shiftDay(`${monthOf(first)}-01`, daysInMonthOf(first));
+    while (last > first && !keep.has(monthOf(last))) last = shiftDay(`${monthOf(last)}-01`, -1);
+
+    if (last < agenda.last) {
+      // Trimming the bottom while the reader is near it clamps the scroll
+      // offset and throws the list a screenful. Two screens of clearance first.
+      const bottom = state.agenda.nodes.get(agenda.last);
+      const clear = bottom && bottom.getBoundingClientRect().top > window.innerHeight * 2;
+      if (clear) dropRange(shiftDay(last, 1), agenda.last, 'below');
+    }
+    if (first > agenda.first) dropRange(agenda.first, shiftDay(first, -1), 'above');
+  }
+  function dropRange(from, to, where) {
+    const agenda = state.agenda;
+    const doomed = [];
+    for (let iso = from; iso <= to; iso = shiftDay(iso, 1)) {
+      const node = agenda.nodes.get(iso);
+      if (node) doomed.push([iso, node]);
+    }
+    if (!doomed.length) return;
+    const keep = where === 'above' ? agenda.nodes.get(shiftDay(to, 1)) : null;
+    holdPlace(keep, () => {
+      for (const [iso, node] of doomed) {
+        unwatchDay(node);
+        node.remove();
+        agenda.nodes.delete(iso);
+      }
+    });
+    if (where === 'above') agenda.first = shiftDay(to, 1);
+    else agenda.last = shiftDay(from, -1);
+    drawEnds();
+  }
+
+  // On opening, the first page is a month — thousands of pixels — so the
+  // sentinel does not fire. If the store had less than that (an offline open
+  // off a partial cache), one page is asked for straight away.
+  function growIfShort() {
+    if (!state.agenda.last) return;
+    const tail = $('agendaTail').getBoundingClientRect();
+    if (tail.top < window.innerHeight * 2) serial(extendAfter);
+  }
+
+  /* ─────────────────────── Watching, without listening ───────────────────
+   *
+   * Two IntersectionObservers and no scroll handler anywhere. A scroll handler
+   * that reads geometry is exactly the layout thrash this phone cannot afford;
+   * an observer reports what it already knows and its callback here never
+   * touches a rect.
+   */
+  let placeWatcher = null;
+  let pageWatcher = null;
+  function watchDay(node) { if (placeWatcher) placeWatcher.observe(node); }
+  function unwatchDay(node) { if (placeWatcher) placeWatcher.unobserve(node); }
+
+  function armObservers() {
+    if (!window.IntersectionObserver) return;
+    const top = stickyHeight();
+    if (placeWatcher) placeWatcher.disconnect();
+    placeWatcher = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const date = entry.target.dataset.date;
+        if (!date) continue;
+        if (entry.isIntersecting) state.agenda.onScreen.add(date);
+        else state.agenda.onScreen.delete(date);
+      }
+      let earliest = null;
+      for (const date of state.agenda.onScreen) if (!earliest || date < earliest) earliest = date;
+      if (!earliest) return;
+      const month = monthOf(earliest);
+      if (month !== state.agenda.month) {
+        state.agenda.month = month;
+        if (state.mode === 'agenda') railAndMasthead();
+      }
+    }, { rootMargin: `${-top}px 0px 0px 0px` });
+    for (const node of state.agenda.nodes.values()) placeWatcher.observe(node);
+
+    if (!pageWatcher) {
+      pageWatcher = new IntersectionObserver((entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        if (state.mode !== 'agenda' || state.agenda.stalled) return;
+        if (state.agenda.pending) return;
+        state.agenda.pending = 'after';
+        serial(extendAfter).then(() => { state.agenda.pending = null; });
+      }, { rootMargin: `0px 0px ${SENTINEL_LEAD} 0px` });
+      pageWatcher.observe($('agendaTail'));
+    }
+  }
+
+  // The two sticky layers, measured once and written as custom properties.
+  // Everything that needs the offset reads them, so nothing else in the file
+  // forces a layout to find out how tall the masthead is today.
+  let stickyKnown = { mast: -1, rail: -1 };
+  function stickyHeight() { return Math.max(0, stickyKnown.mast) + Math.max(0, stickyKnown.rail); }
+  function measureSticky() {
+    const mast = Math.round(document.querySelector('.mast').getBoundingClientRect().height);
+    const rail = state.mode === 'agenda' ? Math.round($('rail').getBoundingClientRect().height) : 0;
+    if (mast === stickyKnown.mast && rail === stickyKnown.rail) return;
+    stickyKnown = { mast, rail };
+    document.documentElement.style.setProperty('--mast-h', `${mast}px`);
+    document.documentElement.style.setProperty('--rail-h', `${rail}px`);
+    armObservers();
+  }
+
+  /* ───────────────────────── Going somewhere ───────────────────────── */
+
+  // Every programmatic scroll in this file is `auto` and never `smooth`: the
+  // engine skips its anchor adjustments for the whole duration of a scripted
+  // animation, so a page arriving mid-animation lands it on the wrong days.
+  function jumpToDate(iso, { load: allowLoad = true } = {}) {
+    const agenda = state.agenda;
+    const node = agenda.nodes.get(iso);
+    if (node) {
+      window.scrollTo({ top: Math.max(0, node.offsetTop - stickyHeight()), behavior: 'auto' });
+      return;
+    }
+    if (!allowLoad) return;
+    // Somewhere else entirely. Abandon whatever growth is queued — its answers
+    // are about days nobody is looking at any more — and start a run there.
+    agenda.gen += 1;
+    agenda.pending = null;
+    agenda.stalled = false;
+    agenda.first = null;
+    agenda.last = null;
+    agenda.nodes.clear();
+    // The target's whole month, not a few days around it: a short run cannot
+    // scroll its target to the top, so the reader would land near the day they
+    // asked for and the rail would name the month above it.
+    const from = firstOfMonth(monthOf(iso));
+    const span = daysInMonthOf(iso);
+    // Whatever storage already holds, drawn before anything is asked for.
+    seedRun(iso);
+    if (agenda.first) { renderAgenda(); drawEnds(); railAndMasthead(); jumpToDate(iso, { load: false }); }
+    serial(async () => {
+      await fetchPage(from, span, 'after');
+      if (!agenda.nodes.get(iso)) { seedRun(iso); renderAgenda(); drawEnds(); }
+      jumpToDate(iso, { load: false });
+      railAndMasthead();
+      // Give the list somewhere to go, so the first flick after arriving does
+      // not stall on an empty tail.
+      growIfShort();
+    });
+  }
+  function jumpToMonth(by) {
+    const here = state.agenda.month || monthOf(state.day);
+    jumpToDate(firstOfMonth(shiftMonth(here, by)));
+  }
+
+  // The longest contiguous run in the store containing `around`, as the drawn
+  // run's ends. Nothing is fetched: this is what an offline open draws from.
+  function seedRun(around) {
+    const agenda = state.agenda;
+    if (!agenda.days.has(around)) {
+      // Nothing for that exact day — the nearest held day in the same month,
+      // and never one in another: a run that started a month away from where
+      // the reader asked to be would scroll to the wrong place.
+      let found = null;
+      for (const date of agenda.days.keys()) {
+        if (monthOf(date) !== monthOf(around)) continue;
+        if (!found || Math.abs(Date.parse(date) - Date.parse(around)) < Math.abs(Date.parse(found) - Date.parse(around))) found = date;
+      }
+      if (!found) { agenda.first = null; agenda.last = null; return; }
+      around = found;
+    }
+    let first = around, last = around;
+    while (agenda.days.has(shiftDay(first, -1))) first = shiftDay(first, -1);
+    while (agenda.days.has(shiftDay(last, 1))) last = shiftDay(last, 1);
+    agenda.first = first;
+    agenda.last = last;
+  }
+
+  // Read the months around today off storage into the store, so the first
+  // frame after tapping the icon has the list in it — desk reachable or not.
+  function seedAgenda() {
+    for (let i = -CACHE_MONTHS_BACK; i <= CACHE_MONTHS_FORWARD; i++) {
+      const held = recallMonth(shiftMonth(monthOf(todayIso()), i));
+      if (!held) continue;
+      for (const day of held.days) if (!state.agenda.days.has(day.date)) state.agenda.days.set(day.date, day);
+    }
+    if (state.mode === 'agenda') seedRun(todayIso());
+  }
+
+  // One way to change the day on screen, from anywhere.
+  function openDay(iso) {
+    setMode('day');
+    goTo(iso);
   }
 
   let hoursDrawn = false;
@@ -1376,15 +2005,8 @@
       const starts = day.entries.map((e) => e.start);
       hour = starts.length ? Math.min(7, Math.max(0, Math.min(...starts) / 60 - 1)) : 7;
     }
-    const mast = document.querySelector('.mast').getBoundingClientRect().height;
-    if (state.mode === 'week') {
-      const body = $('weekbody');
-      const today = body.querySelector('.aday.today');
-      const head = $('weekhead').getBoundingClientRect().height;
-      window.scrollTo({ top: (today ? today.offsetTop : body.offsetTop) - mast - head, behavior: 'auto' });
-      return;
-    }
-    window.scrollTo({ top: $('timeline').offsetTop + hour * HOUR - mast, behavior: 'auto' });
+    if (state.mode === 'agenda') { jumpToDate(state.day, { load: false }); return; }
+    window.scrollTo({ top: $('timeline').offsetTop + hour * HOUR - stickyHeight(), behavior: 'auto' });
   }
 
   /* ───────────────────────────── Sheets ───────────────────────────── */
@@ -1836,16 +2458,25 @@
     state.day = day;
     state.selected = null;
     closeSheet();
-    load().then(scrollToUsefulHour);
+    // Paint the day from storage before asking, exactly as opening the page
+    // does. Stepping through days on mobile data is otherwise a blank frame
+    // each time.
+    const held = recall(day);
+    if (held && (!state.snap || state.snap.days[0].date !== day)) { takeSnapshot(held.snap); render(); }
+    load({ span: 7 }).then(scrollToUsefulHour);
   }
 
-  const step = () => (state.mode === 'week' ? 7 : 1);
-  $('prev').addEventListener('click', () => goTo(shiftDay(state.day, -step())));
-  $('next').addEventListener('click', () => goTo(shiftDay(state.day, step())));
-  $('modeBtn').addEventListener('click', () => setMode(state.mode === 'week' ? 'day' : 'week'));
+  // ‹ › step a day in the day view and a month in the agenda, which is the
+  // unit the agenda is paged and cached and railed in.
+  const stepBack = () => (state.mode === 'agenda' ? jumpToMonth(-1) : goTo(shiftDay(state.day, -1)));
+  const stepOn = () => (state.mode === 'agenda' ? jumpToMonth(1) : goTo(shiftDay(state.day, 1)));
+  $('prev').addEventListener('click', stepBack);
+  $('next').addEventListener('click', stepOn);
+  $('modeBtn').addEventListener('click', () => setMode(state.mode === 'agenda' ? 'day' : 'agenda'));
   // On today already, Today brings the now-line back into view — the thing
   // you want after scrolling off to look at the evening.
   $('todayBtn').addEventListener('click', () => {
+    if (state.mode === 'agenda') { jumpToDate(todayIso()); return; }
     if (state.day === todayIso() && state.snap) scrollToUsefulHour();
     else goTo(todayIso());
   });
@@ -1876,10 +2507,13 @@
   }, { passive: true });
   document.addEventListener('touchend', (e) => {
     if (!touchStart || state.sheet) return;
+    // Only in the day view. In the agenda a sideways flick during a long scroll
+    // is a slip of the thumb, not a request to travel a month.
+    if (state.mode !== 'day') { touchStart = null; return; }
     const dx = e.changedTouches[0].clientX - touchStart.x;
     const dy = e.changedTouches[0].clientY - touchStart.y;
     touchStart = null;
-    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) goTo(shiftDay(state.day, dx < 0 ? step() : -step()));
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) goTo(shiftDay(state.day, dx < 0 ? 1 : -1));
   }, { passive: true });
 
   document.addEventListener('keydown', (e) => {
@@ -1887,10 +2521,10 @@
       if (e.key === 'Escape' && state.sheet) closeSheet();
       return;
     }
-    if (e.key === 'ArrowLeft') goTo(shiftDay(state.day, -step()));
-    if (e.key === 'ArrowRight') goTo(shiftDay(state.day, step()));
-    if (e.key === 't' || e.key === 'T') goTo(todayIso());
-    if (e.key === 'w' || e.key === 'W') setMode(state.mode === 'week' ? 'day' : 'week');
+    if (e.key === 'ArrowLeft') stepBack();
+    if (e.key === 'ArrowRight') stepOn();
+    if (e.key === 't' || e.key === 'T') { if (state.mode === 'agenda') jumpToDate(todayIso()); else goTo(todayIso()); }
+    if (e.key === 'w' || e.key === 'W') setMode(state.mode === 'agenda' ? 'day' : 'agenda');
   });
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1916,7 +2550,16 @@
         // Compared with what the page holds *now*, not with `seen`: an edit
         // made from this page already refetched, and its own wake-up must
         // not fetch the same day again.
-        if (answer && state.snap && answer.version !== state.snap.version) await load({ quiet: true });
+        if (answer && state.snap && answer.version !== state.snap.version) {
+          await load({ quiet: true });
+          // If the refetch did not move us to what the wake-up announced, the
+          // two ends disagree about a number rather than about a day, and
+          // asking again immediately would spin at network speed. A server
+          // whose pulse had never been published did exactly that: thousands
+          // of requests a second, on a phone, in a pocket. This costs nothing
+          // when the versions do converge, which is every ordinary edit.
+          if (state.snap && state.snap.version === seen) await sleep(5000);
+        }
       } catch (error) {
         if (error.status === 401) { showGate(); return; }
         failures += 1;
@@ -1927,26 +2570,73 @@
 
   function startPolling() {
     clearInterval(state.pollTimer);
+    let wasToday = todayIso();
     state.pollTimer = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
+      // Midnight. Every cached day has `is_today` baked into it, so a list left
+      // open overnight would go on marking yesterday — which is the one thing
+      // this view has to get right.
+      const now = todayIso();
+      if (now !== wasToday) {
+        const moved = [wasToday, now];
+        wasToday = now;
+        if (state.mode === 'agenda') {
+          state.day = now;
+          patchAgenda(moved);
+          railAndMasthead();
+        }
+      }
       // Never redraw a sheet someone is typing into.
       load({ quiet: true });
     }, 60000);
-    setInterval(() => { if (state.snap) renderNow(state.snap.days[0]); }, 60000);
+    setInterval(() => { if (state.snap && state.mode === 'day') renderNow(state.snap.days[0]); }, 60000);
     watch();
   }
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') load({ quiet: true });
   });
   // The network coming back is the moment to send what waited.
-  window.addEventListener('online', () => load({ quiet: true }));
+  window.addEventListener('online', () => {
+    if (state.agenda.stalled) { state.agenda.stalled = false; drawEnds(); }
+    load({ quiet: true });
+  });
+  window.addEventListener('resize', measureSticky);
 
   state.token = readToken();
   if (!state.token) {
     showGate();
   } else {
     installManifest();
-    load().then(scrollToUsefulHour);
+    pruneMonths();
+    // Whatever storage holds, in both modes. The agenda draws its first frame
+    // from it; the day view's seven-tap strip takes its dots from the same
+    // store, which is why the week's own request could go.
+    seedAgenda();
+    const span = state.mode === 'agenda' ? 31 : 7;
+    if (state.mode === 'agenda') {
+      // Nothing is awaited above this line, so the first frame the browser
+      // paints already contains the list. `renderAgenda` deliberately does not
+      // go through `render()`, which returns early with no snapshot: the days
+      // are enough to draw with, and the colours fall back on their own.
+      state.day = todayIso();
+      renderAgenda();
+      drawEnds();
+    }
+    const held = recall(state.day);
+    if (held) { takeSnapshot(held.snap); render(); }
+    measureSticky();
+    if (state.mode === 'agenda') { railAndMasthead(); jumpToDate(state.day, { load: false }); }
+    else scrollToUsefulHour();
+    load({ span }).then(() => {
+      if (state.mode === 'agenda') {
+        if (!state.agenda.first) { seedRun(todayIso()); renderAgenda(); drawEnds(); }
+        else growRun();
+        jumpToDate(state.day, { load: false });
+        growIfShort();
+      } else {
+        scrollToUsefulHour();
+      }
+    });
     startPolling();
   }
 

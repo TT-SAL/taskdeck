@@ -192,6 +192,18 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **The week was one week, and cost two round trips to be that** (`phone.html`, §21.5): the view is
+  now a continuous agenda that grows a month at a time, and the page opens on it. Four things went
+  with the rewrite. `loadWeek()` is gone, and with it the second strictly serial request every open
+  and every edit paid for — the week strip's dots now come off the same store the agenda fills.
+  `state.week`, keyed by `monday#version`, meant any edit anywhere invalidated the week; there is
+  one store keyed by date instead, and the two drawing guards that disagreed about their anchor
+  collapse into it. The cold open in the week view painted an empty body until the second request
+  landed; the agenda's first frame is drawn from a month cache in storage before anything is asked
+  for. And a refresh used to redraw the whole view: it now diffs each day's *content* — not its
+  `version`, which the board bumps on every save, so a version-keyed diff would replace all
+  thirty-one sections because somebody renamed one task — and replaces only the days that moved.
+
 - **A freshly started server made the phone ask sixteen thousand times a second** (`phone.rs`,
   `server_main.rs`, `ui.rs`): `/api/wait` answers the instant the pulse's version differs from the
   one the phone sends, and the phone sends the version off its last snapshot — the board's, which a
