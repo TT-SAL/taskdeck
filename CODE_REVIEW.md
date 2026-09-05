@@ -216,6 +216,19 @@ Fixes already landed (newest first). Kept here as history so the open list above
   that overlaps nothing still gets the lane, and none of them takes room from your own work. The
   phone is laid out server-side and drawn from `column`/`columns` like every other entry, so the
   page still decides nothing. Test `two_meetings_at_the_same_hour_are_given_a_column_each`.
+- **Two floors under the phone page, and the settings that break it from outside** (`phone.html`,
+  SERVER.md): a read of what the page actually asks of a browser turned up one hard floor and one
+  silent trap. `replaceChildren` is the newest thing in the file — Firefox 78, Chrome 86, Safari
+  14 — used on every render and unguarded, so on an older engine the page would load, fetch the
+  day, and then show a red banner reading "week.replaceChildren is not a function" where the
+  calendar should be, because the `TypeError` is swallowed by the network `catch`. Four lines of
+  polyfill drop the floor to 2017. Nothing else in the file is newer than ES2017; the defensive
+  `a && a.b && a.b[c]` spelling throughout is what keeps it that way. A `<noscript>` line replaces
+  what was otherwise a dark page showing a lone ellipsis. And the trap, which is not in the code at
+  all: a `*.ts.net` name resolves only through Tailscale's resolver, so a browser with
+  DNS-over-HTTPS enabled cannot find the server and it looks exactly like the server being down.
+  That, One UI's habit of sleeping the Tailscale app along with the browser, and private tabs
+  having no service worker, are now in SERVER.md under *On the phone*.
 - **A new field that never displaced the cache** (`subscriptions.rs`): `Overlay::digest` hashed the
   subscription, day, start, end, all-day and free flags and the summary — and nothing else. So the
   first fetch carrying a `LOCATION` compared equal to the cache written before that field existed,

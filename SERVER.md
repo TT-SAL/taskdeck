@@ -9,6 +9,29 @@ then be pointed at it (see *The desktop as a client* below) so the board lives i
 This document is the setup, start to finish, for a headless Linux box. The reasoning behind the
 design is in [`DOCUMENTATION.md` §21–22](DOCUMENTATION.md).
 
+## On the phone
+
+Any current browser runs the page; three settings are worth knowing.
+
+**Turn DNS-over-HTTPS off** for the browser you use. A `*.ts.net` name only resolves through
+Tailscale's own resolver — a public one answers `NXDOMAIN` — so a browser that sends its lookups
+to Cloudflare or NextDNS cannot find the server at all, and the failure looks like the server being
+down rather than like a DNS setting. In Firefox it is Settings → Privacy and security → DNS over
+HTTPS → Off. Chrome's default ("automatic") uses the system resolver and is already fine.
+
+**Exempt the browser *and* the Tailscale app from battery optimisation.** On a Samsung, One UI's
+sleeping-apps list is the thing that will quietly break this: it puts unused apps to sleep after a
+few days, and when it sleeps Tailscale the whole tailnet route goes with it, not just the tab.
+
+**Do not use a private tab.** Service workers in private browsing are recent, and without one there
+is no offline shell.
+
+On which browser: on an older Android, prefer whichever still gets updates for it. Chrome's minimum
+is currently Android 10 and rises every year or so; Firefox's is Android 8. On a phone that has
+stopped receiving Android updates, that difference decides how long the page keeps getting a
+patched engine, and it matters more than any rendering difference between them — the page needs
+nothing newer than 2020 from any of them.
+
 ## First run, in order
 
 Every instruction below is somewhere in this document; what is easy to miss is the sequence, and

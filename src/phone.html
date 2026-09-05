@@ -323,6 +323,8 @@
   <div class="alldayrow" id="alldayRow" hidden></div>
 </header>
 
+<noscript><p style="padding:18px;font:15px/1.5 system-ui;color:#c9c9c9">TaskDeck needs JavaScript. This page is one file and does all its drawing in the browser.</p></noscript>
+
 <main class="timeline" id="timeline">
   <div id="hours"></div>
   <div class="lanes" id="lanes"><div class="empty-tap" id="emptyTap"></div></div>
@@ -353,6 +355,18 @@
 
 <script>
 (() => {
+  // `replaceChildren` is the newest thing this file needs — Firefox 78,
+  // Chrome 86, Safari 14 — and it is used on every render, so on an older
+  // engine the page would load, fetch the day, and then show a red banner
+  // reading "week.replaceChildren is not a function" instead of a calendar.
+  // Four lines buys four years of phones back.
+  if (!Element.prototype.replaceChildren) {
+    Element.prototype.replaceChildren = function (...nodes) {
+      while (this.firstChild) this.removeChild(this.firstChild);
+      if (nodes.length) this.append(...nodes);
+    };
+  }
+
   'use strict';
 
   /* ───────────────────────────── State ───────────────────────────── */
