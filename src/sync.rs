@@ -77,8 +77,10 @@ pub const CLIENT_ID_FLOOR: u64 = crate::board::TEMPORARY_ID_FLOOR;
 /// unreachable. Short: the UI has already applied the edit, and a slow
 /// server is not worth more than this per command.
 const SEND_TIMEOUT: Duration = Duration::from_secs(8);
-/// How often the sender retries the outbox while offline.
-const RETRY_EVERY: Duration = Duration::from_secs(3);
+/// How often the sender retries the outbox while offline. Three seconds in
+/// the program; a fraction of that under `cargo test`, where the same pacing
+/// is exercised without the suite waiting on it.
+const RETRY_EVERY: Duration = if cfg!(test) { Duration::from_millis(300) } else { Duration::from_secs(3) };
 /// Longer than the server's own 25 s wait, plus slack for the connection.
 const WAIT_TIMEOUT: Duration = Duration::from_secs(40);
 /// How long the startup fetch waits before falling back to the local cache.
@@ -359,7 +361,10 @@ impl Outbox {
             Ok(text) => match serde_json::from_str::<Vec<Queued>>(&text) {
                 Ok(items) => items.into(),
                 Err(error) => {
-                    let aside = data_dir.join(format!("{OUTBOX_FILE}.corrupt"));
+                    // Stamped, as every other set-aside is: a second corrupt
+                    // outbox in a later run must not overwrite the first.
+                    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+                    let aside = data_dir.join(format!("{OUTBOX_FILE}.corrupt-{stamp}"));
                     let _ = fs::rename(&path, &aside);
                     problem = Some(format!(
                         "The outbox of unsent changes could not be read and was set aside as {}:\n{error}",
@@ -438,6 +443,10 @@ impl Outbox {
         temp.write_all(body.as_bytes()).map_err(|e| e.to_string())?;
         temp.as_file_mut().sync_all().map_err(|e| e.to_string())?;
         temp.persist(&self.path).map_err(|e| e.to_string())?;
+        // The rename is atomic, but its directory entry can still be in the
+        // page cache when the power goes (§4.1) — and a power cut is exactly
+        // when the outbox has to be there at the next start.
+        crate::tasks::sync_directory(dir);
         Ok(())
     }
 }
@@ -755,7 +764,6 @@ fn listener(remote: Remote, status: Arc<Mutex<Status>>, events: Sender<SyncEvent
 
         match remote.wait(seen) {
             Ok(version) => {
-                backoff = Duration::from_secs(2);
                 set_online(&status, &events, &wake, true, None);
                 if version < seen {
                     // The server's count went backwards: it restarted (a
@@ -768,10 +776,12 @@ fn listener(remote: Remote, status: Arc<Mutex<Status>>, events: Sender<SyncEvent
                     }
                 }
                 if version == seen {
+                    backoff = Duration::from_secs(2);
                     continue;
                 }
                 match remote.board() {
                     Ok(state) => {
+                        backoff = Duration::from_secs(2);
                         let (pending, acked) = status.lock().map(|s| (s.pending, s.acked_version)).unwrap_or((0, 0));
                         // A fetch that raced an edit — older than what the
                         // sender has since been told — is thrown away; the
@@ -782,10 +792,16 @@ fn listener(remote: Remote, status: Arc<Mutex<Status>>, events: Sender<SyncEvent
                             wake();
                         }
                     }
-                    Err(RemoteError::Unreachable(why)) => set_online(&status, &events, &wake, false, Some(why)),
-                    Err(RemoteError::Rejected { message, .. }) => {
-                        set_online(&status, &events, &wake, false, Some(message));
+                    // The wait answered but the board did not — or it came in
+                    // a shape this build cannot read, which is what two
+                    // computers on different versions look like. A pause, and
+                    // a longer one each time: without it the next wait returns
+                    // at once, the version having still moved, and the two
+                    // requests loop at network speed.
+                    Err(RemoteError::Unreachable(why)) | Err(RemoteError::Rejected { message: why, .. }) => {
+                        set_online(&status, &events, &wake, false, Some(why));
                         thread::sleep(backoff);
+                        backoff = (backoff * 2).min(LISTEN_BACKOFF_MAX);
                     }
                 }
             }
@@ -873,7 +889,11 @@ mod tests {
         let (empty, problem) = Outbox::open(dir.path());
         assert!(empty.is_empty());
         assert!(problem.unwrap().contains("set aside"));
-        assert!(dir.path().join(format!("{OUTBOX_FILE}.corrupt")).exists());
+        let set_aside = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().starts_with(&format!("{OUTBOX_FILE}.corrupt-")));
+        assert!(set_aside, "the corrupt outbox was not set aside under a stamped name");
     }
 
     #[test]
@@ -920,6 +940,10 @@ mod tests {
     struct MockServer {
         port: u16,
         received: Arc<Mutex<Vec<Command>>>,
+        /// The `X-TaskDeck-Request` key of every command request, in order.
+        keys: Arc<Mutex<Vec<String>>>,
+        /// How many times `/api/board` was asked for.
+        boards: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     #[derive(Clone, Copy, PartialEq)]
@@ -928,6 +952,11 @@ mod tests {
         RefuseKey,
         Busy,
         Broken,
+        /// The board is slow: the first two requests under a key are answered
+        /// `503 still working`, the third as normal.
+        BusyTwice,
+        /// The board comes back in a shape this build cannot read.
+        Gibberish,
     }
 
     fn mock_server(mood: Mood) -> MockServer {
@@ -935,10 +964,24 @@ mod tests {
         let port = server.server_addr().to_ip().unwrap().port();
         let received = Arc::new(Mutex::new(Vec::<Command>::new()));
         let seen = Arc::clone(&received);
+        let keys = Arc::new(Mutex::new(Vec::<String>::new()));
+        let keys_seen = Arc::clone(&keys);
+        let boards = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let boards_seen = Arc::clone(&boards);
         thread::spawn(move || {
             let version = Arc::new(Mutex::new(1u64));
+            let mut attempts: HashMap<String, u32> = HashMap::new();
             for mut request in server.incoming_requests() {
                 let url = request.url().to_string();
+                let key = request
+                    .headers()
+                    .iter()
+                    .find(|header| header.field.equiv(crate::phone::REQUEST_HEADER))
+                    .map(|header| header.value.as_str().to_string())
+                    .unwrap_or_default();
+                if url.starts_with("/api/command") {
+                    keys_seen.lock().unwrap().push(key.clone());
+                }
                 let json = |body: String, status: u16| {
                     tiny_http::Response::from_string(body)
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
@@ -957,7 +1000,20 @@ mod tests {
                         let _ = request.respond(json(r#"{"error":"Saving error: disk full"}"#.to_string(), 500));
                         continue;
                     }
-                    Mood::Normal => {}
+                    Mood::BusyTwice if url.starts_with("/api/command") => {
+                        let count = attempts.entry(key.clone()).or_insert(0);
+                        *count += 1;
+                        if *count <= 2 {
+                            let _ = request.respond(json(r#"{"error":"TaskDeck is still working on that change; it is not lost."}"#.to_string(), 503));
+                            continue;
+                        }
+                    }
+                    Mood::Gibberish if url.starts_with("/api/board") => {
+                        boards_seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let _ = request.respond(json(r#"{"nonsense":true}"#.to_string(), 200));
+                        continue;
+                    }
+                    Mood::Normal | Mood::BusyTwice | Mood::Gibberish => {}
                 }
                 if url.starts_with("/api/command") {
                     let mut body = String::new();
@@ -978,6 +1034,7 @@ mod tests {
                     let v = *version.lock().unwrap();
                     let _ = request.respond(json(format!(r#"{{"version":{v}}}"#), 200));
                 } else if url.starts_with("/api/board") {
+                    boards_seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let v = *version.lock().unwrap();
                     let _ = request.respond(json(
                         format!(r#"{{"version":{v},"items":[],"archive":[],"notes":"from the mock"}}"#),
@@ -988,13 +1045,17 @@ mod tests {
                 }
             }
         });
-        MockServer { port, received }
+        MockServer { port, received, keys, boards }
     }
 
-    fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+    fn wait_until(what: &str, condition: impl FnMut() -> bool) {
+        wait_for(what, Duration::from_secs(5), condition);
+    }
+
+    fn wait_for(what: &str, limit: Duration, mut condition: impl FnMut() -> bool) {
         let started = std::time::Instant::now();
         while !condition() {
-            assert!(started.elapsed() < Duration::from_secs(5), "timed out waiting for {what}");
+            assert!(started.elapsed() < limit, "timed out waiting for {what}");
             thread::sleep(Duration::from_millis(20));
         }
     }
@@ -1067,6 +1128,54 @@ mod tests {
             }
         }
         assert!(!refused, "nothing may be dropped over a 500");
+    }
+
+    #[test]
+    fn a_board_this_build_cannot_read_is_retried_with_a_pause_not_a_spin() {
+        // The wait says the version moved; the board comes back in a shape
+        // this build cannot read — two computers on different versions. The
+        // next wait returns at once, because the version has still moved, so
+        // without a pause between the two the listener hammers the server at
+        // network speed and floods the window with offline events.
+        let mock = mock_server(Mood::Gibberish);
+        let remote = Remote::new(&format!("http://127.0.0.1:{}", mock.port), "k", Duration::from_secs(2)).unwrap();
+        let wake: Wake = Arc::new(|| {});
+        let handle = start(remote, Outbox::in_memory(), wake, 0, true);
+        wait_until("the listener to fetch the board once", || {
+            mock.boards.load(std::sync::atomic::Ordering::Relaxed) >= 1
+        });
+        thread::sleep(Duration::from_millis(1500));
+        let fetches = mock.boards.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(fetches <= 2, "{fetches} board fetches in 1.5 s is a spin, not a retry");
+        assert!(!handle.status().online);
+        assert!(handle.status().last_error.as_deref().unwrap_or("").contains("unreadable board"));
+    }
+
+    #[test]
+    fn a_busy_answer_is_retried_under_the_same_key_and_applied_once() {
+        // The server's board is slow: the first attempts hear "still working"
+        // (503). The sender keeps the command, retries on its timer — not in
+        // a spin — and sends the same key every time, so when the board is
+        // done the reply cache answers and nothing is applied twice.
+        let mock = mock_server(Mood::BusyTwice);
+        let remote = Remote::new(&format!("http://127.0.0.1:{}", mock.port), "k", Duration::from_secs(2)).unwrap();
+        let wake: Wake = Arc::new(|| {});
+        let handle = start(remote, Outbox::in_memory(), wake, 0, true);
+        let started = std::time::Instant::now();
+        handle.queue(Command::Unplan { id: 7 }, None);
+
+        wait_for("the command to be applied", Duration::from_secs(15), || mock.received.lock().unwrap().len() == 1);
+        // Two refusals, each a full RETRY_EVERY apart, before the answer:
+        // paced by the timer, not hammered.
+        assert!(started.elapsed() >= RETRY_EVERY * 2, "retried too fast: {:?}", started.elapsed());
+        let keys = mock.keys.lock().unwrap().clone();
+        assert_eq!(keys.len(), 3, "{keys:?}");
+        assert!(!keys[0].is_empty() && keys.iter().all(|key| key == &keys[0]), "one key throughout: {keys:?}");
+        wait_until("the outbox to drain", || {
+            let status = handle.status();
+            status.pending == 0 && status.online
+        });
+        assert_eq!(mock.received.lock().unwrap().len(), 1, "applied once");
     }
 
     #[test]

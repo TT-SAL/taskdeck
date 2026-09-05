@@ -106,8 +106,12 @@ const TOKEN_HEADER: &str = "X-TaskDeck-Token";
 /// The header a client names a command with, the same on every retry of it,
 /// so a repeat is answered from `Replies` rather than applied twice.
 pub const REQUEST_HEADER: &str = "X-TaskDeck-Request";
-/// How many recent replies are kept by key. A retry comes within seconds.
-const REPLIES_KEPT: usize = 256;
+/// How many recent replies are kept by key. A retry comes within seconds,
+/// but a client replaying a long outbox in one burst can send several hundred
+/// commands in those seconds, and a key from the start of the burst must
+/// still be there when its retry comes. A thousand entries is a few hundred
+/// kilobytes at most.
+const REPLIES_KEPT: usize = 1024;
 /// A declared body beyond this is never read — nor drained: `tiny_http`
 /// drains an unread body on drop with one allocation of the declared size,
 /// which for a hostile `Content-Length` is the whole process gone. Such a

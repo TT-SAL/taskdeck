@@ -260,6 +260,10 @@ pub fn save_colorschemes(payload: &HashMap<u32, ColorScheme>, data_dir: &Path) -
 
     // Atomically replace the original file
     temp_file.persist(&final_path)?;
+    // And flush the directory entry, so the rename outlives a power cut (§4.1).
+    // This is a file of `taskdeck_data/` like any other, and the guarantee is
+    // only whole when every writer of the folder takes this step.
+    crate::tasks::sync_directory(data_dir);
 
     Ok(())
 }

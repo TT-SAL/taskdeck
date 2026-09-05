@@ -91,7 +91,9 @@ the task list, and the disk can never disagree.
 
 The corollary: **when the desktop app is closed, nothing syncs.** That is acceptable — edits
 made on the phone queue up wherever they were made (Google, the CalDAV server, the inbox
-file) and reconcile at the next startup — but it must be stated, not discovered.
+file) and reconcile at the next startup — but it must be stated, not discovered. *(As built,
+the "running TaskDeck process" can be `taskdeck-server` on a box that stays on, and the
+desktop's closing then changes nothing — `DOCUMENTATION.md` §22.)*
 
 ### 3.2 Ids are per-install; sync needs globally stable identity
 
@@ -313,7 +315,10 @@ TLS-certificate question never comes up. Do not port-forward this to the open in
 
 - **Desktop off ⇒ phone dark.** §3.5 argues this is rare for this app, and pairing with
   Proposal A (whose §4 transport 3 is *this same HTTP thread* serving one more file) gives a
-  read-only fallback that outlives the desktop being on.
+  read-only fallback that outlives the desktop being on. *(This limit was lifted after the
+  build: the board was extracted from the window and `taskdeck-server` hosts the same page and
+  feed on an always-on machine, with the desktop as its client — `DOCUMENTATION.md` §22. The
+  reasoning above is left as it was written.)*
 - No native notifications/widgets; it is a web page.
 - One new skill in the project: a small amount of HTML/JS. Keeping it to a single embedded
   file (`include_str!`, like the fonts and SVGs) keeps the build story unchanged — the
@@ -354,7 +359,7 @@ and ships in an afternoon.
 | Native phone calendar UI | ✔ | ✔ | ✔ | ✘ (web page) | — |
 | Respects one-writer rule (§3.1) | trivially | needs the full sync engine | needs the full sync engine | **by construction** | ✔ |
 | New moving parts | none | Google project, OAuth, sync state | server to run, OAuth or ops | HTTP thread, token, (Tailscale) | synced text file |
-| Standing annoyances | subscription refresh lag | token expiry / unverified-app ceremony | server care & feeding | keep desktop on | none |
+| Standing annoyances | subscription refresh lag | token expiry / unverified-app ceremony | server care & feeding | keep desktop on — or run `taskdeck-server` on a box that stays on | none |
 | Data leaves your machines | only if transport 1 | yes (Google) | optional | no | no |
 | Effort | **days** | **weeks**, then upkeep | weeks + ops | **~a week** | **hours** |
 
@@ -382,6 +387,11 @@ C is the B-variant to pick only if Google specifically is unwanted.
 What to resist, in the spirit of §20.4: a background sync *daemon* (it is the documented
 clobber case), syncing routines two-way (per-occurrence edits reintroduce the complexity
 §18.3 exists to refuse), and letting any phone surface grow toward being a second TaskDeck.
+
+*What was actually built: Phase 1's feed and Phase 2's D together, then — rather than B — the
+board moved out of the window into `taskdeck-server`, which lifts D's one limit without a second
+copy of anything. The case for B above is therefore now only the native-app experience: widgets
+and notifications. See the status note at the top.*
 
 ---
 

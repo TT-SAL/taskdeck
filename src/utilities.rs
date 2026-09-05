@@ -117,6 +117,8 @@ pub fn save_notepad_text(payload: String, data_dir: &Path) -> Result<(), Box<dyn
 
     // Atomically replace the original file
     temp_file.persist(&final_path)?;
+    // And flush the directory entry, so the rename outlives a power cut (§4.1).
+    crate::tasks::sync_directory(data_dir);
 
     Ok(())
 }

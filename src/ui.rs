@@ -3444,6 +3444,11 @@ impl TaskApp {
                     if let Some(error) = status.last_error.filter(|_| !status.online) {
                         settings_row(ui, "", |ui| settings_note(ui, error));
                     }
+                    // About this disk, not the server: said here as in the
+                    // menu bar, because it is what the next start would lose.
+                    if let Some(problem) = status.storage_error {
+                        settings_row(ui, "", |ui| settings_note(ui, problem));
+                    }
                 }
                 None => {
                     settings_row(ui, "Now", |ui| settings_note(ui, "the board is on this computer"));
@@ -6511,14 +6516,25 @@ impl TaskApp {
         }
     }
     fn try_to_generate_colorscheme(&mut self) {
-        let name = self.background_options[self.selected_background_index].clone();
+        // The images folder can be empty — it is, on a fresh install — and
+        // the manager is drawn instead of the appearance row that would have
+        // said so. Asking for the first of no pictures used to be a crash.
+        let Some(name) = self.background_options.get(self.selected_background_index).cloned() else {
+            self.show_error(
+                "There is no picture to read: put one in the images folder, pick it under Appearance, and try again."
+                    .to_string(),
+            );
+            return;
+        };
 
-        if let Some(scheme) = color::generate_colorscheme(&self.dirs, name) {
-            let new_id = self.colorschemes.keys().max().unwrap_or(&0) + 1;
-
-            self.colorschemes.insert(new_id, scheme);
-
-            self.add_schemes_2_doc();
+        match color::generate_colorscheme(&self.dirs, name.clone()) {
+            Some(scheme) => {
+                let new_id = self.colorschemes.keys().max().unwrap_or(&0) + 1;
+                self.colorschemes.insert(new_id, scheme);
+                self.add_schemes_2_doc();
+            }
+            // A button that does nothing looks broken; say what happened.
+            None => self.show_error(format!("Could not read {name} as a picture to build a palette from.")),
         }
     }
 }
@@ -7351,7 +7367,8 @@ impl TaskApp {
                             ui.add_space(10.0);
 
                             if ui
-                                .add(
+                                .add_enabled(
+                                    !self.background_options.is_empty(),
                                     Button::new(
                                         RichText::new("Generate from the background")
                                             .size(SETTINGS_LABEL_SIZE),
@@ -7359,6 +7376,7 @@ impl TaskApp {
                                     .min_size(wide),
                                 )
                                 .on_hover_text("Read the background picture and build a palette out of it")
+                                .on_disabled_hover_text("Nothing in the images folder to read")
                                 .clicked()
                             {
                                 self.try_to_generate_colorscheme();

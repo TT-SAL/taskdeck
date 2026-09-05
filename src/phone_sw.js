@@ -41,9 +41,13 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(request)
       .then((response) => {
-        // Keep the freshest copy, keyed without the token in the query.
-        const copy = response.clone();
-        caches.open(CACHE).then((cache) => cache.put(shellPath, copy)).catch(() => {});
+        // Keep the freshest copy, keyed without the token in the query — but
+        // only a good one: an error page from a server mid-restart must not
+        // replace the shell that works.
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(shellPath, copy)).catch(() => {});
+        }
         return response;
       })
       .catch(() => caches.match(shellPath).then((cached) => cached || Response.error())),

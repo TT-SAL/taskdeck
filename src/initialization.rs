@@ -94,10 +94,14 @@ fn parse_config_text(contents: &str) -> HashMap<String, String> {
                         value[1..value.len() - 1].to_string()
                     } else if value.starts_with('[') && value.ends_with(']') {
                         value.to_string() // crude fallback: keep array as-is
-                    } else if
-                        (value.starts_with('"') && value.ends_with('"')) ||
-                        (value.starts_with('\'') && value.ends_with('\''))
+                    } else if value.len() > 1
+                        && ((value.starts_with('"') && value.ends_with('"'))
+                            || (value.starts_with('\'') && value.ends_with('\'')))
                     {
+                        // A lone quote — the unclosed string that broke the
+                        // TOML and brought the file here — is one character
+                        // that both starts and ends the value; it is skipped
+                        // below rather than sliced as `1..0`.
                         value[1..value.len() - 1].to_string()
                     } else {
                         continue; // skip invalid
@@ -214,7 +218,10 @@ fn config_from(extracted: &HashMap<String, String>) -> Config {
                         }
                     })
             })
-            .filter(|v| !v.iter().any(|x| x < &200.0))
+            // `nan` is a float to TOML and to `parse`, and compares false
+            // with everything — so the check is for what a size must be, not
+            // for what it must not.
+            .filter(|v| v.iter().all(|x| x.is_finite() && *x >= 200.0))
             .unwrap_or([1280.0, 720.0]),
         start_in_fullscreen: extracted
             .get("start_in_fullscreen")
@@ -246,6 +253,7 @@ fn config_from(extracted: &HashMap<String, String>) -> Config {
                         }
                     })
             })
+            .filter(|v| v.iter().all(|x| x.is_finite()))
             .unwrap_or([0.0, 0.0]),
         calendar_weeks_to_show: extracted
             .get("calendar_weeks_to_show")
@@ -311,6 +319,8 @@ fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
     temp.write_all(text.as_bytes())?;
     temp.as_file_mut().sync_all()?;
     temp.persist(path).map_err(|e| e.error)?;
+    // And the directory entry, so the rename survives a power cut too (§4.1).
+    crate::tasks::sync_directory(dir);
     Ok(())
 }
 
@@ -1128,6 +1138,30 @@ mod tests {
         for f in ["false", "east", "set", "", "0", "no", "off"] {
             assert!(!parse_config_bool(f), "{f:?} should parse false");
         }
+    }
+
+    #[test]
+    fn a_broken_file_with_a_lone_quote_is_read_not_a_crash() {
+        // An unclosed string is the typo that breaks the TOML and sends the
+        // file down the line-by-line fallback — where a value that is one
+        // quote character used to be sliced as `1..0`. The rest of the file
+        // is still read; the broken line is skipped.
+        let broken = "phone_token = \"\nselected_colorscheme_id = 4\nbackground = '\n";
+        let config = config_from(&parse_config_text(broken));
+        assert_eq!(config.selected_colorscheme_id, 4);
+        assert_eq!(config.phone_token, "");
+        assert_eq!(config.background, "");
+    }
+
+    #[test]
+    fn a_float_pair_that_is_not_a_number_falls_back() {
+        // `nan` and `inf` are floats to TOML and to `parse::<f32>`, and a
+        // window of no size or a place at no latitude is nothing to start
+        // from.
+        let text = "window_size_startup = [nan, 720.0]\ncoordinates = [inf, 24.94]\n";
+        let config = config_from(&parse_config_text(text));
+        assert_eq!(config.window_size_startup, [1280.0, 720.0]);
+        assert_eq!(config.coordinates, [0.0, 0.0]);
     }
 
     #[test]

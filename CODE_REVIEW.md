@@ -21,6 +21,14 @@ a description of how it works (that's the documentation's job).
 
 _All items in this section are resolved — see the changelog._
 
+A module-by-module read for panic paths on odd input (2026-09-05) covered every module outside
+`ui.rs`; its findings and fixes are in the changelog, and `board.rs` is covered inside the
+`tasks.rs` and `planner.rs` entries, which is where the defects reachable through it were found.
+`ui.rs` is being read area by area — two of six areas done: the sync-event
+drain, the planner's drag and drop, reflow, block add and remove; the settings panels and the
+colour-scheme manager (one crash fixed); still to read: the archive window, the calendar grid and
+week strip, the notepad and the task list.
+
 ---
 
 ## B. Performance & Power (high priority for an "always-on" calendar)
@@ -159,6 +167,11 @@ The app is a working, complete product; these are hardening steps, ordered by pa
 2. **D6 (remainder)** — model a modal **stack** to replace the remaining `*_flag` booleans (a flat
    enum isn't faithful — see D6). The archive now shows the target shape in-tree.
 3. **D7 (remainder)** — reflow within dialogs; the global fit problem is solved by the UI scale.
+4. **A different HTTP server, only if the phone view ever leaves the tailnet.** The `tiny_http`
+   limits recorded under E11 (a worker parked by a body that never comes, the leaked hostile
+   length) are all things a peer on the same private network could do; on a tailnet or a home
+   LAN that is the same person who holds the key. If the day comes that the port faces anyone
+   else, swap the server before opening it, not after.
 
 _(B4, E8 and E10 are resolved.)_
 
@@ -179,6 +192,381 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **A pre-commit audit of the whole stretch, and the three things it caught**: eleven agents read
+  the uncommitted diff — four inventorying it by slice, four hunting regressions in those slices,
+  one on hygiene and data safety, one checking every documentation claim the diff adds against
+  the code, and one asking what the other ten had missed. Three real defects came out of it, all
+  fixed here:
+  - `color::save_colorschemes` was the one atomic writer of `taskdeck_data/` with no
+    `sync_directory` after its rename — the very gap the durability sweep above set out to close,
+    and the file that sweep never touched. A power cut inside the writeback window took the
+    renamed palette with it. It flushes now, which is also what makes §4.1's sentence true.
+  - One desktop startup path out of six left the board's version at zero: the branch that runs
+    when `server_url` holds something `Remote::new` will not accept. A phone that had opened this
+    desktop before held a clock-seeded version, so every answer looked older than what it already
+    had and it kept showing yesterday's plan. It seeds the clock like the other five.
+  - `locate_names_the_same_folders_and_creates_none_of_them` made `paths.rs` the second test in
+    one binary to set `TASKDECK_HOME`, and cargo runs them on separate threads. The two now take
+    an `ENV_LOCK` first; the copied "single-threaded test process" note that had stopped being
+    true is gone.
+  The audit also found seven documentation claims that had outrun the code — the directory-flush
+  sweep and the whole-file discipline both stated as universal when the palette writer and the
+  archive's append are exceptions, the weather thread said to wake through the `Wake` closure when
+  it holds the proxy itself, `--print-link`'s new leave-no-trace behaviour recorded only here, the
+  startup sketch listing the phone channel three steps late, and a garbled sentence in §11. All
+  seven are corrected. Closing state: 202 tests pass (203 in the tree, one of them Windows-only),
+  `cargo build` and `cargo build --release` both clean, twenty files carry the work.
+- **`ui.rs` read for panic paths on odd input, area 2 — the settings panels and the colour-scheme
+  manager**: one found and fixed. The manager's *Generate from the background* button took the
+  selected picture as `background_options[selected_background_index]`, and the images folder can
+  be empty — it is, on a fresh install, where `paths` creates it and nothing fills it. The
+  appearance row guards the same list (it says "nothing in the images folder" and clamps the
+  index), but the settings panel is not drawn while the manager is open, so from a fresh install
+  Settings → Manage → Generate was three clicks to a crash. The generator now looks the picture
+  up with `get` and reports when there is none, or when the picture cannot be read (which was a
+  silent no-op before); the button is disabled, with a hover note, while the folder is empty.
+  Verified by reading and by the build: `TaskApp` needs a graphics context, so the method has no
+  unit test, and the egui window cannot be driven here (E11). The rest, checked: the selected
+  scheme is read from the map with `get` and the default scheme stands in everywhere it is
+  missing, including after a delete, which then selects the highest remaining id or zero; a
+  rename inserts the default when the id is gone; the six swatches are indexed by a `0..5` loop
+  and a literal `5`, and a swap uses two of those; the monitor list is read with `position` and
+  `get`; a setting that cannot be written because `userconfig.toml` went missing is shown as
+  "Could not save setting", not unwrapped; the sliders clamp through the same helpers the config
+  loader uses; the background list is read from the folder once at startup, so it cannot shrink
+  under a live index, and a picture deleted on disk falls back to the embedded one.
+- **`ui.rs` read for panic paths on odd input, area 1 — the sync-event drain, the planner's
+  drag and drop, reflow, and adding and removing blocks**: none found. `drain_sync_events`
+  replaces the replica only with nothing pending, re-points the selection, the naming and due
+  editors, the two confirmations and an in-flight drag when a temporary id is remapped, and
+  reports a rejected command in words; the drag release takes the gesture out first and asks
+  `planner::preview` for the block, so the committed value and the live preview cannot differ;
+  a drop outside the lanes cancels; every mutation is a `Command` through `apply_or_report`, so
+  an item that vanished under a board replace is a `410` shown in the error window (or, for the
+  silent forget of an unnamed block, swallowed on purpose); sessions are read with `get`,
+  entries with `find` and `position`; and the only palette indices are the colour function's,
+  which clamps. The only `unwrap`s in the file outside tests are on the static font families and
+  the embedded fallback background. Remaining areas, read one per iteration: the settings
+  panels and the colour-scheme manager, the archive window, the calendar grid and week strip,
+  the notepad and the task list.
+- **`paths.rs` and the binaries' arguments read for panic paths on odd input**: `paths.rs`
+  clean; one panic in `taskdeck-server` fixed. The server read its command line with
+  `env::args()`, which panics on an argument that is not valid Unicode — and the service is
+  started by systemd and by shell scripts, which can hand it anything. The loop is now a pure
+  `parse_args` over `args_os`, so such an argument is refused as unknown with exit code 2 like
+  any other, and the help and version answers, the last-of-a-repeated-flag rule and every
+  refusal are tested in the binary (`the_flags_are_read_and_the_last_of_a_repeated_one_wins`,
+  `a_bad_or_missing_value_is_refused_with_the_flag_named`,
+  `an_argument_that_is_not_text_is_unknown_not_a_crash`). Verified live against the debug
+  binary: a `\xff\xfe` argument exited 101 before and answers `unknown argument` with exit 2
+  after; `--port abc`, `0`, `70000`, `1023` and a bare `--port`, `--bind kitchen`, `--bind ""` and
+  a bare `--bind`, and `--frob` all exit 2 with the flag named; a repeated `--port` takes the last;
+  `--help` wins over a bad flag after it. `paths.rs`: `TASKDECK_HOME` is read as an OS string,
+  so a non-UTF-8 byte in it is a path rather than a panic; empty falls to the default like unset;
+  a relative value with a trailing slash is used as written; a home that is a regular file is a
+  clean exit from the server ("could not save the key") since every folder creation is
+  best-effort and the first write reports; `--print-link` creates nothing in any of these;
+  `home_dir` falls back to `.`; `image_path` keeps only the final component; the desktop binary
+  takes no arguments.
+- **`initialization.rs` config parsing read for panic paths on odd input**: one found and fixed,
+  two holes closed. When the TOML will not parse the file is read line by line, and that fallback
+  sliced a quoted value as `1..len-1` after checking only that it started and ended with a quote —
+  so a value that was one quote character, which is exactly what an unclosed string looks like,
+  and an unclosed string is exactly the typo that breaks the TOML and brings the file here,
+  panicked at startup instead of starting from defaults. The branch now also asks for two
+  characters, and the broken line is skipped while the rest of the file is read. Alongside it,
+  `nan` and `inf` are floats to TOML and to `parse::<f32>`, and the window-size check was written
+  as "none below 200", which NaN passes: both float pairs now require finite numbers, the size
+  ones at least 200. Tests `a_broken_file_with_a_lone_quote_is_read_not_a_crash` (panicked at the
+  slice before) and `a_float_pair_that_is_not_a_number_falls_back` (got `[NaN, 720]` before).
+  DOCUMENTATION.md §11 opening paragraph updated. Verified live: the debug `taskdeck-server
+  --print-link` on a scratch home whose file held all three — the unclosed quote, `[nan, 720.0]`
+  and `[inf, 24.94]` — printed its data directory and an unminted key and left the file as
+  written. The rest, checked: a port that is negative,
+  zero, below 1024 or above 65535 falls back to the default; a bind address that is not an IP
+  falls back to every interface; the percentages and counts are clamped and a wrong type is a
+  default; a colour scheme id past the list resolves to the default scheme; a token is trimmed
+  and never placed in a response header; `write_atomically` returns the error of a directory
+  that vanished; `write_config_value` indexes a `DocumentMut`, which inserts rather than panics.
+- **`sync.rs` read for panic paths on odd input**: no panic; one spin fixed, one set-aside name
+  stamped. The listener, once a wait said the version had moved, fetched the board and — when the
+  fetch failed or the board came in a shape this build could not read, which is what two
+  computers on different builds look like — recorded the outage and went straight back to a wait
+  that answered at once, the version having still moved. Two requests per pass at network speed,
+  the board serialised whole each time, and an offline event and a wake to the window each pass.
+  The board-failure arms now sleep the listener's backoff and double it up to thirty seconds,
+  and the backoff resets only on a quiet wait or a board that was read. Test
+  `a_board_this_build_cannot_read_is_retried_with_a_pause_not_a_spin` (mock mood `Gibberish`:
+  five fetches in a second and a half before, one after; a real server, which answers a moved
+  wait at once, would have spun faster). A corrupt `outbox.json` is set aside as
+  `outbox.json.corrupt-<stamp>` rather than a fixed name, so a second corruption in a later run
+  cannot overwrite the first copy. The rest, checked: an outbox that is `[]` is empty, one that is
+  truncated, `{}` or holds an unknown `op` is set aside whole and reported, and an entry without
+  `key` or `local_id` takes the defaults; a reply `id` equal to the local one is not remapped and
+  the remap map holds one entry per acknowledged creation per run; `dec_pending` saturates;
+  `highest_temporary_id` is `None` for an empty or all-real outbox; versions are only compared,
+  never added, so `u64::MAX` and a rewind (which resets `seen` and the acked version) are safe;
+  `Remote::read` reads the reply with `get`, never an index; the set-aside names carry a
+  per-second stamp and a failed set-aside is rolled back. Not reproduced live: an unreadable board
+  needs a server of another build.
+- **`phone.rs` request parsing read for panic paths on odd input**: none found. `percent_decode`
+  works on bytes, checks that two follow a `%` before slicing, and leaves a `%` that is not hex as
+  a `%`; `split_url` and `parse_query` treat a missing `?`, a bare `&`, a pair without `=` and a
+  repeated key (first wins) as data; `read_body` refuses a declared length over `MAX_BODY_BYTES`
+  and reads at most one byte more than that before refusing again; `snapshot_command` refuses a
+  `from` outside 1970–9999 and the snapshot clamps `days` to 1–14, so `days=0` is one day and
+  `days=4294967295` is fourteen, walking from 9999-12-31 into year 10000 without overflow; the
+  long-poll `version` falls back to zero; `reply_json` indexes a fresh object of its own; the
+  static-header helper is only ever given literals; `host_for_url` brackets an IPv6 address;
+  `encode_token` percent-encodes anything outside RFC 3986's unreserved set; a QR too long to
+  encode is `None` and the settings panel draws none; `escape_text` escapes `\ ; ,` and turns a
+  line break into `\n`; `fold_line` counts whole characters against 75 octets, so a fold never
+  splits one. Verified live against the debug `taskdeck-server`: the query shapes above all
+  answered `200` or `400`, and an event named `a;b,c\d`, a line break and sixty `ä€日` came back in
+  `/calendar.ics` escaped, folded to at most 74 octets over six continuation lines each of which
+  decodes on its own, in a feed that is valid UTF-8. Accepted (E11): a `Content-Length` larger
+  than the body sent parks a worker until the client goes away.
+- **`tasks.rs` read for panic paths on odd input**: no panic reachable from the wire; one
+  identity hole fixed. `assign_missing_ids` backfilled only an id of zero, so a file carrying the
+  same id twice — two computers' calendars pasted together by hand — loaded as two items
+  answering to one id, and every command aimed at the second (rename, complete, delete) landed on
+  the first. A later holder of a taken id is now renumbered past the maximum exactly as an item
+  with no id is; the first holder keeps it. Tests
+  `assign_missing_ids_gives_a_repeated_id_to_its_first_holder_only` (tasks) and
+  `two_items_under_one_id_are_told_apart_at_load` (board: write the file, reopen, rename the
+  second, the first is untouched), both of which fail on the old backfill. DOCUMENTATION.md §6
+  identity paragraph updated. The rest, checked: the weekday bit shifts take an index from an
+  enumeration of the seven names in the UI, the phone and the summary, and `SetRepeat` masks a
+  client's `days` to `EVERY_DAY` before storing it, so a shift by eight cannot happen; a file that
+  is `{}` or truncated is a serde error the caller quarantines, and `[]` is the empty board; the
+  legacy fold gives a zero-length slot the minimum length; `remaining_minutes` subtracts with
+  saturation; `quarantine_corrupt_file` answers a missing file with a message and names the copy by
+  the second, so a collision needs two quarantines of one file in one second; `sync_directory`
+  ignores every error. Accepted, debug-build only and hand-edited-file only: an id of `u64::MAX`
+  overflows the `+ 1` in `Board::replace` and the restore path, and a session sum past `u32::MAX`
+  overflows `planned_minutes` — the board never writes either (it issues ids with `saturating_add`
+  and caps a session at a day).
+- **`archive.rs` read for panic paths on odd input**: no panic, one fatal-by-mistake fixed. The
+  loader read the file with `lines()`, which returns an error for a line that is not UTF-8, and
+  `load` passed that error up — so one byte of Latin-1 or bit rot in `archived.jsonl` closed the
+  whole ledger and, through `take`, refused every restore and forget until someone found the byte.
+  That contradicted the module's own rule that a line it cannot read is counted and kept. Lines
+  are now read as bytes; one that is not text is set aside as the bytes it is, counted like any
+  other unreadable line, and written back byte for byte on a rewrite. Test
+  `a_line_that_is_not_even_text_is_set_aside_not_fatal`, which fails on the old loader. The rest
+  is bounded by construction: the median index is taken only from a non-empty list, a month run
+  always has at least one row behind its `end - 1`, `record` inserts at a position the list gave
+  it and `take` removes and re-inserts the same way, a missing directory is recreated before a
+  rewrite, and a duplicate key is taken one at a time. Every timestamp on a row is a
+  `DateTime<Local>` that serde parses before any year check, so the wire was probed live against
+  the debug `taskdeck-server`: `set_deadline`, `complete` and `create` with years 0000, 0001,
+  1969, 9999, +10000, -0001 and 262143, an RFC 3339 offset form, and a time inside the March DST
+  gap all answered `400` or a clamped `ok`, and the process stayed up. Archive rows take their
+  colour from the same `calendar_item_color`, which clamps to the palette.
+- **`planner.rs` read for panic paths on odd input**: one found and fixed. `snap` rounded a float
+  to an `i32` and only then multiplied by the fifteen-minute step, so a length of four billion
+  minutes or a start of `i32::MIN` overflowed the multiply — a panic in a debug build, wrapped
+  nonsense in release — and `Create` and `MoveBlock` hand a client's `start` and `minutes` to
+  `clamp_block` as floats without looking, so any phone or desktop client could reach it with one
+  body. `snap` now clamps in float space first, so those extremes become a whole-day block at
+  midnight, the way a drag past midnight is pulled back; NaN lands on zero. Tests:
+  `snap_survives_a_length_no_clock_could_hold` (planner) and
+  `a_create_with_an_absurd_length_is_clamped_not_a_crash` (board), both of which died on the
+  overflow before the fix. Verified live against the debug `taskdeck-server`: `create` and
+  `move_block` with `start=-2147483648, minutes=4294967295` answered `ok`, the day showed the block
+  at `0` for `1440` minutes, and the process stayed up. The rest of the module is bounded by
+  construction: `resolve_on_day`, `format_minutes` and `local_at` clamp their minutes; the DST
+  nudge is a single sixty-minute step, not a loop; `lay_out` indexes only positions it just
+  pushed; `TimelineGeometry` floors its hour height at one so the pixel-to-minute division is
+  finite; `relative_due` subtracts two timestamps that the board keeps between 1970 and 9999.
+  Accepted: a *hand-edited* file with a session of `2^31` to `2^31 + 1440` minutes would still
+  overflow `DAY_MINUTES - length` in `reflow` in a debug build — the board never stores a length
+  over a day, and the file is the app's to write (§4.1).
+- **`calendarwidgets.rs` read for panic paths on odd input**: none found. The module paints
+  and fits text; it holds no dates. In the fitter every byte offset handed to `split_at` comes
+  from `char_indices` or the first character's length, so it stays on a boundary; a NaN or
+  negative row width fits nothing and the one-character rule still forces progress; the ellipsis
+  trimmer stops once the row is empty; the row count clamps NaN to zero and saturates on
+  infinity; and the row painter reads its left edges with `get`. The one slice, `rows[1..]`, sits
+  behind a length check. The six-colour scheme is indexed by a task's colour at ten call
+  sites in `ui.rs` without a clamp, which is fine because `calendar_item_color` clamps the index
+  to the palette at its source. The existing tests already cover empty text, no rows, widths
+  narrower than a character, and multibyte cuts.
+- **`weather.rs` read for panic paths on odd input**: none found. The forecast is filed into
+  twenty-four hour buckets by `i % 24`, so a payload with any number of hourly rows fits; every
+  column is read with `.get(i)` and a default, a missing field or an unparseable timestamp is an
+  error through `?`, and serde_json refuses NaN and Infinity so no non-finite temperature can
+  arrive. The fetch thread retries with a one, two, four second backoff and then parks on a
+  ten-minute receive timeout, so a dead network never spins. The reshape in `ui.rs` checks for
+  twenty-four buckets of at least three rows each before indexing, and raises the broken-weather
+  flag instead of panicking on a short one.
+- **`color.rs` read for panic paths on odd input**: none found. A scheme file with fewer than six
+  colours fails to parse (the type is a fixed six-element array) and is quarantined; an image that
+  is unreadable, not an image, or too small yields `None` from `generate_colorscheme`; a degenerate
+  cluster's NaN score is ordered by `total_cmp`; cluster indices are always within the centroids;
+  a result of other than six colours falls out through `try_into().ok()?`; a one-colour image
+  produces a one-colour scheme, which is harmless.
+- **Phone page smoke test after the stretch's page edits**: against the scratch server the page
+  loads in the day view, a tap opens the sheet, a length change is applied and the sheet redraws
+  with it, nothing is left in the outbox and no banner is up; the server holds the new length,
+  which was then put back. The pane's one console error is still the service worker it cannot
+  fetch outside a secure context.
+- **§4.1 and §6 say so too**: the durability paragraph lists every writer that flushes the
+  directory, and the persistence list states the whole-file discipline once for all of them.
+  Clippy after this session's additions to `paths.rs`, `utilities.rs` and `initialization.rs`:
+  still exactly the 41 pre-existing warnings, none new.
+- **Every atomic writer now flushes its directory** (`sync.rs`, `initialization.rs`,
+  `utilities.rs`, `color.rs`): §4.1 says the rename is atomic but the directory entry can still be
+  in the page cache when the power goes, and that `tasks::sync_directory` is "the step that makes
+  the guarantee whole" — yet only the active set and the archive rewrite called it. The outbox,
+  the settings file, the notepad and the colour schemes now do too; the outbox is the one that
+  matters most, since a
+  power cut is exactly when it has to be there at the next start. Best-effort and Unix-only, as
+  before. The notepad path was read for odd input on the way: `detab` is a plain replace and a
+  notepad of only tabs, or a 20 000-character line, has no panic in it.
+- **Closing gate for the post-commit stretch**: `cargo build --release` warning-free at the same
+  sizes (16.4 MB / 2.1 MB); 191 tests; every changed file's diff is the same with and without
+  `--ignore-cr-at-eol` (no line-ending flip — the four CRLF files, `initialization.rs`, `lib.rs`,
+  `paths.rs`, `utilities.rs`, were touched only with the editor that keeps them); no untracked
+  files in the tree. Thirteen files carry the post-commit work: the documentation walk, the
+  client's clock-seeded version, the settings-sheet storage note, the page's request timeouts and
+  the service worker's ok-guard, the busy-retry test with its test-time pacing, the larger reply
+  cache, the trace-free `--print-link`, and this changelog.
+- **The desktop's first run, exercised on an empty folder**: both folders and the five files
+  appear; `userconfig.toml` carries every default — the phone view off on 7373, a 32-character
+  key minted although the view is off (so turning it on later has a link at once), the bind
+  address, an uncapped frame rate, empty server fields; the active set is `[]`; no `.client-of`
+  and no `outbox.json`; with the view off nothing listens on 7373. Clippy is clean on the new
+  modules and on `paths.rs` after `locate`.
+- **The server's first run, exercised on an empty folder**: `--print-link` before any start says
+  the key is not minted; `--port 80`, `--port abc` and an unknown flag exit 2 with their messages;
+  the first start writes `userconfig.toml` with a 32-character key and the bind address, an empty
+  `read_at_startup.json`, the notepad and the colour schemes, and prints the link; `/api/state`
+  answers `200` with the minted key and `401` without; `--print-link` beside the running service
+  takes no lock; a second start on the same folder is refused. One thing was not as promised:
+  `--print-link` "writes nothing" but left two empty folders behind, because resolving the data
+  directory created them — as root, before the first start, those would have been root's.
+  `AppDirs::locate` resolves without creating and `--print-link` uses it
+  (`locate_names_the_same_folders_and_creates_none_of_them`); verified on an absent home, which
+  stayed absent. SERVER.md §5 also notes that `--print-link` reports the file's port and bind, so a
+  service run with overrides wants the same flags. 191 tests.
+- **Week view and a kept edit, checked**: the waiting banner is drawn regardless of the view, and
+  the week's columns show the server's picture exactly as the day's timeline does — the extra
+  "waiting" line belongs to the item's sheet, which is the one place a control could look applied.
+  A masthead badge would say the banner's words twice; nothing added. The page and the service
+  worker carry no `console.*`, `alert(` or `debugger` leftovers.
+- **The last `active_things`**: the field left `TaskApp` with the board refactor, and four
+  sentences in §8, §12 and §16.6 still named it; they now say the board's items. README and the
+  changelog's top sections carried no pre-board names; §22.1's mention of the old setter path is
+  explicitly historical and stays.
+- **§16, §17 and §19 levelled**: the planner's setters are described as one-line wrappers over
+  `Board::apply` rather than as ending in `save_active_things`; Reflow is "one command" with the
+  client's `from`; retirement names `Complete`/`Delete` through `Board::retire`; the restore-id
+  paragraph names the board and the temporary range; and the keyboard table gained the phone
+  page's keys (arrows, `T`, `W`) beside the desktop's.
+- **§6 and §14.2 levelled**: the data-model section now says ids come from the board (with the
+  clients' temporary range and its adoption), shows `recurrence` in the struct sketch, has a
+  `Command` subsection pointing at the wire shape and the request key, and lists every writer of
+  the folder — notepad, outbox, config — under one "one board per folder" line. §14.2's
+  single-file stance is restated against today's tree: the window stays in one `ui.rs`, close to
+  eight thousand lines rather than the 2,600 it quoted; what has no window in it has its own
+  module; and the flag refinement it asks for is the modal stack D6 settled on, not a flat enum.
+- **§3, §13 and the table of contents**: the technology table named `egui` 0.33 and `wgpu` 27
+  (the crate is on 0.35 and 29), called the phone server "one thread" (two workers and the
+  pulse), and gave `reqwest` to the weather alone (it is also the client's transport) — all
+  corrected. The table of contents' first four entries were off by one against the headings and
+  named a "Module map" that does not exist; they match now. §13's glossary gained the fields this
+  session added to `TaskApp` — the board and the sync handle (both "not a flag"), the phone
+  view's setting, port, bind and key, its address list, and the settings sheet's editable copies.
+- **§5 brought up to date**: the startup sketch in §5.1 now has the lock, the token mint, the
+  board (local or replica, with the set-aside and the offline fallbacks) and the sync engine's
+  two threads where a reader expects them; the corrupt-file paragraph says which failure is
+  deliberately not quarantined; §5.6 lists every background thread — weather, the two phone
+  workers, the pulse, the sync sender and listener — with what each wakes the UI for, and that
+  the server's wake does nothing. The table of contents no longer calls §20 "not built".
+- **MOBILE.md, §4.1 and the open-items list brought in line with what was built**: the
+  proposals document keeps its reasoning but no longer misleads mid-read — the comparison
+  table's "keep desktop on", §3.1's "nothing syncs when the desktop is closed" and §7's "desktop
+  off ⇒ phone dark" each carry a one-line note that the server lifted the limit, and §10 says
+  what was actually built and what the case for Proposal B has shrunk to. §4.1 now says in one
+  paragraph that the one-writer rule is what the phone, the server and the client are built on,
+  and that the server refuses a contended folder where the desktop only warns. Section G gained
+  a fourth item: a different HTTP server, only if the phone view ever faces anyone beyond the
+  tailnet.
+- **§22 and SERVER.md read as a newcomer and an operator would**: §22.3's *first time* bullet
+  had grown to five ideas and is now two (first contact; leaving and coming back); the live
+  verification sentence in §22.4 had been pushed under the *cannot mend* paragraph and is back
+  where the refusal rules are, pointing at the changelog for each run; SERVER.md §5's cold-boot
+  note had split a sentence from its parenthesis and is its own paragraph; §4's mis-wrapped line
+  is wrapped; §7's cron script has its shebang first and says to make it executable. Every
+  command block in SERVER.md was checked as pasteable in the order build → data → service →
+  client → backups → update. Tests and build green with nothing in Rust changed.
+- **Clippy, the capped event loop, and §21.5 re-read**: the four new modules are still
+  clippy-clean after the latest edits. The frame cap's loop was read against the wake
+  (`initialization.rs`): a wake from the phone or the sync engine serves both queues at once in
+  `user_event` and requests a redraw the cap does not gate, so an edit lands promptly however the
+  loop is paced; an occluded or sleeping window returns before the frame and arms no timer, so a
+  capped loop cannot spin behind a hidden window; the timer's own wake resets the control flow to
+  plain waiting before redrawing, so a stale deadline is never left armed. Nothing to change.
+  §21.5's outbox paragraph, which had grown into one wall with a broken line, is now two: what is
+  kept and how it is shown, then how it is replayed.
+- **The retry pacing is a test-time constant** (`sync.rs`): `RETRY_EVERY` is three seconds in the
+  program and 300 ms under `cargo test` (`cfg!(test)` in the constant), so the busy-board test
+  exercises the same pacing — two refusals a full interval apart, then the answer — and the suite
+  is back to under two seconds. The phone-create-on-a-client path in this iteration's queue needed
+  no new work: the earlier end-to-end run made its online quick-add *through the client's own phone
+  port*, which took a temporary id, reached the server as `#32`, and was renumbered on the client.
+- **A slow board, seen from the desktop client** (`sync.rs`, `phone.rs`): when the board takes
+  longer than the eight seconds a worker waits, the client's own eight-second send can expire at
+  the same moment, and its retry hears *still working* (`503`) until the late reply lands. The
+  sender already keeps every `5xx` queued; `a_busy_answer_is_retried_under_the_same_key_and_applied_once`
+  now pins the whole exchange against a mock whose board answers two requests with `503` and the
+  third as normal — three attempts under one key, three seconds apart (paced by `RETRY_EVERY`,
+  not spun), the command applied once, the outbox drained. The reply cache grew from 256 to 1024
+  entries so a long outbox replayed in one burst cannot evict a key before its retry comes. 190
+  tests.
+- **The phone page's requests have a clock** (`phone.html`): `api()` gave a fetch no timeout,
+  so a mobile link that dropped mid-request — or a desk frozen behind a firewall that swallows
+  packets — could hang a load, and every replay and poll queued behind `flushing` with it. An
+  `AbortController` now ends an ordinary request after fifteen seconds and the long poll after
+  forty-five (the server answers within 25 s), body read included; a request that runs out of
+  time counts as unreachable, so an edit behind it is kept and replayed under its key. Verified by
+  freezing the scratch server (`SIGSTOP`): the page's own resource timing shows each request to
+  the frozen server ending at fifteen seconds, the edit was then kept with the waiting banner and
+  the sheet's waiting line up (in the embedded pane, which counts as a hidden tab and is throttled
+  by the browser, the kept banner followed some seconds later; a visible tab shows it at once), and
+  after `SIGCONT` a frozen quick-add was applied once from the accept backlog while its replay was
+  answered from the reply cache — three kept creates, one item each, no duplicates. The service worker
+  (`phone_sw.js`) was read against the route list: `/api/*`, the feed, the manifest and `/sw.js`
+  are never cached, the shell is network-first and replaced by every good fetch, old caches go on
+  activate; one gap fixed — it cached whatever the shell fetch returned, so an error page from a
+  server mid-restart could replace the shell that works. Only an `ok` response is kept now.
+- **Release re-gate and a read of the client-mode UI paths**: both binaries build warning-free
+  at the same sizes (16.4 MB / 2.1 MB); the four new modules are clippy-clean; `serve_phone_requests`
+  drains the sync engine before it answers the phone, so a phone snapshot from a client shows the
+  latest server board; the PHONE sheet says *no network address found* rather than showing nothing,
+  and its links bracket an IPv6 bind. One thing the docs had not said: the bind address is read at
+  start, so a change in the file takes effect at the next start (§21.7, §11).
+- **Small things after the end-to-end run**: a client replica's board version now starts at the
+  clock too (`main.rs`), so this copy's own phone page is never told the world went backwards
+  after a restart; the SERVER settings section shows the sticky `outbox not saved` problem beside
+  the menu bar's word (`settings_server`); README's *Getting started* points anyone wanting one
+  board on several computers at `taskdeck-server` rather than at two copies of one folder.
+- **The desktop client, run end to end after the review rounds** (scratch server on 7393, a
+  desktop client on its own data directory driven over its phone port): first contact set the
+  client's local files aside, dated, and wrote the marker; an online quick-add left the client
+  under `2⁶²`, reached the server as `#32`, and the client renumbered to match within a second;
+  with the server stopped, a quick-add, its rename and a completion queued as three keyed
+  entries — the second temporary id `2⁶²+1`, not a reuse, and the completion stamped with the
+  client's clock; on restart they replayed in order: the rename followed the remap to `#33`, the
+  completion's archive row carries exactly the client's `at`, the outbox emptied, and the client's
+  picture matched the server's; re-sending the replayed quick-add under its original key answered
+  `#33` again and made nothing. Docs brought level with the behaviour: §22.3 (clearing
+  `server_url`, the `outbox not saved` word, the shutdown on exit), §22.4 (outbox-seeded
+  temporary ids, remaps that follow a restore, the late-reply `503`), §21.2 (the closed pulse),
+  SERVER.md §6 (keys, and the way back to a local board). The config parsing for the new keys was
+  re-read: every one defaults or clamps on garbage and the line-by-line fallback covers a broken
+  file — nothing to add.
 - **The re-review of those fixes, and what it found** (four reviewers over the changed files,
   twenty-one candidates, one confirmed by the workflow before its quota ran out, the rest
   re-read by hand):

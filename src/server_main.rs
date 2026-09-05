@@ -41,50 +41,83 @@ checking a setup, or for a link when the service is already running; it reads
 the settings and writes nothing. --version prints the version and build date.
 ";
 
-fn main() {
-    let mut port_override: Option<u16> = None;
-    let mut bind_override: Option<String> = None;
-    let mut print_link = false;
-    let mut args = std::env::args().skip(1);
+/// What the command line asked for.
+#[derive(Debug, Default, PartialEq)]
+struct Options {
+    port: Option<u16>,
+    bind: Option<String>,
+    print_link: bool,
+    /// `--help` or `--version`: print it and leave, whatever else was said.
+    show: Option<Show>,
+}
+
+#[derive(Debug, PartialEq)]
+enum Show {
+    Help,
+    Version,
+}
+
+/// Read the arguments — as OS strings, so one that is not text is refused
+/// like any other unknown argument rather than panicking the way `env::args`
+/// does; the service is started by systemd and by scripts, which can hand it
+/// anything. The first thing wrong is the answer, with the flag named.
+fn parse_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Options, String> {
+    let mut options = Options::default();
+    let mut args = args.into_iter().map(|arg| arg.to_string_lossy().into_owned());
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                print!("{USAGE}");
-                return;
+                options.show = Some(Show::Help);
+                return Ok(options);
             }
-            "--print-link" => print_link = true,
+            "--version" | "-V" => {
+                options.show = Some(Show::Version);
+                return Ok(options);
+            }
+            "--print-link" => options.print_link = true,
             "--bind" => {
                 let value = args.next().unwrap_or_default();
                 match value.trim().parse::<std::net::IpAddr>() {
-                    Ok(ip) => bind_override = Some(ip.to_string()),
-                    _ => {
-                        eprintln!("--bind needs an address such as 0.0.0.0 or 100.64.0.1, not `{value}`");
-                        exit(2);
-                    }
+                    Ok(ip) => options.bind = Some(ip.to_string()),
+                    Err(_) => return Err(format!("--bind needs an address such as 0.0.0.0 or 100.64.0.1, not `{value}`")),
                 }
-            }
-            "--version" | "-V" => {
-                println!("taskdeck-server {} (built {})", env!("CARGO_PKG_VERSION"), env!("BUILD_DATE"));
-                return;
             }
             "--port" => {
                 let value = args.next().unwrap_or_default();
                 match value.parse::<u16>() {
-                    Ok(port) if port >= phone::PORT_MIN => port_override = Some(port),
-                    _ => {
-                        eprintln!("--port needs a number of at least {}, not `{value}`", phone::PORT_MIN);
-                        exit(2);
-                    }
+                    Ok(port) if port >= phone::PORT_MIN => options.port = Some(port),
+                    _ => return Err(format!("--port needs a number of at least {}, not `{value}`", phone::PORT_MIN)),
                 }
             }
-            other => {
-                eprintln!("unknown argument `{other}`\n\n{USAGE}");
-                exit(2);
-            }
+            other => return Err(format!("unknown argument `{other}`\n\n{USAGE}")),
         }
     }
+    Ok(options)
+}
 
-    let dirs = AppDirs::resolve();
+fn main() {
+    let options = match parse_args(std::env::args_os().skip(1)) {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("{message}");
+            exit(2);
+        }
+    };
+    match options.show {
+        Some(Show::Help) => {
+            print!("{USAGE}");
+            return;
+        }
+        Some(Show::Version) => {
+            println!("taskdeck-server {} (built {})", env!("CARGO_PKG_VERSION"), env!("BUILD_DATE"));
+            return;
+        }
+        None => {}
+    }
+    let Options { port: port_override, bind: bind_override, print_link, .. } = options;
+
+    // A look leaves nothing behind; a run makes its folders.
+    let dirs = if print_link { AppDirs::locate() } else { AppDirs::resolve() };
 
     if print_link {
         // No lock, no bind, no write: this may run beside the service, as
@@ -206,5 +239,45 @@ fn main() {
             }
         };
         let _ = request.reply.send(reply);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    fn parse(args: &[&str]) -> Result<Options, String> {
+        parse_args(args.iter().map(OsString::from))
+    }
+
+    #[test]
+    fn the_flags_are_read_and_the_last_of_a_repeated_one_wins() {
+        let options = parse(&["--port", "7391", "--bind", " 127.0.0.1 ", "--print-link", "--port", "7392"]).unwrap();
+        assert_eq!(options, Options { port: Some(7392), bind: Some("127.0.0.1".into()), print_link: true, show: None });
+        // Help and version answer at once, before anything after them is judged.
+        assert_eq!(parse(&["--help", "--frob"]).unwrap().show, Some(Show::Help));
+        assert_eq!(parse(&["-V"]).unwrap().show, Some(Show::Version));
+    }
+
+    #[test]
+    fn a_bad_or_missing_value_is_refused_with_the_flag_named() {
+        for bad in [&["--port", "abc"][..], &["--port", "0"], &["--port", "70000"], &["--port", "1023"], &["--port"]] {
+            assert!(parse(bad).unwrap_err().starts_with("--port needs"), "{bad:?}");
+        }
+        for bad in [&["--bind", "kitchen"][..], &["--bind", ""], &["--bind"]] {
+            assert!(parse(bad).unwrap_err().starts_with("--bind needs"), "{bad:?}");
+        }
+        assert!(parse(&["--frob"]).unwrap_err().starts_with("unknown argument `--frob`"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_argument_that_is_not_text_is_unknown_not_a_crash() {
+        // `env::args()` panics on one of these before `main` sees it.
+        use std::os::unix::ffi::OsStringExt;
+        let raw = OsString::from_vec(vec![0xff, 0xfe]);
+        let error = parse_args([raw]).unwrap_err();
+        assert!(error.starts_with("unknown argument"), "{error}");
     }
 }

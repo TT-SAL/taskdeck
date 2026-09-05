@@ -678,16 +678,21 @@ pub fn read_at_startup(data_dir: &Path) -> Result<Vec<Active>, Box<dyn Error>> {
     return Ok(read_at_startup);
 }
 
-/// Backfill stable ids onto any items that lack one (`id == 0`) — e.g. loaded
-/// from a pre-id save file or a hand-edited file. Existing non-zero ids are
-/// preserved, and newly assigned ids continue past the current maximum so they
-/// never collide. Returns the next free id, used to seed `TaskApp::next_id`.
+/// Backfill stable ids onto any items that lack one (`id == 0`) or repeat one
+/// already taken — e.g. loaded from a pre-id save file, a hand-edited file, or
+/// two computers' files pasted together. Existing ids are preserved for their
+/// first holder; a later holder is given a fresh id past the current maximum,
+/// as an item with none is, because two items answering to one id means every
+/// command aimed at the second lands on the first. Returns the next free id,
+/// used to seed `Board::next_id`.
 pub fn assign_missing_ids(items: &mut [Active]) -> u64 {
-    let mut next = items.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+    let mut next = items.iter().map(|a| a.id).max().unwrap_or(0).saturating_add(1);
+    let mut taken = std::collections::HashSet::with_capacity(items.len());
     for item in items.iter_mut() {
-        if item.id == 0 {
+        if item.id == 0 || !taken.insert(item.id) {
             item.id = next;
-            next += 1;
+            taken.insert(next);
+            next = next.saturating_add(1);
         }
     }
     next
@@ -1447,6 +1452,26 @@ mod tests {
         let ids: std::collections::HashSet<u64> = items.iter().map(|a| a.id).collect();
         assert_eq!(ids.len(), items.len());
         assert!(!ids.contains(&0));
+    }
+
+    #[test]
+    fn assign_missing_ids_gives_a_repeated_id_to_its_first_holder_only() {
+        // Two computers' files pasted together: ids 5 and 7, and 5 again. The
+        // first 5 keeps it; the second is treated like an item with no id at
+        // all, because leaving both would send every command for one to the
+        // other.
+        let mut items = vec![
+            Active { id: 5, ..active(Some(2), None, false, None) },
+            Active { id: 7, ..active(Some(2), None, false, None) },
+            Active { id: 5, ..active(Some(2), None, false, None) },
+        ];
+
+        let next = assign_missing_ids(&mut items);
+
+        assert_eq!(items[0].id, 5, "the first holder keeps its id");
+        assert_eq!(items[1].id, 7);
+        assert_eq!(items[2].id, 8, "the second holder is renumbered past the maximum");
+        assert_eq!(next, 9);
     }
 
     #[test]

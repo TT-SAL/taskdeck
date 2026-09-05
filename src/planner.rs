@@ -259,8 +259,12 @@ impl TimelineGeometry {
 /// Round to the nearest snap step and clamp into the day.
 pub fn snap(minutes: f32) -> i32 {
     let step = SNAP_MINUTES as f32;
-    let snapped = (minutes / step).round() as i32 * SNAP_MINUTES;
-    snapped.clamp(0, DAY_MINUTES)
+    // Clamped while still a float: `Create` and `MoveBlock` pass a client's
+    // `minutes` and `start` through here unchecked, and rounding four billion
+    // to an `i32` before multiplying by the step overflowed. NaN falls through
+    // the clamp and lands on zero.
+    let steps = (minutes / step).round().clamp(0.0, (DAY_MINUTES / SNAP_MINUTES) as f32);
+    steps as i32 * SNAP_MINUTES
 }
 
 /// Snap and clamp a `(start, length)` pair so the block is at least
@@ -941,6 +945,23 @@ mod tests {
         // Out-of-range drags clamp rather than producing an impossible time.
         assert_eq!(snap(-500.0), 0);
         assert_eq!(snap(5000.0), DAY_MINUTES);
+    }
+
+    #[test]
+    fn snap_survives_a_length_no_clock_could_hold() {
+        // `Create` and `MoveBlock` hand a client's `minutes` (any `u32`) and
+        // `start` (any `i32`) to `clamp_block` as floats without looking, so
+        // this is the one place they are made sane. The old snap rounded the
+        // float to an `i32` and only then multiplied by the step, which
+        // overflowed at either extreme: a panic in a debug build, wrapped
+        // nonsense in release.
+        assert_eq!(snap(u32::MAX as f32), DAY_MINUTES);
+        assert_eq!(snap(i32::MIN as f32), 0);
+        assert_eq!(snap(f32::INFINITY), DAY_MINUTES);
+        assert_eq!(snap(f32::NEG_INFINITY), 0);
+        assert_eq!(snap(f32::NAN), 0);
+        // Together they make a whole-day block at midnight, not a crash.
+        assert_eq!(clamp_block(i32::MIN as f32, u32::MAX as f32), (0, DAY_MINUTES as u32));
     }
 
     #[test]

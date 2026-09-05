@@ -21,10 +21,10 @@
 
 ## 1. Table of Contents
 
-1. Overview & feature tour
-2. Technology stack
-3. Build, run, and the data directory
-4. Module map
+1. Table of contents
+2. Overview & feature tour
+3. Technology stack
+4. Build, run, and the data directory
 5. Runtime architecture (startup → event loop → frame)
 6. Data model & persistence formats
 7. The priority / importance scoring model
@@ -40,7 +40,7 @@
 17. The archive
 18. Routines
 19. The keyboard
-20. Planned ≠ scheduled — where the planner goes next *(design, not built)*
+20. Planned ≠ scheduled — where the planner goes next *(Reflow built; the rest designed, §20.5)*
 21. The phone view
 22. The board, the server, and the desktop as a client
 
@@ -76,14 +76,14 @@ Additional features:
 
 | Concern | Crate(s) |
 |---------|----------|
-| GUI (immediate mode) | `egui` 0.33, `egui_extras` (SVG), `epaint`, `emath` |
-| GPU rendering | `wgpu` 27, `egui-wgpu` |
+| GUI (immediate mode) | `egui` 0.35, `egui_extras` (SVG), `epaint`, `emath` |
+| GPU rendering | `wgpu` 29, `egui-wgpu` |
 | Windowing / event loop | `winit` 0.30, `egui-winit` |
 | Async bootstrap | `pollster` (blocks on the async adapter/device setup) |
 | Dates / times | `chrono` (with `serde`) |
 | Serialization | `serde`, `serde_json` (tasks, schemes, notepad), `toml` + `toml_edit` (config) |
-| HTTP (weather) | `reqwest` (blocking, `rustls-tls`; `default-features = false` keeps system OpenSSL out of the Linux build) |
-| HTTP server (phone view) | `tiny_http` (blocking, one thread — §21), `qrcode` (the link as a QR code in Settings; render features off) |
+| HTTP client (weather; the desktop as a client of `taskdeck-server`, §22.3) | `reqwest` (blocking, `rustls-tls`; `default-features = false` keeps system OpenSSL out of the Linux build) |
+| HTTP server (phone view, `taskdeck-server`) | `tiny_http` (blocking: two worker threads and one for the long poll — §21.2), `qrcode` (the link as a QR code in Settings; render features off) |
 | Images | `image` (backgrounds, world map, icon) |
 | Palette generation | `kmeans_colors`, `palette` (Lab/sRGB conversion) |
 | Atomic file writes | `tempfile` (`NamedTempFile::persist`) |
@@ -129,7 +129,10 @@ executable plus those two folders is the whole install.
 
 `AppDirs::resolve()` runs **once**, first thing in `main`, and every later read or write
 goes through the `AppDirs` it returns (threaded explicitly — no globals, no re-derivation
-per save). Both folders are created if missing. The `<root>` is:
+per save). Both folders are created if missing. `AppDirs::locate()` resolves the same `<root>`
+and creates nothing: `taskdeck-server --print-link` uses it, so a look at a service's link — often
+taken as another user — cannot leave folders behind that the service then cannot write (§22.2).
+The `<root>` is:
 
 1. `$TASKDECK_HOME`, if set.
 2. The project root, when running from `target/{debug,release}` — detected by the parent
@@ -186,13 +189,24 @@ A second instance is **warned, not stopped**, through the same startup-error win
 quarantined file. Refusing to start is the stricter answer and the wrong one here: a false positive
 means "cannot open my own calendar", which is worse than what it prevents, and some filesystems —
 network shares especially — do not lock faithfully. A filesystem that will not lock at all is
-treated as no guard rather than as a conflict.
+treated as no guard rather than as a conflict. (`taskdeck-server` *does* refuse: a server has no
+"my own calendar" excuse, §22.2.)
+
+**This rule is what the phone and the server are built on.** Rather than a second copy of the
+data to reconcile, there is one process writing each folder and everyone else talks to it: the
+phone is a thin client of the running process (§21.1), `taskdeck-server` is that process on a box
+with no window, and a desktop pointed at a server keeps a *replica* in its own folder — one
+writer there too — with `outbox.json` and the `.client-of` marker beside it (the table above,
+§22.1, §22.4). Nothing in this section had to change for any of that; it is the reason the rest
+could be simple.
 
 **Durability of the rename.** The rename is atomic but, on a journalling filesystem, the *directory
 entry* can still be in the page cache when the power goes: contents fsynced, swap atomic, save lost.
 `tasks::sync_directory` flushes the parent directory after each `persist`, which is the step that
-makes the guarantee whole. Best-effort and Unix-only — Windows will not open a directory as a file,
-and NTFS orders the metadata once the file's own data is down.
+makes the guarantee whole — and every writer of the folder takes it: the active set, the archive
+rewrite, the notepad, the outbox, the colour schemes and the settings file (§6). Best-effort and
+Unix-only — Windows
+will not open a directory as a file, and NTFS orders the metadata once the file's own data is down.
 
 ---
 
@@ -203,26 +217,38 @@ and NTFS orders the metadata once the file's own data is down.
 ```
 main → pollster::block_on(run())
 run():
-  1. EventLoop::new(); create an EventLoopProxy (used to wake UI from the weather thread)
-  1b. paths::AppDirs::resolve()  → data/images dirs (created if missing), see §4
-  2. get_check_and_set_config(&dirs.config_file()) → Config (reads + normalizes userconfig.toml)
-  3. tasks::read_at_startup()    → Vec<Active>   (corrupt file → quarantine + empty set, see below)
+  1. EventLoop::new(); create an EventLoopProxy (§5.6)
+  1b. paths::AppDirs::resolve()  → data/images dirs (created if missing), see §4;
+      paths::claim_data_dir()    → the .lock of §4.1 (a second copy is warned)
+  2. get_check_and_set_config(&dirs.config_file()) → Config (reads + normalizes userconfig.toml);
+      an empty phone_token is minted and written back (§21.3)
+  2b. the phone view's request channel (its server thread sends, the UI thread serves, §21.2),
+      then the `Wake` closure around the proxy that the phone server and the sync engine are given
+  3. the Board (§22.1) — items, archive, notes, id counter:
+       server_url empty  → Board::open(data)   (corrupt file → quarantine + empty set, see below;
+                            a folder that was a replica is made its own again, §22.3)
+       server_url set    → sync::Remote::board() → Board::from_parts(...) kept as a replica,
+                            the local board set aside on a first contact; unreachable → the
+                            cache, or the local board on a failed first contact (§22.3);
+                            sync::start(...) spawns the sender and the listener
   4. dirs.background_options()   → names in images/
   5. color::read_colorschemes()  → HashMap<u32, ColorScheme> (inserts default if empty;
                                     corrupt file → quarantine + default scheme)
-  6. utilities::read_notepad_text()
-  7. get_weather(coords, proxy)  → spawns the background weather thread, returns WeatherService
-  8. build TaskAppConfig → TaskApp::new(...)
-  9. task_app.summarize_calendar()   (initial calendar build / sort)
-  10. App::new(task_app, ...) → event_loop.run_app(&mut app)
+  6. get_weather(coords, proxy)  → spawns the background weather thread, returns WeatherService
+  7. build TaskAppConfig (board, sync handle, phone channel, …) → TaskApp::new(...)
+  8. task_app.summarize_calendar()   (initial calendar build / sort)
+  9. App::new(task_app, ...) → event_loop.run_app(&mut app)
 ```
 
 **Corrupt-file recovery.** Steps 3 and 5 must not abort the boot. If `read_at_startup.json` or
 `colorschemes.json` is unreadable or fails to parse, `tasks::quarantine_corrupt_file` renames the bad
 file aside (`<name>.corrupt-<timestamp>`, preserved for manual recovery) and startup continues from an
-empty active set / the default colour scheme. The recovery message(s) are passed to `TaskApp` via
-`TaskAppConfig::startup_error` and shown in the existing error window once the UI is up. The notepad
-load already degrades gracefully via `unwrap_or`.
+empty active set / the default colour scheme. One failure is deliberately *not* quarantined: a file
+that exists but cannot be read for want of permission is left where it is and named, since renaming
+it away would start an empty board over a calendar that is merely owned by someone else
+(`taskdeck-server` refuses to start over such a file, §22.2). The recovery message(s) are passed to
+`TaskApp` via `TaskAppConfig::startup_error` and shown in the existing error window once the UI is
+up. The notepad load already degrades gracefully via `unwrap_or`.
 
 ### 5.2 The two top-level structs
 
@@ -291,9 +317,25 @@ while awake the app renders in a continuous loop (see Performance notes in `CODE
 
 ### 5.6 Cross-thread wake-up
 
-The weather thread holds an `EventLoopProxy<()>`. After a successful fetch it calls
-`proxy.send_event(())`; `App::user_event` then calls `window.request_redraw()` so the new
-forecast is picked up.
+Every background thread wakes the UI through the same `EventLoopProxy<()>` (`proxy.send_event(())`):
+the phone server and the sync engine through one `Wake` closure around it, built once in `main`; the
+weather thread, which predates the closure and needs nothing else from it, through a clone of the
+proxy itself. `App::user_event` then serves
+the phone view's request queue and drains the sync engine's events (`TaskApp::serve_phone_requests`,
+§21.2) before it calls `window.request_redraw()`, so an edit from a phone or a board from the server
+lands even while the window is minimized or asleep, and the next frame draws it. The threads:
+
+| Thread | Module | Wakes the UI when |
+|--------|--------|-------------------|
+| weather | `weather.rs` | a forecast fetch succeeded |
+| phone workers (two) | `phone.rs` | a request has been queued for the UI thread to answer (§21.2) |
+| phone pulse | `phone.rs` | never — it answers parked long polls itself, on the UI thread's `publish` |
+| sync sender | `sync.rs` | a temporary id was mapped to a real one, a command was refused, touch changed (§22.3) |
+| sync listener | `sync.rs` | the server's board arrived (§22.3) |
+
+All plain blocking threads, in the house style (§3.4 of `MOBILE.md` records why: no async
+runtime). `taskdeck-server` has the same phone threads and no window, so its `Wake` does
+nothing and its main thread simply blocks on the queue (§22.2).
 
 ---
 
@@ -315,6 +357,7 @@ struct Active {
     sessions: Vec<Session>,       // when it will be WORKED ON (planner; tasks only)
     planned_start: Option<DateTime<Local>>,  // LEGACY single slot; folded into sessions at load
     duration_minutes: Option<u32>,           // event: block length. task: total ESTIMATE
+    recurrence: Option<Recurrence>,          // a routine's weekly rule (below, §18); None otherwise
 }
 ```
 
@@ -327,10 +370,15 @@ what it was in practice). The legacy field is `None` from then on and nothing el
 
 **Identity.** Items are keyed by `id`, not `name`: delete/complete/lookup and the calendar day
 popup all operate on the id, so duplicate or renamed names are harmless. `id` is a monotonic `u64`
-handed out by `TaskApp::add_active_thing` from `TaskApp::next_id`. `id == 0` is an "unassigned"
-sentinel: items loaded from a pre-id or hand-edited save (the field is `#[serde(default)]`) are
-backfilled at startup by `tasks::assign_missing_ids`, which preserves any existing ids and seeds
-`next_id` past the current maximum. New ids persist on the next save.
+handed out by the `Board` (`Board::next_item_id`, §22.1). `id == 0` is an "unassigned" sentinel:
+items loaded from a pre-id or hand-edited save (the field is `#[serde(default)]`) are backfilled
+at startup by `tasks::assign_missing_ids`, which preserves any existing ids and seeds the counter
+past the current maximum. An id that appears twice — two computers' files pasted together — stays
+with its first holder and the second is renumbered the same way, since two items under one id
+would send every command for one to the other. New ids persist on the next save. Ids from 2⁶² up
+are **temporary**: a desktop that is a client of a server numbers its own creations there until
+the server answers with the real id (§22.4), and a board that becomes its own again renumbers any
+it still holds (`Board::adopt_temporaries`).
 
 Three valid shapes:
 | Kind | `is_event` | `importance` (severity) | `time_importance` (horizon) | `deadline` |
@@ -367,12 +415,33 @@ retiring ends its life as a live item — and `to_active()` is its exact inverse
 > make; and *deleting* wrote nothing at all, so the README's claim that deleted items are kept
 > was untrue. Rows in that shape still load — see the wire-compatibility note in §17.1.
 
+### `Command` (`board.rs`) — the one way anything changes
+
+Every change to the data is a `Command` carried out by `Board::apply` (§22.1): a serialisable
+enum tagged by `op` in `snake_case` on the wire — `{"op":"move_block","id":17,"session":1,
+"day":"2026-09-04","start":870,"minutes":60}` — with times as the phone's own inputs produce them
+(§21.3), and a few fields a client fills for the server: `at` on `complete` and `delete`, `from` on
+`reflow` (§22.4). The request that carries it may name itself with an `X-TaskDeck-Request` key,
+which is what makes a retry a repeat rather than a second application (§22.4).
+
 ### Persistence functions
+
+The board's own files below belong to one `Board` per folder (§4.1, §22.1) and nothing else writes
+them; `userconfig.toml` is the odd one out, written by `main`, the settings sheet and the server
+binary rather than by the board. Each is replaced whole — a temporary file, `fsync`, a rename, and
+then the directory flushed (§4.1) — so a power cut at any instant leaves the previous version or
+the new one, never half of either. The single exception is the archive's ordinary write, which
+appends one line and fsyncs it; the log is rewritten whole only when a row is taken out of it.
 
 - `read_at_startup` / `oversafe_activesave` (`tasks.rs`) — load/save the active set. Saving is
   **atomic**: serialize → write to a temp file in the same dir → `fsync` → `persist` (rename).
 - `archive::ArchiveLog` owns `archived.jsonl` entirely: `load` (once, whole), `record` (one
-  appended line), `take` (remove one row + atomic whole-file rewrite). §17.2.
+  appended line, placed by its time), `take` (remove one row + atomic whole-file rewrite). §17.2.
+- `utilities::save_notepad_text` — the notepad, atomically, through `apply(SetNotes)` (§21.5).
+- `sync::Outbox` — `outbox.json`, a JSON array of `Queued { command, local_id, key }`, rewritten
+  atomically after every change while the desktop is a client (§22.4).
+- `initialization::write_normalized_config` / `write_config_value` — `userconfig.toml`, also
+  through a temporary file, since it holds the phone view's key (§11).
 
 ---
 
@@ -502,7 +571,7 @@ scores — `CODE_REVIEW.md` B3.)
 
 Runs at startup and after any add/delete/complete and on date rollover. Steps:
 
-1. Partition `active_things` into events and tasks; sort events by deadline, tasks by score.
+1. Partition the board's items (`board.items`, §22.1) into events and tasks; sort events by deadline, tasks by score.
 2. Compute `deadline_tasks` (tasks that have a deadline) — these are the ones placeable on the grid.
 3. **Bucket** the events and the deadline-tasks by day via `tasks::bucket_by_deadline_day`
    (`HashMap<NaiveDate, Vec<&Active>>`, borrowing — no clones). This makes each cell an O(1) lookup,
@@ -515,7 +584,7 @@ Runs at startup and after any add/delete/complete and on date rollover. Steps:
 6. Record `item_count`, the day's total. The cell's layout is chosen by it (0/1/2/3/4+), and the
    4+ case draws an overflow marker. This used to be a second, fully-cloned `Vec<DayItem>` of every
    dated item, built so the day popup could list it; the planner that replaced the popup reads
-   `active_things` directly, so only the count is still owed.
+   the board's items directly, so only the count is still owed.
 7. Record per-row month-boundary labels in `row_contains_month_switch`.
 
 Output is cached in `self.calendar_elements: Vec<DayCell>`, where
@@ -657,7 +726,9 @@ nothing at all near the pole, and the flat comparison also breaks completely at 
   drops near-transparent pixels, converts to CIE-Lab, runs **k-means** (`get_kmeans_hamerly`, k=6,
   deterministic seed 42), sorts clusters by a visual-significance heuristic
   (`population*0.6 + saturation*0.2 + |L-50|*0.2`), and emits 6 colors at fixed alpha 80.
-  Requires ≥500 usable pixels, else returns `None`.
+  Requires ≥500 usable pixels, else returns `None`. The manager's *Generate from the background*
+  button is disabled while the images folder is empty, and a `None` is reported in the error
+  window rather than swallowed.
 - **`builtin_schemes()`**: the schemes every install has. `COLORSCHEME ZERO` (six fully
   transparent entries) stays id 0, so the untinted default look is unchanged, followed by
   `EMBER`, `TIDE`, `MOSS`, `DUSK`, and the two that go round the colour wheel instead of along a
@@ -715,10 +786,13 @@ nothing at all near the pole, and the flat comparison also breaks completely at 
 ## 11. Configuration Reference — `taskdeck_data/userconfig.toml`
 
 `get_check_and_set_config` reads the file (falling back to line-by-line parsing if TOML parsing
-fails), clamps/validates each field, then writes the normalized values back to disk via
-`write_normalized_config`. That writer uses `toml_edit`, so it **preserves existing comments, key
-order, and unknown keys** and writes each value with its real TOML type (integers/float-arrays, not
-strings). A missing or unparseable file falls back to a fresh document (same self-heal as before).
+fails; even a line that cannot be read, such as one holding an unclosed quote, is skipped),
+clamps/validates each field (`nan` and `inf` do not count as numbers for the float pairs), then
+writes the normalized
+values back to disk via `write_normalized_config`. That writer uses `toml_edit`, so it **preserves
+existing comments, key order, and unknown keys** and writes each value with its real TOML type
+(integers/float-arrays, not strings). A missing or unparseable file falls back to a fresh document
+(same self-heal as before).
 
 | Key | Type | Default | Validation |
 |-----|------|---------|-----------|
@@ -735,7 +809,7 @@ strings). A missing or unparseable file falls back to a fresh document (same sel
 | `ui_scale_percent` | u32 | `0` (automatic) | `0` = fit to window, else clamped `UI_SCALE_MIN..=MAX` (`40..=100`) |
 | `phone_server_enabled` | bool | `false` | serve the phone view (§21) while the app runs |
 | `phone_server_port` | u16 | `7373` | `phone::PORT_MIN` (1024) or above; anything else falls back to the default |
-| `phone_bind_address` | string | `"0.0.0.0"` | an IP address (trimmed) to listen on alone; anything that is not one falls back to every interface (§21.7). File only — not on the settings sheet |
+| `phone_bind_address` | string | `"0.0.0.0"` | an IP address (trimmed) to listen on alone; anything that is not one falls back to every interface (§21.7). File only — not on the settings sheet — and read at start: a change takes effect at the next start |
 | `phone_token` | string | `""` → minted | the key in the phone's link; `main` mints one on the first start and keeps it. **A credential**: anyone holding the link can edit the calendar |
 | `frame_cap_fps` | u32 | `0` (uncapped) | `0` = the uncapped loop of §14.1, else clamped `FRAME_CAP_MIN..=MAX` (`15..=360`) |
 | `server_url` | string | `""` | a `taskdeck-server` to keep the board on, `http://host:port`; empty means the board lives here (§22) |
@@ -853,7 +927,7 @@ It is also cheaper than what it replaces, which laid out the whole accumulated l
 A name that ends in `…` still has to be readable somehow. Hovering a cell names **every** item on
 that day, in time order, with their times.
 
-It is built from `active_things` on hover, not from the cell's three-item `preview`. Reading the
+It is built from the board's items on hover, not from the cell's three-item `preview`. Reading the
 preview would have the tip answer its own question with "the same three, again" — and storing the
 full list on the `DayCell` instead is exactly what the day popup used to do (a second, fully-cloned
 copy of every dated item, rebuilt on every `summarize_calendar`), which was removed for good reason.
@@ -892,7 +966,12 @@ press/drag handling.
 | `should_save_textbox_text` | Notepad has unsaved edits. Flushed by a ~2 s wall-clock debounce (`last_textbox_edit_time`) and force-flushed on exit via `flush_pending_saves` (`App::exiting`). |
 | `weather_is_broken_flag` | Weather data wasn't in the expected shape. |
 | `hovered_calendar_cell` / `press_origin` | Calendar hover + click/drag tracking. |
-| `phone_server` / `phone_error` / `phone_retry_until` | The phone view's server (§21.2): running, why not, and until when a restart keeps retrying the bind. `phone_version` + `phone_pulse` are the change counter the page watches. |
+| `board` | **Not a flag** — the `Board` (§22.1): the live items, the archive log and the notepad, with `apply(Command)` as the one way to change them. Everything below that names an item names one of its. |
+| `sync` | **Not a flag** — `Some(SyncHandle)` when this copy is a client of a `taskdeck-server` (§22.3): the queue for commands, the events to drain, the status the menu bar shows. `None` when the board lives here. |
+| `phone_enabled` / `phone_port` / `phone_bind` / `phone_token` | The phone view's setting, port, bind address and key (§21.7) — the first three from `userconfig.toml`, the key minted once by `main`. |
+| `phone_server` / `phone_error` / `phone_retry_until` | The phone view's server (§21.2): running, why not, and until when a restart keeps retrying the bind. `phone_pulse` is the change counter the page watches, published from `phone_changed`. |
+| `phone_addresses` / `phone_addresses_checked` | The addresses the settings sheet shows links for (`phone::addresses_for`), re-asked of the kernel every `PHONE_ADDRESS_TTL` rather than every frame. |
+| `phone_port_input` / `server_url_input` / `server_token_input` / `frame_cap_input` | The settings sheet's editable copies of a setting, applied — and written to the file — when the field settles, not per keystroke. The server fields take effect at the next start (§22.3). |
 | `frame_cap_fps` | The optional frame cap (§14.1); `FRAME_CAP_UNCAPPED` by default. |
 
 When any modal flag is set, `hovered_calendar_cell` is cleared at the end of `ui()` so the
@@ -953,14 +1032,17 @@ battery, where a calendar drawn two hundred times a second is a fan.
 
 ### 14.2 Single-file `ui.rs` / large `TaskApp`
 
-`TaskApp` holds ~70 fields and `ui()` is one very long method in a ~2,600-line `ui.rs`. This is
-deliberate: on a solo project, keeping the whole application in one file makes it easier to hold the
-entire thing in your head. **Splitting `ui.rs` into submodules is not wanted.**
+`TaskApp` holds a great many fields and `ui()` is one very long method in a `ui.rs` of close to
+eight thousand lines. This is deliberate: on a solo project, keeping the whole *window* in one file
+makes it easier to hold the entire thing in your head. **Splitting `ui.rs` into submodules is not
+wanted.** What has its own module is what has no window in it: the board (`board.rs`), the phone
+view (`phone.rs`), the client engine (`sync.rs`) and the headless server (`server_main.rs`, §21–22)
+— one of them ships as a binary with no window at all, which is the test of the split.
 
 The one self-contained refinement that would still be welcome (without splitting the file) is
-collapsing the many parallel `*_flag` booleans into a single `enum Modal { None, NewTask, … }`, so
-that "two modals open at once" becomes unrepresentable. That is tracked as an open item in
-`CODE_REVIEW.md`; the file structure itself is not.
+replacing the many parallel `*_flag` booleans with a modal **stack** — not a flat enum, since the
+modals deliberately nest (`CODE_REVIEW.md` D6) — so that "two modals open at once" is expressible
+only where it is meant. That is tracked there as an open item; the file structure itself is not.
 
 ### 14.3 Hand-tuned magic numbers in the calendar widgets & animation
 
@@ -1211,7 +1293,10 @@ There used to be a third kind, `Deadline`, which existed only because a due time
 away.
 
 Everything snaps to `SNAP_MINUTES` (15) and is clamped inside the day by `clamp_block`, which is
-shared by create, move, and resize so all three agree on what a legal block is.
+shared by create, move, and resize so all three agree on what a legal block is. The board
+runs a client's `create` and `move_block` through the same clamp, and `snap` clamps while the value
+is still a float, so a start or length a body carries as `i32::MIN` or `u32::MAX` becomes a
+whole-day block at midnight rather than an integer overflow.
 
 The controls live in a footer row rather than inside the block, for two reasons: a
 15-minute block has no room for three buttons, and — more subtly — the block's own drag target
@@ -1442,7 +1527,7 @@ once and opening on the working hour shows the rest of the day without a scroll.
 
 ### 16.6 State
 
-The planner keeps no cached model: `planner_entries()` rebuilds from `active_things` every
+The planner keeps no cached model: `planner_entries()` rebuilds from the board's items every
 frame, so it cannot drift out of sync with the calendar the way a second copy would. The only
 persistent state is the flag, the day being shown, the selection (`planner_selection` plus
 `planner_selected_session`, so the footer knows *which block* its per-block controls act on),
@@ -1450,10 +1535,12 @@ the in-flight gesture (`planner_drag`), the title being typed, the create kind, 
 field, and the task under the due editor (`planner_due_edit`). `planner_flag` is listed in
 `any_modal_open()`.
 
-The body's controls read `active_things` and write it back through one setter each (`plan_item`,
-`add_session`, `remove_session`, `unplan_item`, `set_item_duration`, `set_item_deadline`, …),
-every one of which ends in `summarize_calendar` + `save_active_things` — so there is no path that
-changes a task without the calendar and the task list agreeing about it a frame later.
+The body's controls read the board's items and write them back through one setter each
+(`plan_item`, `add_session`, `remove_session`, `unplan_item`, `set_item_duration`,
+`set_item_deadline`, …), every one of which is a one-line wrapper that builds a `Command` for
+`Board::apply` (§22.1): the board validates and saves, and `TaskApp::apply` then rebuilds the
+calendar and the task list — so there is no path that changes a task without the calendar and the
+task list agreeing about it a frame later, and none that a phone or a server cannot take too.
 
 ### 16.7 What became of the day popup
 
@@ -1499,9 +1586,10 @@ offer one verb.
   describes. Blocks keep their length; this is a slide, not a re-plan.
 - **Nothing is dropped.** A day that runs out of room has its last blocks clamped inside it and left
   overlapping — an over-booked day should *look* over-booked (§20.4), not be quietly tidied.
-- **It is one setter.** `TaskApp::reflow_day` rewrites `Session::start` for the blocks that changed
-  and ends in `summarize_calendar` + `save_active_things` like every other edit, so the phone view
-  offers the same button (`Command::Reflow`) and the desktop planner shows the result a frame later.
+- **It is one command.** `Command::Reflow`, applied by the board like every other edit, rewrites
+  `Session::start` for the blocks that changed and saves; the phone view offers the same button,
+  the desktop planner shows the result a frame later, and a desktop that is a client stamps the
+  command with its own `from` so the server slides the day as it slid here (§22.4).
 
 `reflow` and `behind_minutes` are pure and tested: order preserved, anchors stepped over (including
 one that begins inside the anchor just stepped past), now rounded up to the snap grid, the
@@ -1547,7 +1635,8 @@ Three things follow, and they are the whole reason for the redesign:
 **Deleting archives too.** Completing and deleting used to differ in kind — one wrote a row, the
 other simply dropped the item. A task you gave up on left no trace it had existed, and the README's
 "completed and deleted items are not thrown away" was false. They are one act with different
-outcomes now (`TaskApp::retire_active_thing`), and the ledger is what tells them apart.
+outcomes now (`Command::Complete` and `Command::Delete`, both through `Board::retire`), and the
+ledger is what tells them apart.
 
 The one path that still removes without recording is `forget_active_thing`, used for Escape on a
 just-created, not-yet-named block (§16.3.5). It is seconds old, the only thing in it is the slot an
@@ -1604,8 +1693,10 @@ hand-edited or hand-merged log has no such guarantee, and the month runs depend 
 real.
 
 **Unreadable lines are kept verbatim** and written back out on a rewrite, at the head of the file.
-Failing to parse a line is not grounds for deleting it. The count is shown in the window rather
-than swallowed — a number that is not zero is a fact about the user's own data.
+Failing to parse a line is not grounds for deleting it. Nor is failing to read it as text: a
+line that is not UTF-8 is set aside as the bytes it is, so one stray byte does not close the
+ledger. The count is shown in the window rather than swallowed — a number that is not zero is a
+fact about the user's own data.
 
 ### 17.3 The window: a ledger with a footer
 
@@ -1641,10 +1732,11 @@ window reads hundreds of rows *and* offers buttons that mutate the log, which ca
 every frame, and it forces the buttons to return an `ArchiveAction` instead of acting mid-draw — so
 every change to the archive happens in one place, after the frame is laid out.
 
-**Restore and the id.** The id comes back with the record, but it may not be free: `next_id` is
+**Restore and the id.** The id comes back with the record, but it may not be free: the counter is
 seeded past the highest id in the *live* set, so archiving the highest-numbered item and restarting
-leaves the counter behind it, and a legacy row carries the `0` sentinel. `restore_archived` pushes
-the counter past whatever came back and hands out a fresh id if the old one is taken.
+leaves the counter behind it, and a legacy row carries the `0` sentinel. `Board::apply(Restore)`
+pushes the counter past whatever came back and hands out a fresh id if the old one is taken, is
+`0`, or lies in the clients' temporary range (§22.4).
 
 ### 17.4 Ghosts: the archive inside the calendar
 
@@ -1874,6 +1966,9 @@ ambiguity: they are never live at the same time, and each is the obvious mnemoni
 | | `A` | Close |
 | Settings | `S` / `Esc` | Close |
 | Dialogs | `Enter` / `Esc` | Accept / cancel |
+| Phone page (§21.5) | `←` `→` | Previous / next day (or week, in the week view) |
+| | `T` | Today |
+| | `W` | Day ↔ week |
 
 The shortcuts are named in the menu buttons' hover text and in the planner's own hint line, because
 a single-letter shortcut nobody knows about is not a feature.
@@ -2168,9 +2263,9 @@ every worker for the full timeout with commands queued behind them. Two workers 
 else. The page keeps a slow poll underneath as a net.
 
 Dropping the `PhoneServer` sets a flag, **interrupts** the pulse so its thread answers every parked
-request with the version unchanged and leaves (publishing a fake version instead would make the
-page reload for nothing, or spin against a number the UI thread never issued), and calls
-`Server::unblock` once per worker.
+request with the version unchanged and leaves — marking the pulse *closed* under the same lock a
+park takes, so a wait that arrives after the sweep is answered at once by its worker rather than
+parked for a thread that is gone — and calls `Server::unblock` once per worker.
 `tiny_http` *queues* each unblock, so a worker that is busy at that moment still finds its unblock
 on its next `recv`; each then leaves, and the socket closes with the last `Arc`. They are
 deliberately **not joined**: a worker may be mid-request, waiting for a reply that only the thread
@@ -2286,24 +2381,29 @@ not over a plain-http LAN address, where the browser refuses the worker and the 
 it did before. Unreachable, it says so and offers a retry; refused (`401`, after a new key), it
 asks for the link again.
 
-**Edits made meanwhile are kept, not applied.** An edit the server cannot be reached for (a
-network failure, or a `5xx` — a desk mid-shutdown, its board not answering in time, a disk
-refusing it) goes into a small outbox in the phone's
-storage, and the banner says so — *2 changes waiting to be sent: add "Milk", change the length
-of "Learn some Rust"* — with **Retry** and **Discard**. The page has no board of its own to apply
-them to, so a waiting edit is shown as waiting rather than as done; that is the honest half of the
-desktop's outbox (§22.4), which does apply locally because it has a `Board`. They are sent in
-order the next time the server answers — before any newer edit, so what was done first arrives
-first — and one the server refuses is dropped and said in the banner until acknowledged, never
-retried for ever; the notice is kept in the phone's storage, so a reload before **OK** does not
-lose the only trace of an edit that was made here and is not on the board. A queued create needs no temporary id: a later edit can only name an item the
-page has seen in a snapshot, so nothing queued after a create can refer to it. Replay is tried
-at every load — the retry button, the network coming back, returning to the foreground, the
-minute poll, the long poll's first answer after an outage. A sheet kept open through all this is
-redrawn when an edit is kept (so a control does not sit there looking applied) and again when
-its edits have gone through; while they wait, the item's sheet carries a line saying so, since
-what it shows is the board from before them. A key the server no longer accepts shows the gate,
-with a line saying how many edits are kept and go with the first load after the new link.
+**Edits made meanwhile are kept, not applied.** An edit the server cannot be reached for goes
+into a small outbox in the phone's storage — a network failure; a request that runs out of time
+(fifteen seconds for an ordinary one, forty-five for the long poll, so a mobile link that drops
+mid-request cannot hang the page); or a `5xx`, the server's own trouble. The banner says so —
+*2 changes waiting to be sent: add "Milk", change the length of "Learn some Rust"* — with
+**Retry** and **Discard**. The page has no board of its own to apply them to, so a waiting edit is
+shown as waiting rather than as done: that is the honest half of the desktop's outbox (§22.4),
+which does apply locally because it has a `Board`. A sheet kept open through this is redrawn when
+an edit is kept, so a control does not sit there looking applied, and the item's sheet carries a
+line saying how many edits to it are waiting and that what it shows is from before them. A key the
+server no longer accepts shows the gate, with a line saying how many edits are kept and go with
+the first load after the new link.
+
+**Replay.** The waiting edits are sent in order the next time the server answers — before any
+newer edit, so what was done first arrives first — each under the request key it was given when
+it was kept, so a lost answer never applies an edit twice (§22.4). Replay is tried at every load:
+the retry button, the network coming back, returning to the foreground, the minute poll, the long
+poll's first answer after an outage. One the server refuses is dropped and said in the banner
+until acknowledged, never retried for ever; the notice is kept in the phone's storage, so a reload
+before **OK** does not lose the only trace of an edit that was made here and is not on the board.
+When the edits have gone through, an open sheet is redrawn once more to show the board as it now
+is. A queued create needs no temporary id: a later edit can only name an item the page has seen
+in a snapshot, so nothing queued after a create can refer to it.
 
 ### 21.6 The feed
 
@@ -2338,7 +2438,8 @@ is sometimes on the LAN and sometimes on the tailnet and the token guards the do
 Setting the key to one address in `userconfig.toml` — the Tailscale one, say — binds that address
 alone; the links shown are then for that address only (`phone::addresses_for`). A key that is not
 an address falls back to every interface rather than to no phone view at all. There is no control
-for it on the sheet: it is a posture decided once, in the file.
+for it on the sheet: it is a posture decided once, in the file, read at start — a change there
+takes effect at the next start, like the server fields (§22.3).
 
 ### 21.8 What this deliberately does not do
 
@@ -2405,7 +2506,12 @@ version if anything changed. Everything the phone view is (§21) it serves uncha
 `TaskApp` and a winit proxy. It stops on `SIGTERM` like any service; the saves inside `apply` are
 atomic, so a stop at any instant leaves the files whole. `--print-link` prints the data directory
 and the phone and feed links without taking the lock or binding the port, so it can be run beside
-the service to read its link; `--port N` overrides the port for one run.
+the service to read its link — and it creates no folders either (`AppDirs::locate`, §4), so a look
+taken as the wrong user leaves nothing behind that the service cannot then write. `--port N`
+overrides the port for one run. The arguments are read as OS strings by a small `parse_args`:
+a flag it does not know, a value it cannot read, or an
+argument that is not text is refused with the flag named and exit code 2, and `--help` or
+`--version` answer before anything after them is judged.
 
 Its power draw is the machine's idle draw; the server itself wakes for milliseconds per request
 and blocks the rest of the time. `SERVER.md` is the setup: a headless Linux box, Tailscale, a
@@ -2427,8 +2533,15 @@ With `server_url` and `server_token` set, the desktop's board is a **replica**:
   them), and writes a marker (`.client-of`, holding the server URL) that makes every later start
   a plain refresh. A *first* contact that fails is not treated as "offline": the folder is still
   its own board, so the desktop runs on it and tries again next start, rather than turning it
-  into a replica the server would overwrite later. Switching to a different server starts the
-  cycle again.
+  into a replica the server would overwrite later. A set-aside that fails halfway is undone —
+  what moved is moved back — and the desktop runs on its own files rather than on a folder half
+  emptied.
+- **Leaving, and coming back.** Clearing `server_url` makes the folder a board of its own again
+  (`sync::forget_replica`): the marker goes, an outbox of edits meant for that server is set
+  aside rather than replayed against whoever comes next, and items created offline under
+  temporary ids are renumbered as the board's own (`Board::adopt_temporaries`). A later return
+  to a server is therefore a first contact again, set-aside and all — never a silent overwrite
+  of what was done locally in between. Switching to a different server is the same cycle.
 - **Every edit applies locally first**, through the same `apply`, so the UI never waits on the
   network; the command is then queued for the server. Online, it is sent within milliseconds; the
   server's version moves; the listener fetches the board; the replica is replaced. The user sees
@@ -2437,14 +2550,20 @@ With `server_url` and `server_token` set, the desktop's board is a **replica**:
   order, retrying every few seconds while the server is unreachable. The *listener* long-polls
   `/api/wait` (§21.2) and, when the version moves, fetches the board and hands it to the UI — but
   never while edits are still waiting to go out, and never a board older than the last reply the
-  sender received, so a fetch racing an edit cannot show the board without it. Both wake the UI
-  through the same `Wake` the phone server uses; the UI drains their events where it drains the
-  phone's queue.
+  sender received, so a fetch racing an edit cannot show the board without it. A board that
+  arrives but cannot be read — two computers on different builds — is fetched again after a pause
+  that doubles up to thirty seconds, not at once: the next wait would answer immediately, the
+  version having still moved. Both wake the UI through the same `Wake` the phone server uses; the
+  UI drains their events where it drains the phone's queue.
 - **The menu bar says where things stand**: `● server` in touch with nothing waiting,
-  `↑ 2 sending…`, `○ offline · 3 waiting`; the hover names the server and the last failure.
-  Settings → **SERVER** holds the two fields; they take effect at the next start, because the
-  board is fetched and the engine started before there is a window, and a restart answers "what
-  happens to the edits in between" honestly — the outbox goes with you.
+  `↑ 2 sending…`, `○ offline · 3 waiting`; the hover names the server and the last failure. One
+  more word is about this disk, not the network: `· outbox not saved` stays until a write of
+  `outbox.json` succeeds, whether or not the server is in touch, because an outbox that is not
+  being written is an outbox that is empty at the next start. Settings → **SERVER** holds the two
+  fields; they take effect at the next start, because the board is fetched and the engine started
+  before there is a window, and a restart answers "what happens to the edits in between" honestly
+  — the outbox goes with you: on the way out (quit, or the restart button) the engine files what
+  it still holds and stops before the process ends (`SyncHandle::shutdown`).
 
 ### 22.4 Offline, and why it is safe
 
@@ -2457,11 +2576,16 @@ server has when it arrives. Nobody's whole board ever overwrites anybody's; a co
 per command, last writer wins, at replay time — the right trade for one person and two devices.
 
 **Temporary ids.** Something created offline gets an id from a range the server never issues
-(`CLIENT_ID_FLOOR`, 2⁶²; `Board::number_from`). When its creation is replayed the server answers
-with the real id; every later queued command that named the temporary one is re-pointed
-(`Outbox::remap`, using `Command::item_id` / `set_item_id`), the replica's item is renumbered, and
-the UI's selection, title editor and confirmations follow it — so a block named right after it was
-made, offline, is still the block under the editor when it comes back as #29.
+(`CLIENT_ID_FLOOR`, 2⁶²; `Board::number_from`) — and, at each start, from past the highest such
+id the outbox still names (`Outbox::highest_temporary_id`), so an id from the last run is never
+handed out again while a remap for it can still arrive. When its creation is replayed the server
+answers with the real id; every later queued command that named the temporary one is re-pointed
+(`Outbox::remap`, using `Command::item_id` / `set_item_id` — which address an archive row by the
+same id, so a task finished and put back offline follows too), the sender remembers the mapping
+for the rest of the run and re-points anything queued after the answer but before the UI drained
+it, the replica's item is renumbered, and the UI's selection, title editor, confirmations and an
+in-flight drag follow it — so a block named right after it was made, offline, is still the block
+under the editor when it comes back as #29.
 
 A command the server refuses — a ✓ for a task that was finished from the phone meanwhile, a block
 of an item since deleted — is **dropped and reported** in the error window (*"a change made here
@@ -2471,15 +2595,22 @@ network failure; a key the server does not accept (`401`/`403`) — that is a se
 an edit to lose, so the sender goes offline with *check the server key* and tries again; and any
 `5xx` — the server's own trouble: shutting down, its board not answering within eight seconds, its
 disk refusing a save — which is treated as unreachable. The phone page (§21.5) draws the same
-three lines.
+three lines. The replay was verified live, more than once: edits queued against a stopped server,
+among them one the server had to refuse, replayed in order on restart, the created item taking its
+real id and its rename following it, the desktop ending with the server's exact board
+(`CODE_REVIEW.md` has each run).
 
 **Once, not at least once.** A reply can be lost — a timeout, a reset, a `503` from a board that
 answered after the eight seconds — and a client that retries would then apply the command twice:
 two *Milk* tasks, two blocks. So every command travels under a key (`X-TaskDeck-Request`), the
-same on every retry of that command, and the serving side keeps its last few hundred replies by
-key (`phone::Replies`): a repeat is answered with the first reply and the board hears nothing.
+same on every retry of that command, and the serving side keeps its last thousand replies by key
+(`phone::Replies`): a repeat is answered with the first reply and the board hears nothing.
 The key is generated when the command is queued (`sync::SyncHandle::queue`, the page's `send`)
-and kept in the outbox with it, so a replay after a restart is a repeat too.
+and kept in the outbox with it, so a replay after a restart is a repeat too. When the board has
+not answered within the eight seconds a worker waits, the key is not freed: the worker parks its
+reply channel with the key, the client hears `503`, and a repeat is answered *still working on
+that change* (`503` again) until the board's late answer arrives — at which point that answer is
+the reply. The outcome of a timed-out command is unknown, not "not applied", and the code says so.
 
 **Two things the replay cannot mend.** A session is addressed by its position in a task's list
 (`MoveBlock { session }`), so an edit queued against block 1 while the server, meanwhile, removed
@@ -2487,9 +2618,6 @@ block 0 lands on what is now block 1 — silently. And a Reflow carries the clie
 slides the day as the client saw it, but the blocks it slides are whatever the server has by
 then. Both are the price of last-writer-wins per command, and both need two devices editing the
 same task's blocks during an outage; they are recorded here rather than solved.
-The replay was verified live: four edits queued against a stopped server, one of which the server
-had to refuse, replayed in order on restart with the created task taking its real id and its
-rename following it, and the desktop ending with the server's exact board.
 
 ### 22.5 What this deliberately does not do
 

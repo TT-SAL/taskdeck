@@ -636,7 +636,9 @@ pub struct ArchiveLog {
     entries: Vec<Archived>,
     /// Lines that would not parse, kept verbatim. They are written back out on
     /// a rewrite: failing to understand a line is not grounds for deleting it.
-    unreadable: Vec<String>,
+    /// Bytes, not text: a line that is not even UTF-8 is still someone's line,
+    /// and the rest of the log must not fail to load over it.
+    unreadable: Vec<Vec<u8>>,
     loaded: bool,
 }
 
@@ -685,18 +687,27 @@ impl ArchiveLog {
 
         let path = dir.join(ARCHIVE_FILE);
         let mut entries: Vec<Archived> = Vec::new();
-        let mut unreadable: Vec<String> = Vec::new();
+        let mut unreadable: Vec<Vec<u8>> = Vec::new();
 
         match File::open(&path) {
             Ok(file) => {
-                for line in BufReader::new(file).lines() {
+                for line in BufReader::new(file).split(b'\n') {
                     let line = line?;
-                    if line.trim().is_empty() {
+                    let text = match String::from_utf8(line) {
+                        Ok(text) => text,
+                        // Not even text. Still someone's line: set aside as the
+                        // bytes it is, rather than failing the whole log over it.
+                        Err(error) => {
+                            unreadable.push(error.into_bytes());
+                            continue;
+                        }
+                    };
+                    if text.trim().is_empty() {
                         continue;
                     }
-                    match serde_json::from_str::<Archived>(&line) {
+                    match serde_json::from_str::<Archived>(&text) {
                         Ok(row) => entries.push(row),
-                        Err(_) => unreadable.push(line),
+                        Err(_) => unreadable.push(text.into_bytes()),
                     }
                 }
             }
@@ -763,22 +774,22 @@ impl ArchiveLog {
     fn rewrite(&self, dir: &Path) -> Result<(), Box<dyn Error>> {
         fs::create_dir_all(dir)?;
 
-        let mut body = String::new();
+        let mut body: Vec<u8> = Vec::new();
         // Unreadable lines first, out of the way of the chronological tail that
-        // appends land on, and preserved exactly as they were found.
+        // appends land on, and preserved byte for byte as they were found.
         for line in &self.unreadable {
-            body.push_str(line);
-            body.push('\n');
+            body.extend_from_slice(line);
+            body.push(b'\n');
         }
         for row in self.entries.iter().rev() {
-            body.push_str(&serde_json::to_string(row)?);
-            body.push('\n');
+            body.extend_from_slice(serde_json::to_string(row)?.as_bytes());
+            body.push(b'\n');
         }
 
         let mut temp = NamedTempFile::new_in(dir)?;
         {
             let mut writer = BufWriter::new(&mut temp);
-            writer.write_all(body.as_bytes())?;
+            writer.write_all(&body)?;
             writer.flush()?;
         }
         temp.as_file_mut().sync_all()?;
@@ -1219,6 +1230,35 @@ mod tests {
         reread.load(dir.path()).unwrap();
         assert_eq!(reread.entries().len(), 1);
         assert_eq!(reread.unreadable(), 1);
+    }
+
+    #[test]
+    fn a_line_that_is_not_even_text_is_set_aside_not_fatal() {
+        // One byte of Latin-1 — an `é` from an editor that was not told the
+        // file is UTF-8, or a bit that flipped — used to fail the whole load,
+        // so the ledger would not open and nothing could be restored or
+        // forgotten until someone found the byte. Now it is one more
+        // unreadable line: counted, and written back exactly as it was.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(ARCHIVE_FILE);
+        let good = serde_json::to_string(&archived("readable", at(2026, 8, 2, 9, 0))).unwrap();
+        let goner = archived("goner", at(2026, 8, 3, 9, 0));
+        let key = goner.key();
+        let mut bytes = format!("{good}\n").into_bytes();
+        bytes.extend_from_slice(b"caf\xE9\n");
+        bytes.extend_from_slice(format!("{}\n", serde_json::to_string(&goner).unwrap()).as_bytes());
+        fs::write(&path, &bytes).unwrap();
+
+        let mut log = ArchiveLog::new();
+        log.load(dir.path()).expect("one bad byte must not close the ledger");
+        assert_eq!(log.entries().len(), 2);
+        assert_eq!(log.unreadable(), 1);
+
+        log.take(dir.path(), key).unwrap();
+        let written = fs::read(&path).unwrap();
+        assert!(written.windows(5).any(|w| w == b"caf\xE9\n"), "the line was not kept byte for byte");
+        assert_eq!(String::from_utf8_lossy(&written).matches("readable").count(), 1);
+        assert!(!String::from_utf8_lossy(&written).contains("goner"));
     }
 
     #[test]

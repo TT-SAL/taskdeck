@@ -1310,6 +1310,49 @@ mod tests {
     }
 
     #[test]
+    fn a_create_with_an_absurd_length_is_clamped_not_a_crash() {
+        // Anything a client can put in a `u32` and an `i32` may arrive here.
+        // The board answers with the legal block nearest to it — the whole
+        // day — the way it clamps a drag past midnight, rather than letting
+        // `planner::snap` overflow on the way (see its own test).
+        let (mut board, _dir) = fresh();
+        let now = at(2026, 9, 5, 8, 0);
+        let reply = board
+            .apply(Command::Create { kind: Kind::Task, name: "all day".into(), day: day(2026, 9, 5), start: i32::MIN, minutes: u32::MAX }, now)
+            .unwrap();
+        let item = board.item(reply.id.unwrap()).unwrap();
+        assert_eq!(item.sessions[0].start, at(2026, 9, 5, 0, 0));
+        assert_eq!(item.sessions[0].minutes, crate::planner::DAY_MINUTES as u32);
+    }
+
+    #[test]
+    fn two_items_under_one_id_are_told_apart_at_load() {
+        // Two computers' files pasted together can carry one id twice. Left
+        // alone, every command aimed at the second item would land on the
+        // first; the loader gives the second a fresh id, as it does an item
+        // with none.
+        let (mut board, dir) = fresh();
+        let now = at(2026, 9, 5, 8, 0);
+        let first = board
+            .apply(Command::Create { kind: Kind::Task, name: "first".into(), day: day(2026, 9, 5), start: 540, minutes: 30 }, now)
+            .unwrap()
+            .id
+            .unwrap();
+        let mut twin = board.item(first).unwrap().clone();
+        twin.name = "second".into();
+        let mut items = board.items.clone();
+        items.push(twin);
+        tasks::oversafe_activesave(&items, dir.path()).unwrap();
+
+        let mut again = reopen(dir.path());
+        let second = again.items.iter().find(|item| item.name == "second").map(|item| item.id).unwrap();
+        assert_ne!(second, first, "the second holder was renumbered");
+        again.apply(Command::Rename { id: second, name: "renamed".into() }, now).unwrap();
+        assert_eq!(again.item(first).unwrap().name, "first");
+        assert_eq!(again.item(second).unwrap().name, "renamed");
+    }
+
+    #[test]
     fn creates_take_the_shape_their_kind_asks_for() {
         let (mut board, _dir) = fresh();
         let now = at(2026, 9, 4, 8, 0);

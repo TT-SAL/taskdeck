@@ -467,22 +467,41 @@
     document.head.append(link);
   }
 
+  // A request that never answers — a mobile link that dropped mid-request,
+  // a desk asleep behind a firewall that swallows packets — would otherwise
+  // hang the page's whole chain of loads and replays. Ordinary requests are
+  // given fifteen seconds; the long poll waits for the server's own 25 s and
+  // then some. A request that runs out of time counts as unreachable (status
+  // 0), so an edit behind it is kept, not lost.
+  const REQUEST_TIMEOUT_MS = 15000;
+  const WAIT_TIMEOUT_MS = 45000;
   async function api(path, options = {}) {
     const headers = Object.assign({ 'X-TaskDeck-Token': state.token }, options.headers || {});
     if (options.body) headers['Content-Type'] = 'application/json';
-    let response;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const limit = path.startsWith('/api/wait') ? WAIT_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+    const timer = controller ? setTimeout(() => controller.abort(), limit) : null;
     try {
-      response = await fetch(path, Object.assign({}, options, { headers, cache: 'no-store' }));
+      const response = await fetch(path, Object.assign({}, options, { headers, cache: 'no-store', signal: controller ? controller.signal : undefined }));
+      // The body is read under the same clock: headers can arrive and the
+      // rest never.
+      const text = await response.text();
+      let payload = null;
+      try { payload = text ? JSON.parse(text) : null; } catch (_) {}
+      if (!response.ok) {
+        const message = (payload && payload.error) || `TaskDeck answered ${response.status}.`;
+        throw new ApiError(response.status, message);
+      }
+      return payload;
     } catch (error) {
+      if (error instanceof ApiError) throw error;
+      if (controller && controller.signal.aborted) {
+        throw new ApiError(0, "TaskDeck did not answer in time. Is it running, and is this phone on a working network?");
+      }
       throw new ApiError(0, "Can't reach TaskDeck. Is it running on the desktop, and is this phone on the same network?");
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    let payload = null;
-    try { payload = await response.json(); } catch (_) {}
-    if (!response.ok) {
-      const message = (payload && payload.error) || `TaskDeck answered ${response.status}.`;
-      throw new ApiError(response.status, message);
-    }
-    return payload;
   }
   class ApiError extends Error {
     constructor(status, message) { super(message); this.status = status; }

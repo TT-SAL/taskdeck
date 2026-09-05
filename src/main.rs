@@ -99,8 +99,12 @@ async fn run() {
         match sync::Remote::new(&server_url, &server_token, sync::STARTUP_TIMEOUT) {
             Err(why) => {
                 startup_errors.push(format!("The server setting is not usable, so this copy runs on its own:\n{why}"));
-                let (board, problems) = Board::open(dirs.data.clone());
+                let (mut board, problems) = Board::open(dirs.data.clone());
                 startup_errors.extend(problems);
+                // A board of its own, like every other branch here: its
+                // version has to start past whatever a phone already
+                // remembers, or the phone keeps its stale copy of the day.
+                board.seed_version(clock_version());
                 board
             }
             Ok(remote) => {
@@ -141,6 +145,10 @@ async fn run() {
                         } else {
                         let mut board = Board::from_parts(state.items, state.notes, dirs.data.clone());
                         board.archive.replace_with(state.archive);
+                        // This copy's own phone page watches this board's version;
+                        // it starts at the clock here too, so a page that saw the
+                        // last run's numbers is not told the world went backwards.
+                        board.seed_version(clock_version());
                         if let Err(why) = board.save_all() {
                             startup_errors.push(format!("Could not keep a local copy of the server's board:\n{why}"));
                         }

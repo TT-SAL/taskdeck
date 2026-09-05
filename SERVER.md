@@ -95,7 +95,8 @@ whole** — `read_at_startup.json`, `archived.jsonl`, `notepad_text.json`, `colo
 `userconfig.toml` — **make the service user its owner** (`sudo chown -R taskdeck:taskdeck
 /var/lib/taskdeck`; the desktop writes its files readable by their owner only, and a file the
 service cannot read stops it from starting, on purpose, rather than serving an empty board over
-it), and from then on run the desktop as a client of the server (§6), not on its own copy. Two TaskDecks writing the same board overwrite each other (`DOCUMENTATION.md` §4.1);
+it), and from then on run the desktop as a client of the server (§6), not on its own copy. Two
+TaskDecks writing the same board overwrite each other (`DOCUMENTATION.md` §4.1);
 `taskdeck-server` refuses to start if another TaskDeck has the folder open.
 
 `userconfig.toml` on the server needs only two keys; everything else in it is about a screen the
@@ -167,18 +168,21 @@ journalctl -u taskdeck-server -f
 The log's first lines say where the data is, which port it serves, and the phone link (with the
 key) for each address the machine has — the Tailscale one is the one to put on the phone. Open it
 there once and add the page to the home screen. The calendar feed is `/calendar.ics?token=…` on
-the same host and port. On a cold boot the Tailscale address can come up after the service
-starts, in which case the first log lines show the LAN link only; `--print-link` a minute later
-shows both, and a service bound to the Tailscale address alone is simply restarted by systemd
-every three seconds until the address exists. (The key is therefore in the journal, readable by anyone who can read
-the journal on that box — the same people who can read `userconfig.toml`. **New key** is a matter
-of editing `phone_token` there and restarting the service.)
+the same host and port. (The key is therefore in the journal, readable by anyone who can read the
+journal on that box — the same people who can read `userconfig.toml`. **New key** is a matter of
+editing `phone_token` there and restarting the service.)
+
+On a cold boot the Tailscale address can come up after the service starts, in which case the
+first log lines show the LAN link only; `--print-link` a minute later shows both, and a service
+bound to the Tailscale address alone is simply restarted by systemd every three seconds until the
+address exists.
 
 `taskdeck-server --help` lists the flags: `--port N` and `--bind ADDR` override the port and
 the address for one run;
 `--print-link` prints the data directory and the phone and feed links without serving (safe to
 run beside the service, e.g. `sudo -u taskdeck TASKDECK_HOME=/var/lib/taskdeck taskdeck-server
---print-link`); `--version` says what is built.
+--print-link`; it reads the port and the bind from the file, so if the service runs with `--port`
+or `--bind` overrides, pass the same ones); `--version` says what is built.
 
 ## 6. The desktop as a client
 
@@ -201,15 +205,22 @@ restarting the service) brings it back. **If the server is unreachable** the
 desktop keeps working on that cache and queues its edits in `taskdeck_data/outbox.json`; when the
 server is back they are replayed in order, the server's picture wins, and anything that could not
 be applied (an item finished meanwhile from the phone, say) is reported rather than silently
-dropped. The menu bar says when edits are waiting.
+dropped. Every command travels under a key that is the same on every retry, so a reply lost on
+the way — or a server that answered late — never means an edit applied twice. The menu bar says
+when edits are waiting, and says `outbox not saved` if the desktop cannot write its own outbox.
+
+**To go back to a local board**, clear `server_url` and restart: the folder is its own board again,
+any edits still unsent are set aside as a dated `outbox.json.local-…` (never replayed against a
+later server, never deleted), and a later return to the server is a first contact again — the
+local board set aside, as above, rather than overwritten.
 
 ## 7. Backups
 
 The whole board is a handful of small text files. A nightly copy is enough:
 
-```bash
-# /etc/cron.daily/taskdeck-backup
+```sh
 #!/bin/sh
+# /etc/cron.daily/taskdeck-backup  (make it executable: sudo chmod +x)
 tar -C /var/lib/taskdeck -czf "/var/backups/taskdeck-$(date +%F).tar.gz" taskdeck_data
 find /var/backups -name 'taskdeck-*.tar.gz' -mtime +30 -delete
 ```

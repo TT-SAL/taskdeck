@@ -119,7 +119,7 @@ TaskDeck keeps two folders:
 - `images/` holds the background pictures you can choose from.
 - `taskdeck_data/` holds your tasks, notes, colour schemes, and settings.
 
-Run one copy at a time. Two copies pointed at the same `taskdeck_data/` each keep their own picture of your tasks and write all of it whenever anything changes, so whichever saves last replaces the other's work — TaskDeck notices and says so at startup rather than letting it happen quietly.
+Run one copy at a time. Two copies pointed at the same `taskdeck_data/` each keep their own picture of your tasks and write all of it whenever anything changes, so whichever saves last replaces the other's work — TaskDeck notices and says so at startup rather than letting it happen quietly. If you want the same board on more than one computer, that is what `taskdeck-server` is for: one copy owns the files and the others are its clients (see *On your phone*, and [`SERVER.md`](SERVER.md)).
 
 Both are created on first run, next to the executable — so keeping the executable in its own folder gives you a self-contained, portable install you can move around. If the executable lives somewhere you are not allowed to write (`/Applications`, `/usr/local/bin`, `C:\Program Files`), TaskDeck falls back to the usual per-user location instead:
 

@@ -162,6 +162,17 @@ impl AppDirs {
         Self { root, data, images }
     }
 
+    /// The same locations, creating nothing. For a look at where a setup keeps
+    /// its files that must leave no trace of itself: `taskdeck-server
+    /// --print-link` may run as another user beside the service, and folders
+    /// it created would be that user's, where the service's should be. A path
+    /// that does not exist simply fails to read later, which is the right
+    /// answer for a look.
+    pub fn locate() -> Self {
+        let root = resolve_root();
+        Self { data: root.join(DATA_DIR_NAME), images: root.join(IMAGES_DIR_NAME), root }
+    }
+
     /// Path of the TOML settings file.
     pub fn config_file(&self) -> PathBuf {
         self.data.join("userconfig.toml")
@@ -297,6 +308,16 @@ fn home_dir() -> PathBuf {
 mod tests {
     use super::*;
 
+    /// `TASKDECK_HOME` belongs to the whole process, and cargo runs the tests
+    /// of one binary on several threads — so the tests that set it take this
+    /// first and hold it until they have put it back. Two of them setting and
+    /// clearing it at once would have one read the other's value, or none, and
+    /// `resolve()` would then make its folders wherever that landed.
+    ///
+    /// Poison is ignored on purpose: a test that panicked while holding this
+    /// should fail on its own account, not take the rest down with it.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn dirs_at(root: &Path) -> AppDirs {
         AppDirs {
             root: root.to_path_buf(),
@@ -344,7 +365,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("home");
 
-        // SAFETY: single-threaded test process; no other thread reads the env.
+        let _env = ENV_LOCK.lock().unwrap_or_else(|held| held.into_inner());
+        // SAFETY: `ENV_LOCK` is held, so no other test is reading or writing
+        // the environment while this one does.
         unsafe { env::set_var("TASKDECK_HOME", &root) };
         let dirs = AppDirs::resolve();
         unsafe { env::remove_var("TASKDECK_HOME") };
@@ -353,6 +376,24 @@ mod tests {
         assert!(dirs.data.is_dir(), "data dir should be created");
         assert!(dirs.images.is_dir(), "images dir should be created");
         assert_eq!(dirs.config_file(), root.join(DATA_DIR_NAME).join("userconfig.toml"));
+    }
+
+    #[test]
+    fn locate_names_the_same_folders_and_creates_none_of_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("elsewhere");
+
+        let _env = ENV_LOCK.lock().unwrap_or_else(|held| held.into_inner());
+        // SAFETY: `ENV_LOCK` is held, so no other test is reading or writing
+        // the environment while this one does.
+        unsafe { env::set_var("TASKDECK_HOME", &root) };
+        let dirs = AppDirs::locate();
+        unsafe { env::remove_var("TASKDECK_HOME") };
+
+        assert_eq!(dirs.root, root);
+        assert_eq!(dirs.data, root.join(DATA_DIR_NAME));
+        assert_eq!(dirs.images, root.join(IMAGES_DIR_NAME));
+        assert!(!root.exists(), "a look must leave nothing behind");
     }
 
     #[test]
