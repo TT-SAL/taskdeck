@@ -216,6 +216,21 @@ Fixes already landed (newest first). Kept here as history so the open list above
   that overlaps nothing still gets the lane, and none of them takes room from your own work. The
   phone is laid out server-side and drawn from `column`/`columns` like every other entry, so the
   page still decides nothing. Test `two_meetings_at_the_same_hour_are_given_a_column_each`.
+- **The server run on a Mac, over Tailscale, against a real board** (SERVER.md, new *Trying it on
+  a Mac first*): the whole deployment document assumed the Linux box, and the cheapest way to find
+  out whether that box is wanted is to run the binary on the machine already there. Four things
+  bite on macOS and are now written down. The firewall keys permission **by path**, so allowing
+  `target/debug/taskdeck-server` during development and then running the release build gives a
+  server that answers on loopback and is silently unreachable from everywhere else — which is
+  exactly what happened, and took a loopback-versus-LAN comparison to see rather than any error.
+  The single-writer lock means the desktop app will not start while the server holds the folder.
+  A closed lid is a stopped server. And no launchd unit ships. On the Tailscale side: the App
+  Store build is sandboxed and has no usable `tailscale serve`, so the standalone one is the one to
+  install; nothing about the server needs changing because `phone_bind_address` already defaults to
+  every interface; and HTTPS is a separate switch in the admin console, worth throwing because it
+  is what lets the browser install the service worker and so what makes the page open at all with
+  no signal. Verified end to end: both devices on the tailnet, a direct path at 42 ms, and a real
+  day of lectures fetched over it.
 - **Two things real calendars taught the feature that reasoning had not** (found by running it
   against two university feeds, 110 events): a course *period* is exported as an event running
   08:00–20:00 on every teaching day, because iCalendar gives an exporter nowhere else to put one.

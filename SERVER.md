@@ -35,6 +35,53 @@ Step 2 has to come before step 7. A desktop's first successful connection to a s
 board aside — harmless once the server already holds the right board, and the moment a calendar is
 lost if it does not.
 
+## Trying it on a Mac first
+
+The whole of this document is about a Linux box, but the server is a plain binary and runs on the
+machine you already have. That is the cheapest way to find out whether you want the box at all.
+
+```sh
+cargo build --release
+./target/release/taskdeck-server        # serves taskdeck_data/ beside the binary
+```
+
+Four things bite on macOS and nowhere else:
+
+- **One writer.** The server takes the same lock the desktop app does (§4.1), so TaskDeck refuses
+  to start while the server is running on the same folder. Pick one.
+- **The firewall keys permission by path.** macOS asks once per binary, and `target/debug/` and
+  `target/release/` are two different binaries to it. Allowing the debug build during development
+  and then running the release build gives you a server that answers on `127.0.0.1` and is
+  silently unreachable from everywhere else. Allow it explicitly rather than waiting for a prompt
+  that may not appear:
+  ```sh
+  sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PWD/target/release/taskdeck-server"
+  ```
+- **Sleep.** A closed lid is a stopped server. Nothing in the app can prevent that.
+- **No launchd unit ships with this.** The server runs until you stop it or reboot.
+
+### Tailscale on a Mac
+
+Install the **standalone** build from `tailscale.com/download/mac`, not the App Store one: the
+sandboxed version does not give a usable `tailscale serve`, which is what puts HTTPS on the phone
+page. Sign in on the Mac and on the phone with the same account, and `tailscale status` should list
+both.
+
+Nothing about the server needs changing: `phone_bind_address` defaults to `0.0.0.0`, which is every
+interface, and the tailnet's is one of them. The phone can open
+`http://<machine>.<tailnet>.ts.net:7373/?token=…` from mobile data straight away.
+
+**HTTPS is a separate switch**, and worth throwing. It is what lets the browser install the service
+worker, which is what makes the page open at all when the phone has no signal (§21.5). Enable
+HTTPS certificates for the tailnet once, in the admin console under DNS, then:
+
+```sh
+sudo tailscale serve --bg 7373
+```
+
+Leave `phone_bind_address` at `0.0.0.0` when you do. `serve` hands requests to `127.0.0.1`, and a
+single-address bind refuses them — the same trap §2 records for the Linux side.
+
 ## 1. The machine and its OS
 
 Any x86-64 or ARM64 box with a couple of gigabytes of RAM is more than enough; the server idles
