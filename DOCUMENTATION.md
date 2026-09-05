@@ -2289,7 +2289,7 @@ A few public routes, which carry no data, and the authorised ones:
 |-------|------|
 | `GET /` | the page. Public — it carries no data, and a home-screen shortcut that opens `/` has to load before it can present its key |
 | `GET /icon.png`, `GET /sw.js`, `GET /manifest.webmanifest` | public; the service worker (§21.5) is only honoured from a secure origin; the manifest's `start_url` keeps the token it was asked with, because iOS gives a home-screen app storage of its own |
-| `GET /api/state?from=YYYY-MM-DD&days=N` | the `Snapshot` (§21.4) |
+| `GET /api/state?from=YYYY-MM-DD&days=N` | the `Snapshot` (§21.4); `N` is clamped to 31 |
 | `GET /api/wait?version=N` | long poll: answers `{version}` the moment the version moves past `N`, or after 25 s unchanged |
 | `GET /api/board` | the whole board — items, archive, notes, version — for a desktop that keeps a replica of it (§22.3) |
 | `POST /api/command` | one `Command`, as JSON tagged by `op`; a query sent here is refused (`400`). `X-TaskDeck-Request: <key>` names the request, the same on every retry, so a repeat is answered with the first reply rather than applied again (§22.4) |
@@ -2330,6 +2330,35 @@ second one drifting in JavaScript.
 severity, horizon, rule, sessions) so the sheet that opens on a tap needs no second request.
 `version` is bumped by the board on every save it makes (`Board::touch`, the one funnel) so the
 page can tell a changed day from a redraw.
+
+**`days` is clamped to `MAX_SNAPSHOT_DAYS`, and clamped silently** — 31, the longest calendar
+month, because the phone's agenda pages by month and a request, a cache key and a slot on the
+month rail should all be the same unit. Asking for more returns 31 days with a 200 and no marker
+of any kind: a client meeting a server's limit is not a client error, and a `400` would break a
+page that sensibly asks for as much as it can use. **So a client counts `days.length` and resumes
+from the last date it actually received**, never from the number it asked for. The ceiling stops
+at 31 rather than higher because `build_day` rescans the whole archive for every day it builds and
+`ArchiveLog` holds every line ever written; past roughly ninety days per request, or a few thousand
+archive rows, the archive wants bucketing by session date once per snapshot before the ceiling
+moves again.
+
+**`known` is the span the subscribed calendars were actually read for**, both ends inclusive —
+`WINDOW_BACK_DAYS` back and `WINDOW_FORWARD_DAYS` forward of whenever the fetch happened. It exists
+because outside that span a day is byte-identical on the wire to a day with nothing on it, and
+answering "nothing on this day" about a day nobody has looked into is a wrong answer to the only
+question a calendar is asked. With the span the phone can say *nothing of yours* instead.
+
+Three rules keep it honest. It is **carried from the fetch that used it**, never re-derived from a
+later clock, so a desk that has just started up reports the window its cache was written with until
+the first refresh lands seconds later. A refresh in which **nothing was read** keeps the previous
+span rather than claiming a new one — the events carried forward through an outage were read for an
+older window, and a desk that has been off a week must not claim to have looked a week further
+ahead than anyone has. And it is **absent entirely when nothing is subscribed**, because a board
+with no calendars has no ignorance to declare, and every day on it that looks free is free.
+
+It is deliberately **not** part of `Overlay::digest`, for the reason `status` is not: the span
+slides forward every midnight, and folding it in would make every refresh a change and wake every
+parked phone, which is the one thing the digest exists to prevent.
 
 ### 21.5 The page
 

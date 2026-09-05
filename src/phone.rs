@@ -61,6 +61,7 @@ use crate::{
     archive::Archived,
     board::{Board, Reply},
     planner,
+    subscriptions,
     tasks::{self, Active, HORIZON_LABELS, IMPORTANCE_LABELS, WEEKDAY_NAMES},
 };
 
@@ -78,9 +79,21 @@ pub const DEFAULT_BIND: &str = "0.0.0.0";
 /// Lowest port the settings accept: the privileged range needs root and is
 /// full of things that are not calendars.
 pub const PORT_MIN: u16 = 1024;
-/// Most days one `/api/state` call will describe. The page asks for one; the
-/// ceiling is so a typo in the URL cannot ask for ten years of them.
-pub const MAX_SNAPSHOT_DAYS: u32 = 14;
+/// Most days one `/api/state` call will describe.
+///
+/// The ceiling is still what it always was — a typo in the URL must not be able
+/// to ask for ten years of days — but the number is no longer arbitrary. The
+/// phone's agenda pages by calendar month, and 31 is the longest one, so a
+/// request, a cache key and a slot on the month rail are all the same unit.
+///
+/// It stops there rather than higher because `build_day` rescans the whole
+/// archive for every day it builds, and `ArchiveLog` holds every line ever
+/// written: the per-day cost is flat only while the archive is small. Before
+/// this number moves again, the archive wants bucketing by session date once
+/// per snapshot, ahead of the map chain in `snapshot`.
+///
+/// The clamp that enforces it is deliberately silent — see `snapshot`.
+pub const MAX_SNAPSHOT_DAYS: u32 = 31;
 
 /// How long the worker waits for the UI thread to answer a command before
 /// telling the phone to try again. Generous: a save on a slow disk plus a
@@ -196,6 +209,11 @@ pub fn snapshot(
     // desk hears about the moment it opens the planner is nagging, not
     // reporting. The day is simply drawn without its ghosts.
     let _ = board.load_archive();
+    // Clamped, and clamped quietly: asking for more than the server will build
+    // is not a client error, it is a client meeting a server limit, and a 400
+    // would break a page that sensibly asks for as much as it can use. The
+    // caller is expected to count the days it got back rather than trust the
+    // number it asked for, which is what the phone's pager does.
     let days = days.clamp(1, MAX_SNAPSHOT_DAYS);
     let day_snapshots = (0..days as i64)
         .map(|offset| from + ChronoDuration::days(offset))
@@ -215,6 +233,8 @@ pub fn snapshot(
         ranked: ranked.unwrap_or_else(|| board.ranked_ids(now)),
         done: done_rows(board.archive.entries()),
         notes: board.notes.clone(),
+        // Only when there is something to be ignorant about.
+        known: if board.subscriptions().iter().any(|s| s.enabled) { board.overlay().covers } else { None },
     }
 }
 
@@ -1259,6 +1279,16 @@ pub struct Snapshot {
     pub done: Vec<DoneRow>,
     /// The desktop notepad, as it stands.
     pub notes: String,
+    /// The span the subscribed calendars were actually read for, both ends
+    /// inclusive. Absent when nothing is subscribed: a board with no calendars
+    /// has no ignorance to declare.
+    ///
+    /// Without this a day past the window is byte-identical to a free day, and
+    /// the phone would answer "nothing on this day" to a question it has not
+    /// looked into. With it the page can say *nothing of yours* instead, which
+    /// is the difference between a wrong answer and an honest one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub known: Option<subscriptions::Covered>,
 }
 
 /// One recent archive row, with what the ledger says about it.
@@ -1918,6 +1948,54 @@ mod tests {
             duration_minutes: None,
             recurrence: None,
         }
+    }
+
+    #[test]
+    fn the_snapshot_declares_how_far_the_calendars_were_read_only_when_there_are_any() {
+        use crate::subscriptions::{Covered, Overlay};
+        let mut board = Board::from_parts(Vec::new(), String::new(), std::path::PathBuf::from("."));
+        let now = at(2026, 9, 5, 12, 0);
+        let from = now.date_naive();
+
+        // Nothing subscribed: no window, because there is nothing to be
+        // ignorant about, and a day with nothing on it really is free.
+        let bare = snapshot(&mut board, [[0; 4]; 6], Some(Vec::new()), from, 1, now);
+        assert_eq!(bare.known, None);
+
+        let covers = Covered { from: from - ChronoDuration::days(60), until: from + ChronoDuration::days(400) };
+        board.adopt_overlay(Overlay::sealed(Vec::new(), Vec::new()).covering(Some(covers)));
+        board
+            .apply(Command::AddSubscription {
+                name: "Timetable".into(),
+                url: "https://example.invalid/a.ics".into(),
+                color: None,
+            }, now)
+            .expect("the address is well formed");
+        let with = snapshot(&mut board, [[0; 4]; 6], Some(Vec::new()), from, 1, now);
+        assert_eq!(with.known, Some(covers));
+
+        // Switched off is the same as absent: nothing was read, so nothing is
+        // claimed to have been.
+        let id = board.subscriptions().first().map(|s| s.id).expect("one subscription");
+        board.apply(Command::SetSubscriptionEnabled { id, enabled: false }, now).expect("switches off");
+        let off = snapshot(&mut board, [[0; 4]; 6], Some(Vec::new()), from, 1, now);
+        assert_eq!(off.known, None);
+    }
+
+    #[test]
+    fn a_request_for_more_days_than_the_server_builds_is_cut_down_quietly() {
+        // The page is expected to count what came back rather than trust what
+        // it asked for, so this must stay a 200 with fewer days — never a 400.
+        let mut board = Board::from_parts(Vec::new(), String::new(), std::path::PathBuf::from("."));
+        let now = at(2026, 9, 5, 12, 0);
+        let from = now.date_naive();
+        for asked in [MAX_SNAPSHOT_DAYS + 1, 100, 400, u32::MAX] {
+            let snap = snapshot(&mut board, [[0; 4]; 6], Some(Vec::new()), from, asked, now);
+            assert_eq!(snap.days.len(), MAX_SNAPSHOT_DAYS as usize, "asked for {asked}");
+        }
+        let exact = snapshot(&mut board, [[0; 4]; 6], Some(Vec::new()), from, MAX_SNAPSHOT_DAYS, now);
+        assert_eq!(exact.days.len(), MAX_SNAPSHOT_DAYS as usize);
+        assert_eq!(exact.days.last().map(|d| d.date), Some(from + ChronoDuration::days(30)));
     }
 
     fn headers(pairs: &[(&str, &str)]) -> Vec<Header> {

@@ -801,6 +801,13 @@ impl Board {
             // the desk can say when it last looked and what it heard, without
             // that being a change anybody else has to hear about.
             self.overlay.status = fresh.status;
+            // And the span it read for, which slides forward every midnight
+            // while the events stay put. The digest folds only events, so for a
+            // stable feed this branch is taken on nearly every refresh — and
+            // without this line the window would freeze at the last time the
+            // feed's *contents* changed, and the phone would start calling
+            // known days unknown.
+            self.overlay.covers = fresh.covers;
             return false;
         }
         self.overlay = fresh;

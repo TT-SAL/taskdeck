@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "Timetable",
+    "url": "https://example.invalid/a.ics",
+    "color": [
+      90,
+      140,
+      200,
+      255
+    ],
+    "enabled": false
+  }
+]

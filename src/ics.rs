@@ -161,7 +161,12 @@ impl Problems {
 
 /* ───────────────────────────── The one entry point ───────────────────────── */
 
-/// Read one fetched iCalendar file, keeping what falls in `[from, until)`.
+/// Read one fetched iCalendar file, keeping what falls in `[from, until]`.
+///
+/// Both ends inclusive — `expand` stops at `until` rather than before it, and
+/// `spread` gives up only once the cursor is past it. Worth being exact about:
+/// the phone marks the far edge of the window from this span, and a day out
+/// would have it greying out a day the calendars were in fact read for.
 ///
 /// The window is days in local time, and it is deliberately not the calendar's
 /// display range: the wall calendar shows up to ten years, and expanding a

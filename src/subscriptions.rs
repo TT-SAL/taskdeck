@@ -102,6 +102,30 @@ pub const REFRESH_EVERY: Duration = if cfg!(test) { Duration::from_millis(200) }
 pub const WINDOW_BACK_DAYS: i64 = 60;
 pub const WINDOW_FORWARD_DAYS: i64 = 400;
 
+/// The span the calendars were actually read for, both ends inclusive.
+///
+/// Outside it the overlay is empty — and an empty day is indistinguishable on
+/// the wire from a day with nothing on it. That is a wrong answer to the only
+/// question a calendar is asked, so the span travels with the overlay and out
+/// to the phone, which can then say *nothing of yours* where it would
+/// otherwise have said *nothing*.
+///
+/// Carried from the fetch that used it, never re-derived from a later clock: a
+/// desk that has just started up honestly reports the window its cache was
+/// written with, until the first refresh lands seconds later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Covered {
+    pub from: NaiveDate,
+    pub until: NaiveDate,
+}
+
+impl Covered {
+    /// Whether a day is one the calendars were read for.
+    pub fn holds(&self, day: NaiveDate) -> bool {
+        self.from <= day && day <= self.until
+    }
+}
+
 /* ────────────────────────── The list, which is authored ──────────────────── */
 
 /// One subscribed calendar, as the user set it up.
@@ -321,6 +345,16 @@ pub struct Overlay {
     /// exists to prevent.
     #[serde(default)]
     pub status: Vec<FetchStatus>,
+    /// The span the last fetch read for. **Kept out of the digest** for the
+    /// same reason as `status`: it slides forward every midnight, so folding it
+    /// in would make every refresh a change and wake every parked phone.
+    /// `None` before anything has been fetched, and from a cache written by a
+    /// version that did not record it — the cache is only rewritten when the
+    /// *events* change, so after a restart with a stable feed this arrives with
+    /// the first refresh rather than off the disk. Until it does, the phone
+    /// draws no edge at all, which is the old behaviour and not a wrong one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub covers: Option<Covered>,
 }
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -338,6 +372,13 @@ impl Overlay {
     /// The one door in, from anywhere: a fetch, the cache on disk, or a server
     /// over the wire. Bounds the strings and the counts, drops an event that
     /// ends before it starts, and **sorts** — see `digest`.
+    /// The span, added after sealing. A builder rather than a third parameter
+    /// on `sealed`, which has twenty callers and does not otherwise care.
+    pub fn covering(mut self, covers: Option<Covered>) -> Overlay {
+        self.covers = covers;
+        self
+    }
+
     pub fn sealed(events: Vec<OverlayEvent>, status: Vec<FetchStatus>) -> Overlay {
         let mut events: Vec<OverlayEvent> = events
             .into_iter()
@@ -367,7 +408,7 @@ impl Overlay {
                 status
             })
             .collect();
-        Overlay { events, status }
+        Overlay { events, status, covers: None }
     }
 
     /// Is this the same calendar as last time?
@@ -460,7 +501,10 @@ pub fn save(list: &[Subscription], data_dir: &Path) -> Result<(), Box<dyn Error>
 pub fn read_overlay(data_dir: &Path) -> Option<Overlay> {
     let text = fs::read_to_string(data_dir.join(OVERLAY_FILE)).ok()?;
     let overlay: Overlay = serde_json::from_str(&text).ok()?;
-    Some(Overlay::sealed(overlay.events, overlay.status))
+    // `sealed` keeps only what it is handed, so the span has to be handed back
+    // to it — otherwise every restart quietly forgets how far the last fetch
+    // looked and the phone stops being able to say so.
+    Some(Overlay::sealed(overlay.events, overlay.status).covering(overlay.covers))
 }
 
 /// Cache the overlay so a restart draws the calendars it drew before rather
@@ -547,10 +591,16 @@ pub fn fetch_all(client: &reqwest::blocking::Client, list: &[Subscription], prev
 
     let mut events = Vec::new();
     let mut status = Vec::new();
+    // Whether anything was actually read this time round. A fetch that failed
+    // carries the last events forward, but those were read for an *older*
+    // window — so claiming today's would say "I looked out to here" about days
+    // nobody has ever looked at.
+    let mut read_something = false;
     for subscription in list.iter().filter(|s| s.enabled) {
         let at = Local::now();
         let outcome = match fetch_one(client, &subscription.url, from, until) {
             Ok(parsed) => {
+                read_something = true;
                 let count = parsed.occurrences.len();
                 events.extend(parsed.occurrences.into_iter().map(|occurrence| OverlayEvent {
                     subscription: subscription.id,
@@ -574,7 +624,8 @@ pub fn fetch_all(client: &reqwest::blocking::Client, list: &[Subscription], prev
         };
         status.push(FetchStatus { subscription: subscription.id, at, outcome });
     }
-    Overlay::sealed(events, status)
+    let covers = if read_something { Some(Covered { from, until }) } else { previous.covers };
+    Overlay::sealed(events, status).covering(covers)
 }
 
 /// Characters a calendar server puts between a course and the room it is in.
@@ -1071,6 +1122,71 @@ mod tests {
         // Derived data: an unreadable cache is nothing to report.
         fs::write(dir.path().join(OVERLAY_FILE), "{not json").expect("writes");
         assert!(read_overlay(dir.path()).is_none());
+    }
+
+    #[test]
+    fn the_span_the_calendars_were_read_for_survives_the_cache() {
+        // `sealed` keeps only what it is handed, so a restart is exactly where
+        // this gets lost, and losing it makes the phone call known days unknown.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let covers = Covered { from: day(2026, 7, 7), until: day(2027, 10, 10) };
+        let overlay = Overlay::sealed(vec![event(1, day(2026, 9, 4), 600, 660, "Lecture")], Vec::new())
+            .covering(Some(covers));
+        save_overlay(&overlay, dir.path()).expect("writes");
+        assert_eq!(read_overlay(dir.path()).and_then(|back| back.covers), Some(covers));
+
+        // And a cache written before the field existed still reads.
+        let older = r#"{"events":[],"status":[]}"#;
+        fs::write(dir.path().join(OVERLAY_FILE), older).expect("writes");
+        let back = read_overlay(dir.path()).expect("reads");
+        assert_eq!(back.covers, None);
+    }
+
+    #[test]
+    fn a_fetch_that_read_nothing_claims_no_more_than_the_last_one_did() {
+        // The events carried forward were read for the window of whenever they
+        // last arrived. A desk that has been off a week and comes back with the
+        // feed still unreachable must not claim it has looked a week further
+        // ahead than anybody has.
+        let stale = Covered { from: day(2026, 1, 1), until: day(2026, 6, 1) };
+        let previous = Overlay::sealed(vec![event(1, day(2026, 2, 2), 600, 660, "Lecture")], Vec::new())
+            .covering(Some(stale));
+        let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(300)).build().expect("a client");
+        let list = vec![Subscription {
+            id: 1,
+            name: "Timetable".into(),
+            url: "http://127.0.0.1:1/gone.ics".into(),
+            color: DEFAULT_COLORS[0],
+            enabled: true,
+        }];
+        let overlay = fetch_all(&client, &list, &previous);
+        assert_eq!(overlay.covers, Some(stale), "an unread window is not a read one");
+        // And the events it could not refresh are still there.
+        assert_eq!(overlay.events.len(), 1);
+    }
+
+    #[test]
+    fn the_span_is_not_part_of_what_counts_as_a_change() {
+        // It slides forward every midnight. Folding it into the digest would
+        // make every refresh a change and wake every parked phone, which is the
+        // one thing the digest exists to prevent.
+        let events = vec![event(1, day(2026, 9, 4), 600, 660, "Lecture")];
+        let monday = Overlay::sealed(events.clone(), Vec::new())
+            .covering(Some(Covered { from: day(2026, 7, 7), until: day(2027, 10, 10) }));
+        let tuesday = Overlay::sealed(events, Vec::new())
+            .covering(Some(Covered { from: day(2026, 7, 8), until: day(2027, 10, 11) }));
+        assert_eq!(monday.digest(), tuesday.digest());
+    }
+
+    #[test]
+    fn a_day_is_inside_the_span_at_both_of_its_ends() {
+        // Inclusive at both ends, matching `ics::parse`. A day out here would
+        // grey a day the calendars were read for.
+        let covers = Covered { from: day(2026, 7, 7), until: day(2027, 10, 10) };
+        assert!(covers.holds(day(2026, 7, 7)));
+        assert!(covers.holds(day(2027, 10, 10)));
+        assert!(!covers.holds(day(2026, 7, 6)));
+        assert!(!covers.holds(day(2027, 10, 11)));
     }
 
     #[test]
