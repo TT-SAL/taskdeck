@@ -131,19 +131,31 @@
   /* A block is as tall as its event is long, so the text uses that height
      rather than being cut to one line with an ellipsis — a course summary
      runs past a hundred characters and the room is at the end of it. */
+  /* Somebody else's calendar. The mark of it is the bar down the left and the
+     flat, unlit ground — not a hatch: diagonal stripes read as "cancelled" or
+     "disabled", which is the wrong thing to say about a lecture you have to be
+     at, and they make the text underneath harder to read for no gain. */
   .subscribed {
-    position: absolute; border-radius: 6px; padding: 2px 8px;
-    border: 1px dashed var(--accent); border-left: 3px solid var(--accent);
-    background: repeating-linear-gradient(135deg,
-      rgba(255,255,255,0.045) 0 6px, rgba(255,255,255,0) 6px 12px);
-    color: var(--faint); font-size: 12px; overflow: hidden;
+    position: absolute; border-radius: 6px; padding: 3px 8px;
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    background: rgba(255,255,255,0.035);
+    color: var(--muted); font-size: 12px; overflow: hidden;
     line-height: 1.25; overflow-wrap: anywhere; pointer-events: none;
+    display: flex; flex-direction: column;
   }
-  /* Where it is, which for a lecture is the room. Its own line because it is
-     short and it is the half you actually look for. */
-  .subscribed .where { display: block; color: var(--accent); font-size: 11px; }
+  /* The name may be cut; the room may not. Two overlapping lectures each get
+     half the width, and the name is a hundred characters while the room is
+     thirteen — so the name is clamped and the room keeps its line, because the
+     room is the part you are looking for. */
+  .subscribed .what {
+    min-height: 0; overflow: hidden;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  }
+  .subscribed .where { flex: 0 0 auto; color: var(--accent); font-size: 11px; margin-top: 1px; }
   /* A course period rather than an appointment: further back still. */
-  .subscribed.backdrop { opacity: 0.55; border-style: dotted; background: none; }
+  /* A course period rather than an appointment: fainter still, and no ground
+     of its own so the lectures over it stay legible. */
+  .subscribed.backdrop { opacity: 0.5; background: none; border-left-style: dotted; }
   .allday {
     display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
     border-radius: 999px; padding: 2px 9px; margin: 0 6px 4px 0;
@@ -177,24 +189,42 @@
   .weekhead button .dn { font-size: 15px; font-weight: 700; color: var(--text); }
   .weekhead button.today .dn { color: #f0c36b; }
   .weekhead button.shown { background: var(--surface); border-radius: 8px; }
-  .weekbody { display: flex; position: relative; height: calc(var(--hour) * 24); }
-  .weekgutter { width: 26px; flex: 0 0 26px; position: relative; }
-  .weekgutter span { position: absolute; left: 0; font-size: 10px; color: var(--faint); transform: translateY(-0.6em); }
-  .weekcol {
-    flex: 1; min-width: 0; position: relative; border-left: 1px solid var(--line);
-    background: repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px var(--hour));
+  /* The week is a list, not a grid.
+     Seven columns on a phone gives each day about fifty pixels, and a course is
+     called "MOLE-101, Biokemia, Biokemia 3.9.–20.10.2026 - Luentokurssi" and
+     happens in "Metsätieteiden talo, sali 110". No orientation of a time grid
+     fixes that: turned on its side, a ninety-minute event across a 24-hour
+     width is twenty-eight pixels, which is worse than the fifty it had. A row
+     per event is the only shape that gives the words the whole screen — and
+     reading what is on is what a week is for. The shape of the hours lives in
+     the day view, which is one column wide and can afford it. */
+  .weekbody { display: block; position: relative; }
+  .aday { margin: 0 0 4px; }
+  .aday > button {
+    display: flex; align-items: baseline; gap: 8px; width: 100%;
+    background: var(--bg); border: 0; border-bottom: 1px solid var(--line);
+    color: var(--muted); padding: 9px 4px 5px; text-align: left; font: inherit;
   }
-  .weekcol.today { background-color: rgba(240, 195, 107, 0.05); }
-  .weekcol .empty-tap { position: absolute; inset: 0; }
-  .wentry {
-    position: absolute; border-radius: 3px; overflow: hidden; padding: 1px 3px;
-    font-size: 9px; line-height: 1.15; color: var(--text); white-space: nowrap; text-overflow: ellipsis;
-    background: var(--tint); border-left: 2px solid var(--accent); pointer-events: none;
+  .aday > button .adate { font-size: 14px; font-weight: 700; color: var(--text); }
+  .aday > button .acount { margin-left: auto; font-size: 11px; color: var(--faint); }
+  .aday.today > button .adate { color: #f0c36b; }
+  .aday.empty > button { opacity: 0.55; }
+  .arow {
+    display: flex; gap: 9px; align-items: baseline;
+    padding: 6px 4px; border-left: 3px solid var(--accent); margin: 3px 0 0;
+    background: var(--tint); border-radius: 0 6px 6px 0;
   }
-  .wentry.routine { background: transparent; border: 1px dashed var(--accent); border-left-width: 2px; color: var(--muted); }
-  .wentry.marker { height: 2px; padding: 0; border: 0; background: var(--accent); }
-  .wentry.ghost { background: rgba(0,0,0,0.25); border: 1px solid var(--accent); color: var(--faint); opacity: 0.8; }
-  .weeknow { position: absolute; left: 0; right: 0; border-top: 2px solid #e5484d; pointer-events: none; z-index: 2; }
+  .arow .at { flex: 0 0 42px; font-size: 11px; line-height: 1.35; color: var(--faint); }
+  .arow .at .ae { display: block; opacity: 0.6; }
+  .arow .abody { min-width: 0; flex: 1; }
+  .arow .an { font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+  .arow .aw { display: block; font-size: 11px; color: var(--accent); margin-top: 1px; overflow-wrap: anywhere; }
+  /* Somebody else's: the same bar, no fill, quieter text — the day view's rule
+     said again in a list. */
+  .arow.sub { background: none; }
+  .arow.sub .an { color: var(--muted); }
+  .arow.done .an { color: var(--faint); text-decoration: line-through; }
+  .anothing { padding: 4px 4px 8px; font-size: 12px; color: var(--faint); }
 
   /* ── Bottom bar ── */
   .bar {
@@ -1009,47 +1039,76 @@
 
     const body = $('weekbody');
     body.replaceChildren();
-    const gutter = el('div', { class: 'weekgutter' });
-    for (let h = 0; h < 24; h += 2) gutter.append(el('span', { class: 'mono', style: `top:${h * HOUR}px`, text: pad(h) }));
-    body.append(gutter);
 
     for (const day of days) {
-      const col = el('div', { class: 'weekcol' + (day.is_today ? ' today' : '') });
-      // Tapping empty space in a column opens that day at that hour.
-      col.append(el('button', { class: 'empty-tap', 'aria-label': `Open ${day.label}`, onclick: () => {
-        state.day = day.date; setMode('day'); load().then(scrollToUsefulHour);
-      } }));
-      // A subscribed calendar's hours, under the week's own blocks. All-day
-      // bands are left out here: seven columns of full-height boxes would be
-      // the whole view.
-      for (const event of (day.subscribed || [])) {
-        if (event.all_day) continue;
-        col.append(el('div', {
-          class: event.background ? 'subscribed backdrop' : 'subscribed',
-          style: `${spanStyle(event)}; --accent:${event.color}`,
-          text: event.where ? `${event.name} · ${event.where}` : event.name,
-          title: [event.calendar, event.where].filter(Boolean).join(' — '),
-        }));
+      const [dy, dm, dd] = day.date.split('-').map(Number);
+      const when = new Date(dy, dm - 1, dd);
+
+      // Everything on the day, the board's and the subscribed calendars', in
+      // one list ordered by the clock — which is the order you read a day in.
+      const rows = [];
+      for (const entry of day.entries) {
+        rows.push({
+          at: entry.start,
+          label: hhmm(entry.start),
+          until: entry.marker ? '' : hhmm(entry.start + entry.minutes),
+          name: entry.name,
+          where: entry.marker && entry.due ? 'due' : '',
+          accent: colorOf(entry.color),
+          tint: tintOf(entry.color),
+          sub: false,
+        });
       }
       for (const ghost of day.ghosts) {
-        col.append(el('div', { class: 'wentry ghost', style: `${laneStyle(ghost)}; --accent:${colorOf(ghost.color)}`, text: ghost.name }));
-      }
-      for (const entry of day.entries) {
-        const accent = colorOf(entry.color);
-        if (entry.marker) {
-          col.append(el('div', { class: 'wentry marker', style: `${laneStyle(entry, 2)}; --accent:${accent}` }));
-          continue;
-        }
-        const node = el('div', {
-          class: 'wentry' + (entry.kind === 'routine' ? ' routine' : ''),
-          style: `${laneStyle(entry)}; --accent:${accent}; --tint:${tintOf(entry.color)}`,
-          title: `${hhmm(entry.start)}–${hhmm(entry.start + entry.minutes)} ${entry.name}`,
+        rows.push({
+          at: ghost.start, label: hhmm(ghost.start), until: hhmm(ghost.start + ghost.minutes),
+          name: ghost.name, where: '',
+          accent: colorOf(ghost.color), tint: 'transparent', sub: false, done: true,
         });
-        if (entry.minutes / 60 * HOUR >= 16) node.textContent = entry.name;
-        col.append(node);
       }
-      if (day.is_today) col.append(el('div', { class: 'weeknow', style: `top:${nowMinutes() / 60 * HOUR}px` }));
-      body.append(col);
+      for (const event of (day.subscribed || [])) {
+        rows.push({
+          at: event.all_day ? -1 : event.start,
+          label: event.all_day ? 'all' : hhmm(event.start),
+          until: event.all_day ? 'day' : hhmm(event.end),
+          name: event.name,
+          where: event.where || '',
+          accent: event.color,
+          tint: 'transparent',
+          sub: true,
+        });
+      }
+      rows.sort((a, b) => a.at - b.at);
+
+      const section = el('div', {
+        class: 'aday' + (day.is_today ? ' today' : '') + (rows.length ? '' : ' empty'),
+      });
+      section.append(el('button', {
+        'aria-label': `Open ${day.label}`,
+        onclick: () => { state.day = day.date; setMode('day'); load().then(scrollToUsefulHour); },
+      }, [
+        el('span', { class: 'adate', text: when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }),
+        el('span', { class: 'acount', text: rows.length ? `${rows.length}` : '' }),
+      ]));
+
+      if (!rows.length) {
+        section.append(el('div', { class: 'anothing', text: 'nothing' }));
+      }
+      for (const row of rows) {
+        const line = el('div', {
+          class: 'arow' + (row.sub ? ' sub' : '') + (row.done ? ' done' : ''),
+          style: `--accent:${row.accent}; --tint:${row.tint}`,
+        });
+        const at = el('span', { class: 'at', text: row.label });
+        if (row.until) at.append(el('span', { class: 'ae', text: row.until }));
+        line.append(at);
+        const bodyCell = el('div', { class: 'abody' });
+        bodyCell.append(el('span', { class: 'an', text: row.name }));
+        if (row.where) bodyCell.append(el('span', { class: 'aw', text: row.where }));
+        line.append(bodyCell);
+        section.append(line);
+      }
+      body.append(section);
     }
     grid.hidden = false;
   }
@@ -1105,7 +1164,7 @@
         style: `${spanStyle(event)}; --accent:${event.color}`,
         title: [event.calendar, event.where, event.note].filter(Boolean).join(' — '),
       });
-      box.append(el('span', { text: event.name }));
+      box.append(el('span', { class: 'what', text: event.name }));
       if (event.where) box.append(el('span', { class: 'where', text: event.where }));
       lanes.append(box);
     }
@@ -1293,17 +1352,21 @@
     const day = state.snap && state.snap.days[0];
     if (!day) return;
     let hour;
-    if (state.mode === 'week') {
-      hour = 7;
-    } else if (day.is_today) {
+    if (day.is_today) {
       hour = Math.max(0, nowMinutes() / 60 - 1);
     } else {
       const starts = day.entries.map((e) => e.start);
       hour = starts.length ? Math.min(7, Math.max(0, Math.min(...starts) / 60 - 1)) : 7;
     }
     const mast = document.querySelector('.mast').getBoundingClientRect().height;
-    const body = state.mode === 'week' ? $('weekbody') : $('timeline');
-    window.scrollTo({ top: body.offsetTop + hour * HOUR - mast, behavior: 'auto' });
+    if (state.mode === 'week') {
+      const body = $('weekbody');
+      const today = body.querySelector('.aday.today');
+      const head = $('weekhead').getBoundingClientRect().height;
+      window.scrollTo({ top: (today ? today.offsetTop : body.offsetTop) - mast - head, behavior: 'auto' });
+      return;
+    }
+    window.scrollTo({ top: $('timeline').offsetTop + hour * HOUR - mast, behavior: 'auto' });
   }
 
   /* ───────────────────────────── Sheets ───────────────────────────── */

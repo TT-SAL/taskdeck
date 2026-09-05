@@ -2342,11 +2342,19 @@ steps it; arrow keys and `T` work too.
 Under the figure, the shown day's week as seven taps, Monday first like the calendar, each with up
 to three dots for what the wall calendar would show on it — events and due dates, in their own
 colours, the same budget a calendar cell has (one extra seven-day request per week and per
-change). **Week** (`W`) turns that same seven-day answer into a view: seven columns at the day's
-own hour scale, each laid out by the server exactly as a day is — lanes, ghosts, markers — too
-narrow to read a name in but wide enough to see the shape of a week, with the masthead adding
-the week up; ‹ › and a swipe step a week at a time, and a tap on a column opens that day. The
-choice of view is remembered on the phone. **Notes** in the bottom bar opens the desktop notepad's text, and **Save** replaces it
+change). **Week** (`W`) turns that same seven-day answer into a view: seven days one under the
+other as a **list**, each day a heading with a count and the day's things beneath it in clock
+order — the start over the end in the left column, the name, and the room under it when the event
+came from a subscribed calendar. ‹ › and a swipe step a week at a time, and a tap on a day's
+heading opens it. The choice of view is remembered on the phone.
+
+It was a seven-column time grid until it met a real week. The arithmetic is unkind: at 380
+device-independent pixels a column is 51 wide, and a lecture called *MS-C1350, Partial Differential
+Equations, L01* in a room called *U4 NORDEA - U142* has nothing to say in 51 pixels. Turning the
+grid on its side does not help — 24 hours across 380px gives a 90-minute lecture 28 pixels, and
+clipping the night away to 07:00–22:00 only gets to 44. A grid spends its width on *when*, which
+seven columns cannot afford; a list spends it on *what*, and the clock survives as two small
+numbers. The day view keeps its hour scale, because one column can pay for it. **Notes** in the bottom bar opens the desktop notepad's text, and **Save** replaces it
 whole (`Command::SetNotes`, tabs removed as on the desktop) — explicit rather than per keystroke,
 so the desk and the phone cannot fight over a sentence.
 
@@ -2768,10 +2776,22 @@ Three surfaces, each honest about whose the event is.
   index — `PreviewItem::subscribed` carries the override. A lecture is worth knowing about; a task
   is worth doing, and the cell says which is which.
 - **The phone**: the same, laid out server-side so the page draws and never decides, with all-day
-  bands as chips above the timeline.
+  bands as chips above the timeline. A flat ground rather than a fill, and a bar down the left in
+  the calendar's colour. It was diagonal stripes for one afternoon; stripes read as *cancelled* or
+  *disabled*, which is the wrong thing to say about a lecture you have to be at. Inside the block
+  the name is clamped to three lines and the room is a separate, unclampable line under it, so the
+  half-width block a clash gives you loses words off the *course title* and never the room. In the
+  week list the same event is one row: time, name, room.
 
 The colour is the subscription's own and deliberately does **not** follow the colour scheme: it
 says which calendar, not how urgent.
+
+**A room named twice is shown once.** Both real university feeds write the whole itinerary into
+`SUMMARY` and then repeat its tail in `LOCATION` — `…Luento - L01 - U4 NORDEA - U142` with
+`LOCATION:U4 NORDEA - U142`. Drawing both spends a line saying nothing, so
+`without_repeated_location` takes the room off the end of the summary, along with whatever `-`,
+`·` or `,` was joining them. Only a suffix, only case-insensitively, and only when a name is left
+over: an event whose summary *is* the room keeps it.
 
 ### 23.6 The parser (`ics.rs`), and why it is ours
 

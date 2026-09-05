@@ -192,6 +192,28 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **The phone's week was a grid nobody could read** (`phone.html`, §21.5): seven columns at the
+  day's hour scale gave each day 51 device-independent pixels, which is not enough for a course
+  code, let alone the room. The reported symptom was names and rooms "crammed against each other";
+  the proposed fix was to rotate the grid, and the arithmetic refuses it — 24 hours across 380px
+  gives a 90-minute lecture 28 pixels, and clipping to 07:00–22:00 reaches 44. The week is now a
+  **list**: a heading per day with a count, then the day's things in clock order, each a row of
+  start-over-end, name, and room. The full page width goes to the words. The day view is unchanged,
+  because one column can afford an hour scale.
+- **Subscribed blocks were drawn as diagonal stripes** (`phone.html`): the pattern was meant to say
+  *somebody else owns this*. It says *cancelled*, which is the opposite of what a lecture you must
+  attend needs to say. Now a flat ground with a coloured bar down the left — the same sentence the
+  desktop's dashed outline speaks, in the phone's accent.
+- **A clash could hide the classroom** (`phone.html`): the block's text was one flow, so the
+  half-width block an overlap produces truncated from the end — and in a university feed the end is
+  the room, the one part you actually need. The name is now clamped to three lines and the room is
+  a separate line beneath it that is never clamped: a clash costs you words off the course title.
+- **A room the feed named twice was printed twice** (`subscriptions.rs`): both real university
+  feeds end `SUMMARY` with the room and then repeat it in `LOCATION`, so a block that had room for
+  two lines spent both on the same string. `without_repeated_location` takes the tail off the
+  summary when it matches, case-insensitively, along with the `-`, `·` or `,` joining them — and
+  leaves the summary alone when nothing would be left of it.
+
 - **Subscribed calendars, end to end** (§23; `ics.rs` and `subscriptions.rs`, both new): TaskDeck
   now reads iCalendar feeds off https addresses and draws them beside the day. The load-bearing
   decision is that they are an **overlay, never items** — nothing fetched becomes an `Active`,

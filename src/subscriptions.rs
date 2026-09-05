@@ -559,7 +559,7 @@ pub fn fetch_all(client: &reqwest::blocking::Client, list: &[Subscription], prev
                     end: occurrence.end,
                     all_day: occurrence.all_day,
                     free: occurrence.free,
-                    summary: occurrence.name,
+                    summary: without_repeated_location(&occurrence.name, &occurrence.location),
                     location: occurrence.location,
                     description: occurrence.description,
                 }));
@@ -575,6 +575,36 @@ pub fn fetch_all(client: &reqwest::blocking::Client, list: &[Subscription], prev
         status.push(FetchStatus { subscription: subscription.id, at, outcome });
     }
     Overlay::sealed(events, status)
+}
+
+/// Characters a calendar server puts between a course and the room it is in.
+const TRAILING_SEPARATORS: &str = "-\u{2013}\u{2014},\u{00b7}|@:;/\u{2022}";
+
+/// The room, taken off the end of the summary when the feed says it twice.
+///
+/// University feeds write the whole itinerary into SUMMARY and then repeat its
+/// last part in LOCATION: "MS-C1350, Partial Differential Equations, Luento -
+/// L01 - U4 NORDEA - U142" with LOCATION "U4 NORDEA - U142". Both are shown —
+/// the room on its own line, because that is the part you are walking towards —
+/// and printing it twice costs the line that would have shown the course.
+///
+/// Only a suffix is taken, and only when something is left: a summary that *is*
+/// the room ("U142") keeps its name rather than becoming blank.
+fn without_repeated_location(summary: &str, location: &str) -> String {
+    let summary = summary.trim();
+    let location = location.trim();
+    if location.chars().count() < 2 {
+        return summary.to_string();
+    }
+    let Some((cut, _)) = summary.char_indices().rev().nth(location.chars().count() - 1) else {
+        return summary.to_string();
+    };
+    if summary[cut..].to_lowercase() != location.to_lowercase() {
+        return summary.to_string();
+    }
+    let kept = summary[..cut]
+        .trim_end_matches(|c: char| c.is_whitespace() || TRAILING_SEPARATORS.contains(c));
+    if kept.is_empty() { summary.to_string() } else { kept.to_string() }
 }
 
 /* ──────────────────────────────── The service ────────────────────────────── */
@@ -1041,5 +1071,37 @@ mod tests {
         // Derived data: an unreadable cache is nothing to report.
         fs::write(dir.path().join(OVERLAY_FILE), "{not json").expect("writes");
         assert!(read_overlay(dir.path()).is_none());
+    }
+
+    #[test]
+    fn a_room_the_feed_names_twice_is_only_shown_once() {
+        // Both real university feeds do this, with different separators.
+        assert_eq!(
+            without_repeated_location(
+                "MS-C1350, Partial Differential Equations - Luento - L01 - U4 NORDEA - U142",
+                "U4 NORDEA - U142",
+            ),
+            "MS-C1350, Partial Differential Equations - Luento - L01",
+        );
+        assert_eq!(
+            without_repeated_location("KEK101, Atomit - Luennot - Chemicum, sali A110", "Chemicum, sali A110"),
+            "KEK101, Atomit - Luennot",
+        );
+        // Case and stray space are the feed's business, not the reader's.
+        assert_eq!(without_repeated_location("Seminar \u{00b7} Exactum  ", " exactum"), "Seminar");
+    }
+
+    #[test]
+    fn a_summary_that_is_only_the_room_keeps_its_name() {
+        // Trimming here would leave the event with nothing to be called.
+        assert_eq!(without_repeated_location("U142", "U142"), "U142");
+        assert_eq!(without_repeated_location("- U142", "U142"), "- U142");
+        // A room named elsewhere in the line is not a suffix and is left alone.
+        assert_eq!(without_repeated_location("U142 lecture", "U142"), "U142 lecture");
+        // Nothing to take: no location, or one too short to be one.
+        assert_eq!(without_repeated_location("Standup", ""), "Standup");
+        assert_eq!(without_repeated_location("Room A", "A"), "Room A");
+        // A location longer than the whole summary cannot be its tail.
+        assert_eq!(without_repeated_location("A110", "Chemicum, sali A110"), "A110");
     }
 }
