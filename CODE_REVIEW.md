@@ -192,6 +192,24 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **One unsent edit held the whole opening screen blank** (`phone.html`, `load()`): the first statement
+  in `load()` replayed the offline outbox, and only after that did the page paint the day it already
+  had in storage. `flush()` awaits each queued command at the 15-second request timeout, so a single
+  edit made in a tunnel and not yet sent bought a blank masthead over an empty body for three times
+  the delay this page spent a day removing. The paint from storage now happens first; the queue is
+  not urgent, and seeing the day is. The load's place in the queue is claimed at the top of the
+  function too, rather than after an await, which is where it always belonged.
+- **The week's request had no in-flight guard** (`phone.html`, `loadWeek()`): swiping quickly, or a
+  poll landing under a tap, starts a second request before the first answers. Out of order they left
+  `state.week` holding a week that was not the shown day's — after which both drawing guards refuse to
+  draw and the phone keeps showing the *previous* week, silently, until something else moves it. It
+  now carries the same sequence counter `load()` has.
+- **A summary line that said `…` forever** (`phone.html`): `render()` sets the week's summary to `…`
+  when `state.week.days` is not there yet, and `loadWeek()` drew the strip and the grid directly
+  without ever going back through `render()`. On any open where the week arrived after the day — which
+  is every cold open, because the two requests are strictly serial — the ellipsis stayed for as long
+  as the view did.
+
 - **The phone's week was a grid nobody could read** (`phone.html`, §21.5): seven columns at the
   day's hour scale gave each day 51 device-independent pixels, which is not enough for a course
   code, let alone the room. The reported symptom was names and rooms "crammed against each other";

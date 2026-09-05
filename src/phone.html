@@ -776,15 +776,18 @@
   }
 
   let loadSeq = 0;
+  // The same, for the week's own request: two of them can be in flight and
+  // land out of order.
+  let weekSeq = 0;
   // Set when a replay sent something, cleared by whichever load draws the
   // board next: the redraw must not be lost with a load that was overtaken.
   let sheetStale = false;
   async function load({ quiet = false } = {}) {
-    const replayed = outbox().length ? await flush() : null;
-    if (replayed && replayed.sent) sheetStale = true;
     // Two loads can be in flight — › tapped twice, a poll under a swipe. Only
     // the latest one's answer is shown, and a day's cache is keyed by the day
     // the answer is actually for, never by the day selected when it arrived.
+    // Claimed here rather than after the replay below: a load's place in the
+    // queue is decided when it is called, not when it gets around to asking.
     const mine = ++loadSeq;
     const asked = state.day;
 
@@ -806,6 +809,14 @@
         render();
       }
     }
+
+    // Replay only after that paint. `flush()` awaits each queued command at
+    // REQUEST_TIMEOUT_MS, so one edit made in a tunnel and still unsent held
+    // the whole opening screen blank for up to fifteen seconds — three times
+    // the delay this page spent a day getting rid of. The queue is not urgent;
+    // seeing the day is.
+    const replayed = outbox().length ? await flush() : null;
+    if (replayed && replayed.sent) sheetStale = true;
 
     try {
       const snap = await api(`/api/state?from=${asked}&days=1`);
@@ -980,17 +991,24 @@
     const monday = isoOf(mondayOf(state.day));
     const key = `${monday}#${state.snap.version}`;
     if (state.week.key === key) return;
+    // Swiping fast, or a poll landing under a tap, starts a second of these
+    // before the first answers. Out of order they leave `state.week` holding a
+    // week that is not the shown day's, and both drawing guards then refuse to
+    // draw — so the phone keeps showing the *previous* week, silently, until
+    // something else moves.
+    const mine = ++weekSeq;
     try {
       const snap = await api(`/api/state?from=${monday}&days=7`);
+      if (mine !== weekSeq) return;
       const marks = {};
       for (const d of snap.days) {
         marks[d.date] = d.entries.filter((e) => e.kind === 'event' || e.due).map((e) => e.color);
       }
       state.week = { key, marks, days: snap.days };
-      if (state.snap) {
-        renderWeek(state.snap.days[0]);
-        if (state.mode === 'week') renderWeekGrid();
-      }
+      // The whole masthead, not just the body: the week's summary line is set
+      // to `…` by `render()` before this answer exists, and drawing only the
+      // grid left it that way for as long as the view stayed open.
+      if (state.snap) render();
     } catch (_) {
       // The dots are a nicety; the day itself already loaded.
     }
