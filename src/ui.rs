@@ -1290,7 +1290,21 @@ struct PressState {
 /// follow the colour scheme (§23).
 fn preview_color(palette: &[Color32; 6], item: &PreviewItem) -> Color32 {
     match item.subscribed {
-        Some([r, g, b, _]) => Color32::from_rgb(r, g, b),
+        // The calendar's own **hue** — which calendar this is — at the
+        // **weight the active scheme gives an event**, which is slot 5.
+        //
+        // Not the colour as stored. A subscription's colour is authored as
+        // opaque RGBA because that is what a swatch in the settings sheet has
+        // to be, and painting it here as stored put a solid block among the
+        // washes every other cell is drawn with: the schemes carry alpha 74–136
+        // on purpose, so the background photo shows through, and COLORSCHEME
+        // ZERO carries none at all. One opaque rectangle in that company does
+        // not read as "somebody else's" — it reads as broken.
+        //
+        // Taking the alpha rather than the whole colour keeps both halves of
+        // §23.5's rule: the hue still says *which calendar*, and the scheme
+        // still decides how present anything on this wall is allowed to be.
+        Some([r, g, b, _]) => Color32::from_rgba_unmultiplied(r, g, b, palette[5].a()),
         None => palette[item.color_id.min(5)],
     }
 }
@@ -8213,7 +8227,45 @@ fn set_world_map(ctx: &Context) -> TextureHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::{snap_font_points, FIXEDSYS_GRID_PX};
+    use super::{preview_color, snap_font_points, Color32, PreviewItem, FIXEDSYS_GRID_PX};
+
+    fn scheme(alpha: [u8; 6]) -> [Color32; 6] {
+        std::array::from_fn(|i| Color32::from_rgba_unmultiplied(10 * i as u8, 20, 30, alpha[i]))
+    }
+    fn subscribed(color: [u8; 4]) -> PreviewItem {
+        PreviewItem { name: "Lecture".into(), time: "10:15".into(), color_id: 0, subscribed: Some(color) }
+    }
+
+    #[test]
+    fn a_subscribed_event_keeps_its_hue_and_takes_the_schemes_weight() {
+        // Its colour is authored opaque, because the swatch in the settings
+        // sheet has to be. Painted as stored it was a solid block among washes
+        // the scheme deliberately keeps at a third of that.
+        let palette = scheme([74, 88, 104, 120, 136, 104]);
+        let drawn = preview_color(&palette, &subscribed([90, 140, 200, 255]));
+        assert_eq!(drawn.a(), 104, "the weight is the scheme's, from the events slot");
+        let bare = Color32::from_rgba_unmultiplied(90, 140, 200, 104);
+        assert_eq!(drawn, bare, "the hue is still the calendar's own");
+    }
+
+    #[test]
+    fn an_untinted_scheme_leaves_a_subscribed_event_untinted_too() {
+        // COLORSCHEME ZERO is six transparent entries so the photo shows
+        // through. A subscribed event has no more right to sit on top of it
+        // than the board's own things do.
+        let palette = scheme([0; 6]);
+        assert_eq!(preview_color(&palette, &subscribed([90, 140, 200, 255])).a(), 0);
+    }
+
+    #[test]
+    fn the_boards_own_items_still_come_straight_off_the_palette() {
+        let palette = scheme([74, 88, 104, 120, 136, 104]);
+        let own = PreviewItem { name: "Essay".into(), time: String::new(), color_id: 3, subscribed: None };
+        assert_eq!(preview_color(&palette, &own), palette[3]);
+        // And an out-of-range slot is clamped rather than panicking.
+        let odd = PreviewItem { name: "?".into(), time: String::new(), color_id: 99, subscribed: None };
+        assert_eq!(preview_color(&palette, &odd), palette[5]);
+    }
 
     /// The whole point of the snap: whatever comes back must land on a whole
     /// number of pixels at the scale it was snapped for.

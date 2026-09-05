@@ -2796,10 +2796,16 @@ made none at all.
   and leave reflow nowhere to put the day's work; so would anything long enough to amount to the
   same. "I am at a conference" is not the claim "there is a meeting at two", so both are drawn and
   planned straight through — the all-day one as a chip above the timeline, the long one as a
-  backdrop behind it. The line is `LONG_EVENT_MINUTES`, six hours, and it was found in real data
-  rather than reasoned out: a university feed exports a course *period* as an event running
-  08:00–20:00 on every teaching day, because iCalendar gave it nowhere else to put one. Treated as
-  busy, that made the whole working day unplannable.
+  backdrop behind it. The line is `LONG_EVENT_MINUTES`, **twelve hours**, and it is measured rather
+  than reasoned out: a university feed exports a course *period* as an event running 08:00–20:00 on
+  every teaching day, because iCalendar gave it nowhere else to put one, and treated as busy that
+  made the whole working day unplannable. Across three real feeds — two university timetables and a
+  student club's — every genuine appointment runs 90 to 600 minutes and every period marker runs
+  exactly 720, with nothing at all in between, so the line goes in the gap. It was six hours first,
+  a guess made against one feed, and the club's calendar showed the cost: a board game night from
+  16:00 to 22:00 and a tournament from noon to eight were both being drawn as scenery for a day
+  that was in fact taken. Past twelve hours there is no morning or evening left to plan into, which
+  is the whole reason a span stops being an appointment.
 - **A backdrop takes no part in the column packing either.** Subscribed events that overlap each
   other are laid out side by side so both stay readable, but a twelve-hour period marker sitting
   behind three lectures would otherwise squeeze every one of them into half a column.
@@ -2848,9 +2854,14 @@ Three surfaces, each honest about whose the event is.
   its own last line. That is not cosmetic: a course feed's summary runs past a hundred characters
   and ends with the room, so an ellipsis eats precisely the part you were looking for.
 - **The month grid**: after the day's own items and never instead of them, in whatever room is left
-  of the cell's three slots, prefixed `◇` and drawn in the calendar's colour rather than a palette
-  index — `PreviewItem::subscribed` carries the override. A lecture is worth knowing about; a task
-  is worth doing, and the cell says which is which.
+  of the cell's three slots, prefixed `◇` and drawn in the calendar's own **hue** rather than a
+  palette index — `PreviewItem::subscribed` carries the override. A lecture is worth knowing about;
+  a task is worth doing, and the cell says which is which. The **weight** is still the scheme's,
+  taken from its events slot: a subscription's colour is authored opaque because the swatch in the
+  settings sheet has to be, and painting it as stored put a solid block among washes the schemes
+  hold at a third of that on purpose, so the background photo can show through. One opaque rectangle
+  in that company does not read as *somebody else's* — it reads as broken. Under COLORSCHEME ZERO,
+  whose six entries are fully transparent, a subscribed event is untinted like everything else.
 - **The phone**: the same, laid out server-side so the page draws and never decides, with all-day
   bands as chips above the timeline. A flat ground rather than a fill, and a bar down the left in
   the calendar's colour. It was diagonal stripes for one afternoon; stripes read as *cancelled* or

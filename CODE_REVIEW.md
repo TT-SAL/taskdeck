@@ -192,6 +192,22 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **Subscribed events were opaque blocks on a translucent wall** (`ui.rs`, `preview_color`): the
+  colour schemes carry alpha 74–136 so the background photo shows through, and COLORSCHEME ZERO
+  carries none at all — but `preview_color` built a subscribed event's colour with
+  `Color32::from_rgb`, dropping the alpha and painting it at full strength. Every cell that held one
+  had a solid rectangle sitting among washes, which does not read as *somebody else's calendar*, it
+  reads as a bug. It now takes the **hue** from the subscription and the **weight** from the active
+  scheme's events slot, which keeps both halves of §23.5's rule intact.
+- **A six-hour threshold turned real evenings into scenery** (`subscriptions.rs`,
+  `LONG_EVENT_MINUTES`): the constant that decides whether a subscribed span is an appointment or
+  the ground the day sits on was guessed at six hours against a single feed. Subscribing to a
+  student club's calendar showed what that cost — a board game night from 16:00 to 22:00 and a
+  tournament from noon to eight were both drawn dimmed and planned straight through, as though the
+  day were free. Measured across all three feeds now in use, every genuine appointment is 90–600
+  minutes and every course-period marker is exactly 720, with nothing in between; the line moved to
+  twelve hours, into the gap.
+
 - **The week was one week, and cost two round trips to be that** (`phone.html`, §21.5): the view is
   now a continuous agenda that grows a month at a time, and the page opens on it. Four things went
   with the rewrite. `loadWeek()` is gone, and with it the second strictly serial request every open

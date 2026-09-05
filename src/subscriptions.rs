@@ -218,9 +218,19 @@ pub struct OverlayEvent {
 /// twelve-hour block because iCalendar gave the exporter nowhere else to put
 /// it. Anchoring reflow on that leaves nowhere to put any work at all, which
 /// is the same failure an all-day band would cause and for the same reason.
-/// Six hours is where the line falls: past it, "I am at a conference" rather
-/// than "there is a meeting at two".
-pub const LONG_EVENT_MINUTES: i32 = 6 * 60;
+/// Twelve hours is where the line falls, and the number is measured rather
+/// than chosen. Across three real feeds — two university timetables and a
+/// student club's — every genuine appointment is 90 to 600 minutes and every
+/// course-period marker is exactly 720. Nothing at all sits between 600 and
+/// 720, so the line goes in the gap.
+///
+/// It was six hours first, which was a guess made against one feed, and the
+/// club's calendar showed what the guess cost: a board game night runs 16:00
+/// to 22:00 and a tournament noon to eight, and all of them were being drawn
+/// as scenery for a day that was in fact taken. Half a day is the honest
+/// threshold — past twelve hours there is no morning or evening left to plan
+/// into, which is the whole reason a span stops being an appointment.
+pub const LONG_EVENT_MINUTES: i32 = 12 * 60;
 
 impl OverlayEvent {
     /// How long it runs.
@@ -1023,9 +1033,21 @@ mod tests {
         );
         let long = overlay.events.iter().find(|e| e.minutes() >= LONG_EVENT_MINUTES).expect("the period");
         assert!(long.is_background() && !long.is_busy());
-        // A four-hour lecture block is still an appointment.
-        let four_hours = event(1, today, 9 * 60, 13 * 60, "Lab");
-        assert!(four_hours.is_busy(), "six hours is the line, not four");
+
+        // The other side of the line, and the reason it moved. These are real
+        // durations off a student club's feed: an evening that ends at ten and
+        // a tournament that runs noon to eight are things you are *at*, not
+        // scenery for a day that is otherwise free.
+        for (start, end, what) in [
+            (16 * 60, 22 * 60, "board game night, six hours"),
+            (12 * 60, 20 * 60, "tournament, eight hours"),
+            (14 * 60, 24 * 60, "the long one, ten hours"),
+            (9 * 60, 13 * 60, "lab, four hours"),
+        ] {
+            assert!(event(1, today, start, end, what).is_busy(), "{what} is an appointment");
+        }
+        // And a day carved out whole still is not.
+        assert!(event(1, today, 0, 24 * 60, "conference").is_background());
     }
 
     #[test]
