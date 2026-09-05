@@ -17,6 +17,13 @@ User=taskdeck
 Group=taskdeck
 # Where taskdeck_data/ lives; copy an existing calendar's folder here whole.
 Environment=TASKDECK_HOME=/var/lib/taskdeck
+# The zone the phone's day is drawn in. chrono reads the box's own zone, so a
+# Linux server left on UTC puts an evening block on the wrong day for anyone
+# who is not on UTC. Prefer fixing the whole box —
+#   sudo timedatectl set-timezone Europe/Helsinki
+# — which fixes the journal timestamps beside it too; uncomment this only on a
+# box that has to stay on UTC. `--print-link` prints the zone it will use.
+#Environment=TZ=Europe/Helsinki
 ExecStart=/usr/local/bin/taskdeck-server
 Restart=always
 RestartSec=3

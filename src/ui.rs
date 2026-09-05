@@ -5,7 +5,7 @@ use egui::{self, Align, Button, Color32, ColorImage, ComboBox, Context, CornerRa
 use image::{ImageBuffer, Rgba};
 use winit::event_loop::EventLoopProxy;
 
-use crate::{archive::{self, ArchiveKey, ArchiveLog, Archived, KindFilter, Outcome, OutcomeFilter}, board::{self, Board}, sync, calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, FRAME_CAP_DEFAULT, FRAME_CAP_MAX, FRAME_CAP_MIN, FRAME_CAP_UNCAPPED, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_frame_cap, clamp_ui_scale_percent}, paths::AppDirs, phone, planner, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active}, weather::{self, WeatherService}};
+use crate::{archive::{self, ArchiveKey, ArchiveLog, Archived, KindFilter, Outcome, OutcomeFilter}, board::{self, Board}, sync, calendarwidgets, color::{self, ColorScheme}, initialization::{DESIGN_WIDTH_POINTS, FRAME_CAP_DEFAULT, FRAME_CAP_MAX, FRAME_CAP_MIN, FRAME_CAP_UNCAPPED, UI_SCALE_AUTO, UI_SCALE_MAX, UI_SCALE_MIN, clamp_frame_cap, clamp_ui_scale_percent}, paths::AppDirs, phone, planner, subscriptions, utilities::{self, next_three_weekdays, resolve_colorscheme}, tasks::{self, Active}, weather::{self, WeatherService}};
 
 /// The calendar's column headings. The same Monday-first list a `Recurrence`
 /// bit indexes into, so there is one place a weekday is named.
@@ -599,6 +599,33 @@ fn planner_weekday_row(ui: &mut Ui, rule: &mut tasks::Recurrence, shown_day: Nai
 /// making it look grabbable would be a lie the pointer immediately exposes —
 /// it takes no gestures at all. Painted before the live entries, so anything
 /// still on the day covers it rather than the other way round.
+/// Draw one subscribed calendar's event on the day's timeline.
+///
+/// Deliberately unlike a block of this board's: no fill of its own, a dashed
+/// outline and a bar down the left in the calendar's own colour. It carries no
+/// response and no gesture, so nothing about it invites the drag or the tap
+/// that would do nothing. The colour is the subscription's rather than the
+/// scheme's, because it says *which calendar*, not how urgent.
+fn paint_subscribed_event(ui: &Ui, rect: Rect, color: Color32, name: &str) {
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::same(6), Color32::from_black_alpha(60));
+    painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, color.gamma_multiply(0.7)), StrokeKind::Inside);
+    // The bar is what reads at a glance as "this one is not mine".
+    painter.rect_filled(
+        Rect::from_min_max(rect.left_top(), pos2(rect.left() + 3.0, rect.bottom())),
+        CornerRadius::same(2),
+        color,
+    );
+    let clipped = painter.with_clip_rect(rect.intersect(ui.clip_rect()));
+    clipped.text(
+        rect.shrink2(vec2(9.0, 3.0)).left_top(),
+        egui::Align2::LEFT_TOP,
+        name,
+        FontId::new(PLANNER_FINE_SIZE, FontFamily::Monospace),
+        Color32::from_white_alpha(150),
+    );
+}
+
 fn paint_planner_ghost(ui: &Ui, ghost: &PlannerGhost, rect: Rect, palette: &[Color32; 6]) {
     let accent = accent_for(palette, ghost.color_id);
     let painter = ui.painter();
@@ -1307,6 +1334,11 @@ pub struct TaskAppConfig {
     pub background_image_tint_percent: u32,
     pub ui_scale_percent: u32,
     pub weather_service: WeatherService,
+    /// The subscribed-calendar service, or `None` when this copy is a client:
+    /// the board is somebody else's and so is the fetching (§23). An `Option`
+    /// rather than a flag, so the rule lives in the type and not in a branch
+    /// that has to remember it.
+    pub calendars: Option<subscriptions::Feeds>,
     /// Message describing any non-fatal startup recovery (e.g. a corrupt data
     /// file that was quarantined), to surface in the error window once the UI is
     /// up. `None` when startup loaded cleanly.
@@ -1369,6 +1401,15 @@ pub struct TaskApp {
     archive_view: ArchiveView,
 
     calendar_elements: Vec<DayCell>,
+
+    /* ────────────────── Subscribed calendars (§23) ────────────────── */
+    /// `None` on a client: the board is the server's and so is the fetching.
+    calendars: Option<subscriptions::Feeds>,
+    last_calendars_version: u64,
+    /// What the CALENDARS settings section is typing.
+    calendar_url_input: String,
+    calendar_name_input: String,
+    calendar_add_error: Option<String>,
 
     /* ───────────────────────── Weather ───────────────────────── */
     pub weather_service: WeatherService,
@@ -1622,6 +1663,11 @@ impl TaskApp {
             weather_service: config.weather_service,
             weather_data_cache: Vec::new(),
             last_weather_version: 0,
+            calendars: config.calendars,
+            last_calendars_version: 0,
+            calendar_url_input: String::new(),
+            calendar_name_input: String::new(),
+            calendar_add_error: None,
             three_day_weather: config.three_day_weather,
             weather_is_broken_flag: false,
 
@@ -2603,6 +2649,7 @@ impl TaskApp {
         let now = Local::now();
         let command = command.stamped(now);
         let touches_archive = command.touches_archive();
+        let touches_calendars = command.touches_calendars();
         let creates = command.creates_item();
         // The notepad is not in the calendar: its autosave rebuilds nothing.
         let only_notes = matches!(command, board::Command::SetNotes { .. });
@@ -2616,10 +2663,43 @@ impl TaskApp {
         if touches_archive {
             self.rebuild_planner_ghosts();
         }
+        // A calendar added, removed or switched back on is fetched now, not at
+        // the next tick of a ten-minute timer: nobody pastes an address and
+        // then waits to find out whether it was the right one. A client has no
+        // service and needs none — the server saw the same command.
+        if touches_calendars
+            && let Some(calendars) = &self.calendars
+        {
+            calendars.set_subscriptions(self.board.subscriptions().to_vec());
+        }
         if let (Some(command), Some(sync), Ok(reply)) = (sent, &self.sync, &result) {
             sync.queue(command, if creates { reply.id } else { None });
         }
         result
+    }
+
+    /// Take in a freshly fetched overlay, if the calendars thread has one.
+    ///
+    /// Polled here rather than beside the weather in the frame because
+    /// `serve_phone_requests` also runs from `App::user_event`: a fetch that
+    /// lands while the window is minimized or asleep then reaches the phone at
+    /// once instead of waiting for a redraw. The same reason `drain_sync_events`
+    /// is called from here.
+    fn adopt_calendar_overlay(&mut self) {
+        let Some(calendars) = &self.calendars else { return };
+        let version = calendars.version.load(Ordering::Relaxed);
+        if version == self.last_calendars_version {
+            return;
+        }
+        self.last_calendars_version = version;
+        // A poisoned lock answers with an empty overlay rather than taking the
+        // window down; the next fetch puts it back.
+        let fresh = calendars.overlay();
+        if self.board.adopt_overlay(fresh) {
+            self.board.save_overlay();
+            self.summarize_calendar();
+            self.phone_changed();
+        }
     }
 
     /// Take in what the sync engine has to say: the server's board, an id
@@ -2653,7 +2733,10 @@ impl TaskApp {
                     // server's copy of them: the debounced save sends ours in
                     // a moment, and last writer wins as everywhere else.
                     let notes = if self.should_save_textbox_text { self.board.notes.clone() } else { state.notes };
-                    self.board.replace(state.items, Some(state.archive), notes);
+                    // The subscriptions and the overlay come in with the rest:
+                    // a client never fetches for itself, so this is the only
+                    // way either reaches it (§23).
+                    self.board.replace(state.items, Some(state.archive), notes, state.subscriptions, state.overlay);
                     let kept = if archive_changed { self.board.save_all() } else { self.board.save_items_and_notes() };
                     if let Err(why) = kept {
                         self.show_error(format!("Could not keep a local copy of the server's board:\n{why}"));
@@ -3162,6 +3245,7 @@ impl TaskApp {
     /// is a second way of changing a task.
     pub fn serve_phone_requests(&mut self) {
         self.drain_sync_events();
+        self.adopt_calendar_overlay();
         self.tend_phone_server();
         while let Ok(request) = self.phone_rx.try_recv() {
             let reply = self.execute_phone_command(request.command);
@@ -3385,6 +3469,121 @@ impl TaskApp {
                 });
             }
         });
+    }
+
+    /// The calendars somebody else keeps (§23).
+    ///
+    /// Read-only everywhere they are drawn, so this is the only place they can
+    /// be changed at all — and every change here is a `Command`, so a server
+    /// and every other client hear about it like any other edit.
+    fn settings_calendars(&mut self, ui: &mut Ui) {
+        settings_section(ui, "CALENDARS", "settings_calendars", |ui| {
+            let subscribed = self.board.subscriptions().to_vec();
+
+            for subscription in &subscribed {
+                let mut color = Color32::from_rgba_unmultiplied(
+                    subscription.color[0],
+                    subscription.color[1],
+                    subscription.color[2],
+                    255,
+                );
+                settings_row(ui, "", |ui| {
+                    let mut enabled = subscription.enabled;
+                    if ui.checkbox(&mut enabled, "").changed() {
+                        self.apply_or_report(board::Command::SetSubscriptionEnabled {
+                            id: subscription.id,
+                            enabled,
+                        });
+                    }
+                    // The colour says which calendar, not how urgent, so it is
+                    // picked straight rather than off the scheme.
+                    if ui.color_edit_button_srgba(&mut color).changed() {
+                        self.apply_or_report(board::Command::SetSubscriptionColor {
+                            id: subscription.id,
+                            color: [color.r(), color.g(), color.b(), 255],
+                        });
+                    }
+                    let mut name = subscription.name.clone();
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut name).desired_width(SETTINGS_CONTROL_WIDTH * 0.7),
+                    );
+                    if field.changed() {
+                        // Held only while typing; the command goes on blur, so
+                        // one rename is one command rather than one per key.
+                        self.calendar_name_input = name.clone();
+                    }
+                    if field.lost_focus() && !self.calendar_name_input.trim().is_empty() {
+                        let name = std::mem::take(&mut self.calendar_name_input);
+                        self.apply_or_report(board::Command::RenameSubscription { id: subscription.id, name });
+                    }
+                    if settings_button(ui, "Remove").clicked() {
+                        self.apply_or_report(board::Command::RemoveSubscription { id: subscription.id });
+                    }
+                });
+                settings_row(ui, "", |ui| settings_note(ui, self.calendar_status_line(subscription.id)));
+            }
+
+            if subscribed.is_empty() {
+                settings_row(ui, "", |ui| settings_note(ui, "nothing subscribed to yet"));
+            }
+
+            if subscribed.len() < subscriptions::SUBSCRIPTIONS_MAX {
+                settings_row(ui, "Add", |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.calendar_url_input)
+                            .hint_text("https://…/basic.ics")
+                            .desired_width(SETTINGS_CONTROL_WIDTH * 1.4),
+                    );
+                    if settings_button(ui, "Subscribe").clicked() {
+                        let url = std::mem::take(&mut self.calendar_url_input);
+                        let name = String::new();
+                        match self.apply(board::Command::AddSubscription { name, url: url.clone(), color: None }) {
+                            Ok(_) => self.calendar_add_error = None,
+                            Err(error) => {
+                                // Kept in the field so it can be corrected
+                                // rather than retyped.
+                                self.calendar_url_input = url;
+                                self.calendar_add_error = Some(error.message);
+                            }
+                        }
+                    }
+                });
+                if let Some(problem) = self.calendar_add_error.clone() {
+                    settings_row(ui, "", |ui| settings_note(ui, problem));
+                }
+                settings_row(ui, "", |ui| {
+                    settings_note(
+                        ui,
+                        "a secret https link from Google, Apple or a work calendar.\nRead-only: these are drawn beside your day, never edited here.",
+                    );
+                });
+            }
+
+            if self.calendars.is_none() {
+                settings_row(ui, "", |ui| {
+                    settings_note(ui, "the server reads these — this copy shows what it found");
+                });
+            }
+        });
+    }
+
+    /// What one subscription's last fetch came to, in a line.
+    fn calendar_status_line(&self, id: u64) -> String {
+        match self.board.overlay().status_for(id) {
+            None => "not read yet".to_string(),
+            Some(status) => {
+                let at = status.at.format("%H:%M");
+                match &status.outcome {
+                    subscriptions::FetchOutcome::Ok { events, problems } if problems.is_empty() => {
+                        format!("{events} events, read at {at}")
+                    }
+                    subscriptions::FetchOutcome::Ok { events, problems } => {
+                        format!("{events} events, read at {at} — {}", problems.join("; "))
+                    }
+                    subscriptions::FetchOutcome::Failed { why } => format!("could not read at {at}: {why}"),
+                }
+            }
+        }
     }
 
     /// Where the board lives when it is not here: a `taskdeck-server`.
@@ -4037,6 +4236,20 @@ impl TaskApp {
                         .color(Color32::from_white_alpha(190)),
                 )
                 .on_hover_text("Overlapping blocks counted once");
+
+                // An all-day thing off a subscribed calendar is named here
+                // rather than drawn on the timeline: one drawn as a block
+                // would claim the whole day and bury everything in it (§23).
+                let bands = self.subscribed_all_day();
+                if !bands.is_empty() {
+                    ui.add_space(18.0);
+                    ui.label(
+                        RichText::new(bands)
+                            .size(PLANNER_META_SIZE)
+                            .color(Color32::from_white_alpha(140)),
+                    )
+                    .on_hover_text("All day, from a subscribed calendar");
+                }
 
                 // Work booked before the now-line and not ticked off is the
                 // day running late, and it gets one verb: slide what is left
@@ -4953,6 +5166,11 @@ impl TaskApp {
                     .or_else(|| entries.iter().position(|entry| entry.id == id))
             });
 
+            // Somebody else's calendar is the ground everything else sits on:
+            // it is not yours to move, and it is drawn behind even the ghosts
+            // so it never hides a thing this board owns (§23).
+            self.paint_subscribed(ui, lane_area, &geometry);
+
             // Ghosts first, so anything still live sits on top of the record of
             // what is already done.
             for (ghost, ghost_rect) in self.planner_ghosts.iter().zip(ghost_rects.iter()) {
@@ -5053,6 +5271,65 @@ impl TaskApp {
     ///
     /// Does nothing while the planner is closed, so opening the archive on a
     /// machine that has never opened the planner does not go looking for a day.
+    /// The subscribed calendars on the day being planned.
+    ///
+    /// Full width of the lane area rather than in a column of its own: these
+    /// are not competing with the day's blocks for room, they are the ground
+    /// under them. An all-day band is left off the timeline entirely — one
+    /// drawn as a block would fill the day and bury everything in it — and is
+    /// named in the masthead instead.
+    fn paint_subscribed(&self, ui: &Ui, lane_area: Rect, geometry: &planner::TimelineGeometry) {
+        let day = self.planner_day;
+        let showing: Vec<(&crate::subscriptions::OverlayEvent, Color32)> = self
+            .board
+            .overlay()
+            .events_on(day)
+            .filter(|event| !event.all_day)
+            .filter_map(|event| {
+                let subscription =
+                    self.board.subscriptions().iter().find(|s| s.id == event.subscription && s.enabled)?;
+                let color =
+                    Color32::from_rgb(subscription.color[0], subscription.color[1], subscription.color[2]);
+                Some((event, color))
+            })
+            .collect();
+
+        // Laid out among *themselves* rather than with the day's own blocks:
+        // two meetings that overlap split the width between them and stay
+        // readable, but they never take room away from your own work, which is
+        // what they are the ground under. Drawn full width before this, which
+        // put two overlapping meetings in exactly the same rectangle.
+        let placements: Vec<planner::Placement> = showing
+            .iter()
+            .map(|(event, _)| planner::Placement::Block {
+                start: event.start,
+                minutes: (event.end - event.start).max(1) as u32,
+            })
+            .collect();
+        let lanes = planner::lay_out(&placements);
+
+        for ((event, color), (placement, lane)) in showing.iter().zip(placements.iter().zip(lanes.iter())) {
+            let rect = planner_entry_rect(*placement, *lane, lane_area, geometry);
+            paint_subscribed_event(ui, rect, *color, &event.summary);
+        }
+    }
+
+    /// The all-day bands on the day being planned, as one line for the
+    /// masthead. Empty when there are none, so the row costs nothing.
+    fn subscribed_all_day(&self) -> String {
+        let names: Vec<&str> = self
+            .board
+            .overlay()
+            .events_on(self.planner_day)
+            .filter(|event| event.all_day)
+            .filter(|event| {
+                self.board.subscriptions().iter().any(|s| s.id == event.subscription && s.enabled)
+            })
+            .map(|event| event.summary.as_str())
+            .collect();
+        names.join("  ·  ")
+    }
+
     fn rebuild_planner_ghosts(&mut self) {
         self.planner_ghosts.clear();
         if !self.planner_flag {
@@ -6953,6 +7230,7 @@ impl TaskApp {
                             self.settings_window_section(ui, ctx);
                             self.settings_calendar(ui);
                             self.settings_weather(ui);
+                            self.settings_calendars(ui);
                             self.settings_phone(ui, ctx);
                             self.settings_server(ui);
                             ui.add_space(4.0);

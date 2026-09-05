@@ -3,7 +3,7 @@
 use mimalloc::MiMalloc;
 use std::sync::Arc;
 
-use task_deck::{board::Board, color, initialization::{self, App, Config, get_check_and_set_config}, paths::{self, AppDirs}, phone, sync, tasks, ui::{TaskApp, TaskAppConfig}, weather::get_weather};
+use task_deck::{board::Board, color, initialization::{self, App, Config, get_check_and_set_config}, paths::{self, AppDirs}, phone, subscriptions, sync, tasks, ui::{TaskApp, TaskAppConfig}, weather::get_weather};
 use winit::event_loop::{ControlFlow, EventLoop};
 
 #[global_allocator]
@@ -145,6 +145,11 @@ async fn run() {
                         } else {
                         let mut board = Board::from_parts(state.items, state.notes, dirs.data.clone());
                         board.archive.replace_with(state.archive);
+                        // The calendars and what they said come down with the
+                        // board: a client never fetches for itself (§23), and
+                        // without this it would show none until the first
+                        // board arrives, which can be minutes.
+                        board.adopt_from_server(state.subscriptions, state.overlay);
                         // This copy's own phone page watches this board's version;
                         // it starts at the clock here too, so a page that saw the
                         // last run's numbers is not told the world went backwards.
@@ -197,6 +202,14 @@ async fn run() {
             }
         }
     };
+
+    // Whichever process owns the board fetches for it (§23). A client's
+    // overlay arrives with the board it is a replica of, and a second fetcher
+    // would be this machine asking a stranger's server for the same file on
+    // the same timer as the server that already has it.
+    let calendars = sync_handle.is_none().then(|| {
+        subscriptions::start(board.subscriptions().to_vec(), board.overlay().clone(), Arc::clone(&wake))
+    });
 
     let background_options = dirs.background_options();
 
@@ -256,6 +269,7 @@ async fn run() {
         background_image_tint_percent,
         ui_scale_percent,
         weather_service: get_weather(coordinates, proxy.clone()),
+        calendars,
         startup_error: if startup_errors.is_empty() {
             None
         } else {

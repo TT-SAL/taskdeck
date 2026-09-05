@@ -201,6 +201,7 @@ pub fn snapshot(
         .map(|offset| from + ChronoDuration::days(offset))
         .map(|day| build_day(&board.items, board.archive.entries(), day, now))
         .collect();
+    let day_snapshots = with_subscribed(day_snapshots, board.subscriptions(), board.overlay());
 
     Snapshot {
         version: board.version(),
@@ -1198,6 +1199,31 @@ pub struct DaySnapshot {
     pub behind_minutes: i32,
     pub entries: Vec<EntrySnapshot>,
     pub ghosts: Vec<GhostSnapshot>,
+    /// What a subscribed calendar says is on this day (§23). Drawn beside the
+    /// day's own blocks and never tappable: nothing here can be edited from
+    /// the phone, because nothing here belongs to this board.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subscribed: Vec<SubscribedSnapshot>,
+}
+
+/// One event off a subscribed calendar, as the page draws it.
+#[derive(Debug, Clone, Serialize)]
+pub struct SubscribedSnapshot {
+    pub start: i32,
+    pub end: i32,
+    /// Which of `columns` side-by-side slots this one takes. Laid out here so
+    /// the page draws and never decides, exactly as the day's own entries are
+    /// — and so two meetings that overlap are both readable instead of one
+    /// being printed on top of the other.
+    pub column: usize,
+    pub columns: usize,
+    pub all_day: bool,
+    pub name: String,
+    /// `#rrggbb`, the subscription's own colour rather than the scheme's: it
+    /// says which calendar, not how urgent.
+    pub color: String,
+    /// Which calendar, for the label under a tap-free block.
+    pub calendar: String,
 }
 
 /// One thing on a day's timeline — the page's copy of `PlannerEntry`, laid
@@ -1307,6 +1333,62 @@ fn kind_of(item: &Active) -> &'static str {
 /// the desktop does (§17.4): an hour already spent behaves like an hour that
 /// is booked, so a new block lands beside finished work rather than on top of
 /// it.
+/// Lay the subscribed calendars over the days that were just built.
+///
+/// Done here rather than inside `build_day` so that function keeps taking only
+/// the board's own things — it is the one the tests drive, and a subscribed
+/// calendar is not part of what it is testing.
+fn with_subscribed(
+    mut days: Vec<DaySnapshot>,
+    subscriptions: &[crate::subscriptions::Subscription],
+    overlay: &crate::subscriptions::Overlay,
+) -> Vec<DaySnapshot> {
+    for day in &mut days {
+        let showing: Vec<(&crate::subscriptions::OverlayEvent, &crate::subscriptions::Subscription)> = overlay
+            .events_on(day.date)
+            .filter_map(|event| {
+                // A calendar switched off is not drawn. The overlay is usually
+                // cleared of it already; this is the belt to that brace, and
+                // costs one lookup per event.
+                let subscription = subscriptions.iter().find(|s| s.id == event.subscription)?;
+                subscription.enabled.then_some((event, subscription))
+            })
+            .collect();
+
+        // Laid out among themselves, the way the day's own entries are laid
+        // out among theirs: two meetings at the same hour split the width
+        // rather than one being drawn over the other. All-day bands take no
+        // part — they are chips above the timeline, not blocks on it.
+        let placements: Vec<planner::Placement> = showing
+            .iter()
+            .map(|(event, _)| planner::Placement::Block {
+                start: event.start,
+                minutes: if event.all_day { 0 } else { (event.end - event.start).max(1) as u32 },
+            })
+            .collect();
+        let lanes = planner::lay_out(&placements);
+
+        day.subscribed = showing
+            .iter()
+            .zip(lanes.iter())
+            .map(|((event, subscription), lane)| SubscribedSnapshot {
+                start: event.start,
+                end: event.end,
+                column: lane.column,
+                columns: lane.columns.max(1),
+                all_day: event.all_day,
+                name: event.summary.clone(),
+                color: format!(
+                    "#{:02x}{:02x}{:02x}",
+                    subscription.color[0], subscription.color[1], subscription.color[2]
+                ),
+                calendar: subscription.name.clone(),
+            })
+            .collect();
+    }
+    days
+}
+
 pub fn build_day(items: &[Active], archived: &[Archived], day: NaiveDate, now: DateTime<Local>) -> DaySnapshot {
     struct Live<'a> {
         item: &'a Active,
@@ -1418,6 +1500,8 @@ pub fn build_day(items: &[Active], archived: &[Archived], day: NaiveDate, now: D
         behind_minutes,
         entries,
         ghosts: ghost_snapshots,
+        // Filled by `with_subscribed`: this function is the board's own things.
+        subscribed: Vec::new(),
     }
 }
 

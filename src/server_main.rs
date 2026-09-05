@@ -12,7 +12,8 @@
 
 use std::{
     process::exit,
-    sync::{Arc, mpsc::channel},
+    sync::{Arc, atomic::Ordering, mpsc::{RecvTimeoutError, channel}},
+    time::Duration,
 };
 
 use chrono::Local;
@@ -22,6 +23,7 @@ use task_deck::{
     initialization::{self, get_check_and_set_config},
     paths::{self, AppDirs},
     phone::{self, PhoneServer, Pulse},
+    subscriptions,
 };
 
 const USAGE: &str = "\
@@ -127,6 +129,8 @@ fn main() {
         let port = port_override.unwrap_or(config.phone_server_port);
         let bind = bind_override.unwrap_or(config.phone_bind_address);
         println!("data:  {}", dirs.data.display());
+        // The runbook in SERVER.md tells people to check this here.
+        println!("zone:  {}", Local::now().format("%Y-%m-%d %H:%M %Z (UTC%:z)"));
         if config.phone_token.is_empty() {
             println!("key:   not minted yet — it is, on the first start");
             return;
@@ -199,6 +203,12 @@ fn main() {
         .and_then(|schemes| schemes.get(&config.selected_colorscheme_id).map(|scheme| scheme.colors))
         .unwrap_or([[0; 4]; 6]);
 
+    // This process owns the board, so this process reads the subscribed
+    // calendars (§23). A desktop that is a client of this server does not, and
+    // gets the overlay with the board it is a replica of.
+    let calendars =
+        subscriptions::start(board.subscriptions().to_vec(), board.overlay().clone(), Arc::new(|| {}));
+
     let (tx, rx) = channel();
     let pulse = Arc::new(Pulse::new());
     // Nothing to wake: this thread is only ever waiting on the queue.
@@ -217,6 +227,10 @@ fn main() {
         phone::host_for_url(&bind),
         board.items.len()
     );
+    // The zone the phone's day is drawn in. Said out loud because getting it
+    // wrong is the quiet failure: everything works, both desktops look right,
+    // and only the phone's dates are off at the edges of the day (SERVER.md §4).
+    eprintln!("  local time:  {}", Local::now().format("%Y-%m-%d %H:%M %Z (UTC%:z)"));
     for address in phone::addresses_for(&bind) {
         eprintln!("  phone link:  {}", phone::page_url(&address, port, &config.phone_token));
     }
@@ -225,20 +239,46 @@ fn main() {
     // The whole program: take a request, answer it, publish if it changed
     // anything. The saves inside `Board::apply` are atomic, so a SIGTERM from
     // the service manager at any moment leaves the files whole.
-    while let Ok(request) = rx.recv() {
-        let now = Local::now();
-        let reply = if request.command.is_query() {
-            phone::answer_query(&mut board, palette, None, &request.command, now)
-        } else {
-            match board.apply(request.command, now) {
-                Ok(reply) => {
-                    pulse.publish(board.version());
-                    Ok(phone::reply_json(&reply, board.version()))
-                }
-                Err(error) => Err(error),
+    let mut seen_calendars = 0;
+    loop {
+        // A timeout rather than a plain `recv`, so a calendar that came back
+        // while nobody was asking anything still reaches a parked phone. Two
+        // seconds is far below the fetch interval and costs one wakeup.
+        match rx.recv_timeout(Duration::from_secs(2)) {
+            Ok(request) => {
+                let now = Local::now();
+                let reply = if request.command.is_query() {
+                    phone::answer_query(&mut board, palette, None, &request.command, now)
+                } else {
+                    match board.apply(request.command, now) {
+                        Ok(reply) => {
+                            // A change to the list is a change to what gets
+                            // fetched, and it is fetched now rather than at
+                            // the next tick.
+                            pulse.publish(board.version());
+                            Ok(phone::reply_json(&reply, board.version()))
+                        }
+                        Err(error) => Err(error),
+                    }
+                };
+                let _ = request.reply.send(reply);
             }
-        };
-        let _ = request.reply.send(reply);
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+
+        // Whatever the calendars said, if they have said anything new. The
+        // version moves only when the events actually differ, so a server
+        // answering the same thing every ten minutes wakes nobody.
+        let version = calendars.version.load(Ordering::Relaxed);
+        if version != seen_calendars {
+            seen_calendars = version;
+            if board.adopt_overlay(calendars.overlay()) {
+                board.save_overlay();
+                pulse.publish(board.version());
+            }
+            calendars.set_subscriptions(board.subscriptions().to_vec());
+        }
     }
 }
 

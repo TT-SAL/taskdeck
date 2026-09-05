@@ -9,6 +9,32 @@ then be pointed at it (see *The desktop as a client* below) so the board lives i
 This document is the setup, start to finish, for a headless Linux box. The reasoning behind the
 design is in [`DOCUMENTATION.md` §21–22](DOCUMENTATION.md).
 
+## First run, in order
+
+Every instruction below is somewhere in this document; what is easy to miss is the sequence, and
+the sequence is where a calendar gets lost. Do it in this order.
+
+1. **Build and install the binary** (§3). Nothing is serving yet.
+2. **Copy one machine's `taskdeck_data/` up first**, into an empty `/var/lib/taskdeck/taskdeck_data/`,
+   and `chown -R taskdeck:taskdeck` it (§4). Pick *one* board: two folders cannot be merged by
+   copying, and whichever you do not pick is re-typed by hand.
+3. **Set the time zone, before the first start** (§4). The server draws the phone's day in its own
+   zone, and an installer's default is usually UTC.
+4. **Start the service** (§5).
+5. **Check it**: `sudo -u taskdeck TASKDECK_HOME=/var/lib/taskdeck taskdeck-server --print-link`.
+   It names the data directory, the zone and the links. Compare the item count in the journal
+   against what you copied up.
+6. **Point the phone at the server's link** (§5) and delete the old home-screen icon. The phone
+   belongs on the machine that is always on, not on a desktop.
+7. **Convert the desktops one at a time** (§6): set `server_url` and `server_token`, restart, and
+   confirm the board that comes back is the one you copied up — *then* do the next one.
+8. **Turn each converted desktop's own phone view off** (Settings → Phone), so there is one link
+   to remember rather than one per machine.
+
+Step 2 has to come before step 7. A desktop's first successful connection to a server sets its own
+board aside — harmless once the server already holds the right board, and the moment a calendar is
+lost if it does not.
+
 ## 1. The machine and its OS
 
 Any x86-64 or ARM64 box with a couple of gigabytes of RAM is more than enough; the server idles
@@ -110,6 +136,23 @@ phone_bind_address = "0.0.0.0" # every interface; a single address serves that o
 
 `selected_colorscheme_id` is honoured if present: the phone paints in that scheme.
 
+### The time zone
+
+The server draws the phone's day, the now-line and the planner's figures in **its own** local zone.
+A Linux installer's default is usually UTC, and a UTC box serving someone three hours east puts
+their evening blocks on the previous day — on the phone only, while both desktops look right, which
+makes it the hardest kind of wrong to notice. Set it before the first start:
+
+```sh
+sudo timedatectl set-timezone Europe/Helsinki
+```
+
+`taskdeck-server --print-link` and the journal both print the zone they will use, so it can be
+checked rather than assumed. A box that has to stay on UTC for other reasons can carry
+`Environment=TZ=…` in the unit instead — edit `deploy/taskdeck-server.service` in the repository,
+not the installed copy, because `install.sh` reinstalls the unit on every run and would put your
+edit back.
+
 ## 5. The service
 
 Everything in this section is also one command, `sudo deploy/install.sh`, run from the repository
@@ -200,8 +243,10 @@ the same command the phone would send, and refreshes the moment anything changes
 `taskdeck_data/` becomes a cache of the last board it saw. **Do the copy in §4 first**: on its
 first successful connection the desktop sets any board that lived in its folder aside — dated
 files like `read_at_startup.json.local-20260904-121500`, never deleted — and tells you; if you
-forgot the copy, those files are your calendar, and copying them into the server's folder (and
-restarting the service) brings it back. **If the server is unreachable** the
+forgot the copy, those files are your calendar — but copying them across restores nothing on its
+own: **rename each back to the name before `.local-`**, because the server opens only the plain
+names. It is safe only while the server's board is still empty; once it holds one, the two have to
+be merged by hand. Restart the service after. **If the server is unreachable** the
 desktop keeps working on that cache and queues its edits in `taskdeck_data/outbox.json`; when the
 server is back they are replayed in order, the server's picture wins, and anything that could not
 be applied (an item finished meanwhile from the phone, say) is reported rather than silently

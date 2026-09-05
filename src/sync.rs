@@ -284,7 +284,7 @@ pub fn set_aside_local_board(data_dir: &Path) -> Result<Option<String>, String> 
         .map(|(_, aside)| aside.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
         .collect();
     Ok(Some(format!(
-        "The board that lived on this computer was set aside, because the board now lives on the server:\n{}\nIf it should have gone to the server, copy those files there (see SERVER.md). To use it here instead, clear server_url in Settings → Server and rename them back. Nothing was deleted.",
+        "The board that lived on this computer was set aside, because the board now lives on the server:\n{}\nIf it should have gone to the server: copy those files into the server's taskdeck_data/ and rename each back to the name before `.local-`. The server opens only the plain names, so copying them as they are restores nothing. Do it while the server's board is still empty; if it already holds a board, the two have to be merged by hand rather than one written over the other. To use it here instead, clear server_url in Settings → Server and rename them back. Nothing was deleted.",
         moved.join("\n")
     )))
 }
@@ -554,6 +554,13 @@ pub fn describe(command: &Command) -> String {
         Command::SetNotes { .. } => "save the notes".to_string(),
         Command::Restore { id, .. } => format!("put back #{id}"),
         Command::ForgetArchived { id, .. } => format!("forget archived #{id}"),
+        Command::AddSubscription { name, .. } => format!("subscribe to {name}"),
+        Command::RemoveSubscription { id } => format!("stop subscribing to #{id}"),
+        Command::RenameSubscription { id, .. } => format!("rename calendar #{id}"),
+        Command::SetSubscriptionColor { id, .. } => format!("recolour calendar #{id}"),
+        Command::SetSubscriptionEnabled { id, enabled } => {
+            format!("{} calendar #{id}", if *enabled { "switch on" } else { "switch off" })
+        }
         Command::Snapshot { .. } | Command::Feed | Command::Board => "a query".to_string(),
     }
 }

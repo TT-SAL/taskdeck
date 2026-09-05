@@ -10,4 +10,6 @@ pub mod paths;
 pub mod planner;
 pub mod phone;
 pub mod board;
+pub mod ics;
+pub mod subscriptions;
 pub mod sync;

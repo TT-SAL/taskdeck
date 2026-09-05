@@ -192,6 +192,51 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **Subscribed calendars, end to end** (§23; `ics.rs` and `subscriptions.rs`, both new): TaskDeck
+  now reads iCalendar feeds off https addresses and draws them beside the day. The load-bearing
+  decision is that they are an **overlay, never items** — nothing fetched becomes an `Active`,
+  reaches the archive, or can be edited — which is §21.1's argument pointed inwards, and it keeps
+  the one-board invariant whole. The list of addresses is board data and moves through
+  `Board::apply` like everything else, so it replicates to clients; the events are derived, cached
+  only so a restart is not blank. Whichever process owns the board fetches, on its own thread in
+  the weather pattern: a standalone desktop, or the server; a client never does and receives the
+  overlay with the board. A subscribed hour becomes a `planner::reflow` anchor, which needed no new
+  concept. Three rules the tests pin: a refresh whose events are unchanged does not move the board
+  version (the digest excludes the fetch time on purpose, or every ten-minute tick would wake every
+  parked phone); a calendar that could not be read **keeps the events it last gave**, because an
+  outage is not a cancellation; and an all-day band is drawn but never anchors, since one would
+  claim the whole day. Imported events stay out of our own feed, or subscribing a calendar app to
+  both would loop.
+- **Two meetings at the same hour were drawn on top of each other** (`ui.rs`, `phone.rs`,
+  `phone.html`): subscribed events were painted the full width of the lane area, on the reasoning
+  that they are the ground the day's own blocks sit on rather than something competing with them
+  for room. Two that overlap therefore landed in exactly the same rectangle, one unreadable under
+  the other — found on the first real calendar subscribed to. They are now laid out with
+  `planner::lay_out` among *themselves*: overlapping ones split the width and stay readable, one
+  that overlaps nothing still gets the lane, and none of them takes room from your own work. The
+  phone is laid out server-side and drawn from `column`/`columns` like every other entry, so the
+  page still decides nothing. Test `two_meetings_at_the_same_hour_are_given_a_column_each`.
+- **The parser is ours, and adds no dependency** (`ics.rs`): the survey found `ical` archived,
+  `icalendar` unable to read `DURATION` or `VTIMEZONE` and recursing through components with no
+  depth cap — a file of repeated `BEGIN:` lines is a stack overflow `panic = "abort"` cannot catch
+  — and `rrule` carrying 174 panic-shaped sites plus `regex` and a seven-megabyte `chrono-tz` table
+  for a two-megabyte server. That table would not have answered the question anyway: Outlook's
+  `TZID`s are not IANA names, and the `VTIMEZONE` the file must carry is right there. So zones are
+  resolved from the file's own definition, the component walk is iterative with a depth cap, every
+  date step in the recurrence walk is `checked_`, and every bound is a counted budget. 28 tests,
+  including the recursion bomb, a moved occurrence replacing rather than joining its series, RFC
+  5545's exclusive all-day end, a monthly rule on the 31st skipping February, and a yearly one on
+  29 February recurring only in leap years.
+- **The three deferred fixes**: the systemd unit and SERVER.md §4 now cover the **time zone** —
+  the server draws the phone's day in its own, and a default-UTC box puts an evening block on the
+  wrong day for anyone else, visible on the phone only while both desktops look right; the server
+  prints the zone at startup and from `--print-link` so it can be checked rather than assumed. The
+  set-aside note in `sync.rs` and SERVER.md §6 now say to **rename the files back** before copying
+  them to a server, because the server opens only the plain names and the documented recovery
+  restored nothing. And SERVER.md opens with a **first-run runbook** giving the order, since every
+  instruction was already there and only the sequence was missing — copy one board up before
+  pointing any desktop at the server, because a first connection sets that desktop's own board
+  aside.
 - **A pre-commit audit of the whole stretch, and the three things it caught**: eleven agents read
   the uncommitted diff — four inventorying it by slice, four hunting regressions in those slices,
   one on hygiene and data safety, one checking every documentation claim the diff adds against

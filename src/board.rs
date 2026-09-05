@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     archive::{ArchiveKey, ArchiveLog, Archived, Outcome},
     planner::{self, CreateKind},
+    subscriptions::{self, Overlay, Subscription},
     tasks::{self, Active, Session, HORIZON_LABELS, IMPORTANCE_LABELS},
     utilities,
 };
@@ -248,6 +249,34 @@ pub enum Command {
         id: u64,
         archived_at: DateTime<Local>,
     },
+
+    /* The subscribed calendars (§23). These change the *list*, which is board
+     * data like anything else; nothing here touches the events themselves,
+     * which are fetched, never authored. */
+    /// Subscribe to a calendar at an https address.
+    AddSubscription {
+        name: String,
+        url: String,
+        #[serde(default)]
+        color: Option<[u8; 4]>,
+    },
+    /// Stop subscribing, and forget what it had said.
+    RemoveSubscription {
+        id: u64,
+    },
+    RenameSubscription {
+        id: u64,
+        name: String,
+    },
+    SetSubscriptionColor {
+        id: u64,
+        color: [u8; 4],
+    },
+    /// Switch one off without forgetting the address.
+    SetSubscriptionEnabled {
+        id: u64,
+        enabled: bool,
+    },
 }
 
 fn one() -> u32 {
@@ -270,6 +299,19 @@ impl Command {
                 | Command::Delete { .. }
                 | Command::Restore { .. }
                 | Command::ForgetArchived { .. }
+        )
+    }
+
+    /// Whether carrying this out changes the list of subscribed calendars —
+    /// and so whether whoever is fetching has to be told.
+    pub fn touches_calendars(&self) -> bool {
+        matches!(
+            self,
+            Command::AddSubscription { .. }
+                | Command::RemoveSubscription { .. }
+                | Command::RenameSubscription { .. }
+                | Command::SetSubscriptionColor { .. }
+                | Command::SetSubscriptionEnabled { .. }
         )
     }
 
@@ -434,6 +476,13 @@ pub struct BoardState {
     pub items: Vec<Active>,
     pub archive: Vec<Archived>,
     pub notes: String,
+    /// The subscribed calendars, which are board data (§23).
+    #[serde(default)]
+    pub subscriptions: Vec<Subscription>,
+    /// What those calendars said last time the board's owner asked. Derived,
+    /// and sent with the board because a client never fetches for itself.
+    #[serde(default)]
+    pub overlay: Overlay,
 }
 
 /* ─────────────────────────────── Replies ─────────────────────────────── */
@@ -499,6 +548,12 @@ pub struct Board {
     /// The notepad. Public because the desktop's text field edits it live;
     /// the debounced save goes through `apply(SetNotes)`.
     pub notes: String,
+    /// The subscribed calendars (§23). Authored, and changed only through
+    /// `apply`, so it reaches a client like every other board change.
+    subscriptions: Vec<Subscription>,
+    /// What those calendars said. Derived: never authored, never in the
+    /// archive, and losing it costs a refresh rather than a calendar.
+    overlay: Overlay,
     /// Next stable id to hand out. Seeded past the highest id present at load
     /// (`tasks::assign_missing_ids`).
     next_id: u64,
@@ -539,14 +594,42 @@ impl Board {
             .map(|text| utilities::detab(&text))
             .unwrap_or_else(|_| "There was something wrong with taskdeck_data/notepad_text.json!".to_string());
 
-        (Self::from_parts(items, notes, data_dir), problems)
+        // The subscribed calendars. An unreadable list is reported and left
+        // exactly where it is rather than quarantined: it holds addresses
+        // that are themselves credentials, and renaming one aside is a good
+        // way for someone to lose a link they cannot get back.
+        let subscriptions = match subscriptions::read(&data_dir) {
+            Ok(list) => list,
+            Err(error) => {
+                problems.push(format!(
+                    "{} could not be read ({error}). Nothing was moved; the subscribed calendars are off until it is fixed.",
+                    subscriptions::SUBSCRIPTIONS_FILE
+                ));
+                Vec::new()
+            }
+        };
+        // And what they last said, so the wall is not blank for the ten
+        // minutes before the first fetch comes back.
+        let overlay = subscriptions::read_overlay(&data_dir).unwrap_or_default();
+
+        let mut board = Self::from_parts(items, notes, data_dir);
+        board.subscriptions = subscriptions;
+        board.overlay = overlay;
+        (board, problems)
     }
 
     /// The board's files that exist in `data_dir` but cannot be opened for
     /// reading — a folder copied in as another user, usually. A server refuses
     /// to start over these rather than serve an empty board in their place.
     pub fn unreadable_files(data_dir: &Path) -> Vec<String> {
-        ["read_at_startup.json", "archived.jsonl", "notepad_text.json", "colorschemes.json", "userconfig.toml"]
+        [
+            "read_at_startup.json",
+            "archived.jsonl",
+            "notepad_text.json",
+            "colorschemes.json",
+            "userconfig.toml",
+            subscriptions::SUBSCRIPTIONS_FILE,
+        ]
             .into_iter()
             .filter(|name| {
                 let path = data_dir.join(name);
@@ -561,7 +644,16 @@ impl Board {
     pub fn from_parts(mut items: Vec<Active>, notes: String, data_dir: PathBuf) -> Self {
         let next_id = tasks::assign_missing_ids(&mut items);
         tasks::migrate_legacy_plans(&mut items);
-        Self { items, archive: ArchiveLog::new(), notes, next_id, data_dir, version: 0 }
+        Self {
+            items,
+            archive: ArchiveLog::new(),
+            notes,
+            subscriptions: Vec::new(),
+            overlay: Overlay::default(),
+            next_id,
+            data_dir,
+            version: 0,
+        }
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -633,7 +725,14 @@ impl Board {
     /// refresh that did not touch the log.
     pub fn save_items_and_notes(&mut self) -> Result<(), String> {
         tasks::oversafe_activesave(&self.items, &self.data_dir).map_err(|e| e.to_string())?;
+        subscriptions::save(&self.subscriptions, &self.data_dir).map_err(|e| e.to_string())?;
         utilities::save_notepad_text(self.notes.clone(), &self.data_dir).map_err(|e| e.to_string())
+    }
+
+    /// Cache what the calendars said. Derived data, so a failure is worth
+    /// nothing more than the next refresh writing it again.
+    pub fn save_overlay(&self) {
+        let _ = subscriptions::save_overlay(&self.overlay, &self.data_dir);
     }
 
     /// A thing created here under a temporary id turned out to be `server`
@@ -651,14 +750,62 @@ impl Board {
 
     /// Swap in another picture of the board — what a client does when the
     /// server's truth arrives. Keeps the id counter ahead of everything.
-    pub fn replace(&mut self, items: Vec<Active>, archived: Option<Vec<Archived>>, notes: String) {
+    /// The subscriptions and the overlay come in with the rest rather than
+    /// through setters of their own: a client never fetches, so this is the
+    /// only way either reaches it, and a caller that could forget one would
+    /// draw yesterday's meetings beside today's blocks.
+    pub fn replace(
+        &mut self,
+        items: Vec<Active>,
+        archived: Option<Vec<Archived>>,
+        notes: String,
+        subscriptions: Vec<Subscription>,
+        overlay: Overlay,
+    ) {
         self.items = items;
         self.next_id = self.next_id.max(self.items.iter().map(|item| item.id + 1).max().unwrap_or(1));
         if let Some(rows) = archived {
             self.archive.replace_with(rows);
         }
         self.notes = notes;
+        self.subscriptions = subscriptions;
+        self.overlay = overlay;
         self.version = self.version.wrapping_add(1);
+    }
+
+    /* ─────────────────────── the subscribed calendars ────────────────────── */
+
+    /// The calendars and their events, as a server handed them down. Used on
+    /// a client's very first board, before any `SyncEvent::Board` has arrived.
+    /// The version does not move: this is a board being built, not changed.
+    pub fn adopt_from_server(&mut self, subscriptions: Vec<Subscription>, overlay: Overlay) {
+        self.subscriptions = subscriptions;
+        self.overlay = overlay;
+    }
+
+    pub fn subscriptions(&self) -> &[Subscription] {
+        &self.subscriptions
+    }
+
+    pub fn overlay(&self) -> &Overlay {
+        &self.overlay
+    }
+
+    /// Put a freshly fetched overlay in place. **True only when it actually
+    /// differs**, and the version moves only then — a calendar server answering
+    /// the same thing every ten minutes must not wake every parked phone and
+    /// make every client refetch the whole board on a timer.
+    pub fn adopt_overlay(&mut self, fresh: Overlay) -> bool {
+        if self.overlay.digest() == fresh.digest() {
+            // The events are the same. Keep the fresh status all the same, so
+            // the desk can say when it last looked and what it heard, without
+            // that being a change anybody else has to hear about.
+            self.overlay.status = fresh.status;
+            return false;
+        }
+        self.overlay = fresh;
+        self.version = self.version.wrapping_add(1);
+        true
     }
 
     pub fn item(&self, id: u64) -> Option<&Active> {
@@ -691,6 +838,8 @@ impl Board {
             items: self.items.clone(),
             archive: self.archive.entries().to_vec(),
             notes: self.notes.clone(),
+            subscriptions: self.subscriptions.clone(),
+            overlay: self.overlay.clone(),
         })
     }
 
@@ -743,6 +892,11 @@ impl Board {
                 }
             }
         }
+        // A subscribed calendar's hours are somebody else's claim on the day,
+        // so reflow steps over them exactly as it steps over an event of our
+        // own. An all-day band is not one of these: it would claim the whole
+        // day and leave nowhere to put anything (§23).
+        anchors.extend(self.overlay.anchors_on(day));
         (blocks, anchors)
     }
 
@@ -764,6 +918,12 @@ impl Board {
         self.version = self.version.wrapping_add(1);
         tasks::oversafe_activesave(&self.items, &self.data_dir)
             .map_err(|error| BoardError::failed(format!("Saving error:\n{error}")))
+    }
+
+    fn save_subscriptions(&mut self) -> Result<(), BoardError> {
+        self.version = self.version.wrapping_add(1);
+        subscriptions::save(&self.subscriptions, &self.data_dir)
+            .map_err(|error| BoardError::failed(format!("Could not save the calendar list:\n{error}")))
     }
 
     fn save_notes(&mut self) -> Result<(), BoardError> {
@@ -1146,6 +1306,83 @@ impl Board {
                 self.version = self.version.wrapping_add(1);
                 Ok(Reply::default())
             }
+
+            /* The subscribed calendars. Each of these edits the *list*; the
+             * events themselves are fetched by whoever owns this board and
+             * are never authored here. */
+            Command::AddSubscription { name, url, color } => {
+                if self.subscriptions.len() >= subscriptions::SUBSCRIPTIONS_MAX {
+                    return Err(BoardError::bad_request(format!(
+                        "That is already {} calendars, which is as many as this keeps.",
+                        subscriptions::SUBSCRIPTIONS_MAX
+                    )));
+                }
+                let url = subscriptions::checked_url(&url).map_err(BoardError::bad_request)?;
+                if self.subscriptions.iter().any(|existing| existing.url == url) {
+                    return Err(BoardError::bad_request("That calendar is already subscribed to."));
+                }
+                let name = checked_name(&name)?;
+                let id = self.next_item_id();
+                let name = if name.is_empty() { format!("Calendar {id}") } else { name };
+                let color = color.unwrap_or(subscriptions::DEFAULT_COLORS
+                    [self.subscriptions.len() % subscriptions::DEFAULT_COLORS.len()]);
+                self.subscriptions.push(Subscription { id, name, url, color, enabled: true });
+                self.save_subscriptions()?;
+                Ok(Reply { id: Some(id), ..Reply::default() })
+            }
+
+            Command::RemoveSubscription { id } => {
+                let before = self.subscriptions.len();
+                self.subscriptions.retain(|subscription| subscription.id != id);
+                if self.subscriptions.len() == before {
+                    return Err(BoardError::gone("That calendar is no longer subscribed to."));
+                }
+                // Its events go now rather than at the next fetch, so the day
+                // is right on the very next frame — and so a client, which
+                // never fetches at all, is right ever.
+                self.overlay.forget(id);
+                self.save_subscriptions()?;
+                Ok(Reply::default())
+            }
+
+            Command::RenameSubscription { id, name } => {
+                let name = checked_name(&name)?;
+                let subscription = self
+                    .subscriptions
+                    .iter_mut()
+                    .find(|subscription| subscription.id == id)
+                    .ok_or_else(|| BoardError::gone("That calendar is no longer subscribed to."))?;
+                if !name.is_empty() {
+                    subscription.name = name;
+                }
+                self.save_subscriptions()?;
+                Ok(Reply::default())
+            }
+
+            Command::SetSubscriptionColor { id, color } => {
+                let subscription = self
+                    .subscriptions
+                    .iter_mut()
+                    .find(|subscription| subscription.id == id)
+                    .ok_or_else(|| BoardError::gone("That calendar is no longer subscribed to."))?;
+                subscription.color = color;
+                self.save_subscriptions()?;
+                Ok(Reply::default())
+            }
+
+            Command::SetSubscriptionEnabled { id, enabled } => {
+                let subscription = self
+                    .subscriptions
+                    .iter_mut()
+                    .find(|subscription| subscription.id == id)
+                    .ok_or_else(|| BoardError::gone("That calendar is no longer subscribed to."))?;
+                subscription.enabled = enabled;
+                if !enabled {
+                    self.overlay.forget(id);
+                }
+                self.save_subscriptions()?;
+                Ok(Reply::default())
+            }
         }
     }
 
@@ -1350,6 +1587,134 @@ mod tests {
         again.apply(Command::Rename { id: second, name: "renamed".into() }, now).unwrap();
         assert_eq!(again.item(first).unwrap().name, "first");
         assert_eq!(again.item(second).unwrap().name, "renamed");
+    }
+
+    #[test]
+    fn a_calendar_is_subscribed_to_renamed_recoloured_switched_off_and_removed() {
+        let (mut board, dir) = fresh();
+        let now = at(2026, 9, 5, 8, 0);
+        let id = board
+            .apply(
+                Command::AddSubscription {
+                    name: "  Work  ".into(),
+                    url: " webcal://cal.example.com/w.ics ".into(),
+                    color: None,
+                },
+                now,
+            )
+            .unwrap()
+            .id
+            .unwrap();
+        let first = board.subscriptions().first().expect("one").clone();
+        assert_eq!(first.name, "Work");
+        assert_eq!(first.url, "https://cal.example.com/w.ics", "webcal is rewritten, not refused");
+        assert!(first.enabled);
+
+        // The same address twice is a mistake, not a second calendar.
+        assert_eq!(
+            board
+                .apply(
+                    Command::AddSubscription { name: "Again".into(), url: "https://cal.example.com/w.ics".into(), color: None },
+                    now
+                )
+                .unwrap_err()
+                .status,
+            400
+        );
+        // And plain http is refused: the link is the password.
+        assert_eq!(
+            board
+                .apply(Command::AddSubscription { name: "X".into(), url: "http://cal.example.com/x.ics".into(), color: None }, now)
+                .unwrap_err()
+                .status,
+            400
+        );
+
+        board.apply(Command::RenameSubscription { id, name: "Office".into() }, now).unwrap();
+        board.apply(Command::SetSubscriptionColor { id, color: [1, 2, 3, 255] }, now).unwrap();
+        board.apply(Command::SetSubscriptionEnabled { id, enabled: false }, now).unwrap();
+        let changed = board.subscriptions().first().expect("one").clone();
+        assert_eq!((changed.name.as_str(), changed.color, changed.enabled), ("Office", [1, 2, 3, 255], false));
+
+        // The list is board data, so it is on disk and comes back.
+        assert_eq!(reopen(dir.path()).subscriptions(), board.subscriptions());
+
+        board.apply(Command::RemoveSubscription { id }, now).unwrap();
+        assert!(board.subscriptions().is_empty());
+        assert_eq!(board.apply(Command::RemoveSubscription { id }, now).unwrap_err().status, 410);
+    }
+
+    #[test]
+    fn a_subscribed_meeting_flows_the_day_around_itself_the_way_one_of_ours_does() {
+        let (mut board, _dir) = fresh();
+        let now = at(2026, 9, 5, 8, 0);
+        let d = day(2026, 9, 5);
+        let id = board
+            .apply(
+                Command::AddSubscription { name: "Work".into(), url: "https://cal.example.com/w.ics".into(), color: None },
+                now,
+            )
+            .unwrap()
+            .id
+            .unwrap();
+
+        // A meeting from noon to one, and an all-day band on the same day.
+        let mut all_day = crate::subscriptions::OverlayEvent {
+            subscription: id,
+            day: d,
+            start: 0,
+            end: planner::DAY_MINUTES,
+            all_day: true,
+            free: false,
+            summary: "Conference".into(),
+        };
+        let meeting = crate::subscriptions::OverlayEvent {
+            start: 12 * 60,
+            end: 13 * 60,
+            all_day: false,
+            summary: "Sprint review".into(),
+            ..all_day.clone()
+        };
+        all_day.all_day = true;
+        board.adopt_overlay(crate::subscriptions::Overlay::sealed(vec![all_day, meeting], Vec::new()));
+
+        // Work booked at 11:30, and the day reflowed from 11:00.
+        board
+            .apply(Command::Create { kind: Kind::Task, name: "Report".into(), day: d, start: 11 * 60 + 30, minutes: 60 }, now)
+            .unwrap();
+        let moved = board.apply(Command::Reflow { day: d, from: Some(11 * 60) }, now).unwrap().moved;
+        assert_eq!(moved, Some(1));
+
+        let item = board.items.iter().find(|item| item.name == "Report").expect("the task");
+        let session = item.sessions.first().expect("its block");
+        assert_eq!(session.start.hour(), 13, "pushed past the subscribed meeting, not through it");
+
+        // The all-day band claimed nothing: it is a fact about the day, not an
+        // hour that is taken.
+        assert_eq!(board.overlay().anchors_on(d), vec![(12 * 60, 13 * 60)]);
+    }
+
+    #[test]
+    fn an_overlay_that_says_the_same_thing_again_does_not_move_the_version() {
+        // A calendar server answering identically every ten minutes must not
+        // wake every parked phone and make every client refetch the board.
+        let (mut board, _dir) = fresh();
+        let overlay = crate::subscriptions::Overlay::sealed(
+            vec![crate::subscriptions::OverlayEvent {
+                subscription: 1,
+                day: day(2026, 9, 5),
+                start: 600,
+                end: 660,
+                all_day: false,
+                free: false,
+                summary: "Standup".into(),
+            }],
+            Vec::new(),
+        );
+        assert!(board.adopt_overlay(overlay.clone()), "the first one is a change");
+        let settled = board.version();
+        assert!(!board.adopt_overlay(overlay), "the same again is not");
+        assert_eq!(board.version(), settled);
     }
 
     #[test]
@@ -1891,7 +2256,7 @@ mod tests {
         let before = board.version();
         let mut theirs = board.items.clone();
         theirs[0].id = 5;
-        board.replace(theirs, None, "server notes".into());
+        board.replace(theirs, None, "server notes".into(), Vec::new(), Overlay::default());
         assert_eq!(board.item(5).unwrap().name, "offline");
         assert_eq!(board.notes, "server notes");
         assert!(board.version() > before);

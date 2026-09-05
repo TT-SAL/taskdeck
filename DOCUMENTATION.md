@@ -43,6 +43,7 @@
 20. Planned ≠ scheduled — where the planner goes next *(Reflow built; the rest designed, §20.5)*
 21. The phone view
 22. The board, the server, and the desktop as a client
+23. Subscribed calendars
 
 ---
 
@@ -165,6 +166,8 @@ Files inside `taskdeck_data/`:
 | `.lock` | empty; the OS lock on it is the content | `paths::claim_data_dir` (§4.1) |
 | `outbox.json` | JSON array of `sync::Queued` — each a `command`, the temporary `local_id` it created if any, and the request `key` it is sent under | `sync::Outbox` (atomic) — only when the desktop is a client of a server (§22.4) |
 | `.client-of` | the server's URL, plain text | `sync::mark_replica_of` — marks the folder as that server's replica, so a later start refreshes rather than sets aside (§22.3) |
+| `subscriptions.json` | JSON array of `subscriptions::Subscription` | `subscriptions::save` (atomic) — the calendars this board subscribes to (§23). Board data: it changes only through `Board::apply` |
+| `subscribed_cache.json` | JSON `subscriptions::Overlay` | `subscriptions::save_overlay` (atomic) — **derived**, not board data: what those calendars last said, kept only so a restart is not blank until the first fetch returns (§23) |
 
 ### 4.1 Atomicity is not exclusion
 
@@ -2495,8 +2498,10 @@ holds the folder's lock.
 
 A second binary from the same crate (`[[bin]] taskdeck-server`, `src/server_main.rs`). It links
 the one library crate, so the build compiles egui, wgpu and winit like the desktop's does — but
-nothing in the server calls them, the release link drops them, and the result is an eighth of the
-desktop's size (2 MB against 16) with no graphics driver needed on the box. It resolves its data directory exactly as the desktop does (`paths::AppDirs`),
+nothing in the server calls them, the release link drops them, and the result is a quarter of the
+desktop's size (3.7 MB against 16) with no graphics driver needed on the box. It was 2 MB until
+§23: reading subscribed calendars put an HTTPS client on its reachable path for the first time, and
+rustls and its crypto are most of the difference. It resolves its data directory exactly as the desktop does (`paths::AppDirs`),
 reads `phone_server_port`, `phone_bind_address`, `phone_token` and `selected_colorscheme_id`
 from the same `userconfig.toml` (`--port` and `--bind` override the first two for one run), mints
 a token on first start, and runs one loop: take a request from the phone
@@ -2630,6 +2635,115 @@ same task's blocks during an outage; they are recorded here rather than solved.
   phone edit there is queued to the server like any other — but the phone should be pointed at
   the server, which is on when the desktop is not.
 - **Encrypt or authenticate beyond the token.** The transport is Tailscale's; see §21.7.
+
+---
+
+## 23. Subscribed Calendars
+
+### 23.1 The central idea: context, not commitments
+
+A subscription is an https address that answers with an iCalendar file — a secret link from
+Google, Apple or a work calendar. What comes back is drawn beside the day and is **never part of
+the board**: nothing fetched becomes an `Active`, nothing reaches the archive, nothing can be
+edited, and no `Command` creates one.
+
+That line is the whole design, and it is the same argument §21.1 makes in the other direction. The
+moment an imported event became an item, this would need identity mapping across refreshes,
+tombstones for events deleted upstream, a policy for an edited import, and an archive filling with
+things nobody did. Keeping the two apart costs one extra shape and buys the invariant back whole.
+
+What an overlay event *is* for: **"there is a meeting at two, so do not plan work at two."** That is
+answered by drawing it, and by `planner::reflow` stepping around it — which needed no new concept,
+because reflow already takes anchors and a subscribed hour is exactly one.
+
+### 23.2 Two halves, and why the split matters
+
+- **The list** (`subscriptions::Subscription`) is *authored*. It lives in `subscriptions.json`
+  beside the other board files, and it changes only through `Board::apply` — five commands:
+  `add_subscription`, `remove_subscription`, `rename_subscription`, `set_subscription_color`,
+  `set_subscription_enabled`. So it replicates to a client like every other change.
+- **The overlay** (`subscriptions::Overlay`) is *derived*. It is what the addresses last said.
+  Losing it costs a refresh, not a calendar. It is cached to `subscribed_cache.json` only so a
+  restart draws the calendars it drew before rather than an empty week for ten minutes.
+
+The URL is usually the credential as well as the address, which is why it lives with the board
+rather than in each machine's `userconfig.toml`, and why the board's folder is the thing to keep
+private. Plain `http://` is refused outright: sending that link in clear over a café's network is
+the one mistake this can prevent for free. `webcal://` is rewritten rather than refused, because
+that is what a person will paste.
+
+### 23.3 Who fetches
+
+**Whichever process owns the board** — the same rule as everything else here.
+
+| This copy | Fetches? | Where its overlay comes from |
+|-----------|----------|------------------------------|
+| A desktop on its own board | yes | its own `subscriptions::Feeds` thread |
+| `taskdeck-server` | yes | the same |
+| A desktop that is a client (§22.3) | **no** | with the board, in `BoardState` |
+| The phone | **no** | in the snapshot |
+
+Two fetchers would be two clocks, two copies of a secret address, and two answers to what is on
+Tuesday. It is expressed in the type rather than in a branch: `TaskApp::calendars` is an `Option`,
+and it is `None` exactly when `sync_handle` is `Some`.
+
+The fetching is on its own thread in the weather pattern of §5.6, for the same reason: the board
+loop answers one request at a time, and a hang on somebody's slow calendar server must not be its
+problem. Adding this put the **first outbound network call** in `taskdeck-server`, which until now
+made none at all.
+
+### 23.4 Rules the code keeps
+
+- **A refresh that changed nothing changes nothing.** `Overlay::digest` is FNV-1a over the sorted
+  events and deliberately excludes the fetch status, which carries the time of the last attempt and
+  would otherwise make every refresh a change — waking every parked phone and making every client
+  refetch the whole board on a ten-minute timer. `Board::adopt_overlay` moves the version only on a
+  real difference.
+- **A calendar that could not be read keeps the events it last gave.** A server that is down or a
+  tunnel that dropped is not somebody cancelling a meeting. The failure shows on the status line at
+  the desk; the meetings stay. This is the same refusal to read an outage as a deletion that §22.4
+  makes about edits.
+- **An all-day event is never an anchor.** One would claim 00:00–24:00 and leave reflow nowhere to
+  put the day's work. "I am at a conference" is not the same claim as "there is a meeting at two",
+  so it is drawn as a band in the masthead and on the phone as a chip, and planned straight through.
+- **`TRANSP:TRANSPARENT` is drawn and not obeyed.** This app's own feed writes it on a due marker,
+  and a household may well subscribe TaskDeck to a calendar TaskDeck feeds; reading our own
+  politeness back as somebody's meeting would wall off the day with our own deadlines.
+- **Imported events never reach our own feed** (§21.6). Subscribing a calendar app to both would
+  otherwise loop.
+- **A window, not the whole calendar.** Sixty days back and four hundred forward. The wall shows up
+  to ten years, and expanding a daily rule across ten years for every subscription is hundreds of
+  thousands of occurrences to hold, to compare on every refresh and to hand to a client.
+
+### 23.5 The parser (`ics.rs`), and why it is ours
+
+A fetched file is **input nobody in this repository wrote**, so `ics.rs` is built the other way
+round from the feed writer it mirrors: everything is bounded before it is read, an unreadable event
+is skipped and *counted* rather than argued with, and only a file that is structurally not a
+calendar is refused whole. It knows nothing of egui, threads or HTTP, so it can be tested against a
+`&str` and nothing else.
+
+It is hand-written, and adds **no dependency**. The survey behind that: `ical` is archived;
+`icalendar` is a good tokenizer that reads no `DURATION`, no `VTIMEZONE`, and recurses through
+components with no depth limit — a file of repeated `BEGIN:` lines is a stack overflow that
+`panic = "abort"` cannot catch; `rrule` carries 174 panic-shaped sites outside its tests and hauls
+in `regex` and `chrono-tz`, whose prebuilt table is seven megabytes of generated Rust for a server
+binary that is two. And `chrono-tz` would not even answer the question: Outlook writes
+`TZID:W. Europe Standard Time`, which is not an IANA name, while the `VTIMEZONE` block RFC 5545
+requires the file to carry is right there. So zones are resolved from the file's own definition.
+
+What it reads: folded lines in CRLF or LF, a byte order mark, quoted parameters, `DTSTART`/`DTEND`/
+`DURATION`, `VALUE=DATE` all-day events with RFC 5545's exclusive end, `EXDATE`, `RDATE`,
+`RECURRENCE-ID` overrides and cancellations, `TRANSP`, `X-WR-CALNAME`, and `RRULE` restricted to
+`FREQ=DAILY|WEEKLY|MONTHLY|YEARLY` with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (including `-1FR`),
+`BYMONTHDAY`, `BYMONTH` and `BYSETPOS`. What it refuses rather than half-honours: `BYYEARDAY`,
+`BYWEEKNO`, sub-daily frequencies, and `EXRULE`. A rule it cannot read leaves its event out and
+says so — an event drawn on the wrong day is worse than an event not drawn.
+
+Every bound is a counted budget in `ics::Limits`, so the cost is a function of those numbers and
+the window, never of what the file claims about itself. The two that matter most: the component
+walk is **iterative with a depth cap**, and every date step in the recurrence walk is `checked_`,
+because `board.rs` already carries the scar of chrono panicking past its last representable day.
 
 ---
 

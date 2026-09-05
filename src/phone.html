@@ -124,6 +124,25 @@
     color: var(--faint); font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
     pointer-events: none; opacity: 0.8;
   }
+  /* Somebody else's calendar (§23). Deliberately unlike a block of your own:
+     no fill, a bar in the calendar's own colour, and `pointer-events: none`
+     so a tap goes to the timeline underneath. Nothing here can be edited,
+     so nothing here should invite a tap. */
+  .subscribed {
+    position: absolute; border-radius: 6px; padding: 2px 8px;
+    border: 1px dashed var(--accent); border-left: 3px solid var(--accent);
+    background: repeating-linear-gradient(135deg,
+      rgba(255,255,255,0.045) 0 6px, rgba(255,255,255,0) 6px 12px);
+    color: var(--faint); font-size: 12px; overflow: hidden;
+    white-space: nowrap; text-overflow: ellipsis; pointer-events: none;
+  }
+  .allday {
+    display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+    border-radius: 999px; padding: 2px 9px; margin: 0 6px 4px 0;
+    border: 1px solid var(--accent); color: var(--faint); font-size: 12px;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .alldayrow { padding: 0 14px 2px; display: flex; flex-wrap: wrap; }
   .marker {
     position: absolute; height: 22px; display: flex; align-items: center; gap: 6px;
     font-size: 12px; color: var(--text); padding-right: 6px; overflow: hidden;
@@ -292,6 +311,8 @@
   <div class="summary" id="summary"></div>
   <div class="week" id="week"></div>
   <div class="behind" id="behind" hidden><button id="reflowBtn" title="Push what is unfinished past now, in order, around events and routines"></button></div>
+  <!-- All-day events off subscribed calendars: chips, not blocks (§23). -->
+  <div class="alldayrow" id="alldayRow" hidden></div>
 </header>
 
 <main class="timeline" id="timeline">
@@ -956,6 +977,13 @@
       col.append(el('button', { class: 'empty-tap', 'aria-label': `Open ${day.label}`, onclick: () => {
         state.day = day.date; setMode('day'); load().then(scrollToUsefulHour);
       } }));
+      // A subscribed calendar's hours, under the week's own blocks. All-day
+      // bands are left out here: seven columns of full-height boxes would be
+      // the whole view.
+      for (const event of (day.subscribed || [])) {
+        if (event.all_day) continue;
+        col.append(el('div', { class: 'subscribed', style: `${spanStyle(event)}; --accent:${event.color}`, text: event.name }));
+      }
       for (const ghost of day.ghosts) {
         col.append(el('div', { class: 'wentry ghost', style: `${laneStyle(ghost)}; --accent:${colorOf(ghost.color)}`, text: ghost.name }));
       }
@@ -1016,6 +1044,19 @@
     const lanes = $('lanes');
     for (const node of Array.from(lanes.children)) {
       if (node.id !== 'emptyTap') node.remove();
+    }
+
+    // Subscribed calendars first, so the day's own blocks draw over them: the
+    // board's things are what you came to look at.
+    renderAllDay(day);
+    for (const event of (day.subscribed || [])) {
+      if (event.all_day) continue;
+      lanes.append(el('div', {
+        class: 'subscribed',
+        style: `${spanStyle(event)}; --accent:${event.color}`,
+        text: event.name,
+        title: event.calendar,
+      }));
     }
 
     for (const ghost of day.ghosts) {
@@ -1158,6 +1199,36 @@
     const width = 100 / placed.columns;
     const left = placed.column * width;
     return `top:${top}px; height:${height}px; left:calc(${left}% + 2px); width:calc(${width}% - 4px)`;
+  }
+
+  /* A subscribed event's box. Full width of the lane area rather than in a
+     column: it is not competing with the day's blocks for room, it is the
+     ground they sit on. */
+  /* A subscribed event's box. Side by side with the others from subscribed
+     calendars when they overlap, laid out by the server the way the day's own
+     entries are — full width was drawing two meetings at the same hour in the
+     same rectangle, one unreadable under the other. */
+  function spanStyle(event) {
+    const top = event.start / 60 * HOUR;
+    const height = Math.max(18, (event.end - event.start) / 60 * HOUR - 2);
+    const columns = Math.max(1, event.columns || 1);
+    const width = 100 / columns;
+    const left = (event.column || 0) * width;
+    return `top:${top}px; height:${height}px; left:calc(${left}% + 2px); width:calc(${width}% - 4px)`;
+  }
+
+  /* All-day events are a row of chips above the timeline, not blocks on it.
+     One drawn as a block would claim the whole day and bury it; "we are away
+     this week" is a fact about the week, not an hour that is taken. */
+  function renderAllDay(day) {
+    const row = $('alldayRow');
+    if (!row) return;
+    row.replaceChildren();
+    const bands = (day.subscribed || []).filter((event) => event.all_day);
+    row.hidden = bands.length === 0;
+    for (const band of bands) {
+      row.append(el('div', { class: 'allday', style: `--accent:${band.color}`, text: band.name, title: band.calendar }));
+    }
   }
 
   function renderNow(day) {
