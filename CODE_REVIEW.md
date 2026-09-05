@@ -192,6 +192,18 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **Every jump in the agenda landed 213 pixels low** (`phone.html`, `jumpToDate`): it scrolled to
+  `node.offsetTop - stickyHeight()`, but a day's offset parent is `#weekbody`, which is
+  `position: relative` — so `offsetTop` is measured from the body, not the document, and was short by
+  the body's own offset. It looked right, which is why it survived: the day you asked for was still
+  the first one visible, just not where it should have been, and the observer that names the month
+  reads *earliest visible* and so agreed. It is measured against the viewport now, which cannot go
+  stale if anything else acquires a `position` between the two.
+- **A resolving fetch could paint the agenda over the day view** (`phone.html`,
+  `railAndMasthead`): the call inside `jumpToDate`'s queued fetch was the one unguarded site, so an
+  answer arriving after the reader had switched views wrote the agenda's glance line over the day
+  figure and moved the masthead's height under them.
+
 - **The masthead stated the day rather than answering about it** (`phone.html`, §21.5): in the
   agenda it read `Today · 1h planned · 2 blocks`, a figure that counts only the board's own things —
   so on a day made entirely of lectures it said *nothing on this day*. It is now the answer to the

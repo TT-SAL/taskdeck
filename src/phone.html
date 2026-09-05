@@ -1558,6 +1558,11 @@
   // The masthead in the agenda: where you are reading on the left, and what
   // the verbs below will act on — which is today, always — on the right.
   function railAndMasthead() {
+    // `jumpToDate` calls this from inside a queued fetch, which can resolve
+    // after the reader has switched to the day view — and then it would paint
+    // the agenda's glance line over the day's figure and move the masthead's
+    // height under them.
+    if (state.mode !== 'agenda') return;
     const at = state.agenda.month || monthOf(state.day);
     renderGlance();
     if (state.railFor !== at) { state.railFor = at; renderRail(); }
@@ -1875,7 +1880,14 @@
     const agenda = state.agenda;
     const node = agenda.nodes.get(iso);
     if (node) {
-      window.scrollTo({ top: Math.max(0, node.offsetTop - stickyHeight()), behavior: 'auto' });
+      // Measured against the viewport rather than taken from `offsetTop`: a
+      // day's offset parent is `#weekbody`, which is `position: relative`, so
+      // `offsetTop` is short by the body's own offset — 213px as the page
+      // stands, and a different number the moment the masthead changes height.
+      // The rect form cannot go stale that way, and this reads geometry only on
+      // a deliberate jump, never while scrolling.
+      const top = node.getBoundingClientRect().top + window.scrollY - stickyHeight();
+      window.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
       return;
     }
     if (!allowLoad) return;
