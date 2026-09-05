@@ -9,8 +9,11 @@
 // http on a LAN address the browser refuses to install it and the page works
 // exactly as before, without the offline shell. `SERVER.md` shows how
 // Tailscale gives the server https.
-const CACHE = 'taskdeck-shell-v1';
-const SHELL = ['/', '/icon.png'];
+const CACHE = 'taskdeck-shell-v2';
+// The page and nothing else. The icon used to be here, which cost 660 KB of
+// cache for a picture only the operating system ever looks at, and only when
+// the app is installed. The page references no image of its own.
+const SHELL = ['/'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

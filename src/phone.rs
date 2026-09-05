@@ -36,10 +36,10 @@
 
 use std::{
     collections::{HashMap, VecDeque},
-    io::Read,
+    io::{Read, Write},
     net::{IpAddr, UdpSocket},
     sync::{
-        Arc, Condvar, Mutex,
+        Arc, Condvar, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, Sender, TryRecvError, channel},
     },
@@ -48,6 +48,7 @@ use std::{
 };
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, NaiveDate, Timelike, Utc};
+use flate2::{Compression, write::GzEncoder};
 use serde::Serialize;
 use tiny_http::{Header, Method, Request as HttpRequest, Response, Server};
 
@@ -522,7 +523,7 @@ fn answer_parked(pulse: &Pulse, stopping: &AtomicBool) {
             // up the UI thread's next publish.
             drop(state);
             for request in due {
-                let body = json_ok(serde_json::json!({ "version": version })).with_header(no_store());
+                let body = Encoding::PLAIN.json(serde_json::json!({ "version": version })).with_header(no_store());
                 let _ = request.respond(body);
             }
             state = pulse.lock();
@@ -687,6 +688,7 @@ fn handle(
     let query = parse_query(query);
     let authorised = is_authorised(request.headers(), &query, token);
     let key = request_key(request.headers());
+    let encoding = Encoding::of(request.headers());
 
     // Long poll: parked on the pulse and answered by its thread the moment the
     // world changes, or after `WAIT_TIMEOUT` with the version unchanged. This
@@ -701,7 +703,7 @@ fn handle(
         if let Some(request) = pulse.park(request, seen, Instant::now() + WAIT_TIMEOUT) {
             // The pulse thread has left: nothing would answer a request
             // parked now. Answered here instead, with what there is.
-            let now = json_ok(serde_json::json!({ "version": pulse.current() }));
+            let now = Encoding::PLAIN.json(serde_json::json!({ "version": pulse.current() }));
             let _ = request.respond(now.with_header(no_store()));
         }
         return;
@@ -712,13 +714,17 @@ fn handle(
         // home-screen shortcut that opens `/` can pick its token back up from
         // storage before it asks for anything.
         (Method::Get | Method::Head, "/") | (Method::Get | Method::Head, "/index.html") => {
-            with_type(Response::from_string(PAGE), "text/html; charset=utf-8")
+            static PACKED: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+            encoding.fixed(PAGE, &PACKED, "text/html; charset=utf-8")
         }
         (Method::Get | Method::Head, "/icon.png") => with_type(Response::from_data(ICON.to_vec()), "image/png"),
+        (Method::Get | Method::Head, "/icon-192.png") => with_type(Response::from_data(icon_at(192)), "image/png"),
+        (Method::Get | Method::Head, "/icon-512.png") => with_type(Response::from_data(icon_at(512)), "image/png"),
         // The offline shell (`phone_sw.js`). Public like the page; it holds
         // no data and a browser only honours it from a secure origin.
         (Method::Get, "/sw.js") => {
-            with_type(Response::from_string(SERVICE_WORKER), "application/javascript; charset=utf-8")
+            static PACKED: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+            encoding.fixed(SERVICE_WORKER, &PACKED, "application/javascript; charset=utf-8")
         }
         (Method::Get, "/manifest.webmanifest") => {
             with_type(Response::from_string(manifest(query.lookup("token").map(String::as_str))), "application/manifest+json")
@@ -729,14 +735,14 @@ fn handle(
         ),
         (Method::Get, "/api/state") => match snapshot_command(&query) {
             Ok(command) => match ask(command, tx, wake) {
-                Ok(value) => json_ok(value),
+                Ok(value) => encoding.json(value),
                 Err(error) => json_error(error.status, &error.message),
             },
             Err(error) => json_error(error.status, &error.message),
         },
         // The whole board, for a desktop that keeps a replica of it.
         (Method::Get, "/api/board") => match ask(Command::Board, tx, wake) {
-            Ok(value) => json_ok(value),
+            Ok(value) => encoding.json(value),
             Err(error) => json_error(error.status, &error.message),
         },
         (Method::Post, "/api/command") => match read_body(&mut request) {
@@ -745,7 +751,7 @@ fn handle(
                 Ok(command) => match replies.claim(&key) {
                     // Asked before, under this key, and answered: the same
                     // answer again, and the board hears nothing.
-                    Claim::Done(value) => json_ok(value),
+                    Claim::Done(value) => encoding.json(value),
                     // Asked before and still with the board: not again.
                     Claim::Busy => json_error(503, "TaskDeck is still working on that change; it is not lost."),
                     Claim::Ours => {
@@ -758,7 +764,7 @@ fn handle(
                             match reply_rx.recv_timeout(REPLY_TIMEOUT) {
                                 Ok(Ok(value)) => {
                                     replies.settle(&key, value.clone());
-                                    json_ok(value)
+                                    encoding.json(value)
                                 }
                                 Ok(Err(error)) => {
                                     replies.release(&key);
@@ -780,9 +786,7 @@ fn handle(
             Err(error) => json_error(error.status, &error.message),
         },
         (Method::Get | Method::Head, "/calendar.ics") => match ask(Command::Feed, tx, wake) {
-            Ok(serde_json::Value::String(feed)) => {
-                with_type(Response::from_string(feed), "text/calendar; charset=utf-8")
-            }
+            Ok(serde_json::Value::String(feed)) => encoding.text(feed, "text/calendar; charset=utf-8"),
             Ok(_) => json_error(500, "The feed came back in the wrong shape."),
             Err(error) => json_error(error.status, &error.message),
         },
@@ -1004,7 +1008,7 @@ fn no_store() -> Header {
 /// safely, which a `max-age` does not.
 fn caching_for(path: &str) -> Header {
     match path {
-        "/icon.png" => header("Cache-Control", "public, max-age=604800"),
+        "/icon.png" | "/icon-192.png" | "/icon-512.png" => header("Cache-Control", "public, max-age=604800"),
         _ => no_store(),
     }
 }
@@ -1013,13 +1017,120 @@ fn with_type(response: Body, content_type: &str) -> Body {
     response.with_header(header("Content-Type", content_type))
 }
 
-fn json_ok(value: serde_json::Value) -> Body {
-    with_type(Response::from_string(value.to_string()), "application/json; charset=utf-8")
+/// Smallest body worth compressing, in bytes.
+///
+/// Below about one packet there is nothing to save and something to lose: gzip
+/// adds a header and a checksum, so a short error sentence comes out *longer*
+/// than it went in, and every hop still pays to decode it.
+const GZIP_FROM_BYTES: usize = 1400;
+
+/// Whether this client can decode gzip.
+///
+/// Everything here is text — a 127 KB page, a 25 KB snapshot, an iCalendar
+/// feed — served to a phone that is often on mobile data, and it compresses to
+/// somewhere near a third. The decision lives here rather than at the two dozen
+/// places a response is built, because it is a property of the transport and
+/// not of any particular answer.
+#[derive(Clone, Copy)]
+pub struct Encoding {
+    gzip: bool,
+}
+
+impl Encoding {
+    /// Nothing negotiated: for bodies built where no request is in hand.
+    pub const PLAIN: Encoding = Encoding { gzip: false };
+
+    fn of(headers: &[Header]) -> Encoding {
+        Encoding { gzip: headers.iter().any(|h| h.field.equiv("Accept-Encoding") && accepts_gzip(h.value.as_str())) }
+    }
+
+    /// One text body, compressed when that is worth doing.
+    fn text(self, body: String, content_type: &str) -> Body {
+        if self.gzip
+            && body.len() >= GZIP_FROM_BYTES
+            && let Some(packed) = gzipped(body.as_bytes(), Compression::fast())
+        {
+            return with_type(Response::from_data(packed), content_type).with_header(header("Content-Encoding", "gzip"));
+        }
+        with_type(Response::from_string(body), content_type)
+    }
+
+    fn json(self, value: serde_json::Value) -> Body {
+        self.text(value.to_string(), "application/json; charset=utf-8")
+    }
+
+    /// A body that never changes, compressed once and kept.
+    ///
+    /// The page and the service worker are the program, not the data. Packing
+    /// 127 KB on every request would be work done again for an identical
+    /// answer, so it is done once and at the best setting rather than the
+    /// fastest — this is the one body where the extra effort is free.
+    fn fixed(self, body: &'static str, packed: &'static OnceLock<Option<Vec<u8>>>, content_type: &str) -> Body {
+        if self.gzip
+            && let Some(bytes) = packed.get_or_init(|| gzipped(body.as_bytes(), Compression::best()))
+        {
+            return with_type(Response::from_data(bytes.clone()), content_type)
+                .with_header(header("Content-Encoding", "gzip"));
+        }
+        with_type(Response::from_string(body), content_type)
+    }
+}
+
+/// Whether an `Accept-Encoding` value offers gzip. `gzip;q=0` is a refusal,
+/// which is rare and cheap to honour.
+fn accepts_gzip(value: &str) -> bool {
+    value.split(',').any(|part| {
+        let mut bits = part.split(';').map(str::trim);
+        let name = bits.next().unwrap_or_default();
+        if !name.eq_ignore_ascii_case("gzip") && name != "*" {
+            return false;
+        }
+        !bits.any(|q| q.replace(' ', "").eq_ignore_ascii_case("q=0") || q.replace(' ', "").starts_with("q=0.0"))
+    })
+}
+
+/// Gzip, or `None` if it did not help — a body that grows is not compressed.
+fn gzipped(bytes: &[u8], level: Compression) -> Option<Vec<u8>> {
+    let mut encoder = GzEncoder::new(Vec::with_capacity(bytes.len() / 2), level);
+    encoder.write_all(bytes).ok()?;
+    let packed = encoder.finish().ok()?;
+    (packed.len() < bytes.len()).then_some(packed)
 }
 
 fn json_error(status: u16, message: &str) -> Body {
+    // Never compressed: an error is one sentence, and see `GZIP_FROM_BYTES`.
     let body = serde_json::json!({ "error": message }).to_string();
     with_type(Response::from_string(body), "application/json; charset=utf-8").with_status_code(status)
+}
+
+/// The icon, scaled to what a home screen asks for and kept.
+///
+/// The source is 882x882 and 660 KB, which is most of what a first install
+/// moves — and Android wants 192 and 512, so it was paying for a picture it
+/// immediately threw most of away. Scaled once, on the first request for each
+/// size, because a resize on the request path would otherwise be paid every
+/// time by the one client least able to afford it.
+fn icon_at(side: u32) -> Vec<u8> {
+    static SMALL: OnceLock<Vec<u8>> = OnceLock::new();
+    static LARGE: OnceLock<Vec<u8>> = OnceLock::new();
+    let kept = if side <= 192 { &SMALL } else { &LARGE };
+    kept.get_or_init(|| scaled_icon(side).unwrap_or_else(|| ICON.to_vec())).clone()
+}
+
+/// `None` if the source will not decode or the result will not encode — the
+/// caller then serves the original, which is large but correct.
+fn scaled_icon(side: u32) -> Option<Vec<u8>> {
+    use image::codecs::png::{CompressionType, FilterType as PngFilter, PngEncoder};
+    use image::{ImageEncoder, imageops::FilterType};
+    let source = image::load_from_memory(ICON).ok()?;
+    let small = source.resize(side, side, FilterType::Lanczos3).into_rgba8();
+    let mut out = Vec::new();
+    // Best rather than default: this runs once for the life of the process and
+    // the result is sent to a phone, so the trade only ever goes one way.
+    PngEncoder::new_with_quality(&mut out, CompressionType::Best, PngFilter::Adaptive)
+        .write_image(&small, small.width(), small.height(), image::ExtendedColorType::Rgba8)
+        .ok()?;
+    Some(out)
 }
 
 /// The web-app manifest, so "Add to Home Screen" opens the view like an app.
@@ -1039,7 +1150,10 @@ fn manifest(token: Option<&str>) -> String {
         "display": "standalone",
         "background_color": "#0f1113",
         "theme_color": "#0f1113",
-        "icons": [{ "src": "/icon.png", "sizes": "882x882", "type": "image/png" }]
+        "icons": [
+            { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+            { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+        ]
     })
     .to_string()
 }
@@ -2025,6 +2139,68 @@ mod tests {
 
         // Fresh, it would have said zero — which is the bug, stated.
         assert_eq!(Pulse::new().current(), 0);
+    }
+
+    #[test]
+    fn gzip_is_offered_only_when_the_client_says_it_can_take_it() {
+        assert!(accepts_gzip("gzip"));
+        assert!(accepts_gzip("gzip, deflate, br"));
+        assert!(accepts_gzip("deflate, gzip;q=1.0, *;q=0.5"));
+        assert!(accepts_gzip("*"), "a client that takes anything takes this");
+        assert!(!accepts_gzip("deflate, br"));
+        assert!(!accepts_gzip(""));
+        // A refusal, spelled either way round.
+        assert!(!accepts_gzip("gzip;q=0"));
+        assert!(!accepts_gzip("gzip; q=0.0"));
+    }
+
+    #[test]
+    fn a_body_too_small_to_be_worth_packing_is_sent_as_it_is() {
+        // Gzip adds a header and a checksum, so a short sentence comes out
+        // longer than it went in and every hop still pays to decode it.
+        let short = "x".repeat(GZIP_FROM_BYTES - 1);
+        assert!(gzipped(short.as_bytes(), Compression::fast()).is_some(), "it does compress; it is just not worth it");
+        // Something already packed does not pack again, and is left alone.
+        let noise: Vec<u8> = (0..4096u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+        if let Some(packed) = gzipped(&noise, Compression::fast()) {
+            assert!(packed.len() < noise.len(), "never returned when it would grow");
+        }
+    }
+
+    #[test]
+    fn the_page_and_a_snapshot_both_shrink_by_more_than_half() {
+        // The two bodies a phone actually pays for on every open.
+        let page = gzipped(PAGE.as_bytes(), Compression::best()).expect("the page compresses");
+        assert!(page.len() * 2 < PAGE.len(), "{} -> {}", PAGE.len(), page.len());
+        let snapshot = serde_json::json!({
+            "days": (0..31).map(|d| serde_json::json!({
+                "date": format!("2026-09-{:02}", (d % 28) + 1),
+                "summary": "nothing on this day",
+                "entries": [], "ghosts": [], "subscribed": [],
+            })).collect::<Vec<_>>()
+        })
+        .to_string();
+        let packed = gzipped(snapshot.as_bytes(), Compression::fast()).expect("json compresses");
+        assert!(packed.len() * 2 < snapshot.len(), "{} -> {}", snapshot.len(), packed.len());
+    }
+
+    #[test]
+    fn the_home_screen_is_offered_the_sizes_it_asks_for() {
+        let text = manifest(None);
+        assert!(text.contains("/icon-192.png") && text.contains("192x192"));
+        assert!(text.contains("/icon-512.png") && text.contains("512x512"));
+        // Scaled, and much smaller than the 882x882 original they come from.
+        let small = icon_at(192);
+        let large = icon_at(512);
+        assert!(small.len() < ICON.len() / 4, "192 is {} of {}", small.len(), ICON.len());
+        assert!(large.len() < ICON.len(), "512 is {} of {}", large.len(), ICON.len());
+        // Real PNGs, at the sizes claimed.
+        for (bytes, side) in [(&small, 192u32), (&large, 512)] {
+            let decoded = image::load_from_memory(bytes).expect("a png");
+            assert_eq!((decoded.width(), decoded.height()), (side, side));
+        }
+        // Asked for twice, the same bytes come back rather than a second scale.
+        assert_eq!(icon_at(192).len(), small.len());
     }
 
     fn headers(pairs: &[(&str, &str)]) -> Vec<Header> {

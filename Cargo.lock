@@ -3707,6 +3707,7 @@ dependencies = [
  "emath",
  "embed-resource",
  "epaint",
+ "flate2",
  "image",
  "kmeans_colors",
  "mimalloc",

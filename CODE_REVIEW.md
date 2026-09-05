@@ -192,6 +192,19 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **Nothing the phone server sent was compressed** (`phone.rs`, `Encoding`): every response is text
+  — a 127 KB page, a 25 KB snapshot, an iCalendar feed — sent uncompressed to a phone usually on
+  mobile data. `flate2` was already in the tree under `image`. The page is now 37,142 bytes instead
+  of 127,656 and a 31-day snapshot 3,840 instead of 25,255, so an open costs 41 KB rather than 153.
+  The decision is taken once per request off `Accept-Encoding` and lives with the transport rather
+  than at the two dozen sites a body is built; anything under 1,400 bytes is left alone, because
+  gzip would make a one-sentence error longer than it started.
+- **The service worker cached 660 KB of icon nothing looks at** (`phone.rs`, `phone_sw.js`): the
+  shell held `/icon.png`, the full 882×882 source, though the page references no image of its own
+  and the only thing that ever reads the icon is the operating system, at install. The manifest also
+  offered that one file for every size. There are now `/icon-192.png` and `/icon-512.png`, scaled
+  once on first request and kept, at 50 KB and 257 KB; the shell holds the page and nothing else.
+
 - **Opening in the day view left the agenda unable to draw itself** (`phone.html`, `seedAgenda`,
   `setMode`): the run's two ends were derived from the store only when the *stored mode* was the
   agenda. Boot into the day view — which is what a reload does after you have tapped through to a

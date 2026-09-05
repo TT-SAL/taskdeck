@@ -2288,12 +2288,29 @@ A few public routes, which carry no data, and the authorised ones:
 | Route | What |
 |-------|------|
 | `GET /` | the page. Public — it carries no data, and a home-screen shortcut that opens `/` has to load before it can present its key |
-| `GET /icon.png`, `GET /sw.js`, `GET /manifest.webmanifest` | public; the service worker (§21.5) is only honoured from a secure origin; the manifest's `start_url` keeps the token it was asked with, because iOS gives a home-screen app storage of its own |
+| `GET /icon-192.png`, `GET /icon-512.png`, `GET /icon.png`, `GET /sw.js`, `GET /manifest.webmanifest` | public; the service worker (§21.5) is only honoured from a secure origin; the manifest's `start_url` keeps the token it was asked with, because iOS gives a home-screen app storage of its own |
 | `GET /api/state?from=YYYY-MM-DD&days=N` | the `Snapshot` (§21.4); `N` is clamped to 31 |
 | `GET /api/wait?version=N` | long poll: answers `{version}` the moment the version moves past `N`, or after 25 s unchanged |
 | `GET /api/board` | the whole board — items, archive, notes, version — for a desktop that keeps a replica of it (§22.3) |
 | `POST /api/command` | one `Command`, as JSON tagged by `op`; a query sent here is refused (`400`). `X-TaskDeck-Request: <key>` names the request, the same on every retry, so a repeat is answered with the first reply rather than applied again (§22.4) |
 | `GET /calendar.ics` | the feed (§21.6) |
+
+**Everything textual is gzipped when the client offers to take it**, which is every browser. The
+decision lives in one place — `Encoding`, taken off `Accept-Encoding` once per request — rather than
+at the two dozen sites a response is built, because it is a property of the transport and not of any
+particular answer. Measured against the real board: the page 127,656 → 37,142 bytes, a 31-day
+snapshot 25,255 → 3,840, the feed 1,874 → 539. A body under 1,400 bytes is sent as it is: gzip adds
+a header and a checksum, so a one-sentence error comes out *longer* than it went in and every hop
+still pays to decode it. The page and the service worker never change between builds, so they are
+packed once at the best setting and kept; everything else is packed per request at the fast one.
+A body that would grow is never compressed.
+
+**The icon is served at the sizes a home screen asks for.** The source is 882×882 and 660 KB, which
+was most of what a first install moved — and Android wants 192 and 512, so it was paying for a
+picture it immediately threw most of away. Scaled once per size on first request (a resize on the
+request path would otherwise be paid every time by the client least able to afford it), it is 50 KB
+and 257 KB. The service worker's shell no longer holds any of them: the page references no image of
+its own, and the only thing that ever looks at the icon is the operating system, at install.
 
 The key travels as the `X-TaskDeck-Token` header (the page), as a bearer token, or as `?token=`
 in the query — the only place a calendar app subscribing to the feed can put it. Comparison is
