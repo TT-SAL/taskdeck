@@ -2735,6 +2735,9 @@ Three surfaces, each honest about whose the event is.
   colour, no fill, and no response registered at all — nothing about it can be dragged, tapped or
   ticked off, so nothing about it should invite the attempt. Overlapping ones are laid out side by
   side by `planner::lay_out` among *themselves*, so they never take width from the day's own blocks.
+  The text uses the height the block has rather than one line and an ellipsis, with `LOCATION` on
+  its own last line. That is not cosmetic: a course feed's summary runs past a hundred characters
+  and ends with the room, so an ellipsis eats precisely the part you were looking for.
 - **The month grid**: after the day's own items and never instead of them, in whatever room is left
   of the cell's three slots, prefixed `◇` and drawn in the calendar's colour rather than a palette
   index — `PreviewItem::subscribed` carries the override. A lecture is worth knowing about; a task
@@ -2763,7 +2766,8 @@ binary that is two. And `chrono-tz` would not even answer the question: Outlook 
 requires the file to carry is right there. So zones are resolved from the file's own definition.
 
 What it reads: folded lines in CRLF or LF, a byte order mark, quoted parameters, `DTSTART`/`DTEND`/
-`DURATION`, `VALUE=DATE` all-day events with RFC 5545's exclusive end, `EXDATE`, `RDATE`,
+`DURATION`, `LOCATION`, `DESCRIPTION`, `VALUE=DATE` all-day events with RFC 5545's exclusive end,
+`EXDATE`, `RDATE`,
 `RECURRENCE-ID` overrides and cancellations, `TRANSP`, `X-WR-CALNAME`, and `RRULE` restricted to
 `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY` with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (including `-1FR`),
 `BYMONTHDAY`, `BYMONTH` and `BYSETPOS`. What it refuses rather than half-honours: `BYYEARDAY`,

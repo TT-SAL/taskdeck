@@ -1290,6 +1290,14 @@ pub struct SubscribedSnapshot {
     /// real lecture beside a twelve-hour course-period marker still gets the
     /// width it needs.
     pub background: bool,
+    /// Where it is, on its own line. A course feed puts the room here in a
+    /// dozen characters while the summary runs past a hundred (§23).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(rename = "where")]
+    pub where_: String,
+    /// A long press says this; nothing paints it.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
     pub name: String,
     /// `#rrggbb`, the subscription's own colour rather than the scheme's: it
     /// says which calendar, not how urgent.
@@ -1452,6 +1460,8 @@ fn with_subscribed(
                 columns: if event.is_background() { 1 } else { lane.columns.max(1) },
                 all_day: event.all_day,
                 background: event.is_background(),
+                where_: event.location.clone(),
+                note: event.description.clone(),
                 name: event.summary.clone(),
                 color: format!(
                     "#{:02x}{:02x}{:02x}",

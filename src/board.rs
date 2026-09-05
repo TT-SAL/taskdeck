@@ -1672,6 +1672,8 @@ mod tests {
             all_day: true,
             free: false,
             summary: "Conference".into(),
+            location: String::new(),
+            description: String::new(),
         };
         let meeting = crate::subscriptions::OverlayEvent {
             start: 12 * 60,
@@ -1713,6 +1715,8 @@ mod tests {
                 all_day: false,
                 free: false,
                 summary: "Standup".into(),
+                location: String::new(),
+                description: String::new(),
             }],
             Vec::new(),
         );

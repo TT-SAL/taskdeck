@@ -128,14 +128,20 @@
      no fill, a bar in the calendar's own colour, and `pointer-events: none`
      so a tap goes to the timeline underneath. Nothing here can be edited,
      so nothing here should invite a tap. */
+  /* A block is as tall as its event is long, so the text uses that height
+     rather than being cut to one line with an ellipsis — a course summary
+     runs past a hundred characters and the room is at the end of it. */
   .subscribed {
     position: absolute; border-radius: 6px; padding: 2px 8px;
     border: 1px dashed var(--accent); border-left: 3px solid var(--accent);
     background: repeating-linear-gradient(135deg,
       rgba(255,255,255,0.045) 0 6px, rgba(255,255,255,0) 6px 12px);
     color: var(--faint); font-size: 12px; overflow: hidden;
-    white-space: nowrap; text-overflow: ellipsis; pointer-events: none;
+    line-height: 1.25; overflow-wrap: anywhere; pointer-events: none;
   }
+  /* Where it is, which for a lecture is the room. Its own line because it is
+     short and it is the half you actually look for. */
+  .subscribed .where { display: block; color: var(--accent); font-size: 11px; }
   /* A course period rather than an appointment: further back still. */
   .subscribed.backdrop { opacity: 0.55; border-style: dotted; background: none; }
   .allday {
@@ -984,7 +990,12 @@
       // the whole view.
       for (const event of (day.subscribed || [])) {
         if (event.all_day) continue;
-        col.append(el('div', { class: event.background ? 'subscribed backdrop' : 'subscribed', style: `${spanStyle(event)}; --accent:${event.color}`, text: event.name }));
+        col.append(el('div', {
+          class: event.background ? 'subscribed backdrop' : 'subscribed',
+          style: `${spanStyle(event)}; --accent:${event.color}`,
+          text: event.where ? `${event.name} · ${event.where}` : event.name,
+          title: [event.calendar, event.where].filter(Boolean).join(' — '),
+        }));
       }
       for (const ghost of day.ghosts) {
         col.append(el('div', { class: 'wentry ghost', style: `${laneStyle(ghost)}; --accent:${colorOf(ghost.color)}`, text: ghost.name }));
@@ -1055,12 +1066,14 @@
     // appointment — then the real ones over them.
     for (const event of (day.subscribed || [])) {
       if (event.all_day) continue;
-      lanes.append(el('div', {
+      const box = el('div', {
         class: event.background ? 'subscribed backdrop' : 'subscribed',
         style: `${spanStyle(event)}; --accent:${event.color}`,
-        text: event.name,
-        title: event.calendar,
-      }));
+        title: [event.calendar, event.where, event.note].filter(Boolean).join(' — '),
+      });
+      box.append(el('span', { text: event.name }));
+      if (event.where) box.append(el('span', { class: 'where', text: event.where }));
+      lanes.append(box);
     }
 
     for (const ghost of day.ghosts) {

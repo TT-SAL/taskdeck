@@ -216,6 +216,19 @@ Fixes already landed (newest first). Kept here as history so the open list above
   that overlaps nothing still gets the lane, and none of them takes room from your own work. The
   phone is laid out server-side and drawn from `column`/`columns` like every other entry, so the
   page still decides nothing. Test `two_meetings_at_the_same_hour_are_given_a_column_each`.
+- **Where it is, off its own field** (`ics.rs`, `phone.html`, `ui.rs`): the first real complaint
+  once this was in daily use was that names were cut off with an ellipsis, and the thing being cut
+  was the classroom. Reading the feed answered it: a university event's `SUMMARY` runs to a median
+  of 107 characters and ends with the room, while `LOCATION` carries the same room on its own in a
+  median of 13. So `LOCATION` is parsed and drawn on its own line, and the blocks stopped being cut
+  to one line at all — an event is as tall as it is long, and that height was going to waste. The
+  week strip, which has no height to spare, appends the room after a separator instead.
+  `DESCRIPTION` is parsed too and bounded to three hundred characters, but never painted: the feeds
+  in question send none, and a calendar server that does send one sends a page of it, so it is what
+  a hover or a long press says. Test
+  `where_it_is_comes_off_its_own_field_rather_than_the_end_of_the_summary` carries a real event's
+  shape. Verified against both live feeds: rooms like "Chemicum, sali A110" now arrive beside the
+  lecture rather than behind an ellipsis.
 - **The server draws its own QR code** (`phone::qr_text`, `server_main.rs`): getting the phone link
   onto a phone was the one genuinely awkward step left, and every obvious answer is worse than it
   sounds — the link is a bearer credential travelling over plain HTTP, so email, a messenger or

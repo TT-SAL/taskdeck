@@ -57,6 +57,16 @@ pub struct Occurrence {
     /// wall off the day with our own due dates.
     pub free: bool,
     pub name: String,
+    /// `LOCATION` — where it is. Its own field in the file, and worth its own
+    /// line on screen: a university feed writes a room here in a dozen
+    /// characters while the summary runs to a hundred, so this is the part
+    /// that survives being read at a glance.
+    #[serde(default)]
+    pub location: String,
+    /// `DESCRIPTION`, bounded. Too long to draw in a calendar block, so it is
+    /// what a hover or a long press says rather than something painted.
+    #[serde(default)]
+    pub description: String,
 }
 
 impl Occurrence {
@@ -354,6 +364,15 @@ fn unescape_text(value: &str) -> String {
 /// breaks, and a calendar cell is one line. Bounded at `NAME_MAX_CHARS`
 /// because that is what a name is here, and a subscribed event's name is not
 /// exempt from it.
+/// A free-text field, flattened and bounded like a name but to its own length.
+fn bounded_text(value: &str, max: usize) -> String {
+    let text = utilities::detab(&unescape_text(value));
+    let flat = text.replace(['\n', '\r'], " ");
+    // Runs of space are what a folded, unescaped description turns into.
+    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    flat.chars().take(max).collect::<String>().trim().to_string()
+}
+
 fn imported_name(value: &str) -> String {
     let text = utilities::detab(&unescape_text(value));
     let flat = text.replace(['\n', '\r'], " ");
@@ -1112,6 +1131,8 @@ fn apply_set_pos(period: Vec<NaiveDate>, rule: &Recurrence) -> Vec<NaiveDate> {
 struct RawEvent {
     uid: Option<String>,
     name: String,
+    location: String,
+    description: String,
     start: Option<IcsTime>,
     end: Option<IcsTime>,
     duration_minutes: Option<i64>,
@@ -1132,6 +1153,10 @@ fn read_event(lines: &[Line]) -> RawEvent {
         match line.name.as_str() {
             "UID" => event.uid = Some(line.value.trim().to_string()),
             "SUMMARY" => event.name = imported_name(&line.value),
+            // Where it is, which in a course feed is the room — its own field,
+            // and short, while the summary runs past a hundred characters.
+            "LOCATION" => event.location = bounded_text(&line.value, 120),
+            "DESCRIPTION" => event.description = bounded_text(&line.value, 300),
             "DTSTART" => event.start = read_time(&line.value, &line.params),
             "DTEND" => event.end = read_time(&line.value, &line.params),
             "DURATION" => event.duration_minutes = read_duration_minutes(&line.value),
@@ -1373,6 +1398,8 @@ fn spread(
                 all_day,
                 free: event.transparent,
                 name: event.name.clone(),
+                location: event.location.clone(),
+                description: event.description.clone(),
             });
         }
         remaining -= end - offset;
@@ -1690,6 +1717,34 @@ mod tests {
         let parsed = read(&body);
         assert_eq!(parsed.problems.len(), 1);
         assert!(parsed.problems.first().is_some_and(|p| p.contains("1000 times")), "{:?}", parsed.problems);
+    }
+
+    #[test]
+    fn where_it_is_comes_off_its_own_field_rather_than_the_end_of_the_summary() {
+        // The shape a real university feed sends, verbatim but for the names:
+        // the room is both buried at the end of a hundred-character summary
+        // and sitting in its own short field. Reading LOCATION is what stops
+        // the room being the first thing an ellipsis eats.
+        let parsed = read(&event(
+            "SUMMARY:MS-A0301\\, Differentiaali- ja integraalilaskenta 3\\, Luento-opetus 23.2.–15.4.2026 - Luento - L01 - E-sali - Y124\r\n\
+             DTSTART:20260910T061500Z\r\nDURATION:PT1H45M\r\nLOCATION:E-sali - Y124\r\nTRANSP:OPAQUE",
+        ));
+        let only = parsed.occurrences.first().expect("one");
+        assert_eq!(only.location, "E-sali - Y124");
+        assert!(only.name.starts_with("MS-A0301, Differentiaali"), "{}", only.name);
+        assert_eq!(only.end - only.start, 105, "PT1H45M");
+        assert!(only.description.is_empty(), "that feed sends none, and none is fine");
+
+        // A description is flattened to one line and bounded: it is a hover,
+        // not a wall. `\t` is not one of RFC 5545's escapes, so it survives as
+        // written rather than being guessed at — the same rule `unescape_text`
+        // keeps for `\%`.
+        let long = read(&event(
+            "SUMMARY:Standup\r\nDTSTART:20260910T090000\r\nDESCRIPTION:line one\\nline two\\n\\nand  spaces",
+        ));
+        let noted = long.occurrences.first().expect("one");
+        assert_eq!(noted.description, "line one line two and spaces");
+        assert!(!noted.description.contains('\n'), "a hover is one line");
     }
 
     #[test]

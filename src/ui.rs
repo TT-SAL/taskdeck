@@ -606,7 +606,7 @@ fn planner_weekday_row(ui: &mut Ui, rule: &mut tasks::Recurrence, shown_day: Nai
 /// response and no gesture, so nothing about it invites the drag or the tap
 /// that would do nothing. The colour is the subscription's rather than the
 /// scheme's, because it says *which calendar*, not how urgent.
-fn paint_subscribed_event(ui: &Ui, rect: Rect, color: Color32, name: &str, background: bool) {
+fn paint_subscribed_event(ui: &Ui, rect: Rect, color: Color32, name: &str, location: &str, background: bool) {
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::same(6), Color32::from_black_alpha(60));
     let weight = if background { 0.45 } else { 0.7 };
@@ -617,14 +617,27 @@ fn paint_subscribed_event(ui: &Ui, rect: Rect, color: Color32, name: &str, backg
         CornerRadius::same(2),
         color,
     );
+    // The block is as tall as the event is long, so the text uses that height
+    // rather than being cut to one line: a course summary runs past a hundred
+    // characters and the room is at the end of it.
+    let font = FontId::new(PLANNER_FINE_SIZE, FontFamily::Monospace);
+    let inner = rect.shrink2(vec2(9.0, 3.0));
+    let line = ui.fonts_mut(|fonts| fonts.row_height(&font));
+    let rows = ((inner.height() / line).floor() as usize).max(1);
+    let widths = vec![inner.width(); rows];
+    let wrapped = calendarwidgets::fit_text_rows(ui, name, &font, &widths);
+
     let clipped = painter.with_clip_rect(rect.intersect(ui.clip_rect()));
-    clipped.text(
-        rect.shrink2(vec2(9.0, 3.0)).left_top(),
-        egui::Align2::LEFT_TOP,
-        name,
-        FontId::new(PLANNER_FINE_SIZE, FontFamily::Monospace),
-        Color32::from_white_alpha(150),
-    );
+    let mut y = inner.top();
+    for row in &wrapped {
+        clipped.text(pos2(inner.left(), y), egui::Align2::LEFT_TOP, row, font.clone(), Color32::from_white_alpha(150));
+        y += line;
+    }
+    // Where it is, on the last line the block has room for, in the calendar's
+    // own colour so it reads as the answer to a different question.
+    if !location.is_empty() && wrapped.len() < rows {
+        clipped.text(pos2(inner.left(), y), egui::Align2::LEFT_TOP, location, font, color.gamma_multiply(0.95));
+    }
 }
 
 fn paint_planner_ghost(ui: &Ui, ghost: &PlannerGhost, rect: Rect, palette: &[Color32; 6]) {
@@ -5403,7 +5416,7 @@ impl TaskApp {
             } else {
                 planner_entry_rect(*placement, *lane, lane_area, geometry)
             };
-            paint_subscribed_event(ui, rect, *color, &event.summary, event.is_background());
+            paint_subscribed_event(ui, rect, *color, &event.summary, &event.location, event.is_background());
         }
     }
 

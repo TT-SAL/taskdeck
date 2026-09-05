@@ -77,6 +77,12 @@ pub const SUMMARY_MAX_CHARS: usize = 200;
 /// out a decade of a daily standup is not malice, only a calendar server being
 /// literal — and either way the wall shows one week.
 pub const EVENTS_MAX: usize = 5_000;
+/// Longest location kept. A room, not an address book: the longest in a real
+/// university feed is thirty-four characters.
+pub const LOCATION_MAX_CHARS: usize = 120;
+/// Longest description kept. It is only ever a hover, and a calendar server
+/// will happily send a page of meeting notes.
+pub const DESCRIPTION_MAX_CHARS: usize = 300;
 /// Longest failure text kept against a subscription. The words come from
 /// somebody else's server and are shown at the desk.
 pub const WHY_MAX_CHARS: usize = 200;
@@ -168,6 +174,15 @@ pub struct OverlayEvent {
     #[serde(default)]
     pub free: bool,
     pub summary: String,
+    /// Where it is. Drawn on its own line: a course feed puts the room here in
+    /// a dozen characters while the summary runs to a hundred, so this is the
+    /// half that reads at a glance (§23).
+    #[serde(default)]
+    pub location: String,
+    /// What a hover or a long press says. Never painted: a calendar server
+    /// will send a page of notes and a block is three lines tall.
+    #[serde(default)]
+    pub description: String,
 }
 
 /// Past this, an event stops being an appointment and starts being a
@@ -331,6 +346,8 @@ impl Overlay {
                 event.start = event.start.clamp(0, planner::DAY_MINUTES);
                 event.end = event.end.clamp(event.start, planner::DAY_MINUTES);
                 event.summary = event.summary.chars().take(SUMMARY_MAX_CHARS).collect();
+                event.location = event.location.chars().take(LOCATION_MAX_CHARS).collect();
+                event.description = event.description.chars().take(DESCRIPTION_MAX_CHARS).collect();
                 event
             })
             .take(EVENTS_MAX)
@@ -535,6 +552,8 @@ pub fn fetch_all(client: &reqwest::blocking::Client, list: &[Subscription], prev
                     all_day: occurrence.all_day,
                     free: occurrence.free,
                     summary: occurrence.name,
+                    location: occurrence.location,
+                    description: occurrence.description,
                 }));
                 FetchOutcome::Ok { events: count, problems: parsed.problems, title: parsed.name }
             }
@@ -672,7 +691,17 @@ mod tests {
     }
 
     fn event(subscription: u64, day: NaiveDate, start: i32, end: i32, summary: &str) -> OverlayEvent {
-        OverlayEvent { subscription, day, start, end, all_day: false, free: false, summary: summary.to_string() }
+        OverlayEvent {
+            subscription,
+            day,
+            start,
+            end,
+            all_day: false,
+            free: false,
+            summary: summary.to_string(),
+            location: String::new(),
+            description: String::new(),
+        }
     }
 
     #[test]
