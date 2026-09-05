@@ -170,18 +170,66 @@ pub struct OverlayEvent {
     pub summary: String,
 }
 
+/// Past this, an event stops being an appointment and starts being a
+/// description of the day.
+///
+/// Found in real data rather than reasoned out: a university feed carries
+/// "CS-C3240, Machine Learning, Lähiopetus 1.9.–30.11." as an event running
+/// 08:00 to 20:00 on every teaching day — a course *period*, written as a
+/// twelve-hour block because iCalendar gave the exporter nowhere else to put
+/// it. Anchoring reflow on that leaves nowhere to put any work at all, which
+/// is the same failure an all-day band would cause and for the same reason.
+/// Six hours is where the line falls: past it, "I am at a conference" rather
+/// than "there is a meeting at two".
+pub const LONG_EVENT_MINUTES: i32 = 6 * 60;
+
 impl OverlayEvent {
+    /// How long it runs.
+    pub fn minutes(&self) -> i32 {
+        (self.end - self.start).max(0)
+    }
+
+    /// Whether this describes the day rather than taking an hour out of it: an
+    /// all-day band, or something long enough to amount to one.
+    ///
+    /// Drawn as the ground the day sits on — full width, behind everything,
+    /// and out of the column packing so a real lecture beside it still gets
+    /// the width it needs.
+    pub fn is_background(&self) -> bool {
+        self.all_day || self.minutes() >= LONG_EVENT_MINUTES
+    }
+
     /// Whether this is time the day has to be planned around.
+    ///
+    /// Not a background span, and not something the owner marked
+    /// `TRANSPARENT` — this app's own feed writes that on a due marker, and a
+    /// household may well subscribe TaskDeck to a calendar TaskDeck feeds.
     pub fn is_busy(&self) -> bool {
-        !self.all_day && !self.free && self.end > self.start
+        !self.is_background() && !self.free && self.end > self.start
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum FetchOutcome {
-    Ok { events: usize, problems: Vec<String> },
-    Failed { why: String },
+    Ok {
+        events: usize,
+        problems: Vec<String>,
+        /// The name the feed gives itself (`X-WR-CALNAME`), when it gives one.
+        /// A subscription that is still wearing its placeholder takes this the
+        /// first time it is read — nobody wants a wall calendar labelled
+        /// "Calendar 150" when the file itself says what it is.
+        #[serde(default)]
+        title: Option<String>,
+    },
+    Failed {
+        why: String,
+    },
+}
+
+/// The name a subscription is given before anything better is known.
+pub fn placeholder_name(id: u64) -> String {
+    format!("Calendar {id}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -436,7 +484,7 @@ pub fn fetch_all(client: &reqwest::blocking::Client, list: &[Subscription], prev
                     free: occurrence.free,
                     summary: occurrence.name,
                 }));
-                FetchOutcome::Ok { events: count, problems: parsed.problems }
+                FetchOutcome::Ok { events: count, problems: parsed.problems, title: parsed.name }
             }
             Err(why) => {
                 events.extend(
@@ -631,7 +679,7 @@ mod tests {
             vec![FetchStatus {
                 subscription: 1,
                 at: Local::now(),
-                outcome: FetchOutcome::Ok { events: 2, problems: Vec::new() },
+                outcome: FetchOutcome::Ok { events: 2, problems: Vec::new(), title: None },
             }],
         );
         assert_eq!(one.digest(), later.digest(), "the time of the last attempt is not a change");
@@ -662,7 +710,7 @@ mod tests {
         let mut overlay = Overlay::sealed(
             vec![event(1, day(2026, 9, 10), 600, 660, "mine"), event(2, day(2026, 9, 10), 700, 760, "theirs")],
             vec![
-                FetchStatus { subscription: 1, at: Local::now(), outcome: FetchOutcome::Ok { events: 1, problems: Vec::new() } },
+                FetchStatus { subscription: 1, at: Local::now(), outcome: FetchOutcome::Ok { events: 1, problems: Vec::new(), title: None } },
                 FetchStatus { subscription: 2, at: Local::now(), outcome: FetchOutcome::Failed { why: "no".into() } },
             ],
         );
@@ -751,6 +799,30 @@ mod tests {
             "{:?}",
             overlay.status
         );
+    }
+
+    #[test]
+    fn a_span_long_enough_to_describe_the_day_is_drawn_but_never_planned_around() {
+        // Straight from a real university feed: a course *period* exported as
+        // an event running 08:00–20:00 on every teaching day. Treated as busy
+        // it leaves reflow nowhere to put any work at all, which is exactly
+        // the failure an all-day band would cause.
+        let today = Local::now().date_naive();
+        let period = event(1, today, 8 * 60, 20 * 60, "CS-C3240, Machine Learning, Lähiopetus 1.9.–30.11.");
+        let lecture = event(1, today, 10 * 60 + 15, 12 * 60, "MOLE-101, Biokemia");
+        let overlay = Overlay::sealed(vec![period, lecture], Vec::new());
+
+        assert_eq!(overlay.events_on(today).count(), 2, "both are still shown");
+        assert_eq!(
+            overlay.anchors_on(today),
+            vec![(10 * 60 + 15, 12 * 60)],
+            "only the lecture takes an hour out of the day"
+        );
+        let long = overlay.events.iter().find(|e| e.minutes() >= LONG_EVENT_MINUTES).expect("the period");
+        assert!(long.is_background() && !long.is_busy());
+        // A four-hour lecture block is still an appointment.
+        let four_hours = event(1, today, 9 * 60, 13 * 60, "Lab");
+        assert!(four_hours.is_busy(), "six hours is the line, not four");
     }
 
     #[test]

@@ -1218,6 +1218,12 @@ pub struct SubscribedSnapshot {
     pub column: usize,
     pub columns: usize,
     pub all_day: bool,
+    /// A span that describes the day rather than taking an hour out of it: an
+    /// all-day band, or something long enough to amount to one (§23). Drawn
+    /// full width behind the rest and left out of the column packing, so a
+    /// real lecture beside a twelve-hour course-period marker still gets the
+    /// width it needs.
+    pub background: bool,
     pub name: String,
     /// `#rrggbb`, the subscription's own colour rather than the scheme's: it
     /// says which calendar, not how urgent.
@@ -1359,11 +1365,13 @@ fn with_subscribed(
         // out among theirs: two meetings at the same hour split the width
         // rather than one being drawn over the other. All-day bands take no
         // part — they are chips above the timeline, not blocks on it.
+        // Only the ones that are really appointments take part in the column
+        // packing; a background span is drawn behind them at full width.
         let placements: Vec<planner::Placement> = showing
             .iter()
             .map(|(event, _)| planner::Placement::Block {
                 start: event.start,
-                minutes: if event.all_day { 0 } else { (event.end - event.start).max(1) as u32 },
+                minutes: if event.is_background() { 0 } else { event.minutes().max(1) as u32 },
             })
             .collect();
         let lanes = planner::lay_out(&placements);
@@ -1374,9 +1382,10 @@ fn with_subscribed(
             .map(|((event, subscription), lane)| SubscribedSnapshot {
                 start: event.start,
                 end: event.end,
-                column: lane.column,
-                columns: lane.columns.max(1),
+                column: if event.is_background() { 0 } else { lane.column },
+                columns: if event.is_background() { 1 } else { lane.columns.max(1) },
                 all_day: event.all_day,
+                background: event.is_background(),
                 name: event.summary.clone(),
                 color: format!(
                     "#{:02x}{:02x}{:02x}",

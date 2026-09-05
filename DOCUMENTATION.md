@@ -2703,9 +2703,17 @@ made none at all.
   tunnel that dropped is not somebody cancelling a meeting. The failure shows on the status line at
   the desk; the meetings stay. This is the same refusal to read an outage as a deletion that §22.4
   makes about edits.
-- **An all-day event is never an anchor.** One would claim 00:00–24:00 and leave reflow nowhere to
-  put the day's work. "I am at a conference" is not the same claim as "there is a meeting at two",
-  so it is drawn as a band in the masthead and on the phone as a chip, and planned straight through.
+- **A span that describes the day is never an anchor.** An all-day event would claim 00:00–24:00
+  and leave reflow nowhere to put the day's work; so would anything long enough to amount to the
+  same. "I am at a conference" is not the claim "there is a meeting at two", so both are drawn and
+  planned straight through — the all-day one as a chip above the timeline, the long one as a
+  backdrop behind it. The line is `LONG_EVENT_MINUTES`, six hours, and it was found in real data
+  rather than reasoned out: a university feed exports a course *period* as an event running
+  08:00–20:00 on every teaching day, because iCalendar gave it nowhere else to put one. Treated as
+  busy, that made the whole working day unplannable.
+- **A backdrop takes no part in the column packing either.** Subscribed events that overlap each
+  other are laid out side by side so both stay readable, but a twelve-hour period marker sitting
+  behind three lectures would otherwise squeeze every one of them into half a column.
 - **`TRANSP:TRANSPARENT` is drawn and not obeyed.** This app's own feed writes it on a due marker,
   and a household may well subscribe TaskDeck to a calendar TaskDeck feeds; reading our own
   politeness back as somebody's meeting would wall off the day with our own deadlines.
@@ -2715,7 +2723,25 @@ made none at all.
   to ten years, and expanding a daily rule across ten years for every subscription is hundreds of
   thousands of occurrences to hold, to compare on every refresh and to hand to a client.
 
-### 23.5 The parser (`ics.rs`), and why it is ours
+### 23.5 Where they are drawn
+
+Three surfaces, each honest about whose the event is.
+
+- **The planner's timeline**: a dashed outline with a bar down the left in the calendar's own
+  colour, no fill, and no response registered at all — nothing about it can be dragged, tapped or
+  ticked off, so nothing about it should invite the attempt. Overlapping ones are laid out side by
+  side by `planner::lay_out` among *themselves*, so they never take width from the day's own blocks.
+- **The month grid**: after the day's own items and never instead of them, in whatever room is left
+  of the cell's three slots, prefixed `◇` and drawn in the calendar's colour rather than a palette
+  index — `PreviewItem::subscribed` carries the override. A lecture is worth knowing about; a task
+  is worth doing, and the cell says which is which.
+- **The phone**: the same, laid out server-side so the page draws and never decides, with all-day
+  bands as chips above the timeline.
+
+The colour is the subscription's own and deliberately does **not** follow the colour scheme: it
+says which calendar, not how urgent.
+
+### 23.6 The parser (`ics.rs`), and why it is ours
 
 A fetched file is **input nobody in this repository wrote**, so `ics.rs` is built the other way
 round from the feed writer it mirrors: everything is bounded before it is read, an unreadable event

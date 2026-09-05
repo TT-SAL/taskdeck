@@ -606,10 +606,11 @@ fn planner_weekday_row(ui: &mut Ui, rule: &mut tasks::Recurrence, shown_day: Nai
 /// response and no gesture, so nothing about it invites the drag or the tap
 /// that would do nothing. The colour is the subscription's rather than the
 /// scheme's, because it says *which calendar*, not how urgent.
-fn paint_subscribed_event(ui: &Ui, rect: Rect, color: Color32, name: &str) {
+fn paint_subscribed_event(ui: &Ui, rect: Rect, color: Color32, name: &str, background: bool) {
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::same(6), Color32::from_black_alpha(60));
-    painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, color.gamma_multiply(0.7)), StrokeKind::Inside);
+    let weight = if background { 0.45 } else { 0.7 };
+    painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, color.gamma_multiply(weight)), StrokeKind::Inside);
     // The bar is what reads at a glance as "this one is not mine".
     painter.rect_filled(
         Rect::from_min_max(rect.left_top(), pos2(rect.left() + 3.0, rect.bottom())),
@@ -1269,6 +1270,32 @@ struct PressState {
     cancelled: bool,
 }
 
+/// The names the feeds gave themselves in their last fetch, by subscription.
+fn feed_titles(overlay: &subscriptions::Overlay) -> Vec<(u64, String)> {
+    overlay
+        .status
+        .iter()
+        .filter_map(|status| match &status.outcome {
+            subscriptions::FetchOutcome::Ok { title: Some(title), .. } if !title.trim().is_empty() => {
+                Some((status.subscription, title.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The colour a cell draws one preview item in.
+///
+/// A subscribed calendar's events carry their own colour rather than a palette
+/// index: it says *which calendar*, not how urgent, so it deliberately does not
+/// follow the colour scheme (§23).
+fn preview_color(palette: &[Color32; 6], item: &PreviewItem) -> Color32 {
+    match item.subscribed {
+        Some([r, g, b, _]) => Color32::from_rgb(r, g, b),
+        None => palette[item.color_id.min(5)],
+    }
+}
+
 /// One item in a day cell's compact preview (at most 3 are shown in the cell).
 #[derive(Clone)]
 struct PreviewItem {
@@ -1277,6 +1304,10 @@ struct PreviewItem {
     time: String,
     /// Palette index (see `Active::calendar_item_color`).
     color_id: usize,
+    /// Set when this came off a subscribed calendar (§23), carrying that
+    /// calendar's own colour rather than a palette index — the colour says
+    /// *which calendar*, not how urgent. `None` for the board's own things.
+    subscribed: Option<[u8; 4]>,
 }
 
 /// One day cell of the calendar model, cached in `TaskApp::calendar_elements`
@@ -2406,32 +2437,32 @@ impl TaskApp {
                                             });
                                         } else if num == 1 {
                                             let first = &preview[0];
-                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, self.active_colorscheme[first.color_id]));
+                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, preview_color(&self.active_colorscheme, first)));
                                             ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                                 ui.add(calendarwidgets::RotatedNumberOnly::new(day_label, is_strong));
                                             });
                                         } else if num == 2 {
                                             let first = &preview[0];
-                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, self.active_colorscheme[first.color_id]));
+                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, preview_color(&self.active_colorscheme, first)));
                                             let second = &preview[1];
-                                            ui.add(calendarwidgets::MiddleHeader::new(&second.name, Some(&second.time), self.active_colorscheme[second.color_id]));
+                                            ui.add(calendarwidgets::MiddleHeader::new(&second.name, Some(&second.time), preview_color(&self.active_colorscheme, second)));
                                             ui.with_layout(Layout::bottom_up(Align::RIGHT), |ui| {
                                                 ui.add(calendarwidgets::RotatedNumberOnly::new(day_label, is_strong));
                                             });
                                         } else if num == 3 {
                                             let first = &preview[0];
-                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, self.active_colorscheme[first.color_id]));
+                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, preview_color(&self.active_colorscheme, first)));
                                             let second = &preview[1];
-                                            ui.add(calendarwidgets::MiddleHeader::new(&second.name, None, self.active_colorscheme[second.color_id]));
+                                            ui.add(calendarwidgets::MiddleHeader::new(&second.name, None, preview_color(&self.active_colorscheme, second)));
                                             let third = &preview[2];
-                                            ui.add(calendarwidgets::BottomHeaderRotated::new(day_label, &third.name, is_strong, &third.time, Some(&second.time), self.active_colorscheme[third.color_id]));
+                                            ui.add(calendarwidgets::BottomHeaderRotated::new(day_label, &third.name, is_strong, &third.time, Some(&second.time), preview_color(&self.active_colorscheme, third)));
                                         } else {
                                             let first = &preview[0];
-                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, self.active_colorscheme[first.color_id]));
+                                            ui.add(calendarwidgets::DayHeader::new(day_label, &first.name, is_strong, &first.time, preview_color(&self.active_colorscheme, first)));
                                             let second = &preview[1];
-                                            ui.add(calendarwidgets::MiddleHeader::new(&second.name, None, self.active_colorscheme[second.color_id]));
+                                            ui.add(calendarwidgets::MiddleHeader::new(&second.name, None, preview_color(&self.active_colorscheme, second)));
                                             let third = &preview[2];
-                                            ui.add(calendarwidgets::ButtonHeaderRotated::new(day_label, &third.name, is_strong, &third.time, Some(&second.time), self.active_colorscheme[third.color_id]));
+                                            ui.add(calendarwidgets::ButtonHeaderRotated::new(day_label, &third.name, is_strong, &third.time, Some(&second.time), preview_color(&self.active_colorscheme, third)));
                                         }
                                     });
                                 });
@@ -2695,10 +2726,25 @@ impl TaskApp {
         // A poisoned lock answers with an empty overlay rather than taking the
         // window down; the next fetch puts it back.
         let fresh = calendars.overlay();
+        let titles = feed_titles(&fresh);
         if self.board.adopt_overlay(fresh) {
             self.board.save_overlay();
             self.summarize_calendar();
             self.phone_changed();
+        }
+        // A calendar that has never been named takes the name the file gives
+        // itself. Through `apply` like any other rename, so a server and every
+        // client hear it; and only while the placeholder stands, so it happens
+        // once rather than on every refresh.
+        for (id, title) in titles {
+            let wearing_placeholder = self
+                .board
+                .subscriptions()
+                .iter()
+                .any(|s| s.id == id && s.name == subscriptions::placeholder_name(id));
+            if wearing_placeholder {
+                self.apply_or_report(board::Command::RenameSubscription { id, name: title });
+            }
         }
     }
 
@@ -2898,6 +2944,37 @@ impl TaskApp {
             .week(Weekday::Mon)
             .first_day();
 
+        // What the subscribed calendars put on each day (§23), gathered once
+        // rather than looked up per cell: the grid is up to ten years of them.
+        // Only the calendars that are switched on, and each already carrying
+        // the colour it is drawn in.
+        let subscribed_by_day: HashMap<NaiveDate, Vec<PreviewItem>> = {
+            let enabled: HashMap<u64, [u8; 4]> = self
+                .board
+                .subscriptions()
+                .iter()
+                .filter(|subscription| subscription.enabled)
+                .map(|subscription| (subscription.id, subscription.color))
+                .collect();
+            let mut by_day: HashMap<NaiveDate, Vec<PreviewItem>> = HashMap::new();
+            for event in &self.board.overlay().events {
+                let Some(color) = enabled.get(&event.subscription).copied() else { continue };
+                by_day.entry(event.day).or_default().push(PreviewItem {
+                    // The glyph is the cell's only room to say "this one is
+                    // not yours to tick off"; the colour says which calendar.
+                    name: format!("◇ {}", event.summary),
+                    time: if event.all_day {
+                        String::new()
+                    } else {
+                        format!("{:02}:{:02}", event.start / 60, event.start % 60)
+                    },
+                    color_id: 0,
+                    subscribed: Some(color),
+                });
+            }
+            by_day
+        };
+
         let mut calendar = Vec::new();
 
         let mut last_days_vec: Vec<Option<(String, String)>> = vec![];
@@ -2937,7 +3014,7 @@ impl TaskApp {
                 // deadline is present; format defensively regardless.
                 chosen.sort_by_key(|a| a.deadline);
 
-                let preview: Vec<PreviewItem> = chosen
+                let mut preview: Vec<PreviewItem> = chosen
                     .into_iter()
                     .map(|a| PreviewItem {
                         name: a.name.clone(),
@@ -2945,15 +3022,30 @@ impl TaskApp {
                             .map(|d| d.format("%H:%M").to_string())
                             .unwrap_or_default(),
                         color_id: a.calendar_item_color(),
+                        subscribed: None,
                     })
                     .collect();
+
+                // Then the subscribed calendars, in whatever room is left
+                // (§23). After the board's own things and never instead of
+                // them: a lecture is worth knowing about, and a task is worth
+                // doing. Marked with a glyph and drawn in the calendar's own
+                // colour, so a cell never claims somebody else's event is
+                // yours to tick off.
+                let subscribed_today = subscribed_by_day.get(&current).map(Vec::as_slice).unwrap_or(&[]);
+                let room = 3usize.saturating_sub(preview.len());
+                preview.extend(subscribed_today.iter().take(room).cloned());
 
                 // 8) The cell's layout is chosen by how many items land on the
                 // day, so the count is all that is needed here. This used to
                 // build a second, fully-cloned copy of every dated item for the
                 // day popup to list; the planner that replaced the popup reads
                 // `board.items` directly, so the clones are gone.
-                let item_count = day_events.len() + day_tasks.len();
+                // Counts what the cell may draw, subscribed calendars
+                // included: the count is what picks the cell's layout, so a
+                // preview with three things in it must not be told there is
+                // one.
+                let item_count = day_events.len() + day_tasks.len() + subscribed_today.len();
 
                 calendar.push(DayCell {
                     preview,
@@ -3574,10 +3666,10 @@ impl TaskApp {
             Some(status) => {
                 let at = status.at.format("%H:%M");
                 match &status.outcome {
-                    subscriptions::FetchOutcome::Ok { events, problems } if problems.is_empty() => {
+                    subscriptions::FetchOutcome::Ok { events, problems, .. } if problems.is_empty() => {
                         format!("{events} events, read at {at}")
                     }
-                    subscriptions::FetchOutcome::Ok { events, problems } => {
+                    subscriptions::FetchOutcome::Ok { events, problems, .. } => {
                         format!("{events} events, read at {at} — {}", problems.join("; "))
                     }
                     subscriptions::FetchOutcome::Failed { why } => format!("could not read at {at}: {why}"),
@@ -5299,18 +5391,35 @@ impl TaskApp {
         // readable, but they never take room away from your own work, which is
         // what they are the ground under. Drawn full width before this, which
         // put two overlapping meetings in exactly the same rectangle.
+        // A background span — a course period written as a twelve-hour block —
+        // takes no part in the packing and is drawn behind at full width, or
+        // one long marker would squeeze every real lecture into half a column.
         let placements: Vec<planner::Placement> = showing
             .iter()
             .map(|(event, _)| planner::Placement::Block {
                 start: event.start,
-                minutes: (event.end - event.start).max(1) as u32,
+                minutes: if event.is_background() { 0 } else { event.minutes().max(1) as u32 },
             })
             .collect();
         let lanes = planner::lay_out(&placements);
 
-        for ((event, color), (placement, lane)) in showing.iter().zip(placements.iter().zip(lanes.iter())) {
-            let rect = planner_entry_rect(*placement, *lane, lane_area, geometry);
-            paint_subscribed_event(ui, rect, *color, &event.summary);
+        let mut order: Vec<usize> = (0..showing.len()).collect();
+        order.sort_by_key(|index| showing.get(*index).is_some_and(|(e, _)| !e.is_background()));
+        for ((event, color), (placement, lane)) in order
+            .iter()
+            .filter_map(|index| Some((showing.get(*index)?, (placements.get(*index)?, lanes.get(*index)?))))
+        {
+            let rect = if event.is_background() {
+                let top = geometry.y_for(event.start as f32);
+                let bottom = geometry.y_for(event.end as f32);
+                Rect::from_min_max(
+                    pos2(lane_area.left() + 1.0, top),
+                    pos2(lane_area.right() - 1.0, bottom.max(top + 16.0)),
+                )
+            } else {
+                planner_entry_rect(*placement, *lane, lane_area, geometry)
+            };
+            paint_subscribed_event(ui, rect, *color, &event.summary, event.is_background());
         }
     }
 

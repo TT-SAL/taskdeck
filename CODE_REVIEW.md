@@ -216,6 +216,22 @@ Fixes already landed (newest first). Kept here as history so the open list above
   that overlaps nothing still gets the lane, and none of them takes room from your own work. The
   phone is laid out server-side and drawn from `column`/`columns` like every other entry, so the
   page still decides nothing. Test `two_meetings_at_the_same_hour_are_given_a_column_each`.
+- **Two things real calendars taught the feature that reasoning had not** (found by running it
+  against two university feeds, 110 events): a course *period* is exported as an event running
+  08:00–20:00 on every teaching day, because iCalendar gives an exporter nowhere else to put one.
+  Treated as busy time it anchored reflow across the whole working day, so no work could be placed
+  at all — the same failure an all-day band would cause, and now handled the same way. Anything
+  over six hours (`LONG_EVENT_MINUTES`) is a **backdrop**: drawn, never an anchor, and out of the
+  column packing, because one twelve-hour marker behind three lectures was squeezing every one of
+  them into half a column. Test
+  `a_span_long_enough_to_describe_the_day_is_drawn_but_never_planned_around` carries the real
+  string that found it. Second: neither feed sends `X-WR-CALNAME`, so the parser's calendar name
+  had nothing to give and the subscriptions kept their placeholders — the name is now adopted
+  through `RenameSubscription` when a feed does send one, once, while the placeholder stands.
+- **Subscribed events reach the month grid** (`ui.rs`): they fill what is left of a cell's three
+  slots after the board's own items, prefixed `◇` and drawn in the calendar's own colour through a
+  new `PreviewItem::subscribed` override. After your own things and never instead of them: a
+  lecture is worth knowing about, a task is worth doing.
 - **The parser is ours, and adds no dependency** (`ics.rs`): the survey found `ical` archived,
   `icalendar` unable to read `DURATION` or `VTIMEZONE` and recursing through components with no
   depth cap — a file of repeated `BEGIN:` lines is a stack overflow `panic = "abort"` cannot catch

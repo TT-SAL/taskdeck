@@ -136,6 +136,8 @@
     color: var(--faint); font-size: 12px; overflow: hidden;
     white-space: nowrap; text-overflow: ellipsis; pointer-events: none;
   }
+  /* A course period rather than an appointment: further back still. */
+  .subscribed.backdrop { opacity: 0.55; border-style: dotted; background: none; }
   .allday {
     display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
     border-radius: 999px; padding: 2px 9px; margin: 0 6px 4px 0;
@@ -982,7 +984,7 @@
       // the whole view.
       for (const event of (day.subscribed || [])) {
         if (event.all_day) continue;
-        col.append(el('div', { class: 'subscribed', style: `${spanStyle(event)}; --accent:${event.color}`, text: event.name }));
+        col.append(el('div', { class: event.background ? 'subscribed backdrop' : 'subscribed', style: `${spanStyle(event)}; --accent:${event.color}`, text: event.name }));
       }
       for (const ghost of day.ghosts) {
         col.append(el('div', { class: 'wentry ghost', style: `${laneStyle(ghost)}; --accent:${colorOf(ghost.color)}`, text: ghost.name }));
@@ -1049,10 +1051,12 @@
     // Subscribed calendars first, so the day's own blocks draw over them: the
     // board's things are what you came to look at.
     renderAllDay(day);
+    // Background spans first and fainter — a course period, not an
+    // appointment — then the real ones over them.
     for (const event of (day.subscribed || [])) {
       if (event.all_day) continue;
       lanes.append(el('div', {
-        class: 'subscribed',
+        class: event.background ? 'subscribed backdrop' : 'subscribed',
         style: `${spanStyle(event)}; --accent:${event.color}`,
         text: event.name,
         title: event.calendar,
