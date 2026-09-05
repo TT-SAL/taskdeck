@@ -2728,6 +2728,30 @@ made none at all.
   to ten years, and expanding a daily rule across ten years for every subscription is hundreds of
   thousands of occurrences to hold, to compare on every refresh and to hand to a client.
 
+### 22.6 Opening it quickly
+
+A calendar you pull out of a pocket to check a time is judged on one number: how long from tapping
+the icon to seeing the day. On an old phone in battery saver that was five seconds, and all three
+causes were ours.
+
+- **The day is painted from `localStorage` before the network is asked.** `load()` used the cached
+  day only in its `catch`, so a working-but-slow connection meant waiting out the whole round trip
+  in front of a blank screen. It now draws what it knows first and replaces it when the answer
+  arrives. No "as of 12:05" banner while a request is in flight — nothing has failed, and saying so
+  would be noise; that banner stays the `catch` branch's.
+- **The service worker serves the shell from disk rather than the network.** It was network-first,
+  which spends a round trip to be handed back a file that only changes when the binary is rebuilt.
+  Cache-first with a background refresh means a rebuilt page appears one launch late, which is the
+  right way round for something opened to check a time.
+- **The icon is cacheable; nothing else is.** 660 KB of the 750 KB a cold open moved was one PNG,
+  re-fetched every time because every response was `no-store`. It is part of the program rather
+  than part of the board, so it gets a week. The board and anything carrying the token still get
+  `no-store`, and the shell is the service worker's to keep, because it knows how to replace it
+  safely and a `max-age` does not.
+
+Together: about 750 KB on every open becomes about 5 KB, and the first paint stops waiting for any
+of it. The remaining fetch is the day itself, which arrives behind an already-drawn screen.
+
 ### 23.5 Where they are drawn
 
 Three surfaces, each honest about whose the event is.

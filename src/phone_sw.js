@@ -38,18 +38,32 @@ self.addEventListener('fetch', (event) => {
   const shellPath = (path === '/' || path === '/index.html' || request.mode === 'navigate') ? '/' : path;
   if (!SHELL.includes(shellPath)) return;
 
-  event.respondWith(
-    fetch(request)
-      .then((response) => {
-        // Keep the freshest copy, keyed without the token in the query — but
-        // only a good one: an error page from a server mid-restart must not
-        // replace the shell that works.
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(shellPath, copy)).catch(() => {});
-        }
-        return response;
-      })
-      .catch(() => caches.match(shellPath).then((cached) => cached || Response.error())),
-  );
+  // Cache first, then catch up. The shell is this app's own file and changes
+  // only when the binary is rebuilt, so waiting on the network to hand back
+  // the same bytes is a round trip spent for nothing — and on a phone on
+  // mobile data that round trip is most of what "the app is slow to open"
+  // means. Serve the copy on disk immediately, fetch in the background, and
+  // let the new one be there next time.
+  //
+  // The trade is that a rebuilt page appears one launch late. That is the
+  // right way round: this is a calendar someone opens to check a time, and a
+  // second of waiting every single time costs more than a stale layout once.
+  // Started here rather than after the cache lookup, for two reasons: it runs
+  // alongside the lookup instead of after it, and `waitUntil` has to be called
+  // while the event is still dispatching or the refresh can be cancelled the
+  // moment the page is closed — which is exactly when someone glances at the
+  // day and pockets the phone.
+  const fresh = fetch(request)
+    .then((response) => {
+      // Only a good answer replaces it: an error page from a server
+      // mid-restart must not become the shell.
+      if (response.ok) {
+        const copy = response.clone();
+        caches.open(CACHE).then((cache) => cache.put(shellPath, copy)).catch(() => {});
+      }
+      return response;
+    })
+    .catch(() => Response.error());
+  event.waitUntil(fresh.catch(() => {}));
+  event.respondWith(caches.match(shellPath).then((cached) => cached || fresh));
 });

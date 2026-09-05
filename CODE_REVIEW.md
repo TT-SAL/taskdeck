@@ -216,6 +216,22 @@ Fixes already landed (newest first). Kept here as history so the open list above
   that overlaps nothing still gets the lane, and none of them takes room from your own work. The
   phone is laid out server-side and drawn from `column`/`columns` like every other entry, so the
   page still decides nothing. Test `two_meetings_at_the_same_hour_are_given_a_column_each`.
+- **Five seconds from tapping the icon to seeing the day** (`phone.html`, `phone_sw.js`,
+  `phone.rs`; §22.6): reported from real use on a 2018 phone in permanent battery saver, and all
+  three causes were ours rather than the phone's. `load()` used the cached day only in its `catch`,
+  so a working-but-slow connection waited out the whole round trip in front of a blank screen — it
+  now paints what it knows first and replaces it when the answer lands. The service worker was
+  network-first, spending a round trip to be handed back a file that changes only when the binary
+  is rebuilt; it is cache-first now, with the refresh started while the event is still dispatching
+  and held with `waitUntil`, because the moment someone glances and pockets the phone is exactly
+  when a background fetch gets cancelled. And every response carried `no-store`, including a 676 KB
+  icon that is 88% of what a cold open moved and is part of the program rather than part of the
+  board; it gets a week, everything else keeps `no-store`. About 750 KB per open becomes about
+  5 KB, and the first paint no longer waits for any of it. Test
+  `the_icon_is_the_one_thing_a_phone_may_keep`. Left alone deliberately: the icon is still 676 KB
+  for something drawn at 192 px, and the 89 KB page is served uncompressed — both are now paid once
+  rather than every time, and fixing either means either an image pipeline or a compression
+  dependency in a tree that has neither.
 - **The QR carried the one address the phone could not reach** (`phone.rs`, `server_main.rs`,
   `initialization.rs`): `--print-link` listed this machine's addresses in the order two UDP probes
   happened to find them, and the QR encoded the first — which on an ethernet-connected desktop is

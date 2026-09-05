@@ -757,6 +757,26 @@
     // the answer is actually for, never by the day selected when it arrived.
     const mine = ++loadSeq;
     const asked = state.day;
+
+    // Paint what we already know before asking anything. The day is in
+    // localStorage from the last visit, and drawing it costs a millisecond
+    // against a round trip that on mobile data is most of a second — and on a
+    // tired phone in battery saver, several. The fetch below replaces it a
+    // moment later; until then the app opens *now*, which is the whole point
+    // of pulling it out of a pocket.
+    //
+    // No stale banner here, on purpose: nothing has failed, a request is in
+    // flight, and "as of 12:05" over a day that is about to refresh itself is
+    // noise. The banner belongs to the catch branch, for when the fetch really
+    // does not arrive.
+    if (!quiet && (!state.snap || state.snap.days[0].date !== asked)) {
+      const known = recall(asked);
+      if (known) {
+        takeSnapshot(known.snap);
+        render();
+      }
+    }
+
     try {
       const snap = await api(`/api/state?from=${asked}&days=1`);
       remember(snap.days[0].date, snap);

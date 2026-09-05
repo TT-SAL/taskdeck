@@ -756,7 +756,7 @@ fn handle(
         _ => json_error(404, "No such page."),
     };
 
-    let _ = request.respond(response.with_header(no_store()));
+    let _ = request.respond(response.with_header(caching_for(path)));
 }
 
 /// Hand a command to the UI thread and wait for its answer.
@@ -955,6 +955,25 @@ fn header(name: &str, value: &str) -> Header {
 
 fn no_store() -> Header {
     header("Cache-Control", "no-store")
+}
+
+/// How long a phone may keep this path before asking again.
+///
+/// Everything used to be `no-store`, which is right for a board that changes
+/// and wrong for the app's own icon: 660 KB of the 750 KB a cold open moved
+/// was one PNG, re-fetched every single time, on mobile data, on a phone the
+/// user had pulled out to check a time. The icon is the one thing here that is
+/// not data — it is part of the program — so it gets a week, and a rebuilt one
+/// arrives within a week rather than never.
+///
+/// The page and the service worker stay uncached at this layer on purpose:
+/// the service worker caches the shell itself, and it knows how to replace it
+/// safely, which a `max-age` does not.
+fn caching_for(path: &str) -> Header {
+    match path {
+        "/icon.png" => header("Cache-Control", "public, max-age=604800"),
+        _ => no_store(),
+    }
 }
 
 fn with_type(response: Body, content_type: &str) -> Body {
@@ -2265,6 +2284,19 @@ mod tests {
         stopping.store(true, Ordering::Relaxed);
         pulse.interrupt();
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn the_icon_is_the_one_thing_a_phone_may_keep() {
+        // 660 KB of the 750 KB a cold open moved was this one file, fetched
+        // again every time because everything was `no-store`. It is part of
+        // the program rather than part of the board, so it keeps.
+        assert_eq!(caching_for("/icon.png").value.as_str(), "public, max-age=604800");
+        // Everything else is the board, or carries the token, and must not be
+        // kept by anything between here and the phone.
+        for path in ["/", "/index.html", "/sw.js", "/manifest.webmanifest", "/api/state", "/calendar.ics"] {
+            assert_eq!(caching_for(path).value.as_str(), "no-store", "{path}");
+        }
     }
 
     #[test]
