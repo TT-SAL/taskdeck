@@ -226,8 +226,11 @@ Fixes already landed (newest first). Kept here as history so the open list above
   them into half a column. Test
   `a_span_long_enough_to_describe_the_day_is_drawn_but_never_planned_around` carries the real
   string that found it. Second: neither feed sends `X-WR-CALNAME`, so the parser's calendar name
-  had nothing to give and the subscriptions kept their placeholders — the name is now adopted
-  through `RenameSubscription` when a feed does send one, once, while the placeholder stands.
+  had nothing to give and the subscriptions kept their placeholders. A calendar nobody has named
+  now takes the best name going, on every refresh rather than only when it is added: the feed's
+  own `X-WR-CALNAME` first, its host after it. Yours became `sisu.helsinki.fi` and `sisu.aalto.fi`
+  on the next read. Only a name nobody chose is replaced, so it settles and a typed one is left
+  alone.
 - **Subscribed events reach the month grid** (`ui.rs`): they fill what is left of a cell's three
   slots after the board's own items, prefixed `◇` and drawn in the calendar's own colour through a
   new `PreviewItem::subscribed` override. After your own things and never instead of them: a

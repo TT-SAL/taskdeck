@@ -1270,20 +1270,6 @@ struct PressState {
     cancelled: bool,
 }
 
-/// The names the feeds gave themselves in their last fetch, by subscription.
-fn feed_titles(overlay: &subscriptions::Overlay) -> Vec<(u64, String)> {
-    overlay
-        .status
-        .iter()
-        .filter_map(|status| match &status.outcome {
-            subscriptions::FetchOutcome::Ok { title: Some(title), .. } if !title.trim().is_empty() => {
-                Some((status.subscription, title.clone()))
-            }
-            _ => None,
-        })
-        .collect()
-}
-
 /// The colour a cell draws one preview item in.
 ///
 /// A subscribed calendar's events carry their own colour rather than a palette
@@ -2726,25 +2712,23 @@ impl TaskApp {
         // A poisoned lock answers with an empty overlay rather than taking the
         // window down; the next fetch puts it back.
         let fresh = calendars.overlay();
-        let titles = feed_titles(&fresh);
         if self.board.adopt_overlay(fresh) {
             self.board.save_overlay();
             self.summarize_calendar();
             self.phone_changed();
         }
-        // A calendar that has never been named takes the name the file gives
-        // itself. Through `apply` like any other rename, so a server and every
-        // client hear it; and only while the placeholder stands, so it happens
-        // once rather than on every refresh.
-        for (id, title) in titles {
-            let wearing_placeholder = self
-                .board
-                .subscriptions()
-                .iter()
-                .any(|s| s.id == id && s.name == subscriptions::placeholder_name(id));
-            if wearing_placeholder {
-                self.apply_or_report(board::Command::RenameSubscription { id, name: title });
-            }
+        // A calendar nobody has named takes the best name going: the one the
+        // feed gives itself, or failing that its host. Through `apply` like
+        // any other rename, so a server and every client hear it, and only
+        // while the name is one nobody chose, so it settles.
+        let renames: Vec<(u64, String)> = self
+            .board
+            .subscriptions()
+            .iter()
+            .filter_map(|s| subscriptions::better_name(s, self.board.overlay()).map(|name| (s.id, name)))
+            .collect();
+        for (id, name) in renames {
+            self.apply_or_report(board::Command::RenameSubscription { id, name });
         }
     }
 

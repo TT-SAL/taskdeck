@@ -273,28 +273,19 @@ fn main() {
         let version = calendars.version.load(Ordering::Relaxed);
         if version != seen_calendars {
             seen_calendars = version;
-            let fresh = calendars.overlay();
-            // A calendar that has never been named takes the name its own file
-            // gives it, once, while the placeholder still stands.
-            let titles: Vec<(u64, String)> = fresh
-                .status
-                .iter()
-                .filter_map(|status| match &status.outcome {
-                    subscriptions::FetchOutcome::Ok { title: Some(title), .. } if !title.trim().is_empty() => {
-                        Some((status.subscription, title.clone()))
-                    }
-                    _ => None,
-                })
-                .collect();
-            if board.adopt_overlay(fresh) {
+            if board.adopt_overlay(calendars.overlay()) {
                 board.save_overlay();
                 pulse.publish(board.version());
             }
-            for (id, name) in titles {
-                let placeholder = subscriptions::placeholder_name(id);
-                if board.subscriptions().iter().any(|s| s.id == id && s.name == placeholder)
-                    && board.apply(task_deck::board::Command::RenameSubscription { id, name }, Local::now()).is_ok()
-                {
+            // A calendar nobody has named takes the best name going: the one
+            // the feed gives itself, or failing that its host.
+            let renames: Vec<(u64, String)> = board
+                .subscriptions()
+                .iter()
+                .filter_map(|s| subscriptions::better_name(s, board.overlay()).map(|name| (s.id, name)))
+                .collect();
+            for (id, name) in renames {
+                if board.apply(task_deck::board::Command::RenameSubscription { id, name }, Local::now()).is_ok() {
                     pulse.publish(board.version());
                 }
             }

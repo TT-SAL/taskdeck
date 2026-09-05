@@ -228,8 +228,60 @@ pub enum FetchOutcome {
 }
 
 /// The name a subscription is given before anything better is known.
+///
+/// Only reached when the address has no host worth reading, which in practice
+/// means never — `checked_url` has already refused anything without one.
 pub fn placeholder_name(id: u64) -> String {
     format!("Calendar {id}")
+}
+
+/// A name taken from the address itself: the host, without `www.` and without
+/// the port.
+///
+/// Better than "Calendar 150" and available immediately, which matters because
+/// half the feeds in the world send no `X-WR-CALNAME` at all — a university's
+/// Sisu feed does not, so the alternative was two calendars in the settings
+/// sheet distinguishable only by an id nobody chose.
+pub fn name_from_url(url: &str) -> Option<String> {
+    let host = url.split("://").nth(1)?;
+    let host = host.split(['/', '?', '#']).next()?;
+    // A userinfo prefix belongs to nobody's calendar name.
+    let host = host.rsplit('@').next()?;
+    let host = host.split(':').next()?;
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+/// A better name for this subscription than the one it is wearing, if there is
+/// one and nobody has typed one.
+///
+/// The feed's own `X-WR-CALNAME` first, and the address's host after it. Only
+/// while the name is one nobody chose, so this settles rather than fighting a
+/// rename every ten minutes, and it runs on every refresh rather than only at
+/// the moment of subscribing — which is what lets a calendar added before any
+/// of this existed pick up a real name on its next read.
+pub fn better_name(subscription: &Subscription, overlay: &Overlay) -> Option<String> {
+    if !is_unnamed(subscription) {
+        return None;
+    }
+    let from_feed = match overlay.status_for(subscription.id).map(|status| &status.outcome) {
+        Some(FetchOutcome::Ok { title: Some(title), .. }) if !title.trim().is_empty() => {
+            Some(title.trim().to_string())
+        }
+        _ => None,
+    };
+    let better = from_feed.or_else(|| name_from_url(&subscription.url))?;
+    (better != subscription.name).then_some(better)
+}
+
+/// Whether this subscription is still wearing a name nobody chose — the
+/// placeholder, or the one taken off its address.
+///
+/// Both count, so a feed that *does* send a name is still allowed to introduce
+/// itself later; only a name a person typed is left alone.
+pub fn is_unnamed(subscription: &Subscription) -> bool {
+    subscription.name == placeholder_name(subscription.id)
+        || Some(&subscription.name) == name_from_url(&subscription.url).as_ref()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -637,6 +689,29 @@ mod tests {
         assert!(checked_url("https://").is_err());
         assert!(checked_url("https://localhost/x.ics").is_err(), "no dot, no host");
         assert!(checked_url(&format!("https://a.com/{}", "x".repeat(3000))).is_err());
+    }
+
+    #[test]
+    fn a_calendar_is_named_after_its_host_until_something_better_turns_up() {
+        // Half the feeds in the world send no X-WR-CALNAME — a university's
+        // Sisu feed does not — and "Calendar 150" tells nobody anything.
+        assert_eq!(name_from_url("https://sisu.helsinki.fi:443/ilmo/x.ics").as_deref(), Some("sisu.helsinki.fi"));
+        assert_eq!(name_from_url("https://www.example.com/a.ics").as_deref(), Some("example.com"));
+        assert_eq!(name_from_url("https://user:pw@cal.example.com/a.ics").as_deref(), Some("cal.example.com"));
+        assert_eq!(name_from_url("not a url").as_deref(), None);
+
+        let host_named = Subscription {
+            id: 150,
+            name: "sisu.helsinki.fi".into(),
+            url: "https://sisu.helsinki.fi:443/ilmo/x.ics".into(),
+            color: [1, 2, 3, 255],
+            enabled: true,
+        };
+        // A name nobody chose, so a feed that does introduce itself still may.
+        assert!(is_unnamed(&host_named));
+        assert!(is_unnamed(&Subscription { name: placeholder_name(150), ..host_named.clone() }));
+        // A name a person typed is left alone.
+        assert!(!is_unnamed(&Subscription { name: "Uni".into(), ..host_named }));
     }
 
     #[test]

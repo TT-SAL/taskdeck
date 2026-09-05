@@ -1323,7 +1323,12 @@ impl Board {
                 }
                 let name = checked_name(&name)?;
                 let id = self.next_item_id();
-                let name = if name.is_empty() { subscriptions::placeholder_name(id) } else { name };
+                let name = if name.is_empty() {
+                    // The address itself is a better answer than a number.
+                    subscriptions::name_from_url(&url).unwrap_or_else(|| subscriptions::placeholder_name(id))
+                } else {
+                    name
+                };
                 let color = color.unwrap_or(subscriptions::DEFAULT_COLORS
                     [self.subscriptions.len() % subscriptions::DEFAULT_COLORS.len()]);
                 self.subscriptions.push(Subscription { id, name, url, color, enabled: true });
