@@ -255,6 +255,23 @@ fn main() {
     let calendars =
         subscriptions::start(board.subscriptions().to_vec(), board.overlay().clone(), Arc::new(|| {}));
 
+    // The picture behind the phone's page, prepared once before anything can
+    // ask for it: a decode, a crop, a resize and up to four JPEG encodes is not
+    // work that may land on a request.
+    if !config.background.trim().is_empty() {
+        let picture = dirs.images.join(config.background.trim());
+        let made = phone::prepare_backdrop(&picture, config.background_image_tint_percent);
+        match &made {
+            Some(ready) => eprintln!(
+                "  picture:     {} → {} KB for the phone",
+                config.background.trim(),
+                ready.bytes.len() / 1024
+            ),
+            None => eprintln!("  picture:     {} could not be read; the phone gets a flat ground", config.background.trim()),
+        }
+        phone::set_backdrop(made);
+    }
+
     let (tx, rx) = channel();
     let pulse = Arc::new(Pulse::new());
     // Nothing to wake: this thread is only ever waiting on the queue.

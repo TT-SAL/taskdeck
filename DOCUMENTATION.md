@@ -2430,6 +2430,36 @@ page x = 23 — ten pixels of page gutter, ten of plate padding, and the row's t
 date spine since it was written and runs its whole planner in monospace; the phone never picked it
 up, and `ui-monospace` is a system face that costs nothing.
 
+**The picture behind it.** The desk's own background image, cropped to a phone's shape, scaled to
+462×1000 and darkened, served from `/bg-<hash>.jpg`. Three numbers decide it. Decode cost scales
+with **megapixels, not bytes** — about 45 MP/s on a desk machine and eight to twenty times slower on
+an old phone in battery saver — so the desktop's 3000×2000 original would be one to nearly three
+seconds on every cold open; at 0.46 MP it is a tenth of a second, and 927 KB becomes 48. The name
+carries the content's hash, so the URL is immutable and cached for a year rather than re-fetched
+with everything else that is `no-store`. And it is behind the token, because a personal photograph
+is a stronger reason to ask for the key than the app's own icon was.
+
+The darkening is **solved, not set**. Nothing on the picture may be bright enough to swallow the
+smallest text that sits on it, expressed as a ceiling on the 99.9th percentile of relative
+luminance — one blown pixel is where a room name goes to die. A highlight roll-off in linear light
+leaves the shadows almost untouched and crushes the top end, then one scale factor lands the peak on
+the ceiling; since luminance is a linear combination of linear channels, that factor is arithmetic
+rather than a search. It is then checked against what actually comes out of the JPEG encoder, whose
+ringing pushes highlights back up, and corrected. The desk's own `background_image_tint_percent` is
+a **floor** on the darkening and never a ceiling: the phone's type is 11 to 14px where a wall
+calendar's is a heading, so it may need to go darker than the desk asked and never lighter.
+
+**Text is made legible by a halo on the glyphs, not by a card under them.** A card is the obvious
+way to put text on a photograph and also the way to hide the photograph. Instead the text carries a
+soft dark shadow for the falloff and — where the browser can draw a stroke *behind* the fill — a
+stroke that becomes a halo rather than a thicker letter. `paint-order: stroke fill` is the
+load-bearing half and sits behind `@supports`, because without it a stroke paints over the fill and
+fattens the text into a blob; the shadow alone carries anything that lacks it. Deliberately **not**
+`backdrop-filter`, which blurs the backdrop per element per frame, and **not**
+`filter: drop-shadow`, which forces a filter surface per element — either across a scrolling list is
+a stall this page has already paid for once. The whole treatment is scoped to `html.has-photo`,
+because on a flat ground a halo is invisible and still costs paint.
+
 **A row's ground is its hue at a fixed luminance**, not its hue at a fixed alpha. `groundOf` scales
 the accent's three channels in linear light onto a five-step ladder, which moves value and leaves
 hue and saturation exactly alone — so a slot stays its own colour and gains weight. That is the ramp

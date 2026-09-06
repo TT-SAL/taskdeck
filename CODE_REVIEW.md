@@ -192,6 +192,15 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **The phone gets the desk's picture, and the darkening is solved rather than set** (`phone.rs`,
+  `prepare_backdrop`): the first attempt applied the desktop's tint as a flat multiply and left the
+  brightest pixels at 0.363 relative luminance — nearly three times what 14px text survives — which
+  the test caught before anything shipped. It now applies a highlight roll-off in linear light and
+  then one scale factor computed from the 99.9th percentile, checked against what the JPEG encoder
+  actually produces and corrected, because ringing pushes highlights back up. 927 KB and 6 MP become
+  48 KB and 0.46 MP, which is the difference between one to three seconds of decode per cold open on
+  the target phone and a tenth of a second.
+
 - **The phone's clock times were below the contrast floor** (`phone.html`): `--faint #6b6a66` on
   `--bg` is 3.49:1, under the 4.5:1 minimum for small text — and it was the colour of every time in
   the agenda at 11px, every day count, every hour label. A room line on a subscribed row managed

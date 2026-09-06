@@ -53,6 +53,11 @@
     --photo-size: max(100vw, calc(100vh * var(--par) + 2px));
     --hour: 56px;
     --gutter: 46px;
+    --mono-stack: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* How wide the halo around text is. See `html.has-photo` below: the stroke
+       is drawn behind the fill, so this thickens the halo and never the
+       letterform. */
+    --halo: 2.5px;
     --r-s: 4px;
     --r-m: 12px;
     --r-l: 18px;
@@ -338,24 +343,11 @@
      off-screen days makes their height a guess, the document height drifts by
      a fifth over a year of them, and landing on a named date — which is the
      whole point of this view — misses by a screenful. */
-  /* A day with something on it is a plate — an object on a field, with an edge
-     and a shadow rather than a 1.1:1 change of grey. Never `overflow: hidden`:
-     it would make `.aday` the sticky scroll container and freeze the heading.
-     `contain: layout style` does not clip the shadow the way `contain: paint`
-     would. */
-  .aday {
-    margin: 0 0 10px; contain: layout style;
-    background: var(--plate); border-radius: var(--r-m); padding: 0 10px 10px;
-    /* A hard ring and no blur. A blurred shadow is rasterised per element, and
-       there are up to a hundred and twenty of these in the DOM at the four-month
-       cap — on a battery-saver phone that is the difference between a list that
-       scrolls and one that does not. The ring alone draws the boundary. */
-    box-shadow: 0 0 0 1px var(--edge);
-  }
-  /* A free day is a void the field shows through, and its heading is static —
-     a transparent sticky heading would let its own line scroll through it. */
-  .aday.free { background: none; box-shadow: none; padding: 0 10px 4px; }
-  .aday.free > button { position: static; background: none; border-bottom: 0; border-radius: 0; }
+  /* No plates and no fills. The day is a departure board: a time column, a
+     route line threading it, and the words. Nothing is drawn behind text — the
+     picture is meant to be seen, and text is made legible by a halo on the
+     glyphs themselves rather than by a card under them. */
+  .aday { margin: 0 0 2px; contain: layout style; padding: 0 4px 10px; }
   /* Sticky on the heading and never on the section. Gecko refuses a sticky
      frame as a scroll anchor, so a sticky section would compensate none of a
      prepend while a sticky heading leaves the section itself eligible. */
@@ -364,44 +356,87 @@
     /* One pixel further under, so no seam can appear between two sticky layers
        even when the arithmetic is exact: a compositor rounding each of them to
        device pixels independently can otherwise leave a hairline. */
-    position: sticky; top: calc(var(--mast-h) - 1px); z-index: 3;
-    /* Opaque, always. It is sticky, there are dozens of them, and it carries
-       11px text; a translucent one would show the rows sliding under it. The
-       -10px bleed puts its ground across the plate's full width while its
-       padding still lands the date on the spine at page x = 23. */
-    background: var(--plate-2); border: 0; border-bottom: 1px solid var(--line);
-    border-radius: var(--r-m) var(--r-m) 0 0;
-    margin: 0 -10px; width: calc(100% + 20px);
-    color: var(--muted); padding: 9px 10px 6px 13px; text-align: left; font: inherit;
+    /* Static, not sticky. A sticky heading with nothing behind it would show
+       its own rows sliding through, and a board does not pin its headings. */
+    position: static; background: none; border: 0;
+    color: var(--muted); padding: 16px 0 8px; text-align: left; font: inherit;
   }
   /* A day the calendars were never read for. Not the same as a free one. */
   .aday.unknown > button { border-bottom-style: dashed; }
-  /* The date comes down from 14/700 and the event name goes up from 13/400:
-     the chrome was set larger than the content it labels. */
-  .aday > button .adate { flex: 0 0 calc(var(--spine) - 3px); font-size: 13px; font-weight: 600; color: var(--text); }
-  .aday > button .aword { font-size: 14px; color: var(--text); }
-  .aday > button .acount { margin-left: auto; font-size: 11px; color: var(--muted); }
-  .aday.today > button .adate { color: var(--today); }
-  .arow {
-    display: flex; gap: 8px; align-items: baseline;
-    padding: 5px 0; border-left: 3px solid var(--accent); margin: 3px 0 0;
-    background: var(--ground); border-radius: 0 var(--r-s) var(--r-s) 0;
+  .aday > button .adate {
+    font: 600 11px/1 var(--mono-stack); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
   }
-  /* On the spine, in tabular figures, so every colon lines up down the whole
-     scroll — the desktop calls this the date spine and runs its planner in
-     monospace; the phone never picked it up, and it costs no bytes. */
-  .arow .at { flex: 0 0 var(--spine); font-size: 12px; line-height: 1.35; color: var(--muted); }
-  .arow .at .ae { display: block; color: var(--muted); }
-  .arow .abody { min-width: 0; flex: 1; }
-  .arow .an { font-size: 14px; color: var(--text); overflow-wrap: anywhere; }
-  /* The accent mixed toward the ink: the raw hue managed 2.3:1 here. */
-  .arow .aw { display: block; font-size: 12px; color: var(--ink); margin-top: 1px; overflow-wrap: anywhere; }
-  /* Somebody else's carries no fill, so it shows the plate: every one of your
-     own things has a hue, and everything else does not. */
-  .arow.sub { background: none; }
-  .arow.sub .an { color: var(--muted); }
-  .arow.done { background: none; }
+  .aday > button .aword { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+  .aday > button .acount { margin-left: auto; font: 600 11px/1 var(--mono-stack); letter-spacing: 0.16em; color: var(--muted); }
+  .aday.today > button .adate { color: var(--today); }
+
+  /* The row. The time is the headline, a route line threads the day, and the
+     room is set like a platform number. */
+  .arow { display: flex; gap: 12px; padding: 0 0 14px; }
+  .arow .at { flex: 0 0 var(--spine); text-align: right; }
+  .arow .at { font: 600 16px/1 var(--mono-stack); color: var(--text); font-variant-numeric: tabular-nums; }
+  .arow .at .ae { display: block; font: 400 11px/1.6 var(--mono-stack); color: var(--muted); }
+  /* The line is one hairline per row rather than one long element, so a day can
+     be replaced on its own without the thread being rebuilt. */
+  .arow .route { flex: 0 0 9px; position: relative; }
+  /* The thread has to read on a photograph as well as on a flat ground, and a
+     1px line at the hairline alpha does not — so it carries its own dark rim
+     rather than borrowing `--line`. */
+  .arow .route::before {
+    content: ""; position: absolute; left: 4px; top: 7px; bottom: -14px; width: 1px;
+    background: rgba(232,230,225,0.30); box-shadow: 0 0 0 1px rgba(4,6,8,0.45);
+  }
+  .arow:last-child .route::before { display: none; }
+  .arow .dot { position: absolute; left: 0; top: 3px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .arow .abody { min-width: 0; flex: 1; padding-bottom: 2px; }
+  .arow .an { font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
+  .arow .aw {
+    display: block; margin-top: 4px; font-size: 11px; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--ink); overflow-wrap: anywhere;
+  }
+  .arow.sub .dot { background: none; box-shadow: inset 0 0 0 2px var(--accent); }
   .arow.done .an { color: var(--muted); text-decoration: line-through; }
+  .arow.done .dot { background: var(--muted); }
+
+  /* ── Text on a photograph ───────────────────────────────────────────────
+   *
+   * A card under text is the obvious way to make it readable on a picture, and
+   * it is also the way to hide the picture. This does it on the glyphs instead:
+   * a soft dark shadow for the falloff, and — where the browser supports
+   * drawing a stroke *behind* the fill — a stroke that becomes a halo rather
+   * than a thicker letter.
+   *
+   * `paint-order` is the load-bearing half. Without it a stroke paints over the
+   * fill and fattens the text into a blob, so it is behind `@supports` and the
+   * shadow alone carries browsers that lack it.
+   *
+   * Deliberately NOT `backdrop-filter`, which blurs the backdrop per element
+   * per frame, and NOT `filter: drop-shadow`, which forces a filter surface per
+   * element — either of those across a scrolling list is the stall this page
+   * has already paid for once.
+   *
+   * Scoped to `.has-photo`: on a flat ground a halo is invisible and still
+   * costs paint. */
+  html.has-photo .mast,
+  html.has-photo .weekgrid,
+  html.has-photo .timeline {
+    text-shadow: 0 1px 2px rgba(4,6,8,0.95), 0 0 9px rgba(4,6,8,0.7);
+  }
+  @supports (paint-order: stroke) {
+    html.has-photo .mast,
+    html.has-photo .weekgrid,
+    html.has-photo .timeline {
+      paint-order: stroke fill;
+      -webkit-text-stroke: var(--halo) rgba(4,6,8,0.62);
+      text-shadow: 0 1px 5px rgba(4,6,8,0.8);
+    }
+    /* The day number is 30px, so its halo can afford to be proportional. */
+    html.has-photo .daynum { -webkit-text-stroke-width: 4px; }
+    /* A dot is a shape, not a glyph; give it its own dark rim so it reads on a
+       bright patch of picture. */
+    html.has-photo .arow .dot { box-shadow: 0 0 0 2px rgba(4,6,8,0.55); }
+    html.has-photo .arow.sub .dot { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px rgba(4,6,8,0.55); }
+  }
 
   /* ── Bottom bar ── */
   .bar {
@@ -1286,6 +1321,7 @@
       // runs from the long poll, from a sixty-second timer, from the tab
       // becoming visible and from the network returning — a pager on this line
       // would fetch a page a minute with nobody scrolling.
+      paintField();
       if (state.mode === 'agenda') { patchAgenda(moved); railAndMasthead(); }
       // A sheet is never redrawn under someone's fingers by a background
       // load — except when edits made from it have just gone through, so
@@ -1583,7 +1619,7 @@
       'aria-label': `Open ${when.toDateString()}`,
       onclick: () => openDay(iso),
     }, [
-      el('span', { class: 'adate mono', text: when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }) }),
+      el('span', { class: 'adate', text: when.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric' }) }),
       // The most-repeated string on the ribbon stops being a line of its own
       // and becomes half of a heading that was already there, on the spine.
       rows.length ? null : el('span', { class: 'aword', text: unread ? '· not read' : '· free' }),
@@ -1595,9 +1631,11 @@
         class: 'arow' + (row.sub ? ' sub' : '') + (row.done ? ' done' : ''),
         style: `--accent:${row.accent}; --ground:${row.ground}; --ink:${row.ink}`,
       });
-      const at = el('span', { class: 'at mono', text: row.label });
+      const at = el('span', { class: 'at', text: row.label });
       if (row.until) at.append(el('span', { class: 'ae', text: row.until }));
       line.append(at);
+      // The thread down the day, with a node for each thing on it.
+      line.append(el('span', { class: 'route' }, [el('i', { class: 'dot' })]));
       const bodyCell = el('div', { class: 'abody' });
       bodyCell.append(el('span', { class: 'an', text: row.name }));
       if (row.where) bodyCell.append(el('span', { class: 'aw', text: row.where }));
@@ -1798,6 +1836,35 @@
       accent: first ? first.accent : 'var(--muted)',
       hollow: true,
     };
+  }
+
+  // The picture behind everything, when the desk has one.
+  //
+  // Everything about it is one conditional: `--photo` and `--par` set or
+  // cleared together, and a class on `<html>` that makes `body` transparent so
+  // the field beneath can be seen. With no picture nothing branches — every
+  // rule falls through to the flat ground it was written against.
+  let lookNow = null;
+  function paintField() {
+    const look = state.snap && state.snap.look;
+    const same = (look && look.id) || null;
+    if (same === lookNow) return;
+    lookNow = same;
+    const root = document.documentElement;
+    if (!look) {
+      root.classList.remove('has-photo');
+      root.style.removeProperty('--photo');
+      root.style.removeProperty('--par');
+      return;
+    }
+    root.style.setProperty('--photo', `url("/bg-${look.id}.jpg?token=${encodeURIComponent(state.token || '')}")`);
+    root.style.setProperty('--par', String(look.aspect));
+    root.classList.add('has-photo');
+    // So the system's own status bar sits on the same shade as the strip of
+    // picture beneath it rather than on a band of a different colour.
+    let meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta) { meta = el('meta', { name: 'theme-color' }); document.head.append(meta); }
+    meta.setAttribute('content', look.top);
   }
 
   function renderGlance() {

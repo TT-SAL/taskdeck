@@ -38,6 +38,7 @@ use std::{
     collections::{HashMap, VecDeque},
     io::{Read, Write},
     net::{IpAddr, UdpSocket},
+    path::Path,
     sync::{
         Arc, Condvar, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -249,6 +250,11 @@ pub fn snapshot(
         notes: board.notes.clone(),
         // Only when there is something to be ignorant about.
         known: if board.subscriptions().iter().any(|s| s.enabled) { board.overlay().covers } else { None },
+        look: backdrop().map(|made| Look {
+            id: made.id.clone(),
+            aspect: BACKGROUND_WIDE as f32 / BACKGROUND_TALL as f32,
+            top: made.top.clone(),
+        }),
     }
 }
 
@@ -746,6 +752,17 @@ fn handle(
             401,
             "Not authorised. Open the phone view from the link in TaskDeck's settings.",
         ),
+        // `/bg-<hash>.jpg`. The hash is the content's, so the URL changes when
+        // the picture does and never otherwise — which is what lets it be
+        // cached for a year and never re-fetched. Everything else here is
+        // `no-store`, and a background re-sent on every open would cost more
+        // than the whole rest of the program.
+        (Method::Get | Method::Head, path) if path.starts_with("/bg-") && path.ends_with(".jpg") => {
+            match backdrop().filter(|made| path == format!("/bg-{}.jpg", made.id)) {
+                Some(made) => with_type(Response::from_data(made.bytes.clone()), "image/jpeg"),
+                None => json_error(404, "No such picture."),
+            }
+        }
         (Method::Get, "/api/state") => match snapshot_command(&query) {
             Ok(command) => match ask(command, tx, wake) {
                 Ok(value) => encoding.json(value),
@@ -1085,6 +1102,8 @@ fn guards() -> [Header; 3] {
 fn caching_for(path: &str) -> Header {
     match path {
         "/icon.png" | "/icon-192.png" | "/icon-512.png" => header("Cache-Control", "public, max-age=604800"),
+        // Immutable, because the name contains the content's own hash.
+        p if p.starts_with("/bg-") && p.ends_with(".jpg") => header("Cache-Control", "private, max-age=31536000, immutable"),
         _ => no_store(),
     }
 }
@@ -1207,6 +1226,175 @@ fn scaled_icon(side: u32) -> Option<Vec<u8>> {
         .write_image(&small, small.width(), small.height(), image::ExtendedColorType::Rgba8)
         .ok()?;
     Some(out)
+}
+
+/* ─────────────────────────── The picture behind ─────────────────────────── */
+
+/// Longest edge of the picture sent to a phone, in pixels.
+///
+/// Decode cost scales with **megapixels, not bytes** — measured at roughly
+/// 45 MP/s on a desk machine, and an old phone in battery saver is eight to
+/// twenty times slower than that. The desktop's own 3000x2000 file is 6 MP,
+/// which is one to nearly three seconds of decode on every cold open; at
+/// 0.75 MP it is a tenth of a second. The picture is darkened and sits behind
+/// text, so detail past this buys nothing anybody can see.
+const BACKGROUND_TALL: u32 = 1000;
+/// Aspect the phone is cropped to: tall enough to cover a phone in portrait
+/// without the browser having to magnify it.
+const BACKGROUND_WIDE: u32 = 462;
+/// JPEG quality. Low, deliberately: this is a darkened backdrop, and the
+/// difference between 55 and 80 is invisible under a tint and costs a third
+/// more bytes on a link that is often mobile data.
+const BACKGROUND_QUALITY: u8 = 55;
+/// The brightest the picture is allowed to get, as relative luminance at the
+/// 99.9th percentile. Derived from the smallest thing that ever sits on bare
+/// picture — 14px in `--text #e8e6e1` — needing 4.5:1 against it.
+const BACKGROUND_CEILING: f32 = 0.13;
+
+fn to_linear(v: u8) -> f32 {
+    let c = v as f32 / 255.0;
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+}
+fn to_srgb(v: f32) -> u8 {
+    let c = v.clamp(0.0, 1.0);
+    let s = if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+    (s * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
+/// The picture, ready to send: cropped to a phone's shape, scaled down,
+/// darkened, and encoded once.
+pub struct Backdrop {
+    /// Content hash, so the URL can be immutable and cached for a year — the
+    /// only way a picture this size is not re-fetched on every single open.
+    pub id: String,
+    pub bytes: Vec<u8>,
+    /// The average colour of its top strip, for the browser's theme colour.
+    pub top: String,
+}
+
+/// Read, crop, scale, darken, encode. `None` for anything unreadable — the
+/// phone then has no picture and every rule falls back to the flat ground.
+///
+/// `tint` is the desktop's own `background_image_tint_percent`: how far toward
+/// black the picture is pulled so text can live on it. The phone needs more of
+/// it than a wall calendar does, because its type is 11 to 14px rather than a
+/// heading across a monitor, so the setting is taken as a floor.
+pub fn prepare_backdrop(path: &Path, tint: u32) -> Option<Backdrop> {
+    use image::imageops::FilterType;
+    let source = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.decode().ok()?;
+
+    // Crop to the phone's shape from the centre, then scale. Cropping first
+    // means the scale never has to magnify, and a landscape desktop picture
+    // would otherwise be blown up 1.28x to cover a portrait screen and show a
+    // third of itself.
+    let (w, h) = (source.width(), source.height());
+    let want = BACKGROUND_WIDE as f32 / BACKGROUND_TALL as f32;
+    let (cw, ch) = if (w as f32 / h as f32) > want {
+        (((h as f32) * want).round() as u32, h)
+    } else {
+        (w, ((w as f32) / want).round() as u32)
+    };
+    let cropped = source.crop_imm((w.saturating_sub(cw)) / 2, (h.saturating_sub(ch)) / 2, cw.max(1), ch.max(1));
+    let small = cropped.resize_exact(BACKGROUND_WIDE, BACKGROUND_TALL, FilterType::Lanczos3);
+
+    // Darken — and *solve* for how much rather than guessing it.
+    //
+    // The rule the whole thing hangs on: nothing on the picture may be bright
+    // enough to swallow the smallest text that sits on it. Expressed as a
+    // ceiling on the 99.9th percentile of relative luminance, because one blown
+    // pixel is where a room name goes to die.
+    //
+    // Two steps, both in linear light. First a highlight roll-off, which leaves
+    // shadows almost untouched (for small values it is the identity) and
+    // crushes the top end, so the picture keeps its shape instead of turning to
+    // mud. Then one scale factor. Luminance is a linear combination of linear
+    // channels, so scaling them scales the luminance exactly — which means the
+    // right factor is arithmetic, not a search.
+    let source_pixels = small.into_rgb8();
+    let shaped: Vec<[f32; 3]> = source_pixels
+        .pixels()
+        .map(|p| {
+            let mut out = [0f32; 3];
+            for channel in 0..3 {
+                let lin = to_linear(p[channel]);
+                out[channel] = lin / (1.0 + 4.0 * lin);
+            }
+            out
+        })
+        .collect();
+    let mut luminances: Vec<f32> = shaped.iter().map(|c| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]).collect();
+    luminances.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let brightest = luminances.get((luminances.len() as f32 * 0.999) as usize).copied().unwrap_or(1.0);
+    // The desktop's own tint is a floor on the darkening, never a ceiling: the
+    // phone's type is 11 to 14px where a wall calendar's is a heading, so it
+    // may need to go darker than the desk asked for, and never lighter.
+    let from_tint = (100u32.saturating_sub(tint.clamp(0, 100)) as f32 / 100.0).clamp(0.10, 1.0);
+    let mut scale = (BACKGROUND_CEILING / brightest.max(1e-6)).min(from_tint).min(1.0);
+
+    // JPEG ringing pushes highlights back up, so the answer is checked against
+    // what actually comes out of the encoder and corrected. It converges in a
+    // couple of passes; the cap is there so a pathological picture cannot spin.
+    let mut bytes = Vec::new();
+    let mut buf = source_pixels.clone();
+    for _ in 0..4 {
+        for (pixel, want) in buf.pixels_mut().zip(shaped.iter()) {
+            for channel in 0..3 {
+                pixel[channel] = to_srgb(want[channel] * scale);
+            }
+        }
+        bytes.clear();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, BACKGROUND_QUALITY)
+            .encode(buf.as_raw(), BACKGROUND_WIDE, BACKGROUND_TALL, image::ExtendedColorType::Rgb8)
+            .ok()?;
+        let back = image::load_from_memory(&bytes).ok()?.into_rgb8();
+        let mut got: Vec<f32> = back
+            .pixels()
+            .map(|p| 0.2126 * to_linear(p[0]) + 0.7152 * to_linear(p[1]) + 0.0722 * to_linear(p[2]))
+            .collect();
+        got.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let peak = got.get((got.len() as f32 * 0.999) as usize).copied().unwrap_or(1.0);
+        if peak <= BACKGROUND_CEILING {
+            break;
+        }
+        scale *= (BACKGROUND_CEILING / peak) * 0.99;
+    }
+
+    // The average of the top eighth, for the browser's own theme colour, so the
+    // status bar does not sit on a strip of a different shade.
+    let mut top = [0u64; 3];
+    let mut counted = 0u64;
+    for (_, y, pixel) in buf.enumerate_pixels() {
+        if y < BACKGROUND_TALL / 8 {
+            for channel in 0..3 { top[channel] += pixel[channel] as u64; }
+            counted += 1;
+        }
+    }
+    let avg = |c: usize| top[c].checked_div(counted).unwrap_or(0) as u8;
+
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in &bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    Some(Backdrop {
+        id: format!("{hash:016x}"),
+        bytes,
+        top: format!("#{:02x}{:02x}{:02x}", avg(0), avg(1), avg(2)),
+    })
+}
+
+/// The prepared picture, set once by whoever owns the board.
+///
+/// Held here rather than passed through every request because it is fixed for
+/// the life of the process and preparing it costs a decode, a crop, a resize
+/// and up to four JPEG encodes — work that must never land on a request.
+static BACKDROP: OnceLock<Option<Backdrop>> = OnceLock::new();
+
+pub fn set_backdrop(made: Option<Backdrop>) {
+    let _ = BACKDROP.set(made);
+}
+pub fn backdrop() -> Option<&'static Backdrop> {
+    BACKDROP.get().and_then(|held| held.as_ref())
 }
 
 /// The web-app manifest, so "Add to Home Screen" opens the view like an app.
@@ -1492,6 +1680,20 @@ pub struct Snapshot {
     /// is the difference between a wrong answer and an honest one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub known: Option<subscriptions::Covered>,
+    /// The picture behind the page, when the desk has one set. Absent means
+    /// there is none, and every rule on the phone falls back to a flat ground.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub look: Option<Look>,
+}
+
+/// What the phone needs to fetch and place the picture: where it is, how tall
+/// it is relative to its width, and what colour its top strip averages, so the
+/// browser's own status bar does not sit on a different shade.
+#[derive(Debug, Clone, Serialize)]
+pub struct Look {
+    pub id: String,
+    pub aspect: f32,
+    pub top: String,
 }
 
 /// One recent archive row, with what the ledger says about it.
@@ -2321,6 +2523,40 @@ mod tests {
         // that — so the bind is the whole defence, and it starts closed.
         assert_eq!(DEFAULT_BIND, "127.0.0.1");
         assert_eq!(addresses_for(DEFAULT_BIND), vec!["127.0.0.1".to_string()]);
+    }
+
+    #[test]
+    fn a_backdrop_is_cropped_scaled_and_darkened_enough_to_put_text_on() {
+        // Runs the real pipeline over the repository's own picture, which is
+        // 3000x2000 and 927 KB — six megapixels, which on the target phone is
+        // one to nearly three seconds of decode per cold open.
+        let source = std::path::Path::new("images/pexels-francesco-ungaro-1525041.jpg");
+        if !source.exists() {
+            return; // No picture in this checkout; nothing to assert.
+        }
+        let made = prepare_backdrop(source, 30).expect("the picture is readable");
+        let decoded = image::load_from_memory(&made.bytes).expect("a jpeg comes out");
+        assert_eq!((decoded.width(), decoded.height()), (BACKGROUND_WIDE, BACKGROUND_TALL));
+        assert!(made.bytes.len() < 120_000, "{} bytes is too much to send", made.bytes.len());
+        assert_eq!(made.id.len(), 16, "the id is a content hash, so the URL can be immutable");
+
+        // The point of the tint: nothing bright enough to swallow text should
+        // survive. Checked at the 99.9th percentile, because one blown pixel is
+        // where a room name goes to die.
+        let mut ys: Vec<f32> = decoded
+            .to_rgb8()
+            .pixels()
+            .map(|p| {
+                let lin = |v: u8| {
+                    let c = v as f32 / 255.0;
+                    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+                };
+                0.2126 * lin(p[0]) + 0.7152 * lin(p[1]) + 0.0722 * lin(p[2])
+            })
+            .collect();
+        ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p999 = ys[(ys.len() as f32 * 0.999) as usize];
+        assert!(p999 <= 0.16, "brightest pixels are {p999}, too bright to put 14px text on");
     }
 
     fn headers(pairs: &[(&str, &str)]) -> Vec<Header> {
