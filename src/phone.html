@@ -268,7 +268,10 @@
      prepend while a sticky heading leaves the section itself eligible. */
   .aday > button {
     display: flex; align-items: baseline; gap: 8px; width: 100%;
-    position: sticky; top: var(--mast-h); z-index: 3;
+    /* One pixel further under, so no seam can appear between two sticky layers
+       even when the arithmetic is exact: a compositor rounding each of them to
+       device pixels independently can otherwise leave a hairline. */
+    position: sticky; top: calc(var(--mast-h) - 1px); z-index: 3;
     background: var(--bg); border: 0; border-bottom: 1px solid var(--line);
     color: var(--muted); padding: 9px 4px 5px; text-align: left; font: inherit;
   }
@@ -1944,7 +1947,12 @@
   let stickyKnown = -1;
   function stickyHeight() { return Math.max(0, stickyKnown); }
   function measureSticky() {
-    const mast = Math.round(document.querySelector('.mast').getBoundingClientRect().height);
+    // Rounded DOWN, never up. The masthead's height is fractional on a real
+    // phone — system font metrics and a safe-area inset rarely land on a whole
+    // pixel — and rounding up pins the day heading *below* the masthead's own
+    // bottom edge, leaving a sliver of the list scrolling through the gap.
+    // Rounding down tucks it under instead, which is invisible.
+    const mast = Math.floor(document.querySelector('.mast').getBoundingClientRect().height);
     if (mast === stickyKnown) return;
     stickyKnown = mast;
     document.documentElement.style.setProperty('--mast-h', `${mast}px`);

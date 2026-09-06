@@ -192,6 +192,15 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **A sliver of the list scrolled through the gap under the masthead** (`phone.html`,
+  `measureSticky`): the masthead's height was rounded to the nearest pixel and the day headings
+  pinned at that number. On a real phone the height is fractional — system font metrics plus a
+  safe-area inset rarely land on a whole pixel — and rounding *up* pins the heading below the
+  masthead's own bottom edge. Reproduced by forcing a fractional height: at 76.594px it rounded to
+  77 and left a 0.406px band of moving content. It rounds down now, and the heading pins one pixel
+  further under still, so no seam can appear even when the arithmetic is exact and only the
+  compositor disagrees.
+
 - **A security review of the network stack** (`phone.rs`, `subscriptions.rs`, `server_main.rs`,
   `initialization.rs`). The confidentiality side held: the 160-bit token is real entropy, compared
   in constant time, every data route is behind it, the parser and the client's DOM handling survived
