@@ -192,6 +192,25 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **The phone's clock times were below the contrast floor** (`phone.html`): `--faint #6b6a66` on
+  `--bg` is 3.49:1, under the 4.5:1 minimum for small text — and it was the colour of every time in
+  the agenda at 11px, every day count, every hour label. A room line on a subscribed row managed
+  2.28:1. Measured after the refinement: 5.92:1 and 8.95:1. This was a functional failure wearing a
+  stylistic one.
+- **Three surface tokens that were one colour** (`phone.html`): `--surface` against `--bg` was
+  1.08:1 and `--surface-2` against `--surface` 1.11:1, with `--line` at 1.40:1 the only thing
+  separating a heading from a card from a sheet from the page. Replaced by one plate material with a
+  lit edge and a shadow, which is how a boundary is drawn at the bottom of the luminance scale.
+- **The desktop's alpha ramp was arriving and being thrown away** (`phone.html`, `tintOf` →
+  `groundOf`): the palette's alpha was read only as a `> 0` truth test and then one hard-coded
+  opacity was used for every slot, so urgency was carried by hue alone — the exact failure
+  `color.rs`'s own history says was fixed on the desktop.
+- **A latent crash in the day view** (`phone.html`): `renderLanes` still called `tintOf` after it
+  was replaced. It survived testing only because the day open at the time had no blocks on it.
+- **A CSS custom property defined in terms of itself** (`phone.html`): a literal sweep rewrote
+  `--today: #f0c36b` into `--today: var(--today)`, a cycle that resolves to nothing, so today's date
+  inherited `--muted` instead of amber. Silent, and invisible except on the one day it applies to.
+
 - **A sliver of the list scrolled through the gap under the masthead** (`phone.html`,
   `measureSticky`): the masthead's height was rounded to the nearest pixel and the day headings
   pinned at that number. On a real phone the height is fractional — system font metrics plus a

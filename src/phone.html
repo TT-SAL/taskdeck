@@ -14,16 +14,48 @@
 <style>
   :root {
     --bg: #0f1113;
-    --surface: #171a1e;
-    --surface-2: #1f2328;
-    --line: #2a2f36;
+    /* One material, two depths. At the bottom of the luminance scale a
+       boundary is drawn by an edge and a shadow, not by a ratio — the three
+       greys this replaced differed by 1.08:1 and 1.11:1, which is to say they
+       were one colour doing the work of three. */
+    --plate: #191c21;
+    --plate-2: #23272d;
+    --edge: rgba(232,230,225,0.09);
+    --edge-2: rgba(232,230,225,0.22);
+    /* A lit hairline, so it reads on a plate and on a photograph alike. */
+    --line: rgba(232,230,225,0.10);
     --text: #e8e6e1;
     --muted: #9a9891;
-    --faint: #6b6a66;
-    --danger: #d1495b;
+    --danger: #e8707d;
     --ok: #4f9a94;
+    --today: #f0c36b;
+    --on-today: #0f1113;
+    /* The desktop's own now-line colour (`ui.rs`), instead of a second red. */
+    --now: #ff785a;
+    /* The spine. The monospace column's left edge is at page x = 23 in every
+       view — 10px page gutter + 10px plate padding + the row's 3px accent bar
+       — and content starts at 23 + 46 + 8 = 77. The masthead's day number,
+       every day heading's date, every row's time and every hour label sit in
+       it, so one ruled column runs from the top of the screen to the bottom of
+       the scroll. `ui-monospace` is a system face and costs nothing. */
+    --spine: 46px;
+    /* The picture's aspect ratio, and the size both `#field` and `.mast` paint
+       it at. They must use the *same explicit size*, not `cover`: `cover`
+       resolves against each element's own box, and the masthead's box is 92px
+       tall while the field's is the viewport — so the two copies would be
+       scaled differently and the picture would break at the masthead's edge.
+       `paintField` overwrites `--par` with the real ratio; the default keeps
+       the shorthand valid, and an invalid one makes the whole background
+       declaration invalid and the masthead transparent. The `+2px` is
+       overscan: at some viewport heights the bare product rounds a pixel short
+       and leaves a hairline of `--bg` at the bottom edge. */
+    --par: 0.4615;
+    --photo-size: max(100vw, calc(100vh * var(--par) + 2px));
     --hour: 56px;
     --gutter: 46px;
+    --r-s: 4px;
+    --r-m: 12px;
+    --r-l: 18px;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
     --safe-top: env(safe-area-inset-top, 0px);
     /* 1 border + 6 top + 44 scrubber + 6 gap + 60 deck + 16 of keep-out below
@@ -33,7 +65,12 @@
     --bar-h: 133px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+  /* `html` carries the ground and `body` must not. Painting order puts a
+     negative-z-index positioned child *below* body's own in-flow background,
+     so an opaque body would hide the field completely — a background that
+     costs everything and shows nothing. */
+  html { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+  body { margin: 0; padding: 0; background: transparent; color: var(--text); }
   body {
     font: 16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     overscroll-behavior-y: contain;
@@ -43,32 +80,63 @@
   button { background: none; border: 0; padding: 0; cursor: pointer; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
 
+  /* The one layer the picture lives on. `width`/`height` in `vw`/`vh` rather
+     than `inset: 0`, because the masthead's `background-size` is in the same
+     units and the two must not disagree about what the viewport is when
+     Firefox for Android hides its toolbar.
+
+     Never `background-attachment: fixed` (Gecko gives it its own picture-cache
+     slice and it stalls against exactly that dynamic toolbar), never
+     `backdrop-filter`, never `filter`, never `will-change` — a fixed element
+     already has its own spatial node, so the compositor does not repaint it as
+     the scroll offset changes. And never a scroll listener. */
+  #field {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    z-index: -1; pointer-events: none;
+    background:
+      var(--photo, none) 50% 0 / var(--photo-size) no-repeat,
+      linear-gradient(180deg, var(--wash-a, var(--bg)), var(--wash-b, var(--bg)));
+  }
+  #field.dim { opacity: 0.55; }
+
   /* ── Masthead ── */
+  /* An aperture cut into the field, not a window through it.
+     `#field` sits at `z-index: -1`, which paints *below* body's in-flow
+     content — so a translucent masthead would reveal the scrolling list, not
+     the photograph. Instead it paints the same image in its own stack, at the
+     same explicit size and origin: both boxes are 100vw wide and both are
+     anchored at viewport y = 0, so `50% 0` resolves identically in each and the
+     picture is continuous across the masthead's bottom edge. A JPEG has no
+     alpha and the size covers the box, so it stays fully opaque and nothing of
+     the list can ever show through. The veil's dark lower edge is the
+     separation; there is no border. */
   .mast {
     position: sticky; top: 0; z-index: 5;
-    background: var(--bg);
-    border-bottom: 1px solid var(--line);
-    padding: calc(8px + var(--safe-top)) 14px 8px;
+    padding: calc(8px + var(--safe-top)) 14px 8px 23px;
+    background:
+      var(--veil, none),
+      var(--photo, none) 50% 0 / var(--photo-size) no-repeat,
+      linear-gradient(180deg, var(--wash-a, var(--bg)), var(--wash-b, var(--bg)));
   }
   .chip {
     min-width: 44px; height: 40px; padding: 0 14px; border-radius: 12px;
-    background: var(--surface); color: var(--text); font-weight: 600;
+    background: var(--plate); color: var(--text); font-weight: 600;
   }
-  .chip:active { background: var(--surface-2); }
-  /* One row now that the buttons have gone, so the weekday has the whole width
-     instead of the hundred pixels left beside four of them — where six of the
-     seven names were being silently ellipsised. `min-height` and never
-     `height`: a raised system font should shorten the date, not guillotine it. */
-  .date { display: flex; align-items: baseline; gap: 8px; min-height: 35px; }
-  .weekday { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .weekday.today { color: #f0c36b; }
-  /* Gives way before the weekday does: the weekday is the headline. */
-  .daylabel { color: var(--muted); font-size: 13px; flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* Which day the buttons below act on, in the agenda, where there is no big
-     date to say it and the list under your thumb is showing some other month. */
-  .pinned { font-size: 12px; line-height: 15px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .behindnote { color: #f0c36b; font-weight: 700; }
-  .summary { color: var(--muted); font-size: 13px; margin-top: 6px; min-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chip:active { background: var(--plate-2); }
+  /* The day number is the headline this view never had — the largest thing on
+     screen was 16px — and it sits at the head of the spine, so the ruled column
+     begins in the masthead and runs to the bottom of the scroll. It is also
+     what every verb in the bar acts on, which a 12px grey line used to say. */
+  .date { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+  .daynum { flex: 0 0 var(--spine); font-size: 30px; font-weight: 800; line-height: 1; letter-spacing: -0.02em; color: var(--text); }
+  .daynum.today { color: var(--today); }
+  .dwhen { min-width: 0; }
+  .dwd { font-size: 13px; font-weight: 700; color: var(--text); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dmo { font-size: 12px; color: var(--text); line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .behindnote { color: var(--today); font-weight: 700; }
+  /* Both views give the masthead the same height, which is what lets a mode
+     change re-measure to the same number and leave the two observers alone. */
+  .summary { color: var(--muted); font-size: 13px; margin-top: 6px; min-height: 38px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* The line that answers the question before anything is read. Two rows of
      fixed height, because the masthead is sticky and everything below it is
      positioned from its height — a line that grew and shrank would move the
@@ -97,15 +165,15 @@
   }
   .week button .wd { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
   .week button .dn { font-size: 15px; font-weight: 700; color: var(--text); }
-  .week button.today .dn { color: #f0c36b; }
-  .week button.shown { background: var(--surface); }
+  .week button.today .dn { color: var(--today); }
+  .week button.shown { background: var(--plate); }
   .week button.shown .dn { color: var(--text); }
-  .week button.shown.today .dn { color: #f0c36b; }
-  .week button:active { background: var(--surface-2); }
+  .week button.shown.today .dn { color: var(--today); }
+  .week button:active { background: var(--plate-2); }
   .week .dots { display: flex; gap: 3px; height: 4px; margin-top: 3px; }
   .week .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--c); display: block; }
   textarea.notes {
-    width: 100%; min-height: 40vh; background: var(--surface-2); border: 1px solid var(--line);
+    width: 100%; min-height: 40vh; background: var(--plate-2); border: 1px solid var(--line);
     border-radius: 12px; padding: 10px 12px; color: var(--text); font: inherit; line-height: 1.4; resize: vertical;
   }
   /* Reflow moves what is unfinished. It is not reversible, so it does not live
@@ -114,7 +182,7 @@
   .reflow {
     width: 100%; height: 44px; padding: 0 14px; margin: 0 0 12px; border-radius: 12px;
     font-weight: 700; font-size: 14px;
-    background: #2a2416; color: #f0c36b; border: 1px solid #4a3d1f;
+    background: #2a2416; color: var(--today); border: 1px solid #4a3d1f;
   }
   .reflow:active { filter: brightness(1.2); }
 
@@ -127,14 +195,14 @@
   .hourline.small { opacity: 0.55; }
   .hourline span {
     position: absolute; left: 0; top: -0.6em; width: var(--gutter);
-    padding-left: 4px; font-size: 12px; color: var(--faint);
+    padding-left: 4px; font-size: 12px; color: var(--muted);
   }
   .lanes { position: absolute; top: 0; bottom: 0; left: var(--gutter); right: 0; }
   .entry {
     position: absolute; border-radius: 8px; overflow: hidden;
     padding: 4px 8px; font-size: 14px; line-height: 1.25;
     border-left: 3px solid var(--accent);
-    background: var(--tint);
+    background: var(--ground);
     color: var(--text);
   }
   .entry .time { font-size: 11px; color: var(--muted); }
@@ -156,7 +224,7 @@
   .ghost {
     position: absolute; border-radius: 8px; padding: 3px 8px;
     border: 1px solid var(--accent); background: rgba(0,0,0,0.25);
-    color: var(--faint); font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    color: var(--muted); font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
     pointer-events: none; opacity: 0.8;
   }
   /* Somebody else's calendar (§23). Deliberately unlike a block of your own:
@@ -194,7 +262,7 @@
   .allday {
     display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
     border-radius: 999px; padding: 2px 9px; margin: 0 6px 4px 0;
-    border: 1px solid var(--accent); color: var(--faint); font-size: 12px;
+    border: 1px solid var(--accent); color: var(--muted); font-size: 12px;
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   }
   .alldayrow { padding: 0 14px 2px; display: flex; flex-wrap: wrap; }
@@ -209,12 +277,12 @@
     overflow: hidden; text-overflow: ellipsis; max-width: 100%;
   }
   .marker.due .label::before { content: "⚑ "; }
-  .nowline { position: absolute; left: calc(var(--gutter) - 8px); right: 0; height: 0; border-top: 2px solid #e5484d; z-index: 2; pointer-events: none; }
-  .nowline::before { content: ""; position: absolute; left: -4px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: #e5484d; }
+  .nowline { position: absolute; left: calc(var(--gutter) - 8px); right: 0; height: 0; border-top: 2px solid var(--now); z-index: 2; pointer-events: none; }
+  .nowline::before { content: ""; position: absolute; left: -4px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: var(--now); }
   .empty-tap { position: absolute; inset: 0; }
 
   /* ── Week ── */
-  .weekgrid { margin: 6px 6px 0 4px; }
+  .weekgrid { margin: 6px 0 0; }
   /* Scrolling to a date months away is O(distance) in thumb-flicks: a day is
      about 250px, a screen holds three of them, so a hard flick is roughly a
      week and next February is twenty flicks. Seven month cells and two taps
@@ -228,26 +296,29 @@
   /* Where today is, when today is not where you are reading — the Today button
      sits directly under this cell. */
   .rail button.hastoday::after {
-    content: ""; width: 4px; height: 4px; border-radius: 50%; background: #f0c36b; margin-top: 3px;
+    content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--today); margin-top: 3px;
   }
-  .rail button.here { background: var(--surface); color: var(--text); font-weight: 700; }
+  .rail button.here { background: var(--plate); color: var(--text); font-weight: 700; }
   .rail button .yr { font-size: 9px; letter-spacing: 0; opacity: 0.55; text-transform: none; }
   .rail button.beyond { opacity: 0.4; }
   /* The reading position is moved by `holdPlace` and by nothing else. Anything
      inserted above it that skips `holdPlace` will jump the list by its full
      height, silently, and only on a phone. */
-  .weekgrid { overflow-anchor: none; }
+  /* Ten pixels of field down both sides and between every day. That
+     passe-partout is what makes the plates read as objects on a ground rather
+     than as a list with a picture behind it. */
+  .weekgrid { overflow-anchor: none; padding: 0 10px; }
   .aend { min-height: 1px; }
   .aend .card {
     margin: 10px 4px 14px; padding: 12px 14px; border-radius: 12px;
-    background: var(--surface); border: 1px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.45;
+    background: var(--plate); border: 1px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.45;
   }
   .aend .card b { color: var(--text); font-weight: 700; }
   .aend .card button {
     margin-top: 10px; padding: 8px 12px; border-radius: 10px;
-    background: var(--surface-2); color: var(--text); border: 1px solid var(--line); font: inherit; font-weight: 700;
+    background: var(--plate-2); color: var(--text); border: 1px solid var(--line); font: inherit; font-weight: 700;
   }
-  .aend .waiting { padding: 14px 4px 20px; color: var(--faint); font-size: 12px; }
+  .aend .waiting { padding: 14px 4px 20px; color: var(--muted); font-size: 12px; }
   /* The week is a list, not a grid.
      Seven columns on a phone gives each day about fifty pixels, and a course is
      called "MOLE-101, Biokemia, Biokemia 3.9.–20.10.2026 - Luentokurssi" and
@@ -262,7 +333,20 @@
      off-screen days makes their height a guess, the document height drifts by
      a fifth over a year of them, and landing on a named date — which is the
      whole point of this view — misses by a screenful. */
-  .aday { margin: 0 0 4px; contain: layout style; }
+  /* A day with something on it is a plate — an object on a field, with an edge
+     and a shadow rather than a 1.1:1 change of grey. Never `overflow: hidden`:
+     it would make `.aday` the sticky scroll container and freeze the heading.
+     `contain: layout style` does not clip the shadow the way `contain: paint`
+     would. */
+  .aday {
+    margin: 0 0 10px; contain: layout style;
+    background: var(--plate); border-radius: var(--r-m); padding: 0 10px 10px;
+    box-shadow: 0 0 0 1px var(--edge), 0 1px 2px rgba(0,0,0,0.5);
+  }
+  /* A free day is a void the field shows through, and its heading is static —
+     a transparent sticky heading would let its own line scroll through it. */
+  .aday.free { background: none; box-shadow: none; padding: 0 10px 4px; }
+  .aday.free > button { position: static; background: none; border-bottom: 0; border-radius: 0; }
   /* Sticky on the heading and never on the section. Gecko refuses a sticky
      frame as a scroll anchor, so a sticky section would compensate none of a
      prepend while a sticky heading leaves the section itself eligible. */
@@ -272,39 +356,52 @@
        even when the arithmetic is exact: a compositor rounding each of them to
        device pixels independently can otherwise leave a hairline. */
     position: sticky; top: calc(var(--mast-h) - 1px); z-index: 3;
-    background: var(--bg); border: 0; border-bottom: 1px solid var(--line);
-    color: var(--muted); padding: 9px 4px 5px; text-align: left; font: inherit;
+    /* Opaque, always. It is sticky, there are dozens of them, and it carries
+       11px text; a translucent one would show the rows sliding under it. The
+       -10px bleed puts its ground across the plate's full width while its
+       padding still lands the date on the spine at page x = 23. */
+    background: var(--plate-2); border: 0; border-bottom: 1px solid var(--line);
+    border-radius: var(--r-m) var(--r-m) 0 0;
+    margin: 0 -10px; width: calc(100% + 20px);
+    color: var(--muted); padding: 9px 10px 6px 13px; text-align: left; font: inherit;
   }
   /* A day the calendars were never read for. Not the same as a free one. */
   .aday.unknown > button { border-bottom-style: dashed; }
-  .aday > button .adate { font-size: 14px; font-weight: 700; color: var(--text); }
-  .aday > button .acount { margin-left: auto; font-size: 11px; color: var(--faint); }
-  .aday.today > button .adate { color: #f0c36b; }
-  .aday.empty > button { opacity: 0.55; }
+  /* The date comes down from 14/700 and the event name goes up from 13/400:
+     the chrome was set larger than the content it labels. */
+  .aday > button .adate { flex: 0 0 calc(var(--spine) - 3px); font-size: 13px; font-weight: 600; color: var(--text); }
+  .aday > button .aword { font-size: 14px; color: var(--text); }
+  .aday > button .acount { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .aday.today > button .adate { color: var(--today); }
   .arow {
-    display: flex; gap: 9px; align-items: baseline;
-    padding: 6px 4px; border-left: 3px solid var(--accent); margin: 3px 0 0;
-    background: var(--tint); border-radius: 0 6px 6px 0;
+    display: flex; gap: 8px; align-items: baseline;
+    padding: 5px 0; border-left: 3px solid var(--accent); margin: 3px 0 0;
+    background: var(--ground); border-radius: 0 var(--r-s) var(--r-s) 0;
   }
-  .arow .at { flex: 0 0 42px; font-size: 11px; line-height: 1.35; color: var(--faint); }
-  .arow .at .ae { display: block; opacity: 0.6; }
+  /* On the spine, in tabular figures, so every colon lines up down the whole
+     scroll — the desktop calls this the date spine and runs its planner in
+     monospace; the phone never picked it up, and it costs no bytes. */
+  .arow .at { flex: 0 0 var(--spine); font-size: 12px; line-height: 1.35; color: var(--muted); }
+  .arow .at .ae { display: block; color: var(--muted); }
   .arow .abody { min-width: 0; flex: 1; }
-  .arow .an { font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
-  .arow .aw { display: block; font-size: 11px; color: var(--accent); margin-top: 1px; overflow-wrap: anywhere; }
-  /* Somebody else's: the same bar, no fill, quieter text — the day view's rule
-     said again in a list. */
+  .arow .an { font-size: 14px; color: var(--text); overflow-wrap: anywhere; }
+  /* The accent mixed toward the ink: the raw hue managed 2.3:1 here. */
+  .arow .aw { display: block; font-size: 12px; color: var(--ink); margin-top: 1px; overflow-wrap: anywhere; }
+  /* Somebody else's carries no fill, so it shows the plate: every one of your
+     own things has a hue, and everything else does not. */
   .arow.sub { background: none; }
   .arow.sub .an { color: var(--muted); }
-  .arow.done .an { color: var(--faint); text-decoration: line-through; }
-  .anothing { padding: 4px 4px 8px; font-size: 12px; color: var(--faint); }
-  .aday.unknown .anothing { font-style: italic; }
+  .arow.done { background: none; }
+  .arow.done .an { color: var(--muted); text-decoration: line-through; }
 
   /* ── Bottom bar ── */
   .bar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: block;
     height: calc(var(--bar-h) + var(--safe-bottom));
     padding: 6px 14px calc(16px + var(--safe-bottom));
-    background: var(--bg); border-top: 1px solid var(--line);
+    background: var(--plate); border-top: 0;
+    border-radius: var(--r-l) var(--r-l) 0 0;
+    box-shadow: 0 0 0 1px var(--edge), 0 -14px 30px rgba(0,0,0,0.5);
     user-select: none; -webkit-user-select: none;
   }
   /* Holds its height whichever scrubber is showing — and before the first
@@ -313,26 +410,30 @@
   .deck { display: flex; gap: 8px; margin-top: 6px; height: 60px; }
   .deck button {
     flex: 1; min-width: 0; height: 60px; border-radius: 14px; font-weight: 700; font-size: 15px;
-    background: var(--surface); color: var(--text); border: 1px solid var(--line);
+    background: var(--plate); color: var(--text); border: 1px solid var(--line);
   }
-  .deck button.primary { background: #e8e6e1; color: #0f1113; border-color: transparent; }
+  /* It was 15.17:1 — the highest-contrast object anywhere on the page, 60px
+     tall, and the button pressed least often on a schedule check. Inside a
+     sheet the primary IS what you came for and keeps its white fill; here it
+     is not. */
+  .deck button.primary { background: var(--plate-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--edge-2); border-color: transparent; }
   .deck button:active { filter: brightness(1.2); }
   /* The day is running behind. The fact is in the masthead; this only points
      at where the verb lives. */
-  .deck button.late { box-shadow: inset 0 -3px 0 #f0c36b; }
+  .deck button.late { box-shadow: inset 0 -3px 0 var(--today); }
   /* Kills the 300ms tap delay on the things that are only ever tapped. Never
      `.entry`, which is a button too and carries the press-and-hold that lifts
      a block. */
   .deck button, .aday > button, .actions button, .btn { touch-action: manipulation; }
-  .count { display: inline-block; min-width: 22px; padding: 0 6px; margin-left: 6px; border-radius: 11px; background: var(--surface-2); font-size: 13px; }
-  .count.urgent { background: #f0c36b; color: #0f1113; }
+  .count { display: inline-block; min-width: 22px; padding: 0 6px; margin-left: 6px; border-radius: 11px; background: var(--plate-2); font-size: 13px; }
+  .count.urgent { background: var(--today); color: #0f1113; }
 
   /* ── Sheets ── */
-  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 8; }
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.68); z-index: 8; }
   .sheet {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 9;
     max-height: 88vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
-    background: var(--surface); border-radius: 18px 18px 0 0;
+    background: var(--plate); border-radius: 18px 18px 0 0;
     padding: 8px 16px 0;
     box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
   }
@@ -346,31 +447,31 @@
      way out of anything one-handed. */
   .sheetfoot {
     position: sticky; bottom: 0; display: flex; gap: 8px;
-    background: var(--surface); border-top: 1px solid var(--line);
+    background: var(--plate); border-top: 1px solid var(--line);
     padding: 10px 0 calc(16px + var(--safe-bottom));
   }
   .sheetfoot button {
     flex: 1; height: 52px; border-radius: 12px; font-weight: 700;
-    background: var(--surface-2); border: 1px solid var(--line); color: var(--text);
+    background: var(--plate-2); border: 1px solid var(--line); color: var(--text);
   }
   .sheet h2 { margin: 0 0 2px; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; word-break: break-word; }
   .sheet h2 button { text-align: left; width: 100%; }
-  .sheet h2 input { width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 18px; font-weight: 700; }
+  .sheet h2 input { width: 100%; background: var(--plate-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 18px; font-weight: 700; }
   .kindline { color: var(--muted); font-size: 13px; margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); display: inline-block; }
   .section { border-top: 1px solid var(--line); padding: 12px 0; }
-  .section h3 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); font-weight: 700; }
+  .section h3 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
   .field { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; }
   .field label { color: var(--muted); font-size: 14px; }
   .field input, .field select {
-    background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+    background: var(--plate-2); border: 1px solid var(--line); border-radius: 10px;
     padding: 8px 10px; min-height: 40px; color: var(--text); max-width: 60%;
   }
   .field input[type="time"], .field input[type="datetime-local"] { color-scheme: dark; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .actions button, .btn {
     height: 44px; padding: 0 14px; border-radius: 12px; font-weight: 700;
-    background: var(--surface-2); border: 1px solid var(--line); color: var(--text);
+    background: var(--plate-2); border: 1px solid var(--line); color: var(--text);
     flex: 1 1 auto;
   }
   .actions button.ok { background: var(--ok); color: #0f1113; border-color: transparent; }
@@ -379,24 +480,24 @@
   .actions button:active { filter: brightness(1.2); }
   .weekdays { display: flex; gap: 6px; flex-wrap: wrap; }
   .weekdays button {
-    width: 40px; height: 40px; border-radius: 10px; background: var(--surface-2);
+    width: 40px; height: 40px; border-radius: 10px; background: var(--plate-2);
     border: 1px solid var(--line); font-weight: 700; color: var(--muted);
   }
   .weekdays button.on { background: var(--text); color: #0f1113; border-color: transparent; }
-  .seg { display: flex; background: var(--surface-2); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
+  .seg { display: flex; background: var(--plate-2); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
   .seg button { flex: 1; height: 38px; border-radius: 9px; font-weight: 700; color: var(--muted); }
   .seg button.on { background: var(--text); color: #0f1113; }
 
   /* ── Tray ── */
   .quickadd { display: flex; gap: 8px; margin-bottom: 8px; }
-  .quickadd input { flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; height: 46px; }
+  .quickadd input { flex: 1; min-width: 0; background: var(--plate-2); border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; height: 46px; }
   .quickadd button { width: 64px; height: 46px; border-radius: 12px; background: var(--text); color: #0f1113; font-weight: 800; }
-  .quickadd button.chip { width: auto; height: 46px; background: var(--surface-2); color: var(--muted); font-weight: 600; padding: 0 12px; }
+  .quickadd button.chip { width: auto; height: 46px; background: var(--plate-2); color: var(--muted); font-weight: 600; padding: 0 12px; }
   .quickadd + .field input { max-width: 100%; }
   .card {
     display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
     padding: 10px 10px 10px 12px; border-radius: 12px; margin: 6px 0;
-    background: var(--surface-2); border-left: 3px solid var(--accent);
+    background: var(--plate-2); border-left: 3px solid var(--accent);
   }
   .card .chip { flex: 0 0 auto; min-width: 44px; padding: 0 10px; }
   .card .meta { white-space: normal; }
@@ -405,9 +506,9 @@
   .card .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
   .card .due-in { font-size: 12px; color: var(--muted); }
   .card .due-in.overdue { color: var(--danger); font-weight: 700; }
-  .tray-heading { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); font-weight: 700; margin: 14px 0 4px; }
-  .tray-heading.urgent { color: #f0c36b; }
-  .nothing { color: var(--faint); font-size: 14px; padding: 10px 0; }
+  .tray-heading { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin: 14px 0 4px; }
+  .tray-heading.urgent { color: var(--today); }
+  .nothing { color: var(--muted); font-size: 14px; padding: 10px 0; }
 
   /* ── Banners ── */
   .banner {
@@ -429,11 +530,16 @@
   }
   .gate { padding: 24px 18px; max-width: 420px; margin: 40px auto; }
   .gate p { color: var(--muted); }
-  .gate input { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 8px 0; }
+  .gate input { width: 100%; background: var(--plate); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 8px 0; }
   [hidden] { display: none !important; }
 </style>
 </head>
 <body>
+
+<!-- The picture, when there is one. A direct child of `body` and nothing else:
+     `.aday` carries `contain: layout style`, which makes every day section a
+     containing block for fixed descendants and would trap this in the scroll. -->
+<div id="field" aria-hidden="true"></div>
 
 <!-- Nothing in here is tappable, and that is the rule the layout hangs on: the
      masthead is what you read, the bar at the bottom is what you touch. It
@@ -442,10 +548,12 @@
      every day heading below it is positioned from. -->
 <header class="mast">
   <div class="date">
-    <div class="weekday" id="weekday">…</div>
-    <div class="daylabel" id="daylabel"></div>
+    <div class="daynum mono" id="daynum">··</div>
+    <div class="dwhen">
+      <div class="dwd" id="dayweek"></div>
+      <div class="dmo" id="daymonth"></div>
+    </div>
   </div>
-  <div class="pinned" id="pinned" hidden></div>
   <div class="summary" id="summary"></div>
 </header>
 
@@ -636,12 +744,73 @@
     if (p && p[3] > 0) return `rgb(${p[0]}, ${p[1]}, ${p[2]})`;
     return FALLBACK[Math.min(index, 5)];
   }
-  function tintOf(index) {
+  /* ── The ladder ──────────────────────────────────────────────────────────
+   *
+   * A row's ground is the accent hue at a fixed *luminance*, not the accent at
+   * a fixed alpha. The desktop has always sent a five-step alpha ramp
+   * (`color.rs`'s `RAMP_ALPHA`) whose own comment says opacity is "half of what
+   * makes a step read as louder than the one below it" — and the phone threw it
+   * away, hard-coding one alpha for every slot and carrying urgency by hue
+   * alone. `color.rs` records that as the exact bug they fixed on the desktop:
+   * two colours "differed by a hue nudge at nearly the same lightness, and on a
+   * small calendar pill over a photo they were one colour."
+   *
+   * Scaling all three channels in linear light moves value and leaves hue and
+   * saturation exactly alone, so a slot stays recognisably its own colour and
+   * gains weight. The ceiling is set by `--muted` needing 4.5:1 against the
+   * darkest row it can sit on. */
+  const GROUND_L = [0.0130, 0.0162, 0.0198, 0.0240, 0.0288];
+  const EVENT_L = 0.0192;
+  const toLinear = (v) => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const toSrgb = (v) => {
+    const c = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+    return Math.max(0, Math.min(255, Math.round(c * 255)));
+  };
+  function rgbOf(index) {
     const p = state.snap && state.snap.palette && state.snap.palette[index];
-    if (p && p[3] > 0) return `rgba(${p[0]}, ${p[1]}, ${p[2]}, 0.32)`;
+    if (p && p[3] > 0) return [p[0], p[1], p[2]];
     const hex = FALLBACK[Math.min(index, 5)];
-    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-    return `rgba(${r}, ${g}, ${b}, 0.30)`;
+    return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+  }
+  const shades = new Map();
+  function groundOf(index) {
+    const key = `g${index}`;
+    if (shades.has(key)) return shades.get(key);
+    const [r, g, b] = rgbOf(index);
+    const lin = [toLinear(r), toLinear(g), toLinear(b)];
+    const y = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+    const want = index === 5 ? EVENT_L : GROUND_L[Math.min(index, 4)];
+    const k = y > 0 ? want / y : 0;
+    const out = `rgb(${toSrgb(lin[0] * k)}, ${toSrgb(lin[1] * k)}, ${toSrgb(lin[2] * k)})`;
+    shades.set(key, out);
+    return out;
+  }
+  // The accent mixed toward the page's ink, so a room line reads at 5:1 on its
+  // own row instead of the 2.3:1 the raw accent managed — while keeping enough
+  // hue to say which calendar it came from.
+  function inkOf(indexOrHex) {
+    const key = `i${indexOrHex}`;
+    if (shades.has(key)) return shades.get(key);
+    const [r, g, b] = typeof indexOrHex === 'string' ? hexBits(indexOrHex) : rgbOf(indexOrHex);
+    const mix = (c, t) => Math.round(c + (t - c) * 0.55);
+    const out = `rgb(${mix(r, 232)}, ${mix(g, 230)}, ${mix(b, 225)})`;
+    shades.set(key, out);
+    return out;
+  }
+  // Somebody else's calendar: the hue, quietened toward the plate it sits on.
+  // The desktop's `preview_color` in a different material.
+  function subBarOf(hex) {
+    const key = `s${hex}`;
+    if (shades.has(key)) return shades.get(key);
+    const [r, g, b] = hexBits(hex);
+    const mix = (c, t) => Math.round(c + (t - c) * 0.35);
+    const out = `rgb(${mix(r, 25)}, ${mix(g, 28)}, ${mix(b, 33)})`;
+    shades.set(key, out);
+    return out;
+  }
+  function hexBits(hex) {
+    const h = hex.trim().replace('#', '');
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
   }
   function durationOptions(current) {
     const list = DURATIONS.slice();
@@ -1209,20 +1378,12 @@
       $('week').hidden = true;
       $('rail').hidden = false;
       $('weekgrid').hidden = false;
-      // The big date comes off: the rail already names the month you are
-      // reading, and `#pinned` names the day the buttons act on.
-      document.querySelector('.date').hidden = true;
-      $('pinned').hidden = false;
       railAndMasthead();
       measureSticky();
       return;
     }
 
-    $('pinned').hidden = true;
-    document.querySelector('.date').hidden = false;
-    $('weekday').textContent = day.weekday;
-    $('weekday').classList.toggle('today', day.is_today);
-    $('daylabel').textContent = day.label + (day.is_today ? ' · today' : '');
+    mastheadFor(day.date, day.is_today);
     $('summary').classList.remove('glance');
     $('summary').replaceChildren(...bits(day.summary, late && day.behind_minutes));
     $('rail').hidden = true;
@@ -1260,14 +1421,17 @@
     return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
   }
 
-  // Which day ＋ New, Tray and Reflow act on. Always today, by the agenda's own
-  // rule — and worth saying out loud there, because the list under your thumb
-  // may be showing November. The date comes off the clock rather than out of
-  // the snapshot, so it is right on a first-ever open with the desk off.
-  function renderPinned() {
-    const day = state.snap && state.snap.days[0];
-    const late = day && day.date === todayIso() && day.behind_minutes > 0;
-    $('pinned').replaceChildren(...bits(`Today · ${longDay(todayIso())}`, late && day.behind_minutes));
+  // The masthead's three fields, the same in both views. In the agenda it is
+  // always today's date, because today is what every verb in the bar acts on —
+  // said at 30px instead of in a line of 12px grey. Zero-padded, so the column
+  // is two glyphs wide and the spine never shifts under it.
+  function mastheadFor(iso, isToday) {
+    const [y, m, d] = iso.split('-').map(Number);
+    const when = new Date(y, m - 1, d);
+    $('daynum').textContent = iso.slice(8);
+    $('daynum').classList.toggle('today', isToday);
+    $('dayweek').textContent = when.toLocaleDateString(undefined, { weekday: 'long' });
+    $('daymonth').textContent = when.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   }
 
   // The shown day's week, Monday first like the calendar, as seven taps. Under
@@ -1366,7 +1530,8 @@
           name: entry.name,
           where: entry.marker && entry.due ? 'due' : '',
           accent: colorOf(entry.color),
-          tint: tintOf(entry.color),
+          ground: groundOf(entry.color),
+          ink: inkOf(entry.color),
           sub: false,
         });
       }
@@ -1374,7 +1539,7 @@
         rows.push({
           at: ghost.start, label: hhmm(ghost.start), until: hhmm(ghost.start + ghost.minutes),
           name: ghost.name, where: '',
-          accent: colorOf(ghost.color), tint: 'transparent', sub: false, done: true,
+          accent: colorOf(ghost.color), ground: 'transparent', ink: 'var(--muted)', sub: false, done: true,
         });
       }
       for (const event of (day.subscribed || [])) {
@@ -1384,8 +1549,9 @@
           until: event.all_day ? 'day' : hhmm(event.end),
           name: event.name,
           where: event.where || '',
-          accent: event.color,
-          tint: 'transparent',
+          accent: subBarOf(event.color),
+          ground: 'transparent',
+          ink: inkOf(event.color),
           sub: true,
         });
       }
@@ -1396,27 +1562,31 @@
     // own blocks on it are real; the absence of lectures on it means only that
     // nobody has looked.
     const unread = !day || !isKnown(iso);
+    // A day with nothing on it gets no plate: it is a void the field shows
+    // through. Today always keeps its plate — it is what every verb in the bar
+    // acts on, so it is never "nothing".
+    const free = !rows.length && iso !== todayIso();
     const section = el('div', {
-      class: 'aday' + (iso === todayIso() ? ' today' : '') + (rows.length ? '' : ' empty') + (unread ? ' unknown' : ''),
+      class: 'aday' + (iso === todayIso() ? ' today' : '') + (free ? ' free' : '') + (unread ? ' unknown' : ''),
       'data-date': iso,
     });
     section.append(el('button', {
       'aria-label': `Open ${when.toDateString()}`,
       onclick: () => openDay(iso),
     }, [
-      el('span', { class: 'adate', text: when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) }),
+      el('span', { class: 'adate mono', text: when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }) }),
+      // The most-repeated string on the ribbon stops being a line of its own
+      // and becomes half of a heading that was already there, on the spine.
+      rows.length ? null : el('span', { class: 'aword', text: unread ? '· not read' : '· free' }),
       el('span', { class: 'acount', text: rows.length ? `${rows.length}` : '' }),
     ]));
 
-    if (!rows.length) {
-      section.append(el('div', { class: 'anothing', text: unread ? 'nothing of yours' : 'nothing' }));
-    }
     for (const row of rows) {
       const line = el('div', {
         class: 'arow' + (row.sub ? ' sub' : '') + (row.done ? ' done' : ''),
-        style: `--accent:${row.accent}; --tint:${row.tint}`,
+        style: `--accent:${row.accent}; --ground:${row.ground}; --ink:${row.ink}`,
       });
-      const at = el('span', { class: 'at', text: row.label });
+      const at = el('span', { class: 'at mono', text: row.label });
       if (row.until) at.append(el('span', { class: 'ae', text: row.until }));
       line.append(at);
       const bodyCell = el('div', { class: 'abody' });
@@ -1616,7 +1786,7 @@
     return {
       lead: 'Nothing else today',
       detail: first ? `Tomorrow · ${shortName(first.name)} at ${hhmm(first.start)}` : '',
-      accent: first ? first.accent : 'var(--faint)',
+      accent: first ? first.accent : 'var(--muted)',
       hollow: true,
     };
   }
@@ -1628,14 +1798,18 @@
     if (!day || day.date !== todayIso()) {
       // Between midnight and the first answer of the new day. Say nothing
       // rather than something about yesterday.
-      box.replaceChildren(el('span', { class: 'gdot hollow', style: '--accent:var(--faint)' }), el('span', { class: 'glead', text: '…' }), el('span', { class: 'gdetail' }));
+      box.replaceChildren(el('span', { class: 'gdot hollow', style: '--accent:var(--muted)' }), el('span', { class: 'glead', text: '…' }), el('span', { class: 'gdetail' }));
       return;
     }
     const at = glanceFor(day, state.agenda.days.get(shiftDay(day.date, 1)), nowMinutes());
+    const detail = el('span', { class: 'gdetail', text: at.detail });
+    if (day.behind_minutes > 0) {
+      detail.append(el('span', { class: 'behindnote', text: ` · ${dur(day.behind_minutes)} behind` }));
+    }
     box.replaceChildren(
       el('span', { class: 'gdot' + (at.hollow ? ' hollow' : ''), style: `--accent:${at.accent}` }),
       el('span', { class: 'glead', text: at.lead }),
-      el('span', { class: 'gdetail', text: at.detail }),
+      detail,
     );
   }
 
@@ -1648,7 +1822,7 @@
     // height under them.
     if (state.mode !== 'agenda') return;
     const at = state.agenda.month || monthOf(state.day);
-    renderPinned();
+    mastheadFor(todayIso(), true);
     renderGlance();
     if (state.railFor !== at) { state.railFor = at; renderRail(); }
   }
@@ -2119,7 +2293,7 @@
       const short = height < 46;
       const node = el('button', {
         class: 'entry' + (entry.kind === 'routine' ? ' routine' : '') + (short ? ' short' : '') + (selected ? ' selected' : ''),
-        style: `${laneStyle(entry)}; --accent:${accent}; --tint:${tintOf(entry.color)}`,
+        style: `${laneStyle(entry)}; --accent:${accent}; --ground:${groundOf(entry.color)}`,
         onclick: () => { if (!suppressClick) openItem(entry.id, entry.session); },
       });
       node.append(

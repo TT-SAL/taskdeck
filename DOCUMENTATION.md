@@ -2413,8 +2413,37 @@ parked phone, which is the one thing the digest exists to prevent.
 
 ### 21.5 The page
 
-One file, no dependencies, dark, sized for a thumb — and laid out around one rule: **the masthead
-is what you read, and the bar at the bottom is everything you touch.** Nothing in the masthead is
+One file, no dependencies, dark, sized for a thumb — and laid out around two rules. **The masthead
+is what you read, and the bar at the bottom is everything you touch.** And **a day is a plate**: one
+material at one radius with a lit edge and a shadow, floating in ten pixels of ground, rather than a
+change of grey. The three dark tokens this replaced differed by 1.08:1 and 1.11:1 — twenty-two rules
+spending two tokens on a distinction nobody could see. At the bottom of the luminance scale a
+boundary is drawn by an edge and a shadow, not by a ratio; the plate's own ratio is still 1.11:1 and
+that is the point. A day with nothing on it gets no plate: it is a void of page colour with its date
+and the word *free* on it, so the ribbon reads as a rhythm of solid days and open ones.
+
+**One monospace column runs the whole length of the page.** The masthead's day number, every day
+heading's date, every agenda row's time and every hour label in the day view share a left edge at
+page x = 23 — ten pixels of page gutter, ten of plate padding, and the row's three-pixel accent bar
+— with content starting at 77. It is not a rule or a fill, just alignment and `tabular-nums`, so
+`09:15` and `11:00` are the same width and every colon lines up. The desktop has called this the
+date spine since it was written and runs its whole planner in monospace; the phone never picked it
+up, and `ui-monospace` is a system face that costs nothing.
+
+**A row's ground is its hue at a fixed luminance**, not its hue at a fixed alpha. `groundOf` scales
+the accent's three channels in linear light onto a five-step ladder, which moves value and leaves
+hue and saturation exactly alone — so a slot stays its own colour and gains weight. That is the ramp
+`color.rs` has been sending in `RAMP_ALPHA` all along, whose own comment calls opacity "half of what
+makes a step read as louder than the one below it", and which the phone was discarding by
+hard-coding one alpha for every slot. `color.rs` also records the bug that causes: two colours
+"differed by a hue nudge at nearly the same lightness, and on a small calendar pill over a photo
+they were one colour."
+
+The ceiling of that ladder is a contrast budget, and it is what makes the type legible. A room line
+takes the accent mixed 55% toward the page's ink rather than the raw accent, and the numbers moved
+accordingly: measured on the real board, a clock time went from **3.49:1 to 5.92:1** and a room line
+from 2.28:1 to **8.95:1**. The times are the one thing this app exists to deliver and they were the
+least legible text on the screen, at 11px, outdoors, at battery-saver brightness. Nothing in the masthead is
 tappable. That started as ergonomics and turned out to be structural: navigation used to be four
 buttons in the top row, which on a phone held in one hand is the furthest thing from a thumb, while
 the three easiest targets on the screen were spent on Tray, Notes and ＋ New — of which only the
