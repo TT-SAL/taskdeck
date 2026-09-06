@@ -183,8 +183,20 @@ sudo tailscale serve --bg 7373
 Everything works the same over plain HTTP; the difference is that a browser treats the HTTPS page
 as a secure context, which is what lets the phone page install its offline shell — with it, the
 page opens and shows the last day it saw even when the server is unreachable (edits made then
-are kept on the phone and sent when the server answers, over either form). The desktop's
+are kept on the phone and sent when the server answers, over either form). It is also what lets
+the phone keep the page as an app in its own window rather than a browser tab. The desktop's
 `server_url` can use either form.
+
+**Then tell the server the name**, or it has no way to know a proxy is in front of it and will go
+on printing its own loopback address as the phone link — a link that cannot work, which is the
+one failure a runbook step can have while looking finished:
+
+```toml
+phone_public_url = "https://spare.tail1234.ts.net"
+```
+
+With that set, the printed link and the QR carry the HTTPS name, and the startup banner says the
+proxy is the intended path instead of warning that nothing can reach the port.
 
 ## 3. Building
 

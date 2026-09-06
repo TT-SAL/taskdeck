@@ -8,8 +8,13 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="TaskDeck">
-<link rel="apple-touch-icon" href="/icon.png">
-<link rel="icon" href="/icon.png">
+<!-- The scaled icons, not `/icon.png`. A `rel=icon` link makes the browser
+     fetch the file, and the source is 676 KB at 882x882 where this is 50 KB —
+     for a picture drawn at sixteen pixels in a tab strip. The service worker's
+     shell does not hold either of them, so this is a real network fetch on the
+     phone it was written for. -->
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
 <title>TaskDeck</title>
 <style>
   :root {
@@ -1874,6 +1879,11 @@
   // the field beneath can be seen. With no picture nothing branches — every
   // rule falls through to the flat ground it was written against.
   let lookNow = null;
+  // What the document shipped with, so clearing the picture can put it back
+  // rather than leaving the system's status bar tinted for a photo that is no
+  // longer on screen — which in an installed app is a band of the wrong colour
+  // that survives until the next launch.
+  const GROUND_THEME = (document.querySelector('meta[name="theme-color"]') || {}).content || '#0f1113';
   function paintField() {
     const look = state.snap && state.snap.look;
     const same = (look && look.id) || null;
@@ -1884,6 +1894,7 @@
       root.classList.remove('has-photo');
       root.style.removeProperty('--photo');
       root.style.removeProperty('--par');
+      themeColor(GROUND_THEME);
       return;
     }
     root.style.setProperty('--photo', `url("/bg-${look.id}.jpg?token=${encodeURIComponent(state.token || '')}")`);
@@ -1891,9 +1902,13 @@
     root.classList.add('has-photo');
     // So the system's own status bar sits on the same shade as the strip of
     // picture beneath it rather than on a band of a different colour.
+    themeColor(look.top);
+  }
+
+  function themeColor(value) {
     let meta = document.querySelector('meta[name="theme-color"]');
     if (!meta) { meta = el('meta', { name: 'theme-color' }); document.head.append(meta); }
-    meta.setAttribute('content', look.top);
+    meta.setAttribute('content', value);
   }
 
   function renderGlance() {
@@ -2768,8 +2783,12 @@
     // The two dials. They act on the picture already on the server, so they
     // work whether it came from here or from the desk — and they are sent on
     // release rather than per step, because each one re-encodes the picture.
-    const look = (state.snap && state.snap.look) || { blur: 11, light: 39 };
-    const dials = { blur: look.blur, light: look.light };
+    // From the snapshot's own `dials`, which the server sends whether or not
+    // there is a picture. Seeding these from a literal would show the file's
+    // real settings as 11/39 on a board with no picture — and the first touch
+    // of either slider would write that fiction back over the file.
+    const sent = (state.snap && state.snap.dials) || {};
+    const dials = { blur: sent.blur ?? 11, light: sent.light ?? 39 };
     const dialRow = (label, key, hint) => {
       const out = el('output', { class: 'dialval mono', text: String(dials[key]) });
       const slider = el('input', {

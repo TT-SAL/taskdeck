@@ -250,16 +250,19 @@ pub fn snapshot(
         notes: board.notes.clone(),
         // Only when there is something to be ignorant about.
         known: if board.subscriptions().iter().any(|s| s.enabled) { board.overlay().covers } else { None },
-        look: backdrop().map(|made| {
-            let dials = look_dials();
-            Look {
-                id: made.id.clone(),
-                aspect: BACKGROUND_WIDE as f32 / BACKGROUND_TALL as f32,
-                top: made.top.clone(),
-                blur: dials.blur_percent,
-                light: dials.light_percent,
-            }
+        look: backdrop().map(|made| Look {
+            id: made.id.clone(),
+            aspect: BACKGROUND_WIDE as f32 / BACKGROUND_TALL as f32,
+            top: made.top.clone(),
         }),
+        // Beside `look`, never inside it. The dials are settings and exist
+        // whether or not a picture does; sent only with the picture, the sheet
+        // would open on a hardcoded guess whenever the board had none — and the
+        // first touch of either slider would write that guess over the file.
+        dials: {
+            let dials = look_dials();
+            Dials { blur: dials.blur_percent, light: dials.light_percent }
+        },
     }
 }
 
@@ -547,7 +550,9 @@ fn answer_parked(pulse: &Pulse, stopping: &AtomicBool) {
             // up the UI thread's next publish.
             drop(state);
             for request in due {
-                let body = Encoding::PLAIN.json(serde_json::json!({ "version": version })).with_header(no_store());
+                let body = guarded(
+                    Encoding::PLAIN.json(serde_json::json!({ "version": version })).with_header(no_store()),
+                );
                 let _ = request.respond(body);
             }
             state = pulse.lock();
@@ -722,7 +727,7 @@ fn handle(
     if *request.method() == Method::Get && path == "/api/wait" {
         if !authorised {
             let refused = json_error(401, "Not authorised. Open the phone view from the link in TaskDeck's settings.");
-            let _ = request.respond(refused.with_header(no_store()));
+            let _ = request.respond(guarded(refused.with_header(no_store())));
             return;
         }
         let seen = query.lookup("version").and_then(|text| text.parse::<u64>().ok()).unwrap_or(0);
@@ -730,7 +735,7 @@ fn handle(
             // The pulse thread has left: nothing would answer a request
             // parked now. Answered here instead, with what there is.
             let now = Encoding::PLAIN.json(serde_json::json!({ "version": pulse.current() }));
-            let _ = request.respond(now.with_header(no_store()));
+            let _ = request.respond(guarded(now.with_header(no_store())));
         }
         return;
     }
@@ -748,11 +753,11 @@ fn handle(
         (Method::Get | Method::Head, "/icon-512.png") => with_type(Response::from_data(icon_at(512)), "image/png"),
         // The offline shell (`phone_sw.js`). Public like the page; it holds
         // no data and a browser only honours it from a secure origin.
-        (Method::Get, "/sw.js") => {
+        (Method::Get | Method::Head, "/sw.js") => {
             static PACKED: OnceLock<Option<Vec<u8>>> = OnceLock::new();
             encoding.fixed(SERVICE_WORKER, &PACKED, "application/javascript; charset=utf-8")
         }
-        (Method::Get, "/manifest.webmanifest") => {
+        (Method::Get | Method::Head, "/manifest.webmanifest") => {
             with_type(Response::from_string(manifest(query.lookup("token").map(String::as_str))), "application/manifest+json")
         }
         _ if !authorised => json_error(
@@ -785,6 +790,13 @@ fn handle(
         }
         // The phone's own picture, already cropped by it to the shape this
         // server serves. An empty body means "use the desk's again".
+        // Same gate as `/api/command` below, same reason, because this writes
+        // too. It names a different type only because the phone sends the crop
+        // as `application/octet-stream` — which a form and a simple
+        // cross-origin `fetch` can no more set than they can `application/json`.
+        (Method::Post, "/api/background") if !is_type(request.headers(), "application/octet-stream") => {
+            json_error(415, "Send this as application/octet-stream.")
+        }
         (Method::Post, "/api/background") => {
             let clearing = request.headers().iter().any(|h| h.field.equiv("X-TaskDeck-Clear"));
             match read_body_up_to(&mut request, MAX_UPLOAD_BYTES) {
@@ -798,6 +810,9 @@ fn handle(
         // The two dials, turned from the phone. Kept in the config file so the
         // desk agrees, and the picture is re-made from whichever source it
         // came from — the phone's crop if there is one, the desk's if not.
+        (Method::Post, "/api/look") if !is_json(request.headers()) => {
+            json_error(415, "Send this as application/json.")
+        }
         (Method::Post, "/api/look") => match read_body(&mut request) {
             Ok(body) => match serde_json::from_slice::<LookDialsWire>(&body) {
                 Ok(wire) => {
@@ -1091,6 +1106,15 @@ fn header(name: &str, value: &str) -> Header {
 /// Whether the body is offered as JSON. The parameters after `;` are the
 /// sender's business — `application/json; charset=utf-8` is still JSON.
 fn is_json(headers: &[Header]) -> bool {
+    is_type(headers, "application/json")
+}
+
+/// Whether the body was offered as exactly `want`, parameters aside. The point
+/// is never the parsing — it is that naming a type outside the three a form can
+/// send (`text/plain`, `multipart/form-data`, `application/x-www-form-urlencoded`)
+/// puts the request in the class a browser will not send cross-origin without a
+/// preflight, and this server answers no preflight.
+fn is_type(headers: &[Header], want: &str) -> bool {
     headers.iter().any(|header| {
         header.field.equiv("Content-Type")
             && header
@@ -1098,7 +1122,7 @@ fn is_json(headers: &[Header]) -> bool {
                 .as_str()
                 .split(';')
                 .next()
-                .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("application/json"))
+                .is_some_and(|kind| kind.trim().eq_ignore_ascii_case(want))
     })
 }
 
@@ -1132,6 +1156,18 @@ fn no_store() -> Header {
 /// file the user just picked without pushing a twelve-megapixel photograph
 /// through a base64 string. It admits nothing from the network — a blob is
 /// bytes this page already holds.
+/// Put the guards on a response. Every answer leaves through here or through
+/// the loop at the end of `serve`; the long poll needs its own call because it
+/// answers from three places that never reach that loop — and being the request
+/// the phone makes most often, it is the worst one to leave bare.
+fn guarded<R: std::io::Read>(response: Response<R>) -> Response<R> {
+    let mut response = response;
+    for guard in guards() {
+        response.add_header(guard);
+    }
+    response
+}
+
 fn guards() -> [Header; 3] {
     [
         header("Referrer-Policy", "no-referrer"),
@@ -1432,7 +1468,17 @@ pub fn prepare_backdrop_bytes(bytes: &[u8], dials: LookDials) -> Option<Backdrop
     // Blurred before the tone-map, so the darkening solves against what will
     // actually be on screen: a blur moves the bright pixels around, and
     // measuring the peak before it would aim at a picture that no longer exists.
-    let small = image::DynamicImage::ImageRgb8(image::imageops::blur(&small.into_rgb8(), dials.blur_for(BACKGROUND_WIDE)));
+    // Guarded, because `image::imageops::blur` reads a sigma of exactly 0.0 as
+    // "you did not mean that" and substitutes 0.8 (image-0.25.10,
+    // imageops/sample.rs:1039). Handed the dial straight through, 0 would come
+    // out blurrier than 1 through 5 — a control that reverses at the end of its
+    // travel, which is worse than one that does nothing.
+    let sigma = dials.blur_for(BACKGROUND_WIDE);
+    let small = if sigma >= 0.1 {
+        image::DynamicImage::ImageRgb8(image::imageops::blur(&small.into_rgb8(), sigma))
+    } else {
+        small
+    };
 
     // Darken — and *solve* for how much rather than guessing it.
     //
@@ -1602,9 +1648,18 @@ pub fn remake_backdrop() -> Option<String> {
     let uploaded = home.data_dir.join(BACKGROUND_FILE);
     let source = if uploaded.exists() { Some(uploaded) } else { home.desk.clone() };
     let made = source.and_then(|picture| prepare_backdrop(&picture, look_dials()));
-    let id = made.as_ref().map(|ready| ready.id.clone());
-    set_backdrop(made);
-    id
+    // A remake that failed is not a reason to take the picture away. The source
+    // can be unreadable for a moment — a file being replaced, an encoder
+    // refusing — and answering that by clearing a backdrop the phone is already
+    // showing turns a dial into a delete. Keep what is up and say nothing new.
+    match made {
+        Some(ready) => {
+            let id = ready.id.clone();
+            set_backdrop(Some(ready));
+            Some(id)
+        }
+        None => backdrop().map(|kept| kept.id.clone()),
+    }
 }
 
 /// Take a picture the phone sent: prepare it, write the crop down so a restart
@@ -1952,6 +2007,7 @@ pub struct Snapshot {
     /// there is none, and every rule on the phone falls back to a flat ground.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub look: Option<Look>,
+    pub dials: Dials,
 }
 
 /// What the phone needs to fetch and place the picture: where it is, how tall
@@ -1962,8 +2018,12 @@ pub struct Look {
     pub id: String,
     pub aspect: f32,
     pub top: String,
-    /// Where the two dials stand, so the sliders open on the truth rather than
-    /// on a default that may be nothing like the picture on screen.
+}
+
+/// Where the two dials stand, so the sliders open on the truth rather than on a
+/// default that may be nothing like what the file says. Always sent.
+#[derive(Debug, Clone, Serialize)]
+pub struct Dials {
     pub blur: u32,
     pub light: u32,
 }
@@ -2770,6 +2830,29 @@ mod tests {
         assert!(!is_json(&headers(&[])), "a body offered as nothing is not JSON");
     }
 
+    /// The three the long poll answers from, which is where they went missing:
+    /// `guards()` holding the right headers says nothing about whether any
+    /// response carries them, and this test used to check only the former while
+    /// being named for the latter.
+    #[test]
+    fn the_long_polls_own_answers_carry_the_guards_too() {
+        let wanted = ["referrer-policy", "x-content-type-options", "content-security-policy"];
+        for (what, response) in [
+            ("refusal", json_error(401, "no")),
+            ("timeout", Encoding::PLAIN.json(serde_json::json!({ "version": 1u64 }))),
+            ("wakeup", Encoding::PLAIN.json(serde_json::json!({ "version": 2u64 }))),
+        ] {
+            let got: Vec<String> = guarded(response.with_header(no_store()))
+                .headers()
+                .iter()
+                .map(|h| h.field.as_str().as_str().to_ascii_lowercase())
+                .collect();
+            for name in wanted {
+                assert!(got.contains(&name.to_string()), "the {what} answer is missing {name}: {got:?}");
+            }
+        }
+    }
+
     #[test]
     fn every_answer_carries_the_guards() {
         // `Referrer-Policy` is the load-bearing one: the token is in the query
@@ -2873,6 +2956,30 @@ mod tests {
         // A dial that arrives out of range is clamped, never wrapped.
         assert_eq!(LookDials { blur_percent: 900, light_percent: 900 }.ceiling(),
                    LookDials { blur_percent: 100, light_percent: 100 }.ceiling());
+    }
+
+    /// The bottom of the blur dial, which is a trap rather than a bug in our own
+    /// arithmetic: `image::imageops::blur` reads a sigma of exactly 0.0 as a
+    /// mistake and substitutes 0.8 (image-0.25.10, imageops/sample.rs:1039), so
+    /// a dial handed straight through comes out *blurrier* at 0 than at 5. The
+    /// guard is in the pipeline; this is what would notice it being removed.
+    #[test]
+    fn the_blur_dial_does_not_reverse_at_the_bottom_of_its_travel() {
+        let source = std::path::Path::new("images/pexels-francesco-ungaro-1525041.jpg");
+        if !source.exists() {
+            return; // No picture in this checkout; nothing to assert.
+        }
+        let at = |blur| {
+            let made = prepare_backdrop(source, LookDials { blur_percent: blur, light_percent: 39 })
+                .expect("the picture is readable");
+            detail(&image::load_from_memory(&made.jpeg).expect("a jpeg comes out"))
+        };
+        // Sharpest at 0, and never sharper as the dial goes up.
+        let ladder: Vec<f32> = [0, 3, 8].iter().map(|p| at(*p)).collect();
+        assert!(
+            ladder[0] >= ladder[1] && ladder[1] >= ladder[2],
+            "detail must fall as the dial rises, got {ladder:?}"
+        );
     }
 
     /// Blur is the one dial whose effect nothing else in the suite would catch:

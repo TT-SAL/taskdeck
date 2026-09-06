@@ -40,6 +40,11 @@ self.addEventListener('fetch', (event) => {
 
   const shellPath = (path === '/' || path === '/index.html' || request.mode === 'navigate') ? '/' : path;
   if (!SHELL.includes(shellPath)) return;
+  // `request.mode === 'navigate'` is true for a top-level load of ANY path on
+  // this origin — typing an icon or a `/bg-<hash>.jpg` URL into the address bar
+  // included. Those map to '/' above, so without the content-type check below
+  // one such navigation would store a PNG as the app shell and every later
+  // open would render the image instead of the page.
 
   // Cache first, then catch up. The shell is this app's own file and changes
   // only when the binary is rebuilt, so waiting on the network to hand back
@@ -58,9 +63,11 @@ self.addEventListener('fetch', (event) => {
   // day and pockets the phone.
   const fresh = fetch(request)
     .then((response) => {
-      // Only a good answer replaces it: an error page from a server
-      // mid-restart must not become the shell.
-      if (response.ok) {
+      // Only a good answer replaces it, and only an answer that is actually
+      // the page: an error page from a server mid-restart must not become the
+      // shell, and neither must an image someone navigated to directly.
+      const kind = response.headers.get('content-type') || '';
+      if (response.ok && (shellPath !== '/' || kind.includes('text/html'))) {
         const copy = response.clone();
         caches.open(CACHE).then((cache) => cache.put(shellPath, copy)).catch(() => {});
       }

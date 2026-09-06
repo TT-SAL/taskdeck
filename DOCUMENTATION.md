@@ -2323,8 +2323,10 @@ A body that would grow is never compressed.
 was most of what a first install moved — and Android wants 192 and 512, so it was paying for a
 picture it immediately threw most of away. Scaled once per size on first request (a resize on the
 request path would otherwise be paid every time by the client least able to afford it), it is 50 KB
-and 257 KB. The service worker's shell no longer holds any of them: the page references no image of
-its own, and the only thing that ever looks at the icon is the operating system, at install.
+and 257 KB. The service worker's shell no longer holds any of them, and the page's own
+`<link rel="icon">` points at the 192 for the same reason the manifest does — a `rel=icon` link
+*is* a fetch, so pointing it at the source meant every cold open pulled 660 KB for a picture drawn
+at sixteen pixels in a tab strip. That the shell had stopped caching it made the fetch a real one.
 
 The key travels as the `X-TaskDeck-Token` header (the page), as a bearer token, or as `?token=`
 in the query — the only place a calendar app subscribing to the feed can put it. Comparison is
@@ -2691,9 +2693,12 @@ returning to the foreground, and polls once a minute as a net; it never redraws 
 is typing into.
 
 **Offline.** The page keeps the last snapshot of each day it showed in the phone's own storage,
-and a small service worker (`phone_sw.js`, served at `/sw.js`) keeps the page shell and the icon
-— network-first, so an updated page arrives whenever it can; the API, the feed and the manifest
-are never cached. With the server unreachable the page therefore still opens and still shows the
+and a small service worker (`phone_sw.js`, served at `/sw.js`) keeps the page shell
+— **cache-first with a background refresh**, so the page paints from disk without waiting on a
+round trip and a rebuilt page arrives one launch late (§21.6); the API, the feed, the manifest and
+the worker itself are never cached. A response is only stored as the shell when it is actually the
+page: a top-level navigation to any other path on the origin — an icon URL typed in by hand —
+reports `mode: 'navigate'` and would otherwise be filed under `/`, replacing the app with an image. With the server unreachable the page therefore still opens and still shows the
 day, with a banner saying "as of 12:05" and why. A service worker needs a secure context — HTTPS,
 or localhost — so that half works over Tailscale's HTTPS (`tailscale serve`, `SERVER.md` §2) and
 not over a plain-http LAN address, where the browser refuses the worker and the page behaves as
@@ -2754,7 +2759,7 @@ not be port-forwarded to the open internet.
 
 **The server binds this machine alone by default (`phone_bind_address = "127.0.0.1"`).** That is
 deliberate, and it is not the same thing as serving nobody: the recommended setup puts
-`tailscale serve` in front of loopback (SERVER.md §3), which is what gets the phone an **HTTPS**
+`tailscale serve` in front of loopback (SERVER.md §2), which is what gets the phone an **HTTPS**
 origin — and HTTPS is what lets the browser install the service worker and run the page as a
 standalone app rather than a tab. Loopback is therefore the *right* answer for the setup the
 documentation recommends, and the wrong one only when nothing is proxying.

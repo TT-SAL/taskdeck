@@ -45,6 +45,24 @@ checking a setup, or for a link when the service is already running; it reads
 the settings and writes nothing. --version prints the version and build date.
 ";
 
+/// How far a printed link actually reaches, said in the line that shows it.
+/// Loopback is the case worth naming out loud: it reads like an address and is
+/// the one that cannot work from a phone, which is how a runbook step ends up
+/// looking done when it is not.
+fn reach_note(address: &str) -> &'static str {
+    if is_loopback(address) {
+        "  (this machine only — not reachable from a phone)"
+    } else if phone::is_tailnet(address) {
+        "  (tailnet — anywhere)"
+    } else {
+        "  (this network only)"
+    }
+}
+
+fn is_loopback(address: &str) -> bool {
+    address.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
 /// What the command line asked for.
 #[derive(Debug, Default, PartialEq)]
 struct Options {
@@ -168,10 +186,17 @@ fn main() {
             println!("feed:  {}", phone::public_feed_url(&config.phone_public_url, &config.phone_token));
         } else {
             for address in phone::addresses_for(&bind) {
-                let reach =
-                    if phone::is_tailnet(&address) { "  (tailnet — anywhere)" } else { "  (this network only)" };
-                println!("phone: {}{reach}", phone::page_url(&address, port, &config.phone_token));
+                println!("phone: {}{}", phone::page_url(&address, port, &config.phone_token), reach_note(&address));
                 println!("feed:  {}", phone::feed_url(&address, port, &config.phone_token));
+            }
+            if phone::addresses_for(&bind).iter().all(|a| is_loopback(a)) {
+                println!();
+                println!("No phone can open the link above: it is this machine's own address.");
+                println!("If `tailscale serve` is in front, set the name it serves —");
+                println!("  phone_public_url = \"https://<machine>.<tailnet>.ts.net\"");
+                println!("and this prints that instead. Otherwise bind the tailnet address");
+                println!("(`phone_bind_address = \"100.x.y.z\"`), which costs HTTPS and the");
+                println!("offline shell. SERVER.md §2.");
             }
         }
         // And the first of those links as something a phone camera can take
@@ -338,7 +363,7 @@ fn main() {
              \x20              Set `phone_bind_address = \"127.0.0.1\"` in userconfig.toml if the\n\
              \x20              phone reaches this through `tailscale serve`, which is the usual case."
         );
-    } else if bind == phone::DEFAULT_BIND {
+    } else if is_loopback(&bind) {
         // Loopback is both the recommended setting and a way to serve nobody,
         // and this line cannot tell which without knowing whether something is
         // proxying to it. So it states the condition rather than asserting a
@@ -352,7 +377,7 @@ fn main() {
                 "\n\x20              `phone_public_url` is set, so that is the intended setup: the\n\
                  \x20              link below is the one to use, and `tailscale serve` must be running."
             } else {
-                "\n\x20              If nothing is proxying (`tailscale serve --bg 7373`, SERVER.md §3),\n\
+                "\n\x20              If nothing is proxying (`tailscale serve --bg 7373`, SERVER.md §2),\n\
                  \x20              no phone can reach this. Either start one, or set\n\
                  \x20              `phone_bind_address` to this machine's tailnet address (100.x.y.z)."
             }
@@ -366,8 +391,7 @@ fn main() {
         eprintln!("  phone link:  {}", phone::public_page_url(&config.phone_public_url, &config.phone_token));
     } else {
         for address in phone::addresses_for(&bind) {
-            let reach = if phone::is_tailnet(&address) { "  (tailnet — anywhere)" } else { "  (this network only)" };
-            eprintln!("  phone link:  {}{reach}", phone::page_url(&address, port, &config.phone_token));
+            eprintln!("  phone link:  {}{}", phone::page_url(&address, port, &config.phone_token), reach_note(&address));
         }
     }
     eprintln!("  feed:        /calendar.ics?token=…   (same host and port)");
