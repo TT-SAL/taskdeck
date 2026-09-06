@@ -2697,7 +2697,21 @@ is typing into.
 and a small service worker (`phone_sw.js`, served at `/sw.js`) keeps the page shell
 — **cache-first with a background refresh**, so the page paints from disk without waiting on a
 round trip and a rebuilt page arrives one launch late (§21.6); the API, the feed, the manifest and
-the worker itself are never cached. A response is only stored as the shell when it is actually the
+the worker itself are never cached.
+
+**The background photo is kept too, in a cache of its own** (`taskdeck-photo-v1`, beside the
+shell's, so a shell version bump does not throw the picture away). Cache-first and never revalidated,
+which is safe precisely because the name carries the content's hash: a cached copy cannot be the
+wrong picture, and a changed picture is a changed URL. Storing one sweeps the others, so the tens of
+kilobytes are for the current background rather than for every background ever set. It is keyed by
+path rather than by the full URL — the token in the query would otherwise orphan the picture the day
+the key is re-minted, and keying by path also settles `Vary: Accept` by keeping whichever of AVIF or
+JPEG this browser was first given.
+
+Before this, the photo lived only in the browser's ordinary HTTP cache. That is a year of
+`immutable` and usually enough — but it is evictable, and the first thing a phone low on space
+discards, so the page could open offline having kept the shell, the token and the day's snapshot and
+still show a flat ground. The day's data was never the part at risk; the picture was. A response is only stored as the shell when it is actually the
 page: a top-level navigation to any other path on the origin — an icon URL typed in by hand —
 reports `mode: 'navigate'` and would otherwise be filed under `/`, replacing the app with an image. With the server unreachable the page therefore still opens and still shows the
 day, with a banner saying "as of 12:05" and why. A service worker needs a secure context — HTTPS,

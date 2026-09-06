@@ -10,9 +10,17 @@
 // exactly as before, without the offline shell. `SERVER.md` shows how
 // Tailscale gives the server https.
 const CACHE = 'taskdeck-shell-v2';
+// The background photo lives in its own cache, apart from the shell. It is the
+// one big thing here — tens of kilobytes against the page's forty — and it
+// changes on its own schedule, so keeping the two separate means a shell
+// version bump does not throw the picture away and vice versa.
+const PHOTO = 'taskdeck-photo-v1';
+const KEEP = [CACHE, PHOTO];
 // The page and nothing else. The icon used to be here, which cost 660 KB of
 // cache for a picture only the operating system ever looks at, and only when
-// the app is installed. The page references no image of its own.
+// the app is installed. The page's own icon links point at the scaled 50 KB
+// file, which the browser's ordinary cache handles well enough for something
+// drawn at sixteen pixels.
 const SHELL = ['/'];
 
 self.addEventListener('install', (event) => {
@@ -24,7 +32,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => !KEEP.includes(key)).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });
@@ -37,6 +45,18 @@ self.addEventListener('fetch', (event) => {
   const path = url.pathname;
   // Data is never served from here.
   if (path.startsWith('/api/') || path === '/calendar.ics' || path === '/manifest.webmanifest' || path === '/sw.js') return;
+
+  // The background, cache-first and kept. Its name carries the content's own
+  // hash, so a cached copy can never be the wrong picture — which is what makes
+  // this safe to answer from disk without asking the server anything at all.
+  // Without it the photo lives only in the browser's ordinary HTTP cache, which
+  // is evictable, and the first thing a phone low on space throws away; the
+  // page then opens over a flat ground with the server unreachable, having kept
+  // everything else it needed.
+  if (path.startsWith('/bg-')) {
+    event.respondWith(photo(request, path));
+    return;
+  }
 
   const shellPath = (path === '/' || path === '/index.html' || request.mode === 'navigate') ? '/' : path;
   if (!SHELL.includes(shellPath)) return;
@@ -77,3 +97,35 @@ self.addEventListener('fetch', (event) => {
   event.waitUntil(fresh.catch(() => {}));
   event.respondWith(caches.match(shellPath).then((cached) => cached || fresh));
 });
+
+async function photo(request, path) {
+  const cache = await caches.open(PHOTO);
+  // Keyed by path alone. The URL carries the token in its query, and a token
+  // that is re-minted must not orphan a picture that has not changed.
+  //
+  // Keying by path also steps around `Vary: Accept`: the server sends AVIF or
+  // JPEG by what the request asked for, and a path key keeps whichever this
+  // browser was given the first time. That is right for a phone, which does not
+  // change its mind about AVIF between openings, and the hash in the name means
+  // the bytes are the same picture either way.
+  const hit = await cache.match(path);
+  if (hit) return hit;
+  let response;
+  try {
+    response = await fetch(request);
+  } catch (_) {
+    // Offline and nothing kept: the page falls back to its flat ground, which
+    // is what it did before any of this. Not an error worth throwing.
+    return Response.error();
+  }
+  if (response.ok) {
+    // One picture at a time. The name holds the content's hash, so a different
+    // name is a different photo and the old one is dead weight — this is where
+    // every background ever set would otherwise pile up.
+    for (const key of await cache.keys()) {
+      if (new URL(key.url).pathname !== path) await cache.delete(key);
+    }
+    await cache.put(path, response.clone());
+  }
+  return response;
+}
