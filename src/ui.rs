@@ -1376,6 +1376,8 @@ pub struct TaskAppConfig {
     pub selected_monitor_name: String,
     pub three_day_weather: bool,
     pub background_image_tint_percent: u32,
+    pub background_blur_percent: u32,
+    pub background_light_percent: u32,
     pub ui_scale_percent: u32,
     pub weather_service: WeatherService,
     /// The subscribed-calendar service, or `None` when this copy is a client:
@@ -1554,6 +1556,8 @@ pub struct TaskApp {
     selected_background_index: usize,
     background_options: Vec<String>,
     background_image_tint_percent: u32,
+    background_blur_percent: u32,
+    background_light_percent: u32,
     /// Percentage the whole UI is scaled by, or `UI_SCALE_AUTO` for the
     /// fit-to-window default. See `apply_ui_scale`.
     ui_scale_percent: u32,
@@ -1762,6 +1766,8 @@ impl TaskApp {
             selected_background_index,
             background_options: config.background_options,
             background_image_tint_percent: config.background_image_tint_percent,
+            background_blur_percent: config.background_blur_percent,
+            background_light_percent: config.background_light_percent,
             ui_scale_percent: config.ui_scale_percent,
             // Fitting automatically leaves no percentage to show, so the slider
             // starts from the top of the range rather than from zero.
@@ -3388,7 +3394,7 @@ impl TaskApp {
             .background_options
             .get(self.selected_background_index)
             .map(|name| self.dirs.images.join(name));
-        phone::set_backdrop_home(self.dirs.data.clone(), desk_picture, self.background_image_tint_percent);
+        phone::set_backdrop_home(self.dirs.data.clone(), self.dirs.config_file(), desk_picture, self.look_dials());
         if phone::backdrop().is_none() {
             let uploaded = self.dirs.data.join(phone::BACKGROUND_FILE);
             let source = if uploaded.exists() {
@@ -3399,7 +3405,7 @@ impl TaskApp {
                     .map(|name| self.dirs.images.join(name))
             };
             if let Some(picture) = source {
-                phone::set_backdrop(phone::prepare_backdrop(&picture, self.background_image_tint_percent));
+                phone::set_backdrop(phone::prepare_backdrop(&picture, self.look_dials()));
             }
         }
 
@@ -6377,6 +6383,14 @@ impl TaskApp {
     /// Persist the background brightness. The value itself is live — it is one
     /// multiply in the draw — so only the write to disk waits for the drag to
     /// stop.
+    /// The two dials, as the phone and the picture pipeline see them.
+    fn look_dials(&self) -> phone::LookDials {
+        phone::LookDials {
+            blur_percent: self.background_blur_percent,
+            light_percent: self.background_light_percent,
+        }
+    }
+
     fn set_background_tint(&mut self) {
         let clamped = self.background_image_tint_percent.clamp(0, 100);
         self.background_image_tint_percent = clamped;
@@ -6422,7 +6436,7 @@ impl TaskApp {
                     if previous_index != self.selected_background_index || reload.clicked() {
                         let name = self.background_options[self.selected_background_index].clone();
                         self.background_image_texture =
-                            Some(set_background(ctx, &self.dirs, name.clone()));
+                            Some(set_background(ctx, &self.dirs, name.clone(), self.background_blur_percent));
                         self.persist_config_value("background", name);
                     }
                 }
@@ -6983,7 +6997,7 @@ impl TaskApp {
 
         if self.background_image_texture.is_none() {
             if let Some(name) = self.pending_initial_background.take() {
-                self.background_image_texture = Some(set_background(ctx, &self.dirs, name.clone()));
+                self.background_image_texture = Some(set_background(ctx, &self.dirs, name.clone(), self.background_blur_percent));
             }
         }
 
@@ -8198,7 +8212,12 @@ fn attempt_background(path: PathBuf) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, B
     Ok(image)
 }
 
-fn set_background(ctx: &Context, dirs: &AppDirs, name: String) -> TextureHandle {
+/// Longest side a backdrop texture may have. Above 4K on purpose: this is a
+/// guard against a photograph nobody meant to use as wallpaper, not a quality
+/// setting, and a picture the window can actually show should never meet it.
+const BACKDROP_MAX_SIDE: u32 = 4608;
+
+fn set_background(ctx: &Context, dirs: &AppDirs, name: String, blur_percent: u32) -> TextureHandle {
     // Fall back to the bundled placeholder if the name is unusable or the file
     // can't be loaded. `image_path` keeps this confined to `images/`.
     let image = dirs.image_path(&name)
@@ -8215,7 +8234,15 @@ fn set_background(ctx: &Context, dirs: &AppDirs, name: String) -> TextureHandle 
     // anything past the limit is detail nobody can see anyway. The limit comes
     // from the adapter (commonly 8192 or 16384), so this only bites on genuinely
     // huge photographs.
-    let max_side = ctx.input(|i| i.max_texture_side) as u32;
+    //
+    // A second, lower cap sits under that one for a different reason: the blur
+    // below is a CPU pass whose cost is linear in pixels, measured at 26 ms per
+    // megapixel on this machine. The desktop's own 3000x2000 picture is 155 ms,
+    // which is a blink at startup; a fifty-megapixel photograph would be more
+    // than a second of frozen window. `BACKDROP_MAX_SIDE` is set above 4K so
+    // that ordinary pictures — including the one shipped here — pass through
+    // untouched, and only genuinely enormous ones are brought down.
+    let max_side = (ctx.input(|i| i.max_texture_side) as u32).min(BACKDROP_MAX_SIDE);
     let longest_side = image.width().max(image.height());
     let image = if longest_side > max_side {
         // Scale both axes by the same factor so the picture isn't stretched.
@@ -8229,6 +8256,14 @@ fn set_background(ctx: &Context, dirs: &AppDirs, name: String) -> TextureHandle 
     } else {
         image
     };
+
+    // The same softening the phone gets, from the same dial, so the two look
+    // like one program. The radius is a fraction of the picture's own width —
+    // a pixel radius that reads on a 720-pixel crop is invisible across three
+    // thousand — and it is baked into the texture rather than done per frame,
+    // because this is a backdrop that changes once in a session.
+    let sigma = phone::LookDials { blur_percent, light_percent: 0 }.blur_for(image.width());
+    let image = if sigma >= 0.1 { image::imageops::blur(&image, sigma) } else { image };
 
     let size = [image.width() as usize, image.height() as usize];
 

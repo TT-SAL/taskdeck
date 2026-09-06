@@ -250,10 +250,15 @@ pub fn snapshot(
         notes: board.notes.clone(),
         // Only when there is something to be ignorant about.
         known: if board.subscriptions().iter().any(|s| s.enabled) { board.overlay().covers } else { None },
-        look: backdrop().map(|made| Look {
-            id: made.id.clone(),
-            aspect: BACKGROUND_WIDE as f32 / BACKGROUND_TALL as f32,
-            top: made.top.clone(),
+        look: backdrop().map(|made| {
+            let dials = look_dials();
+            Look {
+                id: made.id.clone(),
+                aspect: BACKGROUND_WIDE as f32 / BACKGROUND_TALL as f32,
+                top: made.top.clone(),
+                blur: dials.blur_percent,
+                light: dials.light_percent,
+            }
         }),
     }
 }
@@ -582,14 +587,16 @@ pub struct PhoneServer {
 }
 
 impl PhoneServer {
-    /// Bind `port` on `bind` — every interface by default (`DEFAULT_BIND`), or
+    /// Bind `port` on `bind` — this machine alone by default (`DEFAULT_BIND`), or
     /// the one address given — and start serving.
     ///
-    /// Every interface rather than the LAN one alone, because "the phone" is
-    /// sometimes on the LAN and sometimes on a Tailscale address, and the token
-    /// is what guards the door in both cases. Binding one address is the
-    /// narrower posture for a box that also sits on a network it should not
-    /// serve (`SERVER.md` §2).
+    /// Loopback is the default because a default should not be a decision
+    /// nobody made: the phone is sometimes on the LAN and sometimes on a
+    /// Tailscale address, and which of those the reader wants is something only
+    /// they know. Naming the address — `--bind 100.x.y.z`, or
+    /// `phone_bind_address` — opens exactly that one and no other, which is the
+    /// right posture for a box that also sits on a network it should not serve
+    /// (`SERVER.md` §2). The token still guards the door in every case.
     /// `version` is the board's, as it stands right now.
     ///
     /// It is a parameter rather than something the caller is trusted to publish
@@ -788,6 +795,21 @@ fn handle(
             Err(error) => json_error(error.status, &error.message),
             }
         }
+        // The two dials, turned from the phone. Kept in the config file so the
+        // desk agrees, and the picture is re-made from whichever source it
+        // came from — the phone's crop if there is one, the desk's if not.
+        (Method::Post, "/api/look") => match read_body(&mut request) {
+            Ok(body) => match serde_json::from_slice::<LookDialsWire>(&body) {
+                Ok(wire) => {
+                    set_look_dials(LookDials { blur_percent: wire.blur.min(100), light_percent: wire.light.min(100) });
+                    let kept = remember_dials(wire.blur.min(100), wire.light.min(100));
+                    let id = remake_backdrop();
+                    encoding.json(serde_json::json!({ "ok": true, "id": id, "kept": kept }))
+                }
+                Err(_) => json_error(400, "That is not a pair of dials."),
+            },
+            Err(error) => json_error(error.status, &error.message),
+        },
         (Method::Get, "/api/state") => match snapshot_command(&query) {
             Ok(command) => match ask(command, tx, wake) {
                 Ok(value) => encoding.json(value),
@@ -1278,32 +1300,52 @@ fn scaled_icon(side: u32) -> Option<Vec<u8>> {
 /// Decode cost scales with **megapixels, not bytes** — roughly 45 MP/s on a
 /// desk machine, eight to twenty times slower on an old phone in battery saver.
 /// The desktop's own 3000x2000 original is 6 MP and one to nearly three seconds
-/// per cold open. This is 0.12 MP.
-const BACKGROUND_TALL: u32 = 1170;
+/// per cold open. This is 1.12 MP.
+const BACKGROUND_TALL: u32 = 1560;
 /// Aspect the phone is cropped to: tall enough to cover a phone in portrait.
-const BACKGROUND_WIDE: u32 = 540;
-/// Blur radius, in pixels at the size above — a softening, not a frosting.
-/// The picture is served slightly wider than a phone's CSS width, so on screen
-/// this lands around two pixels: enough to settle the grain and let the eye
-/// fall on the text, not enough to stop it being a photograph.
+const BACKGROUND_WIDE: u32 = 720;
+/// How the two dials in the phone's Look sheet become the numbers below.
 ///
-/// It is applied here and never as a CSS `filter`, which would be GPU work on
-/// every frame; and it pays for itself twice, because blur removes exactly the
-/// high frequencies a codec spends most of its bytes on.
-const BACKGROUND_BLUR: f32 = 1.2;
+/// Blur is a **fraction of the picture's own width**, never a pixel radius: a
+/// radius that reads well on a 540-pixel crop is invisible on a 3000-pixel
+/// desktop picture, so one dial has to mean the same *look* at any size.
+#[derive(Debug, Clone, Copy)]
+pub struct LookDials {
+    pub blur_percent: u32,
+    pub light_percent: u32,
+}
+
+impl LookDials {
+    /// Blur radius in pixels for a picture this wide. The scale is chosen so
+    /// the default 11 lands near two pixels on screen at the size served:
+    /// enough to settle the grain and let the eye fall on the text, not enough
+    /// to stop it being a photograph.
+    ///
+    /// Applied here and never as a CSS `filter`, which would be GPU work on
+    /// every frame; and it pays for itself twice, because blur removes exactly
+    /// the high frequencies a codec spends most of its bytes on.
+    pub fn blur_for(&self, width: u32) -> f32 {
+        width as f32 * self.blur_percent.min(100) as f32 * 0.0002
+    }
+    /// The brightest the picture is allowed to get, as relative luminance at
+    /// the 99.9th percentile. The divisor puts the default 39 at 0.13, which is
+    /// where the smallest thing that ever sits on bare picture — 14px in
+    /// `--text #e8e6e1` — still has 4.5:1 against it. Turning the dial up past
+    /// that is the reader's own call, not a bug.
+    pub fn ceiling(&self) -> f32 {
+        (self.light_percent.min(100) as f32 / 300.0).max(0.01)
+    }
+}
+
 /// JPEG quality. Low, deliberately: this is a darkened backdrop, and the
 /// difference between 55 and 80 is invisible under a tint and costs a third
 /// more bytes on a link that is often mobile data.
 const BACKGROUND_QUALITY: u8 = 55;
-/// The brightest the picture is allowed to get, as relative luminance at the
-/// 99.9th percentile. Derived from the smallest thing that ever sits on bare
-/// picture — 14px in `--text #e8e6e1` — needing 4.5:1 against it.
-const BACKGROUND_CEILING: f32 = 0.13;
 /// AVIF quality and encoder speed. Speed is the encoder's own scale where 10 is
 /// fastest and worst; 4 is a compromise that keeps a one-off startup encode
 /// under a second on a laptop while giving up almost nothing. Quality is not
 /// the same scale as JPEG's — 70 here is visually well above JPEG 70.
-const AVIF_QUALITY: u8 = 70;
+const AVIF_QUALITY: u8 = 82;
 const AVIF_SPEED: u8 = 4;
 // Worth knowing before anyone tunes these: encoding one background at 540x1170
 // takes about 0.45s in a release build and nearly nine seconds in a debug one.
@@ -1342,13 +1384,11 @@ pub struct Backdrop {
 /// Read, crop, scale, darken, encode. `None` for anything unreadable — the
 /// phone then has no picture and every rule falls back to the flat ground.
 ///
-/// `tint` is the desktop's own `background_image_tint_percent`: how far toward
-/// black the picture is pulled so text can live on it. The phone needs more of
-/// it than a wall calendar does, because its type is 11 to 14px rather than a
-/// heading across a monitor, so the setting is taken as a floor.
-pub fn prepare_backdrop(path: &Path, tint: u32) -> Option<Backdrop> {
+/// `dials` are the two the phone owns: how soft the picture is and how light it
+/// may get. They live in the config, so the answer survives a restart.
+pub fn prepare_backdrop(path: &Path, dials: LookDials) -> Option<Backdrop> {
     let bytes = std::fs::read(path).ok()?;
-    prepare_backdrop_bytes(&bytes, tint)
+    prepare_backdrop_bytes(&bytes, dials)
 }
 
 /// Most an uploaded picture may weigh. The phone crops before it sends, so what
@@ -1361,7 +1401,7 @@ pub const MAX_UPLOAD_BYTES: usize = 6 * 1024 * 1024;
 const MAX_UPLOAD_PIXELS: u64 = 40 * 1_000_000;
 
 /// The same, from bytes that came off the wire.
-pub fn prepare_backdrop_bytes(bytes: &[u8], tint: u32) -> Option<Backdrop> {
+pub fn prepare_backdrop_bytes(bytes: &[u8], dials: LookDials) -> Option<Backdrop> {
     use image::imageops::FilterType;
     if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
         return None;
@@ -1392,7 +1432,7 @@ pub fn prepare_backdrop_bytes(bytes: &[u8], tint: u32) -> Option<Backdrop> {
     // Blurred before the tone-map, so the darkening solves against what will
     // actually be on screen: a blur moves the bright pixels around, and
     // measuring the peak before it would aim at a picture that no longer exists.
-    let small = image::DynamicImage::ImageRgb8(image::imageops::blur(&small.into_rgb8(), BACKGROUND_BLUR));
+    let small = image::DynamicImage::ImageRgb8(image::imageops::blur(&small.into_rgb8(), dials.blur_for(BACKGROUND_WIDE)));
 
     // Darken — and *solve* for how much rather than guessing it.
     //
@@ -1422,11 +1462,11 @@ pub fn prepare_backdrop_bytes(bytes: &[u8], tint: u32) -> Option<Backdrop> {
     let mut luminances: Vec<f32> = shaped.iter().map(|c| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]).collect();
     luminances.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let brightest = luminances.get((luminances.len() as f32 * 0.999) as usize).copied().unwrap_or(1.0);
-    // The desktop's own tint is a floor on the darkening, never a ceiling: the
-    // phone's type is 11 to 14px where a wall calendar's is a heading, so it
-    // may need to go darker than the desk asked for, and never lighter.
-    let from_tint = (100u32.saturating_sub(tint.clamp(0, 100)) as f32 / 100.0).clamp(0.10, 1.0);
-    let mut scale = (BACKGROUND_CEILING / brightest.max(1e-6)).min(from_tint).min(1.0);
+    // Only ever a darkening. The phone's type is 11 to 14px where a wall
+    // calendar's is a heading, so a picture that is already dark enough is left
+    // where it is rather than lifted to meet the ceiling.
+    let ceiling = dials.ceiling();
+    let mut scale = (ceiling / brightest.max(1e-6)).min(1.0);
 
     // JPEG ringing pushes highlights back up, so the answer is checked against
     // what actually comes out of the encoder and corrected. It converges in a
@@ -1450,10 +1490,10 @@ pub fn prepare_backdrop_bytes(bytes: &[u8], tint: u32) -> Option<Backdrop> {
             .collect();
         got.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let peak = got.get((got.len() as f32 * 0.999) as usize).copied().unwrap_or(1.0);
-        if peak <= BACKGROUND_CEILING {
+        if peak <= ceiling {
             break;
         }
-        scale *= (BACKGROUND_CEILING / peak) * 0.99;
+        scale *= (ceiling / peak) * 0.99;
     }
 
     // The average of the top eighth, for the browser's own theme colour, so the
@@ -1511,10 +1551,26 @@ static BACKDROP_HOME: OnceLock<BackdropHome> = OnceLock::new();
 
 struct BackdropHome {
     data_dir: std::path::PathBuf,
+    /// Where the dials are kept, so a change from the phone survives a restart.
+    config_file: std::path::PathBuf,
     /// The desk's own picture, which is what "use the desk's" goes back to.
     /// `None` when the desk has none set, and then clearing leaves no picture.
     desk: Option<std::path::PathBuf>,
-    tint: u32,
+}
+
+/// The two dials, turned from the phone and kept in the config file. These are
+/// only what stands before the config is read; `set_backdrop_home` replaces
+/// them at startup with what the file says.
+static LOOK: Mutex<LookDials> = Mutex::new(LookDials {
+    blur_percent: crate::initialization::BACKGROUND_BLUR_DEFAULT,
+    light_percent: crate::initialization::BACKGROUND_LIGHT_DEFAULT,
+});
+
+pub fn look_dials() -> LookDials {
+    *LOOK.lock().unwrap_or_else(|held| held.into_inner())
+}
+pub fn set_look_dials(dials: LookDials) {
+    *LOOK.lock().unwrap_or_else(|held| held.into_inner()) = dials;
 }
 /// The file an uploaded crop is kept in, beside the board's own files. The
 /// bytes are the phone's crop exactly as it sent them, not the prepared
@@ -1529,8 +1585,26 @@ pub fn backdrop() -> Option<Arc<Backdrop>> {
 }
 /// Tell the server where an uploaded picture lives, what to fall back to, and
 /// how dark to make either.
-pub fn set_backdrop_home(data_dir: std::path::PathBuf, desk: Option<std::path::PathBuf>, tint: u32) {
-    let _ = BACKDROP_HOME.set(BackdropHome { data_dir, desk, tint });
+pub fn set_backdrop_home(
+    data_dir: std::path::PathBuf,
+    config_file: std::path::PathBuf,
+    desk: Option<std::path::PathBuf>,
+    dials: LookDials,
+) {
+    set_look_dials(dials);
+    let _ = BACKDROP_HOME.set(BackdropHome { data_dir, config_file, desk });
+}
+
+/// Re-make the picture with whatever the dials now say, from the crop the phone
+/// sent if there is one and the desk's own if not.
+pub fn remake_backdrop() -> Option<String> {
+    let home = BACKDROP_HOME.get()?;
+    let uploaded = home.data_dir.join(BACKGROUND_FILE);
+    let source = if uploaded.exists() { Some(uploaded) } else { home.desk.clone() };
+    let made = source.and_then(|picture| prepare_backdrop(&picture, look_dials()));
+    let id = made.as_ref().map(|ready| ready.id.clone());
+    set_backdrop(made);
+    id
 }
 
 /// Take a picture the phone sent: prepare it, write the crop down so a restart
@@ -1549,12 +1623,12 @@ fn adopt_background(body: &[u8]) -> Result<Option<String>, String> {
         // Not "no picture": back to whatever the desk is showing, which is what
         // the button offering this says.
         let _ = std::fs::remove_file(home.data_dir.join(BACKGROUND_FILE));
-        let back = home.desk.as_ref().and_then(|picture| prepare_backdrop(picture, home.tint));
+        let back = home.desk.as_ref().and_then(|picture| prepare_backdrop(picture, look_dials()));
         let id = back.as_ref().map(|made| made.id.clone());
         set_backdrop(back);
         return Ok(id);
     }
-    let made = prepare_backdrop_bytes(body, home.tint)
+    let made = prepare_backdrop_bytes(body, look_dials())
         .ok_or_else(|| "That file is not a picture this can read.".to_string())?;
     // Written the way every other file here is: a temp file, fsynced, renamed.
     // A half-written background would be read as a broken one at the next start.
@@ -1563,6 +1637,22 @@ fn adopt_background(body: &[u8]) -> Result<Option<String>, String> {
     let id = made.id.clone();
     set_backdrop(Some(made));
     Ok(Some(id))
+}
+
+#[derive(serde::Deserialize)]
+struct LookDialsWire {
+    blur: u32,
+    light: u32,
+}
+
+/// Write the dials into the config file, so they survive a restart and the desk
+/// reads the same numbers. `false` if it could not be written — the picture
+/// still changes for this run, which is the honest half of the outcome.
+fn remember_dials(blur: u32, light: u32) -> bool {
+    let Some(home) = BACKDROP_HOME.get() else { return false };
+    let file = home.config_file.clone();
+    crate::initialization::write_config_value(&file, "background_blur_percent", blur as i64).is_ok()
+        && crate::initialization::write_config_value(&file, "background_light_percent", light as i64).is_ok()
 }
 
 fn write_bytes_atomically(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
@@ -1872,6 +1962,10 @@ pub struct Look {
     pub id: String,
     pub aspect: f32,
     pub top: String,
+    /// Where the two dials stand, so the sliders open on the truth rather than
+    /// on a default that may be nothing like the picture on screen.
+    pub blur: u32,
+    pub light: u32,
 }
 
 /// One recent archive row, with what the ledger says about it.
@@ -2734,6 +2828,72 @@ mod tests {
         }
     }
 
+    /// Relative luminance at the 99.9th percentile — the brightest the picture
+    /// gets once one-in-a-thousand outliers are set aside.
+    fn brightest(picture: &image::DynamicImage) -> f32 {
+        let mut ys: Vec<f32> = picture.to_rgb8().pixels().map(|p| {
+            0.2126 * to_linear(p[0]) + 0.7152 * to_linear(p[1]) + 0.0722 * to_linear(p[2])
+        }).collect();
+        ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        ys[(ys.len() as f32 * 0.999) as usize]
+    }
+
+    /// Mean absolute difference between neighbouring pixels: high on a sharp
+    /// picture, low on a blurred one. The cheapest honest measure of softness.
+    fn detail(picture: &image::DynamicImage) -> f32 {
+        let rgb = picture.to_rgb8();
+        let (w, h) = rgb.dimensions();
+        let raw = rgb.as_raw();
+        let mut sum = 0.0f64;
+        for y in 0..h as usize {
+            let row = y * w as usize * 3;
+            for i in 3..w as usize * 3 {
+                sum += (raw[row + i] as f64 - raw[row + i - 3] as f64).abs();
+            }
+        }
+        (sum / (h as f64 * (w - 1) as f64 * 3.0)) as f32
+    }
+
+    /// The dial-to-number mapping, which is the whole contract the phone sees.
+    #[test]
+    fn the_dials_map_to_numbers_that_mean_the_same_look_at_any_size() {
+        let soft = LookDials { blur_percent: 40, light_percent: 39 };
+        let sharp = LookDials { blur_percent: 0, light_percent: 39 };
+        assert_eq!(sharp.blur_for(720), 0.0, "blur 0 is no blur, not a little blur");
+        // Blur is a fraction of width, so the same dial is the same look on a
+        // phone crop and on a desktop picture five times its size.
+        assert!((soft.blur_for(3600) / soft.blur_for(720) - 5.0).abs() < 1e-4);
+
+        // Brightness is a ceiling, so up means lighter, and the bottom of the
+        // dial still leaves a picture rather than a black rectangle.
+        let dim = LookDials { blur_percent: 11, light_percent: 15 };
+        let bright = LookDials { blur_percent: 11, light_percent: 80 };
+        assert!(bright.ceiling() > dim.ceiling() * 2.0);
+        assert!(dim.ceiling() >= 0.01);
+        // A dial that arrives out of range is clamped, never wrapped.
+        assert_eq!(LookDials { blur_percent: 900, light_percent: 900 }.ceiling(),
+                   LookDials { blur_percent: 100, light_percent: 100 }.ceiling());
+    }
+
+    /// Blur is the one dial whose effect nothing else in the suite would catch:
+    /// wire it to zero and every other assertion still passes. So it is checked
+    /// where it actually lands, on the pixels that get sent.
+    #[test]
+    fn turning_the_blur_dial_up_softens_the_picture_that_is_sent() {
+        let source = std::path::Path::new("images/pexels-francesco-ungaro-1525041.jpg");
+        if !source.exists() {
+            return; // No picture in this checkout; nothing to assert.
+        }
+        let at = |blur| {
+            let made = prepare_backdrop(source, LookDials { blur_percent: blur, light_percent: 39 })
+                .expect("the picture is readable");
+            image::load_from_memory(&made.jpeg).expect("a jpeg comes out")
+        };
+        let sharp = detail(&at(0));
+        let soft = detail(&at(45));
+        assert!(soft < sharp * 0.6, "blur 45 left {soft} detail against {sharp} at blur 0");
+    }
+
     #[test]
     fn a_backdrop_is_cropped_scaled_and_darkened_enough_to_put_text_on() {
         // Runs the real pipeline over the repository's own picture, which is
@@ -2743,30 +2903,26 @@ mod tests {
         if !source.exists() {
             return; // No picture in this checkout; nothing to assert.
         }
-        let made = prepare_backdrop(source, 30).expect("the picture is readable");
+        let dials = LookDials {
+            blur_percent: crate::initialization::BACKGROUND_BLUR_DEFAULT,
+            light_percent: crate::initialization::BACKGROUND_LIGHT_DEFAULT,
+        };
+        let made = prepare_backdrop(source, dials).expect("the picture is readable");
         let decoded = image::load_from_memory(&made.jpeg).expect("a jpeg comes out");
         assert_eq!((decoded.width(), decoded.height()), (BACKGROUND_WIDE, BACKGROUND_TALL));
         let sent = made.avif.as_ref().unwrap_or(&made.jpeg);
         assert!(sent.len() < 90_000, "{} bytes is too much to send", sent.len());
         assert_eq!(made.id.len(), 16, "the id is a content hash, so the URL can be immutable");
 
-        // The point of the tint: nothing bright enough to swallow text should
-        // survive. Checked at the 99.9th percentile, because one blown pixel is
-        // where a room name goes to die.
-        let mut ys: Vec<f32> = decoded
-            .to_rgb8()
-            .pixels()
-            .map(|p| {
-                let lin = |v: u8| {
-                    let c = v as f32 / 255.0;
-                    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
-                };
-                0.2126 * lin(p[0]) + 0.7152 * lin(p[1]) + 0.0722 * lin(p[2])
-            })
-            .collect();
-        ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let p999 = ys[(ys.len() as f32 * 0.999) as usize];
-        assert!(p999 <= 0.16, "brightest pixels are {p999}, too bright to put 14px text on");
+        // The point of the darkening: nothing bright enough to swallow text
+        // should survive. Checked at the 99.9th percentile, because one blown
+        // pixel is where a room name goes to die.
+        let p999 = brightest(&decoded);
+        let ceiling = dials.ceiling();
+        assert!(
+            p999 <= ceiling * 1.25,
+            "brightest pixels are {p999}, over the {ceiling} the dial asked for"
+        );
     }
 
     fn headers(pairs: &[(&str, &str)]) -> Vec<Header> {

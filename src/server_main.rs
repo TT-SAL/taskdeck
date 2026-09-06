@@ -35,9 +35,10 @@ USAGE
 The data directory is resolved like the desktop app's: $TASKDECK_HOME if set,
 otherwise next to the executable, otherwise the per-user data directory.
 `phone_server_port`, `phone_bind_address` and `phone_token` are read from
-userconfig.toml there; --port and --bind override the first two for this run
-(--bind 100.x.y.z serves the tailnet alone; the default 0.0.0.0 is every
-interface). The token is minted on first start.
+userconfig.toml there; --port and --bind override the first two for this run.
+The default is 127.0.0.1, which no phone can reach: name the address you mean.
+--bind 100.x.y.z serves the tailnet alone, --bind 0.0.0.0 every interface.
+The token is minted on first start.
 --print-link shows the phone links, the data directory and the time zone, then
 exits, and draws the first link as a QR code when a terminal is watching — for
 checking a setup, or for a link when the service is already running; it reads
@@ -259,15 +260,19 @@ fn main() {
     // ask for it: a decode, a crop, a resize and up to four JPEG encodes is not
     // work that may land on a request.
     // Where an uploaded crop is kept, and how dark to prepare anything with.
+    let dials = phone::LookDials {
+        blur_percent: config.background_blur_percent,
+        light_percent: config.background_light_percent,
+    };
     let desk_picture = Some(config.background.trim())
         .filter(|name| !name.is_empty())
         .map(|name| dirs.images.join(name));
-    phone::set_backdrop_home(dirs.data.clone(), desk_picture.clone(), config.background_image_tint_percent);
+    phone::set_backdrop_home(dirs.data.clone(), dirs.config_file(), desk_picture.clone(), dials);
     // A picture sent from the phone wins over the desk's own: it was cropped
     // for this screen by the person looking at it.
     let uploaded = dirs.data.join(phone::BACKGROUND_FILE);
     if uploaded.exists() {
-        let made = phone::prepare_backdrop(&uploaded, config.background_image_tint_percent);
+        let made = phone::prepare_backdrop(&uploaded, dials);
         match &made {
             Some(ready) => eprintln!(
                 "  picture:     the one sent from the phone → {} KB for it",
@@ -277,7 +282,7 @@ fn main() {
         }
         phone::set_backdrop(made);
     } else if let Some(picture) = desk_picture {
-        let made = phone::prepare_backdrop(&picture, config.background_image_tint_percent);
+        let made = phone::prepare_backdrop(&picture, dials);
         match &made {
             Some(ready) => eprintln!(
                 "  picture:     {} → {} KB{} for the phone",
@@ -332,6 +337,18 @@ fn main() {
             "  listening:   every interface — including any untrusted network this machine joins.\n\
              \x20              Set `phone_bind_address = \"127.0.0.1\"` in userconfig.toml if the\n\
              \x20              phone reaches this through `tailscale serve`, which is the usual case."
+        );
+    } else if bind == phone::DEFAULT_BIND {
+        // The other half of the same duty, and the one that actually bit: bound
+        // to loopback the server comes up perfectly, answers every local
+        // request, and is unreachable from the phone. Nothing else in the
+        // system says so — the phone just keeps showing its cached week — so
+        // the only place it can be said is here, at the moment it happens.
+        eprintln!(
+            "  listening:   this machine only. No phone can reach it as it stands.\n\
+             \x20              That is right if `tailscale serve` is in front of it (SERVER.md §3);\n\
+             \x20              otherwise set `phone_bind_address` to this machine's tailnet address\n\
+             \x20              (100.x.y.z) in userconfig.toml and start again."
         );
     }
     // The zone the phone's day is drawn in. Said out loud because getting it

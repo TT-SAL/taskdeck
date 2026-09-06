@@ -140,6 +140,10 @@ pub const DESIGN_WIDTH_POINTS: f32 = 1920.0;
 /// `ui_scale_percent = 0` means "fit the layout to the window automatically".
 /// Any other value is an explicit scale the user picked.
 pub const UI_SCALE_AUTO: u32 = 0;
+/// Default blur: a fraction of the picture's width, gentle.
+pub const BACKGROUND_BLUR_DEFAULT: u32 = 11;
+/// Default lightness ceiling for the phone, where text sits on the picture.
+pub const BACKGROUND_LIGHT_DEFAULT: u32 = 39;
 /// Bounds for an explicit `ui_scale_percent`, and for the automatic fit. The
 /// lower bound keeps text legible in a small window; the upper bound is 100%
 /// because the layout is tuned at that size and nothing is gained by magnifying
@@ -305,6 +309,16 @@ fn config_from(extracted: &HashMap<String, String>) -> Config {
             .get("phone_token")
             .map(|s| s.trim().to_string())
             .unwrap_or_default(),
+        background_blur_percent: extracted
+            .get("background_blur_percent")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(BACKGROUND_BLUR_DEFAULT)
+            .min(100),
+        background_light_percent: extracted
+            .get("background_light_percent")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(BACKGROUND_LIGHT_DEFAULT)
+            .min(100),
         phone_bind_address: extracted
             .get("phone_bind_address")
             .map(|s| clean_bind_address(s))
@@ -387,6 +401,8 @@ fn write_normalized_config(path: &Path, config: &Config) {
     doc["selected_monitor_name"] = value(config.selected_monitor_name.clone());
     doc["selected_colorscheme_id"] = value(config.selected_colorscheme_id as i64);
     doc["three_day_weather"] = value(config.three_day_weather);
+    doc["background_blur_percent"] = value(config.background_blur_percent as i64);
+    doc["background_light_percent"] = value(config.background_light_percent as i64);
     doc["background_image_tint_percent"] = value(config.background_image_tint_percent as i64);
     doc["ui_scale_percent"] = value(config.ui_scale_percent as i64);
     doc["phone_server_enabled"] = value(config.phone_server_enabled);
@@ -413,6 +429,19 @@ pub struct Config {
     pub selected_colorscheme_id: u32,
     pub three_day_weather: bool,
     pub background_image_tint_percent: u32,
+    /// How blurred the background is, on a 0–100 dial, on both surfaces.
+    ///
+    /// Not a pixel radius: a radius that reads well on a 720-pixel phone crop
+    /// is invisible on a 3000-pixel desktop picture. This is a fraction of the
+    /// picture's own width, so one number means the same *look* at any size.
+    pub background_blur_percent: u32,
+    /// How bright the phone is allowed to let the picture get, on a 0–100 dial.
+    ///
+    /// The phone solves its darkening against a ceiling on relative luminance,
+    /// because text sits directly on the picture there; this is that ceiling.
+    /// The desktop's own `background_image_tint_percent` is a different control
+    /// for a different problem — a wall calendar's type is a heading.
+    pub background_light_percent: u32,
     /// Percentage the whole UI is scaled by, or `UI_SCALE_AUTO` (0) to fit the
     /// layout to the window automatically.
     pub ui_scale_percent: u32,
@@ -1119,6 +1148,8 @@ mod tests {
             selected_colorscheme_id: 3,
             three_day_weather: true,
             background_image_tint_percent: 30,
+            background_blur_percent: BACKGROUND_BLUR_DEFAULT,
+            background_light_percent: BACKGROUND_LIGHT_DEFAULT,
             ui_scale_percent: UI_SCALE_AUTO,
             phone_server_enabled: false,
             phone_server_port: crate::phone::DEFAULT_PORT,

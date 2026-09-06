@@ -783,7 +783,19 @@ nothing at all near the pole, and the flat comparison also breaks completely at 
 - **`set_background`** (in `ui.rs`) shrinks a picture whose longest side exceeds
   `max_texture_side` (uniformly, so it isn't stretched) before uploading it.
   `Context::load_texture` *panics* on an oversized image, and this is a full-window backdrop —
-  detail beyond the GPU limit isn't visible anyway.
+  detail beyond the GPU limit isn't visible anyway. A second cap, `BACKDROP_MAX_SIDE` (4608),
+  sits under the GPU's for a different reason: the blur below is a CPU pass costing about
+  **26 ms per megapixel**, so the shipped 3000×2000 picture is 155 ms of startup and a
+  fifty-megapixel photograph would be well over a second of frozen window. The cap is set above
+  4K on purpose — a picture the window can actually show never meets it.
+- **The desktop blurs its backdrop from the same dial the phone turns.** `background_blur_percent`
+  is read as a fraction of the picture's own width (`phone::LookDials::blur_for`), so one number
+  means the same *look* on a 720-pixel phone crop and a 3000-pixel wall picture, and the two
+  surfaces look like one program. It is baked into the texture once rather than done per frame,
+  because a backdrop changes at most a few times in a session. The **other** half of the phone's
+  pipeline — AVIF, and the scale down to 1.12 MP — deliberately does *not* cross over: both are
+  transfer optimisations for a picture crossing a link, and the desktop reads its picture off the
+  local disk straight into a GPU texture. Encoding it smaller would cost quality and buy nothing.
 
 ---
 
@@ -807,13 +819,15 @@ existing comments, key order, and unknown keys** and writes each value with its 
 | `window_size_startup` | `[f32; 2]` | `[1280, 720]` | rejected if either dim `< 200` |
 | `calendar_weeks_to_show` | usize | `100` | clamped `CALENDAR_WEEKS_MIN..=MAX` (`6..=520`, ~10 years) |
 | `background_image_tint_percent` | u32 | `30` | clamped `1..=100` |
+| `background_blur_percent` | u32 | `11` | clamped `0..=100`; a fraction of the picture's width, not a pixel radius, so it means the same on both surfaces. Turned from the phone's Look sheet (§23) and applied to the desktop backdrop too |
+| `background_light_percent` | u32 | `39` | clamped `0..=100`; the ceiling the phone's darkening solves against (`39` → 0.13 relative luminance, where 14px text still clears 4.5:1). Phone only — the desktop has `background_image_tint_percent` |
 | `selected_monitor_name` | string | `""` | matched against `available_monitors()`; Settings shows "No monitors detected" (no crash) if the list is empty |
 | `selected_colorscheme_id` | u32 | `0` | clamped `0..=200000` |
 | `three_day_weather` | bool | `false` | |
 | `ui_scale_percent` | u32 | `0` (automatic) | `0` = fit to window, else clamped `UI_SCALE_MIN..=MAX` (`40..=100`) |
 | `phone_server_enabled` | bool | `false` | serve the phone view (§21) while the app runs |
 | `phone_server_port` | u16 | `7373` | `phone::PORT_MIN` (1024) or above; anything else falls back to the default |
-| `phone_bind_address` | string | `"0.0.0.0"` | an IP address (trimmed) to listen on alone; anything that is not one falls back to every interface (§21.7). File only — not on the settings sheet — and read at start: a change takes effect at the next start |
+| `phone_bind_address` | string | `"127.0.0.1"` | an IP address (trimmed) to listen on alone; anything that is not one falls back to this machine alone (§21.7). **The default reaches no phone** — `100.x.y.z` serves the tailnet, `0.0.0.0` every interface. File only — not on the settings sheet — and read at start: a change takes effect at the next start |
 | `phone_token` | string | `""` → minted | the key in the phone's link; `main` mints one on the first start and keeps it. **A credential**: anyone holding the link can edit the calendar |
 | `frame_cap_fps` | u32 | `0` (uncapped) | `0` = the uncapped loop of §14.1, else clamped `FRAME_CAP_MIN..=MAX` (`15..=360`) |
 | `server_url` | string | `""` | a `taskdeck-server` to keep the board on, `http://host:port`; empty means the board lives here (§22) |
@@ -2241,7 +2255,7 @@ read-only case when it is not.
 
 ### 21.2 Threads: the weather pattern, again
 
-`PhoneServer::start` binds `0.0.0.0:<port>` with `tiny_http` and spawns two plain worker
+`PhoneServer::start` binds `<phone_bind_address>:<port>` with `tiny_http` and spawns two plain worker
 threads (and a third for the long poll, below). A worker never touches `TaskApp`. Per request it
 parses a `Command`, sends `PhoneRequest { command, reply }` down a channel, calls the `Wake` it
 was given — on the desktop a closure around the same `EventLoopProxy` the weather thread uses, on
@@ -2431,15 +2445,17 @@ date spine since it was written and runs its whole planner in monospace; the pho
 up, and `ui-monospace` is a system face that costs nothing.
 
 **The picture behind it.** The desk's own background image, cropped to a phone's shape, scaled to
-540×1170, softened, darkened, and served from `/bg-<hash>.jpg` in **AVIF or JPEG, chosen by the
+720×1560, softened, darkened, and served from `/bg-<hash>.jpg` in **AVIF or JPEG, chosen by the
 request's own `Accept`** with `Vary: Accept` so no cache hands an AVIF to something that cannot read
 one. Both are encoded once at startup, which costs about a second of boot and never a request.
 
 AVIF is what buys the resolution back. Measured on the real picture it is 38% smaller than JPEG on a
-sharp image and 55% smaller on a softened one, so the same 21 KB that bought a 240×520 mush buys
-540×1170: **927 KB and 6 MP become 21.5 KB and 0.63 MP**, against 47 KB for the JPEG fallback of the
-identical picture. Firefox for Android has read AVIF since 93; the JPEG is not a nicety, because a
-client that says nothing in its `Accept` still gets a picture.
+sharp image and 55% smaller on a softened one, so **927 KB and 6 MP become 34.2 KB and 1.12 MP**,
+against 70.3 KB for the JPEG fallback of the identical picture. The size has been walked up twice:
+240×520 was small enough to look like mush, 540×1170 at 21.5 KB was the first that did not, and
+720×1560 is where it sits now — thirteen more kilobytes for nearly double the pixels. Firefox for
+Android has read AVIF since 93; the JPEG is not a nicety, because a client that says nothing in its
+`Accept` still gets a picture.
 
 Decode cost scales with **megapixels, not bytes** — about 45 MP/s on a desk machine and eight to
 twenty times slower on an old phone in battery saver — so the 3000×2000 original would be one to
@@ -2449,13 +2465,27 @@ is `no-store` — and the hash is taken from the JPEG alone on purpose, so a cli
 codec it accepts is not sent to a different URL for the same image. It sits behind the token,
 because a personal photograph is a stronger reason to ask for the key than the app's own icon was.
 
+**Two dials, turned from the phone.** Tray → **Look** carries a *Blur* and a *Brightness* slider
+(`POST /api/look`, `LookDials`), and both are written straight into `userconfig.toml`, so an answer
+found on the sofa survives a restart and is what the desktop reads next time it starts. They are
+sent on the slider's `change`, not its `input`, because every turn re-encodes the picture and a drag
+would otherwise queue thirty encodes. Blur is stored as a **fraction of the picture's own width**
+rather than a pixel radius: a radius that reads well on a 720-pixel crop is invisible across three
+thousand, so one dial has to mean the same *look* at either size — which is what lets the desktop
+share it. Brightness is the ceiling the darkening below solves against; the default 39 puts it at
+0.13, which is where 14px `--text` still clears 4.5:1 against the picture. Turning it higher is the
+reader's own call, and the number is clamped, never wrapped.
+
 **The picture can be chosen from the phone.** Tray → **Look**: pick a file, drag and pinch it into a
 frame that is the shape of the screen it will fill, and Save. The crop happens on the phone because
 only the person holding it knows which part of a picture they want behind their week — and because
 sending the crop rather than the original means a twelve-megapixel photograph never crosses the
 link. The picture is moved with a CSS transform on an `<img>` rather than redrawn on a canvas per
 frame, since a transform is composited and a redraw is not; the canvas is touched exactly once, on
-Save, to rasterise the frame's contents at the size the server serves. The frame's height is set and
+Save, to rasterise the frame's contents at **one and a half times** the size the server serves —
+sending it at exactly that size would leave the canvas's own bilinear draw as the only resample in
+the chain, where sending it larger lets the server's Lanczos filter do the downscale, which is
+sharper and quieter for a few hundred kilobytes on a link that is a house away. The frame's height is set and
 its width derived, never `max-height` over `width: 100%` — that clamps the box and quietly breaks
 the aspect, and a preview whose shape does not match the result is worse than no preview.
 
@@ -2481,9 +2511,9 @@ luminance — one blown pixel is where a room name goes to die. A highlight roll
 leaves the shadows almost untouched and crushes the top end, then one scale factor lands the peak on
 the ceiling; since luminance is a linear combination of linear channels, that factor is arithmetic
 rather than a search. It is then checked against what actually comes out of the JPEG encoder, whose
-ringing pushes highlights back up, and corrected. The desk's own `background_image_tint_percent` is
-a **floor** on the darkening and never a ceiling: the phone's type is 11 to 14px where a wall
-calendar's is a heading, so it may need to go darker than the desk asked and never lighter.
+ringing pushes highlights back up, and corrected. It is only ever a *darkening*: a picture already
+below the ceiling is left where it is rather than lifted to meet it, because the phone's type is 11
+to 14px where a wall calendar's is a heading and there is no reading to be gained by brightening.
 
 **Text is made legible by a halo on the glyphs, not by a card under them.** A card is the obvious
 way to put text on a photograph and also the way to hide the photograph. Instead the text carries a
@@ -2722,13 +2752,16 @@ encrypted end to end, so plain HTTP inside the tunnel is fine and the TLS-certif
 never comes up. The link is the key — the sheet says to share it like a password — and it should
 not be port-forwarded to the open internet.
 
-The server binds every interface by default (`phone_bind_address = "0.0.0.0"`), because the phone
-is sometimes on the LAN and sometimes on the tailnet and the token guards the door either way.
-Setting the key to one address in `userconfig.toml` — the Tailscale one, say — binds that address
-alone; the links shown are then for that address only (`phone::addresses_for`). A key that is not
-an address falls back to every interface rather than to no phone view at all. There is no control
-for it on the sheet: it is a posture decided once, in the file, read at start — a change there
-takes effect at the next start, like the server fields (§22.3).
+**The server binds this machine alone by default (`phone_bind_address = "127.0.0.1"`), which no
+phone can reach.** That is deliberate: which network the reader wants to serve is not something a
+default can guess, and the failure mode of guessing *wide* is a port on the café or campus network
+the laptop joined, while the failure mode of guessing *narrow* is a phone that says it cannot
+connect. Setting the key to one address in `userconfig.toml` — the Tailscale one, `100.x.y.z` —
+binds that address alone, and the links shown are then for that address only
+(`phone::addresses_for`); `0.0.0.0` opens every interface, and the startup banner says so out loud
+when it does. A key that is not an address falls back to the default rather than to something
+wider. There is no control for it on the sheet: it is a posture decided once, in the file, read at
+start — a change there takes effect at the next start, like the server fields (§22.3).
 
 ### 21.8 What this deliberately does not do
 
@@ -2859,6 +2892,15 @@ With `server_url` and `server_token` set, the desktop's board is a **replica**:
   before there is a window, and a restart answers "what happens to the edits in between" honestly
   — the outbox goes with you: on the way out (quit, or the restart button) the engine files what
   it still holds and stops before the process ends (`SyncHandle::shutdown`).
+
+**`phone_server_enabled` is independent of `server_url`, and that is worth knowing.** A desktop
+that is a client of a server will still start *its own* phone view when the toggle is on — serving
+its replica, on its own port, behind its own token. The data is the same board, so nothing breaks,
+but there are then two phone links in the house that look alike and are not interchangeable, and
+two doors where one was intended. The pairing that was designed for is: the server serves the
+phone, and the desktop is a client with **Settings → PHONE off**. The other way round is left
+possible rather than blocked, because a laptop that keeps serving its phone view while the server
+is down is a reasonable thing to want.
 
 ### 22.4 Offline, and why it is safe
 

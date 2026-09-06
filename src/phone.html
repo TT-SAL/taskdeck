@@ -481,7 +481,7 @@
      not match the result is worse than no preview. */
   .cropframe {
     position: relative; overflow: hidden; touch-action: none;
-    height: 44vh; aspect-ratio: 540 / 1170; width: auto;
+    height: 44vh; aspect-ratio: 720 / 1560; width: auto;
     margin: 4px auto 10px; border-radius: var(--r-m);
     background: var(--plate-2); background-image:
       linear-gradient(45deg, rgba(255,255,255,0.03) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.03) 75%),
@@ -490,6 +490,12 @@
   }
   .cropimg { position: absolute; left: 50%; top: 50%; transform-origin: 50% 50%; max-width: none; user-select: none; -webkit-user-drag: none; }
   .cropedge { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 1px var(--edge-2); border-radius: var(--r-m); }
+
+  .dial { margin-bottom: 14px; }
+  .dial input[type=range] { width: 100%; margin: 2px 0 0; accent-color: var(--today); }
+  .diallabel { display: flex; align-items: baseline; justify-content: space-between; font-size: 14px; font-weight: 600; }
+  .dialval { color: var(--muted); font-size: 12px; font-weight: 400; }
+  .dialhint { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
   /* ── Sheets ── */
   .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.68); z-index: 8; }
@@ -2652,7 +2658,12 @@
    * and this has to be smooth on a phone that struggles. The canvas is touched
    * exactly once, on Save.
    */
-  const CROP_W = 540, CROP_H = 1170;
+  // One and a half times the 720x1560 the server serves. Sending it at exactly
+  // the served size would mean the only resample in the whole chain is this
+  // canvas's own bilinear draw; sending it larger lets the server's Lanczos
+  // filter do the downscale, which is sharper and quieter than bilinear, and
+  // costs a few hundred kilobytes on a link that is a house away.
+  const CROP_W = 1080, CROP_H = 2340;
 
   function renderLookSheet(sheet) {
     sheet.append(el('h2', { text: 'Background' }));
@@ -2754,6 +2765,37 @@
       el('button', { text: 'Choose picture…', onclick: () => file.click() }),
       save,
     ]));
+    // The two dials. They act on the picture already on the server, so they
+    // work whether it came from here or from the desk — and they are sent on
+    // release rather than per step, because each one re-encodes the picture.
+    const look = (state.snap && state.snap.look) || { blur: 11, light: 39 };
+    const dials = { blur: look.blur, light: look.light };
+    const dialRow = (label, key, hint) => {
+      const out = el('output', { class: 'dialval mono', text: String(dials[key]) });
+      const slider = el('input', {
+        type: 'range', min: '0', max: '100', step: '1', value: String(dials[key]),
+        'aria-label': label,
+      });
+      const send = async () => {
+        out.textContent = String(dials[key]);
+        try {
+          await api('/api/look', { method: 'POST', body: JSON.stringify(dials) });
+          await load({ quiet: true });
+        } catch (error) { toast(error.message); }
+      };
+      slider.addEventListener('input', () => { dials[key] = Number(slider.value); out.textContent = slider.value; });
+      slider.addEventListener('change', send);
+      return el('div', { class: 'dial' }, [
+        el('div', { class: 'diallabel' }, [el('span', { text: label }), out]),
+        slider,
+        el('div', { class: 'dialhint', text: hint }),
+      ]);
+    };
+    sheet.append(el('div', { class: 'section' }, [
+      dialRow('Blur', 'blur', 'Softens the picture so the words come forward.'),
+      dialRow('Brightness', 'light', 'How light the picture may get. Lower is easier to read on.'),
+    ]));
+
     sheet.append(el('div', { class: 'section actions' }, [
       el('button', { text: 'Use the desk\u2019s picture', onclick: async () => {
         hint.textContent = 'Clearing…';
@@ -2770,7 +2812,7 @@
     ]));
   }
 
-  // The one moment a canvas is touched: the frame's contents, redrawn at the
+  // The one moment a canvas is touched: the frame's contents, redrawn above the
   // size the server serves, and handed over as a JPEG.
   async function sendBackground(img, art, view, box) {
     const canvas = document.createElement('canvas');
