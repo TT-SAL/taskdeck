@@ -14,3 +14,11 @@
 /TODO.md
 # macOS Finder metadata
 .DS_Store
+
+# A board writes its files beside itself, and a test that used "." as its
+# data directory put one here. These hold calendar URLs, which are credentials.
+/subscriptions.json
+/read_at_startup.json
+/archived.jsonl
+/notepad_text.json
+/subscribed_cache.json

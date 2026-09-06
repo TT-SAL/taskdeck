@@ -2691,7 +2691,14 @@ mod tests {
     #[test]
     fn the_snapshot_declares_how_far_the_calendars_were_read_only_when_there_are_any() {
         use crate::subscriptions::{Covered, Overlay};
-        let mut board = Board::from_parts(Vec::new(), String::new(), std::path::PathBuf::from("."));
+        // A scratch directory, never `"."`. A board writes its files beside
+        // itself, so a test that says "here" makes the repository the board's
+        // data directory — which is how a `subscriptions.json` came to be
+        // committed at the root of this checkout. It held `example.invalid`
+        // and nothing real, and the next one might not: these files hold
+        // calendar URLs, and a calendar URL is a password.
+        let home = tempfile::tempdir().expect("a scratch directory");
+        let mut board = Board::from_parts(Vec::new(), String::new(), home.path().to_path_buf());
         let now = at(2026, 9, 5, 12, 0);
         let from = now.date_naive();
 
@@ -2724,7 +2731,14 @@ mod tests {
     fn a_request_for_more_days_than_the_server_builds_is_cut_down_quietly() {
         // The page is expected to count what came back rather than trust what
         // it asked for, so this must stay a 200 with fewer days — never a 400.
-        let mut board = Board::from_parts(Vec::new(), String::new(), std::path::PathBuf::from("."));
+        // A scratch directory, never `"."`. A board writes its files beside
+        // itself, so a test that says "here" makes the repository the board's
+        // data directory — which is how a `subscriptions.json` came to be
+        // committed at the root of this checkout. It held `example.invalid`
+        // and nothing real, and the next one might not: these files hold
+        // calendar URLs, and a calendar URL is a password.
+        let home = tempfile::tempdir().expect("a scratch directory");
+        let mut board = Board::from_parts(Vec::new(), String::new(), home.path().to_path_buf());
         let now = at(2026, 9, 5, 12, 0);
         let from = now.date_naive();
         for asked in [MAX_SNAPSHOT_DAYS + 1, 100, 400, u32::MAX] {
