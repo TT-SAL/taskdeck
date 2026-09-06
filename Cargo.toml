@@ -33,7 +33,7 @@ emath = "0.35.0"
 # rustls rather than the default native-tls: it needs no system OpenSSL, so a
 # Linux build works from a bare toolchain like the Windows and macOS ones do.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
-image = "0.25"
+image = { version = "0.25", features = ["avif"] }
 # Already in the tree under `image` (via `png`); named here so the phone server
 # can gzip what it serves. The page is 127 KB of text and compresses to 37.
 flate2 = "1.1"

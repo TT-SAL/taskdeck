@@ -263,9 +263,16 @@ fn main() {
         let made = phone::prepare_backdrop(&picture, config.background_image_tint_percent);
         match &made {
             Some(ready) => eprintln!(
-                "  picture:     {} → {} KB for the phone",
+                "  picture:     {} → {} KB{} for the phone",
                 config.background.trim(),
-                ready.bytes.len() / 1024
+                ready.avif.as_ref().unwrap_or(&ready.jpeg).len() / 1024,
+                match &ready.avif {
+                    Some(avif) => format!(" avif ({} KB jpeg)", ready.jpeg.len() / 1024).replace(
+                        "avif",
+                        &format!("avif, {}% under", 100 - (avif.len() * 100 / ready.jpeg.len().max(1)))
+                    ),
+                    None => " jpeg".to_string(),
+                }
             ),
             None => eprintln!("  picture:     {} could not be read; the phone gets a flat ground", config.background.trim()),
         }

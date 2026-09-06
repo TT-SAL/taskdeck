@@ -2431,13 +2431,29 @@ date spine since it was written and runs its whole planner in monospace; the pho
 up, and `ui-monospace` is a system face that costs nothing.
 
 **The picture behind it.** The desk's own background image, cropped to a phone's shape, scaled to
-462×1000 and darkened, served from `/bg-<hash>.jpg`. Three numbers decide it. Decode cost scales
-with **megapixels, not bytes** — about 45 MP/s on a desk machine and eight to twenty times slower on
-an old phone in battery saver — so the desktop's 3000×2000 original would be one to nearly three
-seconds on every cold open; at 0.46 MP it is a tenth of a second, and 927 KB becomes 48. The name
-carries the content's hash, so the URL is immutable and cached for a year rather than re-fetched
-with everything else that is `no-store`. And it is behind the token, because a personal photograph
-is a stronger reason to ask for the key than the app's own icon was.
+540×1170, softened, darkened, and served from `/bg-<hash>.jpg` in **AVIF or JPEG, chosen by the
+request's own `Accept`** with `Vary: Accept` so no cache hands an AVIF to something that cannot read
+one. Both are encoded once at startup, which costs about a second of boot and never a request.
+
+AVIF is what buys the resolution back. Measured on the real picture it is 38% smaller than JPEG on a
+sharp image and 55% smaller on a softened one, so the same 21 KB that bought a 240×520 mush buys
+540×1170: **927 KB and 6 MP become 21.5 KB and 0.63 MP**, against 47 KB for the JPEG fallback of the
+identical picture. Firefox for Android has read AVIF since 93; the JPEG is not a nicety, because a
+client that says nothing in its `Accept` still gets a picture.
+
+Decode cost scales with **megapixels, not bytes** — about 45 MP/s on a desk machine and eight to
+twenty times slower on an old phone in battery saver — so the 3000×2000 original would be one to
+nearly three seconds on every cold open, and this is a tenth of that. The name carries the content's
+hash, so the URL is immutable and cached for a year rather than re-fetched with everything else that
+is `no-store` — and the hash is taken from the JPEG alone on purpose, so a client that changes which
+codec it accepts is not sent to a different URL for the same image. It sits behind the token,
+because a personal photograph is a stronger reason to ask for the key than the app's own icon was.
+
+**The blur is applied here, never as a CSS `filter`.** A filter on a full-screen layer is GPU work
+on every frame; a blurred bitmap costs the phone nothing beyond the decode. It pays for itself twice
+over, because blur removes exactly the high frequencies a codec spends most of its bytes on — and it
+is applied *before* the tone-map, since a blur moves bright pixels around and solving the darkening
+against the unblurred image would be aiming at a picture that no longer exists.
 
 The darkening is **solved, not set**. Nothing on the picture may be bright enough to swallow the
 smallest text that sits on it, expressed as a ceiling on the 99.9th percentile of relative

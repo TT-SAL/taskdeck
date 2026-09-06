@@ -759,7 +759,20 @@ fn handle(
         // than the whole rest of the program.
         (Method::Get | Method::Head, path) if path.starts_with("/bg-") && path.ends_with(".jpg") => {
             match backdrop().filter(|made| path == format!("/bg-{}.jpg", made.id)) {
-                Some(made) => with_type(Response::from_data(made.bytes.clone()), "image/jpeg"),
+                // One URL, two codecs, chosen by what the client offers to
+                // take. `Vary: Accept` so a cache never hands an AVIF to
+                // something that cannot read one.
+                Some(made) => {
+                    let wants_avif = request
+                        .headers()
+                        .iter()
+                        .any(|h| h.field.equiv("Accept") && h.value.as_str().contains("image/avif"));
+                    let (body, kind) = match (&made.avif, wants_avif) {
+                        (Some(avif), true) => (avif.clone(), "image/avif"),
+                        _ => (made.jpeg.clone(), "image/jpeg"),
+                    };
+                    with_type(Response::from_data(body), kind).with_header(header("Vary", "Accept"))
+                }
                 None => json_error(404, "No such picture."),
             }
         }
@@ -1230,18 +1243,31 @@ fn scaled_icon(side: u32) -> Option<Vec<u8>> {
 
 /* ─────────────────────────── The picture behind ─────────────────────────── */
 
-/// Longest edge of the picture sent to a phone, in pixels.
+/// The size the picture is sent at — small, because it is blurred.
 ///
-/// Decode cost scales with **megapixels, not bytes** — measured at roughly
-/// 45 MP/s on a desk machine, and an old phone in battery saver is eight to
-/// twenty times slower than that. The desktop's own 3000x2000 file is 6 MP,
-/// which is one to nearly three seconds of decode on every cold open; at
-/// 0.75 MP it is a tenth of a second. The picture is darkened and sits behind
-/// text, so detail past this buys nothing anybody can see.
-const BACKGROUND_TALL: u32 = 1000;
-/// Aspect the phone is cropped to: tall enough to cover a phone in portrait
-/// without the browser having to magnify it.
-const BACKGROUND_WIDE: u32 = 462;
+/// Blurring is done here and never in the browser: a `filter: blur()` on a
+/// full-screen layer is GPU work on every frame, while a blurred JPEG costs the
+/// phone exactly nothing beyond the decode. And once the high frequencies are
+/// gone there is nothing left for resolution to carry, so the picture can be a
+/// quarter the size it was: the browser magnifies it about four times to fill
+/// the screen, and magnifying something already soft is invisible.
+///
+/// Decode cost scales with **megapixels, not bytes** — roughly 45 MP/s on a
+/// desk machine, eight to twenty times slower on an old phone in battery saver.
+/// The desktop's own 3000x2000 original is 6 MP and one to nearly three seconds
+/// per cold open. This is 0.12 MP.
+const BACKGROUND_TALL: u32 = 1170;
+/// Aspect the phone is cropped to: tall enough to cover a phone in portrait.
+const BACKGROUND_WIDE: u32 = 540;
+/// Blur radius, in pixels at the size above — a softening, not a frosting.
+/// The picture is served slightly wider than a phone's CSS width, so on screen
+/// this lands around two pixels: enough to settle the grain and let the eye
+/// fall on the text, not enough to stop it being a photograph.
+///
+/// It is applied here and never as a CSS `filter`, which would be GPU work on
+/// every frame; and it pays for itself twice, because blur removes exactly the
+/// high frequencies a codec spends most of its bytes on.
+const BACKGROUND_BLUR: f32 = 1.2;
 /// JPEG quality. Low, deliberately: this is a darkened backdrop, and the
 /// difference between 55 and 80 is invisible under a tint and costs a third
 /// more bytes on a link that is often mobile data.
@@ -1250,6 +1276,12 @@ const BACKGROUND_QUALITY: u8 = 55;
 /// 99.9th percentile. Derived from the smallest thing that ever sits on bare
 /// picture — 14px in `--text #e8e6e1` — needing 4.5:1 against it.
 const BACKGROUND_CEILING: f32 = 0.13;
+/// AVIF quality and encoder speed. Speed is the encoder's own scale where 10 is
+/// fastest and worst; 4 is a compromise that keeps a one-off startup encode
+/// under a second on a laptop while giving up almost nothing. Quality is not
+/// the same scale as JPEG's — 70 here is visually well above JPEG 70.
+const AVIF_QUALITY: u8 = 70;
+const AVIF_SPEED: u8 = 4;
 
 fn to_linear(v: u8) -> f32 {
     let c = v as f32 / 255.0;
@@ -1261,13 +1293,21 @@ fn to_srgb(v: f32) -> u8 {
     (s * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
-/// The picture, ready to send: cropped to a phone's shape, scaled down,
-/// darkened, and encoded once.
+/// The picture, ready to send: cropped to a phone's shape, scaled, blurred,
+/// darkened, and encoded once in both codecs.
 pub struct Backdrop {
     /// Content hash, so the URL can be immutable and cached for a year — the
     /// only way a picture this size is not re-fetched on every single open.
     pub id: String,
-    pub bytes: Vec<u8>,
+    /// AVIF, when the encoder managed it. Measured on the real picture, AVIF is
+    /// 38% smaller than JPEG on a sharp image and 55% smaller on a softened
+    /// one — which is what buys back the resolution a small JPEG had to give
+    /// up. Firefox for Android has read it since 93.
+    pub avif: Option<Vec<u8>>,
+    /// JPEG, for anything that does not offer to take AVIF. Not a nicety: the
+    /// negotiation is on the request's own `Accept`, so a client that says
+    /// nothing still gets a picture.
+    pub jpeg: Vec<u8>,
     /// The average colour of its top strip, for the browser's theme colour.
     pub top: String,
 }
@@ -1296,6 +1336,10 @@ pub fn prepare_backdrop(path: &Path, tint: u32) -> Option<Backdrop> {
     };
     let cropped = source.crop_imm((w.saturating_sub(cw)) / 2, (h.saturating_sub(ch)) / 2, cw.max(1), ch.max(1));
     let small = cropped.resize_exact(BACKGROUND_WIDE, BACKGROUND_TALL, FilterType::Lanczos3);
+    // Blurred before the tone-map, so the darkening solves against what will
+    // actually be on screen: a blur moves the bright pixels around, and
+    // measuring the peak before it would aim at a picture that no longer exists.
+    let small = image::DynamicImage::ImageRgb8(image::imageops::blur(&small.into_rgb8(), BACKGROUND_BLUR));
 
     // Darken — and *solve* for how much rather than guessing it.
     //
@@ -1371,6 +1415,22 @@ pub fn prepare_backdrop(path: &Path, tint: u32) -> Option<Backdrop> {
     }
     let avg = |c: usize| top[c].checked_div(counted).unwrap_or(0) as u8;
 
+    // The same settled pixels again in AVIF. Encoded once, at startup, so its
+    // slowness costs a moment of boot and never a request; `None` if the
+    // encoder refuses, and then everything falls through to the JPEG.
+    let avif = {
+        use image::ImageEncoder as _;
+        let mut out = Vec::new();
+        image::codecs::avif::AvifEncoder::new_with_speed_quality(&mut out, AVIF_SPEED, AVIF_QUALITY)
+            .write_image(buf.as_raw(), BACKGROUND_WIDE, BACKGROUND_TALL, image::ExtendedColorType::Rgb8)
+            .ok()
+            .map(|()| out)
+            .filter(|made| !made.is_empty())
+    };
+
+    // The name is hashed from the JPEG alone, on purpose: both codecs carry the
+    // same picture, and a client that changes which one it accepts must not be
+    // sent to a different URL for the same image.
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for byte in &bytes {
         hash ^= *byte as u64;
@@ -1378,7 +1438,8 @@ pub fn prepare_backdrop(path: &Path, tint: u32) -> Option<Backdrop> {
     }
     Some(Backdrop {
         id: format!("{hash:016x}"),
-        bytes,
+        avif,
+        jpeg: bytes,
         top: format!("#{:02x}{:02x}{:02x}", avg(0), avg(1), avg(2)),
     })
 }
@@ -2332,6 +2393,7 @@ fn fold_line(out: &mut String, line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::ImageEncoder as _;
     use crate::tasks::{Recurrence, Session};
     use chrono::TimeZone;
 
@@ -2526,6 +2588,36 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "a measurement, not an assertion: cargo test -- --ignored --nocapture codec_bake_off"]
+    fn codec_bake_off() {
+        use image::imageops::FilterType;
+        let Ok(reader) = image::ImageReader::open("images/pexels-francesco-ungaro-1525041.jpg") else {
+            return; // No picture in this checkout; nothing to measure.
+        };
+        let source = reader.decode().expect("decode");
+        println!("\n  size        blur   jpeg-q70    avif-q70   avif saves");
+        for (w, h) in [(360u32, 780u32), (462, 1000), (540, 1170), (640, 1386)] {
+            for blur in [0.0f32, 0.8, 1.6] {
+                let cropped = source.crop_imm(750, 0, 1500, 2000);
+                let small = cropped.resize_exact(w, h, FilterType::Lanczos3).into_rgb8();
+                let small = if blur > 0.0 { image::imageops::blur(&small, blur) } else { small };
+                let mut jpg = Vec::new();
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg, 70)
+                    .encode(small.as_raw(), w, h, image::ExtendedColorType::Rgb8).expect("jpeg");
+                let mut avif = Vec::new();
+                image::codecs::avif::AvifEncoder::new_with_speed_quality(&mut avif, 4, 70)
+                    .write_image(&small, w, h, image::ExtendedColorType::Rgb8).expect("avif");
+                println!(
+                    "  {w:>4}x{h:<6} {blur:>4.1}  {:>7.1} KB {:>9.1} KB {:>9.0}%",
+                    jpg.len() as f32 / 1024.0,
+                    avif.len() as f32 / 1024.0,
+                    100.0 - (avif.len() as f32 / jpg.len() as f32 * 100.0),
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_backdrop_is_cropped_scaled_and_darkened_enough_to_put_text_on() {
         // Runs the real pipeline over the repository's own picture, which is
         // 3000x2000 and 927 KB — six megapixels, which on the target phone is
@@ -2535,9 +2627,10 @@ mod tests {
             return; // No picture in this checkout; nothing to assert.
         }
         let made = prepare_backdrop(source, 30).expect("the picture is readable");
-        let decoded = image::load_from_memory(&made.bytes).expect("a jpeg comes out");
+        let decoded = image::load_from_memory(&made.jpeg).expect("a jpeg comes out");
         assert_eq!((decoded.width(), decoded.height()), (BACKGROUND_WIDE, BACKGROUND_TALL));
-        assert!(made.bytes.len() < 120_000, "{} bytes is too much to send", made.bytes.len());
+        let sent = made.avif.as_ref().unwrap_or(&made.jpeg);
+        assert!(sent.len() < 90_000, "{} bytes is too much to send", sent.len());
         assert_eq!(made.id.len(), 16, "the id is a content hash, so the URL can be immutable");
 
         // The point of the tint: nothing bright enough to swallow text should
