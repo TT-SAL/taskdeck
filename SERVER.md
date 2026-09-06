@@ -207,15 +207,19 @@ box itself:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
 git clone <this repository> taskdeck && cd taskdeck
-cargo build --release --bin taskdeck-server
+cargo build --release --no-default-features --bin taskdeck-server
 ```
 
-The result is `target/release/taskdeck-server`, one self-contained executable — no window, and
-no graphics library needed to run it. The build itself compiles the whole crate, the desktop's
-graphics crates included (they are one crate; nothing in the server calls them and the link drops
-them), so expect the first build to take a while and to want the same Rust toolchain the desktop
-does, nothing more. A plain `cargo build --release` builds `TaskDeck` too, which the box does not
-need.
+The result is `target/release/taskdeck-server`, one self-contained executable — no window, and no
+graphics library needed to run it or to build it.
+
+**`--no-default-features` is the part worth not skipping.** The desktop and the server are two
+binaries in one crate, and the window lives behind a `desk` feature that is on by default. Turning
+it off drops 98 of the 307 crates — egui, wgpu, winit and everything under them — which the server
+never calls. Leave it on and you compile a graphics stack to throw it away at link time, on a box
+that may have no GPU and, if it is an ARM board, a good deal less patience.
+
+A plain `cargo build --release` builds `TaskDeck` too, which the box does not need.
 
 ```bash
 sudo install -m 755 target/release/taskdeck-server /usr/local/bin/
@@ -399,7 +403,7 @@ restores that task both live and in the ledger, which is visible at once and men
 Pull, rebuild, install, restart:
 
 ```bash
-cd ~/taskdeck && git pull && cargo build --release --bin taskdeck-server
+cd ~/taskdeck && git pull && cargo build --release --no-default-features --bin taskdeck-server
 sudo deploy/install.sh
 ```
 

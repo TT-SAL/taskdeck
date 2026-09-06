@@ -89,7 +89,8 @@ Additional features:
 | Images | `image` (backgrounds, world map, icon) |
 | Palette generation | `kmeans_colors`, `palette` (Lab/sRGB conversion) |
 | Atomic file writes | `tempfile` (`NamedTempFile::persist`) |
-| Allocator | `mimalloc` (set as `#[global_allocator]`) |
+| Allocator | `mimalloc` (set as `#[global_allocator]` — by `main.rs` only, so it sits behind `desk`) |
+| Window (all behind the **`desk`** feature) | `egui`, `wgpu`, `egui-wgpu`, `winit`, `egui-winit`, `egui_extras`, `epaint`, `emath`, `pollster` |
 | Build | `embed-resource` (embeds `resources.rc` → `icon.ico`), `chrono` (stamps `BUILD_DATE`) |
 
 > `rev_lines` was here, used to reverse-scan the archive log a page at a time. The archive
@@ -2831,6 +2832,23 @@ can be **hosted** anywhere:
 The two-writers rule of §4.1 is satisfied by construction in every arrangement: a board's files
 have exactly one process writing them, and `taskdeck-server` refuses to start if another TaskDeck
 holds the folder's lock.
+
+**The window is a Cargo feature, and the server is built without it.** Both binaries live in one
+crate, so for a long time building the headless server compiled the whole graphics stack and threw
+it away at link time. `desk` (on by default, `required-features` on the `TaskDeck` bin) now gates
+`ui`, `calendarwidgets` and `weather` in `lib.rs`, the window half of `initialization.rs` — from
+`AppState` down, the config half above it is shared — the one function in `utilities.rs` that
+speaks in `Color32`, and `mimalloc`, which only `main.rs` installs. Nothing else needed touching:
+`phone`, `board`, `tasks`, `archive`, `ics`, `subscriptions`, `sync`, `paths`, `color` and
+`planner` never referenced a toolkit type, and `initialization` was the only module importing
+`crate::ui`.
+
+`cargo build --no-default-features --bin taskdeck-server` drops **98 of 307 crates**. The point is
+less the build time than what leaves with them: `winit` pulls `android-activity` on any Android
+target, and that crate refuses to compile outside a real Android app — so before this split the
+server could not be built for a phone or for some ARM boards *at all*, for want of a window it
+never opens. What is left needing a C toolchain is `ring`, by way of rustls; AVIF encoding is pure
+Rust here (`ravif`/`rav1e` with no assembly), which is usually the dependency that stops this.
 
 ### 22.2 `taskdeck-server`
 

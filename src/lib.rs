@@ -1,8 +1,13 @@
 pub mod archive;
 pub mod tasks;
+// The window and everything that only it needs. Behind `desk` so the
+// headless server can be built without a graphics toolkit — see Cargo.toml.
+#[cfg(feature = "desk")]
 pub mod ui;
 pub mod utilities;
+#[cfg(feature = "desk")]
 pub mod weather;
+#[cfg(feature = "desk")]
 pub mod calendarwidgets;
 pub mod initialization;
 pub mod color;

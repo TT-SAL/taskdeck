@@ -1,8 +1,12 @@
-use std::{collections::HashMap, error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::Path};
+use std::{error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::Path};
+#[cfg(feature = "desk")]
+use std::collections::HashMap;
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone};
+#[cfg(feature = "desk")]
 use egui::Color32;
 use tempfile::NamedTempFile;
 
+#[cfg(feature = "desk")]
 use crate::color::ColorScheme;
 
 /// Build a TOML array `[a, b]` of two floats for the config file. Used for the
@@ -83,6 +87,10 @@ pub fn days_in_month(year: i32, month: u32) -> u32 {
     }
 }
 
+// The only thing in here that speaks in a toolkit type, and `ui.rs` is its
+// only caller. The scheme itself (`color::ColorScheme`) is plain bytes and
+// stays available to the server.
+#[cfg(feature = "desk")]
 pub fn resolve_colorscheme(
     schemes: &HashMap<u32, ColorScheme>,
     selected_id: u32,

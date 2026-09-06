@@ -1,24 +1,42 @@
+#[cfg(feature = "desk")]
 use egui::Context;
+#[cfg(feature = "desk")]
 use egui_wgpu::wgpu::{StoreOp};
+#[cfg(feature = "desk")]
 use egui_wgpu::{wgpu, Renderer, RendererOptions, ScreenDescriptor};
+#[cfg(feature = "desk")]
 use egui_winit::{ActionRequested, State};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "desk")]
 use crate::ui::TaskApp;
+#[cfg(feature = "desk")]
 use wgpu::{Color, ExperimentalFeatures, LoadOp};
+#[cfg(feature = "desk")]
 use winit::event::{StartCause, WindowEvent};
+#[cfg(feature = "desk")]
 use winit::event_loop::ControlFlow;
 // The taskbar-icon extension trait only exists on Windows; see `window_attributes`.
 #[cfg(windows)]
+#[cfg(feature = "desk")]
 use winit::platform::windows::WindowAttributesExtWindows;
+#[cfg(feature = "desk")]
 use winit::window::{Window, WindowId};
+#[cfg(feature = "desk")]
 use egui_wgpu::wgpu::CurrentSurfaceTexture;
 use std::collections::HashMap;
-use std::{fs, time};
+use std::fs;
+#[cfg(feature = "desk")]
+use std::time;
 use std::path::Path;
+#[cfg(feature = "desk")]
 use std::sync::Arc;
+#[cfg(feature = "desk")]
 use std::time::Instant;
+#[cfg(feature = "desk")]
 use winit::application::ApplicationHandler;
+#[cfg(feature = "desk")]
 use winit::dpi::{LogicalSize, PhysicalPosition};
+#[cfg(feature = "desk")]
 use winit::event_loop::ActiveEventLoop;
 use toml::Value;
 
@@ -476,6 +494,7 @@ pub struct Config {
     pub server_token: String,
 }
 
+#[cfg(feature = "desk")]
 pub struct AppState<'a> {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -488,6 +507,7 @@ pub struct AppState<'a> {
     _instance: wgpu::Instance,
 }
 
+#[cfg(feature = "desk")]
 impl AppState<'_> {
     async fn new(
         instance: wgpu::Instance,
@@ -623,6 +643,7 @@ impl AppState<'_> {
     }
 }
 
+#[cfg(feature = "desk")]
 pub struct App<'a> {
     cursor_inside_window: bool,
     window_is_focused: bool,
@@ -640,6 +661,7 @@ pub struct App<'a> {
     selected_monitor_name: String,
 }
 
+#[cfg(feature = "desk")]
 impl<'a> App<'a> {
     pub fn new(task_app: TaskApp, window_size_startup: [f32; 2], selected_monitor_name: String) -> Self {
         Self {
@@ -991,6 +1013,7 @@ impl<'a> App<'a> {
 /// Decode the embedded PNG into a winit icon. A failure here is cosmetic — the
 /// window just gets the platform default — so it must not abort startup the way
 /// the old `unwrap()` pair did.
+#[cfg(feature = "desk")]
 fn window_icon() -> Option<winit::window::Icon> {
     let image = image::load_from_memory_with_format(
         include_bytes!("../icon.png"),
@@ -1002,6 +1025,7 @@ fn window_icon() -> Option<winit::window::Icon> {
     winit::window::Icon::from_rgba(image.into_raw(), width, height).ok()
 }
 
+#[cfg(feature = "desk")]
 impl ApplicationHandler for App<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attributes = self.window_attributes(event_loop);

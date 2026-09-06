@@ -6,6 +6,9 @@ edition = "2024"
 [[bin]]
 name = "TaskDeck"
 path = "src/main.rs"
+# The window is a feature, so `--no-default-features` cannot be asked to build a
+# desktop app without the toolkit to draw it.
+required-features = ["desk"]
 
 # The headless host: the board, the phone view and the feed, and no window.
 # For the always-on box in the cupboard; see SERVER.md.
@@ -13,22 +16,45 @@ path = "src/main.rs"
 name = "taskdeck-server"
 path = "src/server_main.rs"
 
+# `desk` is the window: egui, wgpu, winit and the allocator that only `main.rs`
+# installs. It is on by default, so an ordinary `cargo build` is unchanged.
+#
+# Turning it off (`--no-default-features --bin taskdeck-server`) drops about a
+# hundred crates and, more to the point, drops `winit` — which on Android pulls
+# `android-activity`, a crate that refuses to compile outside a real Android
+# app. The headless server had no use for any of it and could not be built for
+# a phone or a small ARM box because of it.
+[features]
+default = ["desk"]
+desk = [
+    "dep:egui",
+    "dep:wgpu",
+    "dep:egui-wgpu",
+    "dep:winit",
+    "dep:egui-winit",
+    "dep:pollster",
+    "dep:egui_extras",
+    "dep:epaint",
+    "dep:emath",
+    "dep:mimalloc",
+]
+
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-egui = "0.35.0"
-wgpu = "29.0"
-egui-wgpu = "0.35.0"
-winit = "0.30.13"
-egui-winit = "0.35.0"
-pollster = "0.4.0"
+egui = { version = "0.35.0", optional = true }
+wgpu = { version = "29.0", optional = true }
+egui-wgpu = { version = "0.35.0", optional = true }
+winit = { version = "0.30.13", optional = true }
+egui-winit = { version = "0.35.0", optional = true }
+pollster = { version = "0.4.0", optional = true }
 
-egui_extras = { version = "0.35.0", features = ["svg"] }
+egui_extras = { version = "0.35.0", features = ["svg"], optional = true }
 
-epaint = "0.35.0"
-emath = "0.35.0"
+epaint = { version = "0.35.0", optional = true }
+emath = { version = "0.35.0", optional = true }
 
 # rustls rather than the default native-tls: it needs no system OpenSSL, so a
 # Linux build works from a bare toolchain like the Windows and macOS ones do.
@@ -38,7 +64,9 @@ image = { version = "0.25", features = ["avif"] }
 # can gzip what it serves. The page is 127 KB of text and compresses to 37.
 flate2 = "1.1"
 tempfile = "3.20.0"
-mimalloc = "0.1.47"
+# Installed by `main.rs` alone. Optional so the headless build does not carry a
+# C allocator it never asks for — one fewer thing needing a cross-toolchain.
+mimalloc = { version = "0.1.47", optional = true }
 toml = "0.9.5"
 toml_edit = "0.23.7"
 
@@ -48,8 +76,10 @@ kmeans_colors = "0.7.1"
 # The phone view (`phone.rs`): a small blocking HTTP server on its own thread,
 # in the same shape as the weather thread — no async runtime enters the tree.
 tiny_http = "0.12"
-# Paints the phone link as a QR code in Settings. Render features off: the
-# matrix is drawn with egui's painter, not turned into an image.
+# Paints the phone link as a QR code — in Settings on the desktop, and in the
+# terminal from `taskdeck-server --print-link`, so it is not desk-only. Render
+# features off: the matrix is drawn as glyphs or by egui's painter, never turned
+# into an image.
 qrcode = { version = "0.14", default-features = false }
 
 [build-dependencies]
