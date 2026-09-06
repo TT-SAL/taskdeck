@@ -70,7 +70,12 @@
      so an opaque body would hide the field completely — a background that
      costs everything and shows nothing. */
   html { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
-  body { margin: 0; padding: 0; background: transparent; color: var(--text); }
+  /* Opaque unless there is actually a picture to show. A transparent body costs
+     the compositor its opaque base on every frame, and with no picture set it
+     was buying nothing at all — `paintField` adds `.has-photo` when there is
+     something behind to reveal. */
+  body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+  html.has-photo body { background: transparent; }
   body {
     font: 16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     overscroll-behavior-y: contain;
@@ -341,7 +346,11 @@
   .aday {
     margin: 0 0 10px; contain: layout style;
     background: var(--plate); border-radius: var(--r-m); padding: 0 10px 10px;
-    box-shadow: 0 0 0 1px var(--edge), 0 1px 2px rgba(0,0,0,0.5);
+    /* A hard ring and no blur. A blurred shadow is rasterised per element, and
+       there are up to a hundred and twenty of these in the DOM at the four-month
+       cap — on a battery-saver phone that is the difference between a list that
+       scrolls and one that does not. The ring alone draws the boundary. */
+    box-shadow: 0 0 0 1px var(--edge);
   }
   /* A free day is a void the field shows through, and its heading is static —
      a transparent sticky heading would let its own line scroll through it. */
