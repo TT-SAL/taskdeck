@@ -2708,6 +2708,24 @@ path rather than by the full URL — the token in the query would otherwise orph
 the key is re-minted, and keying by path also settles `Vary: Accept` by keeping whichever of AVIF or
 JPEG this browser was first given.
 
+**The unreachable warning can be silenced, and the staleness cannot.** For a reader whose laptop
+spends the day in a bag, the server being unreachable is the normal condition rather than an
+incident, and a fixed banner over the timetable every sixty seconds says something they already
+know. The banner therefore carries its own **Don't warn** button, which writes `taskdeck-quiet-offline`
+and survives restarts and reconnects — this is a standing fact about how someone lives, not a
+dismissal of one outage, so it does not reset the next time the server answers. The tray shows a row
+to turn it back on, and only while it is off: a setting at its default needs no row.
+
+Two things are deliberately *not* silenced. **Edits that have not reached the desk** always speak up,
+banner and all, and are not even offered the button — that is the reader's own data waiting on a
+phone, and it is a different claim from "the desk is asleep". And the masthead carries **`· as of
+12:03`** in muted ink beside the day's line for as long as what is on screen came out of store, so
+what is silenced is the interruption and never the information; a timetable of unknown age with no
+way to tell would be worse than the banner ever was. The note is refreshed by `refreshStale`, which
+redraws that one line — a failed load whose day is already on screen adopts no snapshot and so draws
+nothing, and redrawing the whole view for a line of text would throw away scroll position every
+minute.
+
 **The page paints the field where it adopts the snapshot**, in `takeSnapshot`, not on the load path.
 There are five places a snapshot is taken — the load that succeeded, the one that fell back to a kept
 day, and three restores from store — and `paintField` used to be called from the first of them only.

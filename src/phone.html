@@ -149,6 +149,9 @@
   .dwd { font-size: 13px; font-weight: 700; color: var(--text); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dmo { font-size: 12px; color: var(--text); line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .behindnote { color: var(--today); font-weight: 700; }
+  /* An aside, not an alarm: the same muted ink as the line it sits on, and no
+     weight of its own. The behind-schedule note beside it is the loud one. */
+  .stalenote { color: var(--muted); font-weight: 400; opacity: 0.8; }
   /* Both views give the masthead the same height, which is what lets a mode
      change re-measure to the same number and leave the two observers alone. */
   .summary { color: var(--muted); font-size: 13px; margin-top: 6px; min-height: 38px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -593,6 +596,12 @@
   .banner.info { background: #1d2530; color: #cfe0f3; border-color: #2f4a63; }
   .banner .actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
   .banner button { font-weight: 700; padding: 4px 8px; }
+  .quietrow {
+    display: flex; gap: 10px; align-items: center; margin: 10px 0 2px;
+    padding: 8px 12px; border-radius: 10px; font-size: 13px;
+    background: var(--plate-2); color: var(--muted); border: 1px solid var(--edge);
+  }
+  .quietrow button { flex-shrink: 0; margin-left: auto; font-weight: 700; padding: 4px 8px; }
   .sheet .waiting {
     margin: 10px 0 2px; padding: 8px 12px; border-radius: 10px; font-size: 13px;
     background: #1d2530; color: #cfe0f3; border: 1px solid #2f4a63;
@@ -744,8 +753,25 @@
   };
   // A refusal is kept until it is acknowledged, reload or not: it is the only
   // trace of an edit that was made here and is not on the board.
+  // Set from the banner's own "Don't warn" button. For a laptop that spends
+  // its day in a bag: the server being unreachable is this reader's normal
+  // condition, not an incident, and a fixed banner over the timetable every
+  // sixty seconds is the wrong way to say something they already know.
+  //
+  // It silences the *warning*, never the *fact*: the masthead carries "as of"
+  // for as long as the day on screen came out of store, so what is silenced is
+  // the interruption and not the information.
+  const QUIET_KEY = 'taskdeck-quiet-offline';
   const NOTICE_KEY = 'taskdeck-notice';
   try { state.notice = localStorage.getItem(NOTICE_KEY); } catch (_) {}
+  try { state.quietOffline = localStorage.getItem(QUIET_KEY) === 'yes'; } catch (_) { state.quietOffline = false; }
+  function setQuietOffline(quiet) {
+    state.quietOffline = quiet;
+    try {
+      if (quiet) localStorage.setItem(QUIET_KEY, 'yes');
+      else localStorage.removeItem(QUIET_KEY);
+    } catch (_) {}
+  }
   function rememberNotice(text) {
     state.notice = text;
     try {
@@ -1356,8 +1382,10 @@
       const moved = absorb(snap);
       if (mine !== loadSeq || asked !== state.day) return;
       takeSnapshot(anchorOf(snap));
+      state.staleAt = null;
       settleBanner();
       render();
+      refreshStale();
       // Absorb and patch, and NEVER grow the ribbon from here. `load({quiet})`
       // runs from the long poll, from a sixty-second timer, from the tab
       // becoming visible and from the network returning — a pager on this line
@@ -1375,18 +1403,31 @@
       const waiting = outbox().length;
       const suffix = waiting ? ` · ${waiting} change${waiting === 1 ? '' : 's'} waiting to be sent` : '';
       const actions = waiting ? [discardAction] : [];
+      const kept = keptSince();
+      // Set before the draw, because the masthead reads it: what is on screen
+      // came out of store, and says so whether or not the banner is showing.
+      state.staleAt = kept;
       if (cached) takeSnapshot(cached.snap);
       if (cached) render();
-      const kept = keptSince();
+      // Even when there was nothing new to draw: the note is the thing that
+      // changed, and with the banner silenced it is the only thing saying so.
+      refreshStale();
+      // Quiet is for the condition the reader already knows about. Edits that
+      // have not reached the desk are a different thing entirely — that is
+      // their data waiting on a machine in a bag, and it always speaks up.
+      if (state.quietOffline && !waiting) { hideBanner(); return; }
+      const quietable = !waiting
+        ? [['Don\u2019t warn', () => { setQuietOffline(true); hideBanner(); }]]
+        : [];
       if (kept) {
         const when = new Date(kept).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
         // "This day" in the day view, where there is one. The agenda is a
         // patchwork of months last written at different times, so the only
         // claim that cannot be wrong there is the oldest of them.
         const what = state.mode === 'agenda' ? 'Showing kept days — the oldest here is from' : 'Showing this day as of';
-        showBanner(`${what} ${when} — ${error.message}${suffix}`, { retry: true, actions });
+        showBanner(`${what} ${when} — ${error.message}${suffix}`, { retry: true, actions: actions.concat(quietable) });
       } else {
-        showBanner(error.message + suffix, { retry: true, actions });
+        showBanner(error.message + suffix, { retry: true, actions: actions.concat(quietable) });
       }
     }
   }
@@ -1435,6 +1476,27 @@
 
   /* ───────────────────────────── Rendering ───────────────────────────── */
 
+  function daySummary(day, late) {
+    $('summary').classList.remove('glance');
+    $('summary').replaceChildren(...bits(day.summary, late && day.behind_minutes));
+  }
+
+  // Redraw the one line that carries "as of", and nothing else.
+  //
+  // A load that fails while the day on screen is already the right one adopts
+  // no new snapshot and so draws nothing — which is correct for the day and
+  // wrong for the note, because the reader has just gone offline and the
+  // masthead still claims to be current. Redrawing the whole view here instead
+  // would throw away scroll position every sixty seconds for a line of text.
+  function refreshStale() {
+    if (!state.snap) return;
+    if (state.mode === 'agenda') renderGlance();
+    else {
+      const day = state.snap.days[0];
+      daySummary(day, day.behind_minutes > 0);
+    }
+  }
+
   function render() {
     const snap = state.snap;
     if (!snap) return;
@@ -1469,8 +1531,7 @@
     }
 
     mastheadFor(day.date, day.is_today);
-    $('summary').classList.remove('glance');
-    $('summary').replaceChildren(...bits(day.summary, late && day.behind_minutes));
+    daySummary(day, late);
     $('rail').hidden = true;
     $('week').hidden = false;
     renderWeek(day);
@@ -1498,7 +1559,20 @@
   function bits(text, behindMinutes) {
     const out = [document.createTextNode(text)];
     if (behindMinutes > 0) out.push(el('span', { class: 'behindnote', text: ` · ${dur(behindMinutes)} behind` }));
+    const stale = staleNote();
+    if (stale) out.push(stale);
     return out;
+  }
+
+  // What is on screen came out of store, and when. Quiet on purpose — it is an
+  // aside, not an alarm — but always there while it is true, so that silencing
+  // the banner costs the reader the interruption and not the fact. Without it,
+  // "don't warn me" would mean "show me a day of unknown age with no way to
+  // tell", which for a timetable is worse than the banner ever was.
+  function staleNote() {
+    if (!state.staleAt) return null;
+    const when = new Date(state.staleAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return el('span', { class: 'stalenote', text: ` · as of ${when}` });
   }
 
   function longDay(iso) {
@@ -1958,7 +2032,10 @@
     if (!day || day.date !== todayIso()) {
       // Between midnight and the first answer of the new day. Say nothing
       // rather than something about yesterday.
-      box.replaceChildren(el('span', { class: 'gdot hollow', style: '--accent:var(--muted)' }), el('span', { class: 'glead', text: '…' }), el('span', { class: 'gdetail' }));
+      const waiting = el('span', { class: 'gdetail' });
+      const stale = staleNote();
+      if (stale) waiting.append(stale);
+      box.replaceChildren(el('span', { class: 'gdot hollow', style: '--accent:var(--muted)' }), el('span', { class: 'glead', text: '…' }), waiting);
       return;
     }
     const at = glanceFor(day, state.agenda.days.get(shiftDay(day.date, 1)), nowMinutes());
@@ -1966,6 +2043,8 @@
     if (day.behind_minutes > 0) {
       detail.append(el('span', { class: 'behindnote', text: ` · ${dur(day.behind_minutes)} behind` }));
     }
+    const stale = staleNote();
+    if (stale) detail.append(stale);
     box.replaceChildren(
       el('span', { class: 'gdot' + (at.hollow ? ' hollow' : ''), style: `--accent:${at.accent}` }),
       el('span', { class: 'glead', text: at.lead }),
@@ -2695,7 +2774,6 @@
     else if (state.sheet === 'new') renderNewSheet(sheet);
     else if (state.sheet === 'notes') renderNotesSheet(sheet);
     else if (state.sheet === 'look') renderLookSheet(sheet);
-    else if (state.sheet === 'look') renderLookSheet(sheet);
     sheet.append(sheetFoot());
   }
 
@@ -3122,6 +3200,17 @@
     const tray = state.snap.tray;
     const day = state.snap.days[0];
     sheet.append(el('h2', { text: 'Tasks' }));
+
+    // Shown only while the warning is off, because a setting that is at its
+    // default does not need a row: the way to turn it off is on the banner it
+    // silences, and this is the way back. Without it the choice would be a
+    // one-way door with nothing on the page to say it had been made.
+    if (state.quietOffline) {
+      sheet.append(el('div', { class: 'quietrow' }, [
+        el('span', { text: 'Offline warnings are off. The masthead still says how old the day is.' }),
+        el('button', { text: 'Turn on', onclick: () => { setQuietOffline(false); renderSheet(); load({ quiet: true }); } }),
+      ]));
+    }
 
     // Work booked before the now-line and not ticked off. Above the tabs, so it
     // is on all three of them — and here rather than in the bar, because it is
