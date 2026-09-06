@@ -2708,6 +2708,20 @@ path rather than by the full URL — the token in the query would otherwise orph
 the key is re-minted, and keying by path also settles `Vary: Accept` by keeping whichever of AVIF or
 JPEG this browser was first given.
 
+**The page paints the field where it adopts the snapshot**, in `takeSnapshot`, not on the load path.
+There are five places a snapshot is taken — the load that succeeded, the one that fell back to a kept
+day, and three restores from store — and `paintField` used to be called from the first of them only.
+The picture was therefore cached correctly and simply never asked for with the server unreachable:
+the background came back every time the network did, and was missing every time it was not, which
+reads like a caching failure and is not one. `paintField` is idempotent, so calling it wherever a
+snapshot lands costs a comparison.
+
+The page also warms the photo cache itself (`keepPhoto`), rather than leaving it to whatever passes
+through the worker. On the load where a *new* worker takes over, the picture may have been requested
+before it claimed the page, which would leave the cache empty until the next open; doing it in both
+places makes one online open always enough. It is the same one-picture sweep in both, and the cache
+name is the single thing `phone.html` and `phone_sw.js` must agree on.
+
 Before this, the photo lived only in the browser's ordinary HTTP cache. That is a year of
 `immutable` and usually enough — but it is evictable, and the first thing a phone low on space
 discards, so the page could open offline having kept the shell, the token and the day's snapshot and

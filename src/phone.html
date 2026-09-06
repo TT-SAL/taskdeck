@@ -1144,6 +1144,13 @@
   function takeSnapshot(snap) {
     state.snap = snap;
     state.items = new Map(snap.items.map((item) => [item.id, item]));
+    // Painted here, where the snapshot is adopted, and nowhere else. The field
+    // is a function of the snapshot, and there are five places a snapshot is
+    // taken — the load that succeeded, the one that fell back to a kept day,
+    // and three restores from store. Calling this from the success path alone
+    // is how the background came back online and stayed missing offline: the
+    // picture was cached and the page never asked for it.
+    paintField();
   }
 
   // Edits made while TaskDeck cannot be reached are kept here, in order, and
@@ -1355,7 +1362,6 @@
       // runs from the long poll, from a sixty-second timer, from the tab
       // becoming visible and from the network returning — a pager on this line
       // would fetch a page a minute with nobody scrolling.
-      paintField();
       if (state.mode === 'agenda') { patchAgenda(moved); railAndMasthead(); }
       // A sheet is never redrawn under someone's fingers by a background
       // load — except when edits made from it have just gone through, so
@@ -1897,12 +1903,46 @@
       themeColor(GROUND_THEME);
       return;
     }
-    root.style.setProperty('--photo', `url("/bg-${look.id}.jpg?token=${encodeURIComponent(state.token || '')}")`);
+    const path = `/bg-${look.id}.jpg`;
+    root.style.setProperty('--photo', `url("${path}?token=${encodeURIComponent(state.token || '')}")`);
     root.style.setProperty('--par', String(look.aspect));
     root.classList.add('has-photo');
     // So the system's own status bar sits on the same shade as the strip of
     // picture beneath it rather than on a band of a different colour.
     themeColor(look.top);
+    keepPhoto(path);
+  }
+
+  // The name of the worker's photo cache, repeated here on purpose: this is the
+  // one thing the page and `phone_sw.js` have to agree on, and the alternative
+  // is asking the worker over `postMessage` for something a one-line constant
+  // settles. Change it in both or in neither.
+  const PHOTO_CACHE = 'taskdeck-photo-v1';
+
+  // Make sure the picture is on disk before the network goes away.
+  //
+  // The worker already keeps whatever passes through it, but on the load where
+  // a *new* worker takes over, the request may have gone out before it claimed
+  // the page — leaving the photo uncached until the next open. Doing it here as
+  // well means one online open is always enough, and the check is a cache
+  // lookup, so the usual answer costs nothing.
+  async function keepPhoto(path) {
+    try {
+      if (!('caches' in window)) return;
+      const cache = await caches.open(PHOTO_CACHE);
+      if (await cache.match(path)) return;
+      const response = await fetch(`${path}?token=${encodeURIComponent(state.token || '')}`);
+      if (!response.ok) return;
+      // One picture at a time — the same sweep the worker does, for the same
+      // reason: the name holds the content's hash, so the others are dead.
+      for (const key of await cache.keys()) {
+        if (new URL(key.url).pathname !== path) await cache.delete(key);
+      }
+      await cache.put(path, response);
+    } catch (_) {
+      // Offline, no storage, or a browser that refuses: the page has a flat
+      // ground to fall back on and nothing here is worth a visible failure.
+    }
   }
 
   function themeColor(value) {
