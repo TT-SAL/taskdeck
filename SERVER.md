@@ -219,6 +219,11 @@ it off drops 98 of the 307 crates — egui, wgpu, winit and everything under the
 never calls. Leave it on and you compile a graphics stack to throw it away at link time, on a box
 that may have no GPU and, if it is an ARM board, a good deal less patience.
 
+Measured on a ten-core laptop, a clean release build of the server alone goes from **1m33s to
+1m06s** — but from **348 to 191 CPU-seconds**, and it is the second number a small box feels. Wall
+time hides the difference here only because there are cores enough to compile the discarded crates
+in parallel; on one or two slow ARM cores the saving lands closer to the 45% the CPU figure shows.
+
 A plain `cargo build --release` builds `TaskDeck` too, which the box does not need.
 
 ```bash
