@@ -2449,6 +2449,26 @@ is `no-store` — and the hash is taken from the JPEG alone on purpose, so a cli
 codec it accepts is not sent to a different URL for the same image. It sits behind the token,
 because a personal photograph is a stronger reason to ask for the key than the app's own icon was.
 
+**The picture can be chosen from the phone.** Tray → **Look**: pick a file, drag and pinch it into a
+frame that is the shape of the screen it will fill, and Save. The crop happens on the phone because
+only the person holding it knows which part of a picture they want behind their week — and because
+sending the crop rather than the original means a twelve-megapixel photograph never crosses the
+link. The picture is moved with a CSS transform on an `<img>` rather than redrawn on a canvas per
+frame, since a transform is composited and a redraw is not; the canvas is touched exactly once, on
+Save, to rasterise the frame's contents at the size the server serves. The frame's height is set and
+its width derived, never `max-height` over `width: 100%` — that clamps the box and quietly breaks
+the aspect, and a preview whose shape does not match the result is worse than no preview.
+
+`POST /api/background` takes those bytes, runs them through the **same** blur, tone-map and
+two-codec encode as the desk's own picture — a bright wallpaper needs the ceiling more than a
+landscape does, not less — and writes the crop down as received, so the derived parts are re-derived
+on the next start rather than baked into a file for ever. The body is capped below `DRAIN_LIMIT` and
+the decoder is bounded before it reads (`max_image_width`, `max_alloc`), because a few hundred bytes
+of header can ask a decoder for gigabytes and this is a file somebody sent us. An empty body means
+*use the desk's again* and falls back to it rather than to nothing. Encoding one background takes
+about **0.45 s in a release build and nearly nine in a debug one** — rav1e is a different program
+without optimisation, and it is the release binary that answers the Save.
+
 **The blur is applied here, never as a CSS `filter`.** A filter on a full-screen layer is GPU work
 on every frame; a blurred bitmap costs the phone nothing beyond the decode. It pays for itself twice
 over, because blur removes exactly the high frequencies a codec spends most of its bytes on — and it

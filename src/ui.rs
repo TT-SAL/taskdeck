@@ -3381,6 +3381,28 @@ impl TaskApp {
         }
         self.phone_last_attempt = Some(Instant::now());
 
+        // The same picture the standalone server prepares, so the phone looks
+        // the same whichever process is serving it — and so a crop sent from
+        // the phone has somewhere to be kept.
+        let desk_picture = self
+            .background_options
+            .get(self.selected_background_index)
+            .map(|name| self.dirs.images.join(name));
+        phone::set_backdrop_home(self.dirs.data.clone(), desk_picture, self.background_image_tint_percent);
+        if phone::backdrop().is_none() {
+            let uploaded = self.dirs.data.join(phone::BACKGROUND_FILE);
+            let source = if uploaded.exists() {
+                Some(uploaded)
+            } else {
+                self.background_options
+                    .get(self.selected_background_index)
+                    .map(|name| self.dirs.images.join(name))
+            };
+            if let Some(picture) = source {
+                phone::set_backdrop(phone::prepare_backdrop(&picture, self.background_image_tint_percent));
+            }
+        }
+
         // The wake pokes the event loop: `App::user_event` serves the queue,
         // even while the window is minimized or asleep.
         let proxy = self.event_proxy.clone();

@@ -776,6 +776,18 @@ fn handle(
                 None => json_error(404, "No such picture."),
             }
         }
+        // The phone's own picture, already cropped by it to the shape this
+        // server serves. An empty body means "use the desk's again".
+        (Method::Post, "/api/background") => {
+            let clearing = request.headers().iter().any(|h| h.field.equiv("X-TaskDeck-Clear"));
+            match read_body_up_to(&mut request, MAX_UPLOAD_BYTES) {
+            Ok(body) => match adopt_background(if clearing { &[] } else { &body }) {
+                Ok(id) => encoding.json(serde_json::json!({ "ok": true, "id": id })),
+                Err(why) => json_error(400, &why),
+            },
+            Err(error) => json_error(error.status, &error.message),
+            }
+        }
         (Method::Get, "/api/state") => match snapshot_command(&query) {
             Ok(command) => match ask(command, tx, wake) {
                 Ok(value) => encoding.json(value),
@@ -895,16 +907,20 @@ fn snapshot_command(query: &[(String, String)]) -> Result<Command, PhoneError> {
 }
 
 fn read_body(request: &mut HttpRequest) -> Result<Vec<u8>, PhoneError> {
-    if request.body_length().is_some_and(|length| length > MAX_BODY_BYTES) {
+    read_body_up_to(request, MAX_BODY_BYTES)
+}
+
+fn read_body_up_to(request: &mut HttpRequest, cap: usize) -> Result<Vec<u8>, PhoneError> {
+    if request.body_length().is_some_and(|length| length > cap) {
         return Err(PhoneError::bad_request("That request is too large."));
     }
     let mut body = Vec::new();
     request
         .as_reader()
-        .take(MAX_BODY_BYTES as u64 + 1)
+        .take(cap as u64 + 1)
         .read_to_end(&mut body)
         .map_err(|error| PhoneError::bad_request(format!("Could not read the request: {error}")))?;
-    if body.len() > MAX_BODY_BYTES {
+    if body.len() > cap {
         return Err(PhoneError::bad_request("That request is too large."));
     }
     Ok(body)
@@ -1087,6 +1103,13 @@ fn no_store() -> Header {
 /// back to `script-src` and is refused, which costs the offline shell and the
 /// instant open that the whole page is shaped around. Found by loading the page
 /// rather than by reading the policy.
+///
+/// `blob:` is in `img-src` for one reason, worth naming so nobody widens it
+/// further by accident: choosing a background on the phone has to show the
+/// picture before it is sent, and an object URL is the only way to display a
+/// file the user just picked without pushing a twelve-megapixel photograph
+/// through a base64 string. It admits nothing from the network — a blob is
+/// bytes this page already holds.
 fn guards() -> [Header; 3] {
     [
         header("Referrer-Policy", "no-referrer"),
@@ -1094,7 +1117,7 @@ fn guards() -> [Header; 3] {
         header(
             "Content-Security-Policy",
             "default-src 'none'; script-src 'self' 'unsafe-inline'; worker-src 'self'; \
-             style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; \
+             style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; \
              manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
         ),
     ]
@@ -1282,6 +1305,10 @@ const BACKGROUND_CEILING: f32 = 0.13;
 /// the same scale as JPEG's — 70 here is visually well above JPEG 70.
 const AVIF_QUALITY: u8 = 70;
 const AVIF_SPEED: u8 = 4;
+// Worth knowing before anyone tunes these: encoding one background at 540x1170
+// takes about 0.45s in a release build and nearly nine seconds in a debug one.
+// rav1e is a different program without optimisation, and the phone's Save tap
+// is answered by the release binary.
 
 fn to_linear(v: u8) -> f32 {
     let c = v as f32 / 255.0;
@@ -1320,8 +1347,34 @@ pub struct Backdrop {
 /// it than a wall calendar does, because its type is 11 to 14px rather than a
 /// heading across a monitor, so the setting is taken as a floor.
 pub fn prepare_backdrop(path: &Path, tint: u32) -> Option<Backdrop> {
+    let bytes = std::fs::read(path).ok()?;
+    prepare_backdrop_bytes(&bytes, tint)
+}
+
+/// Most an uploaded picture may weigh. The phone crops before it sends, so what
+/// arrives is a few hundred kilobytes; this is the wall, not the expectation,
+/// and it stays under `DRAIN_LIMIT` so an oversized one is refused politely
+/// rather than dropped.
+pub const MAX_UPLOAD_BYTES: usize = 6 * 1024 * 1024;
+/// Most pixels a decoder is allowed to allocate for an upload. A small file can
+/// declare an enormous canvas, and this is bytes from outside the process.
+const MAX_UPLOAD_PIXELS: u64 = 40 * 1_000_000;
+
+/// The same, from bytes that came off the wire.
+pub fn prepare_backdrop_bytes(bytes: &[u8], tint: u32) -> Option<Backdrop> {
     use image::imageops::FilterType;
-    let source = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.decode().ok()?;
+    if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
+        return None;
+    }
+    // Bounded before it is read, not after: a few hundred bytes of header can
+    // ask a decoder for gigabytes, and this is a file somebody sent us.
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(20_000);
+    limits.max_image_height = Some(20_000);
+    limits.max_alloc = Some(MAX_UPLOAD_PIXELS * 4);
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    reader.limits(limits);
+    let source = reader.decode().ok()?;
 
     // Crop to the phone's shape from the centre, then scale. Cropping first
     // means the scale never has to magnify, and a landscape desktop picture
@@ -1444,18 +1497,82 @@ pub fn prepare_backdrop(path: &Path, tint: u32) -> Option<Backdrop> {
     })
 }
 
-/// The prepared picture, set once by whoever owns the board.
+/// The prepared picture. Replaceable, because the phone can now send a new one.
 ///
-/// Held here rather than passed through every request because it is fixed for
-/// the life of the process and preparing it costs a decode, a crop, a resize
-/// and up to four JPEG encodes — work that must never land on a request.
-static BACKDROP: OnceLock<Option<Backdrop>> = OnceLock::new();
+/// Held here rather than passed through every request because preparing it
+/// costs a decode, a blur, a tone-map and two encodes — work that must never
+/// land on a request. An `Arc` so a request can take a reference and let go of
+/// the lock before it starts writing bytes down a slow link.
+static BACKDROP: Mutex<Option<Arc<Backdrop>>> = Mutex::new(None);
+/// Where an uploaded picture is kept, what the desk's own picture is, and the
+/// tint to prepare either with. Set once at startup by whoever owns the board,
+/// because only they know the data dir.
+static BACKDROP_HOME: OnceLock<BackdropHome> = OnceLock::new();
+
+struct BackdropHome {
+    data_dir: std::path::PathBuf,
+    /// The desk's own picture, which is what "use the desk's" goes back to.
+    /// `None` when the desk has none set, and then clearing leaves no picture.
+    desk: Option<std::path::PathBuf>,
+    tint: u32,
+}
+/// The file an uploaded crop is kept in, beside the board's own files. The
+/// bytes are the phone's crop exactly as it sent them, not the prepared
+/// picture, so a change to the pipeline is re-derived rather than baked in.
+pub const BACKGROUND_FILE: &str = "phone_background.img";
 
 pub fn set_backdrop(made: Option<Backdrop>) {
-    let _ = BACKDROP.set(made);
+    *BACKDROP.lock().unwrap_or_else(|held| held.into_inner()) = made.map(Arc::new);
 }
-pub fn backdrop() -> Option<&'static Backdrop> {
-    BACKDROP.get().and_then(|held| held.as_ref())
+pub fn backdrop() -> Option<Arc<Backdrop>> {
+    BACKDROP.lock().unwrap_or_else(|held| held.into_inner()).clone()
+}
+/// Tell the server where an uploaded picture lives, what to fall back to, and
+/// how dark to make either.
+pub fn set_backdrop_home(data_dir: std::path::PathBuf, desk: Option<std::path::PathBuf>, tint: u32) {
+    let _ = BACKDROP_HOME.set(BackdropHome { data_dir, desk, tint });
+}
+
+/// Take a picture the phone sent: prepare it, write the crop down so a restart
+/// still has it, and put it in front of the one that was there.
+///
+/// The crop is stored **as received**, not as prepared: the blur, the tone-map
+/// and the two encodes are derived, and a change to any of them should be
+/// re-derived on the next start rather than baked into a file forever.
+///
+/// An empty body clears it, and the desk's own picture comes back.
+fn adopt_background(body: &[u8]) -> Result<Option<String>, String> {
+    let Some(home) = BACKDROP_HOME.get() else {
+        return Err("This copy has nowhere to keep a picture.".to_string());
+    };
+    if body.is_empty() {
+        // Not "no picture": back to whatever the desk is showing, which is what
+        // the button offering this says.
+        let _ = std::fs::remove_file(home.data_dir.join(BACKGROUND_FILE));
+        let back = home.desk.as_ref().and_then(|picture| prepare_backdrop(picture, home.tint));
+        let id = back.as_ref().map(|made| made.id.clone());
+        set_backdrop(back);
+        return Ok(id);
+    }
+    let made = prepare_backdrop_bytes(body, home.tint)
+        .ok_or_else(|| "That file is not a picture this can read.".to_string())?;
+    // Written the way every other file here is: a temp file, fsynced, renamed.
+    // A half-written background would be read as a broken one at the next start.
+    write_bytes_atomically(&home.data_dir, BACKGROUND_FILE, body)
+        .map_err(|error| format!("Could not keep the picture: {error}"))?;
+    let id = made.id.clone();
+    set_backdrop(Some(made));
+    Ok(Some(id))
+}
+
+fn write_bytes_atomically(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(dir)?;
+    let mut temp = tempfile::NamedTempFile::new_in(dir)?;
+    temp.write_all(bytes)?;
+    temp.as_file_mut().sync_all()?;
+    temp.persist(dir.join(name))?;
+    crate::tasks::sync_directory(dir);
+    Ok(())
 }
 
 /// The web-app manifest, so "Add to Home Screen" opens the view like an app.

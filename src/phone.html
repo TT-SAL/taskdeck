@@ -472,6 +472,25 @@
   .count { display: inline-block; min-width: 22px; padding: 0 6px; margin-left: 6px; border-radius: 11px; background: var(--plate-2); font-size: 13px; }
   .count.urgent { background: var(--today); color: #0f1113; }
 
+  /* The frame is the shape of the phone's own screen, so what you line up in
+     it is what you get. `touch-action: none` because every touch inside it is
+     a placement, never a scroll. */
+  /* Height first and width derived from it, never `max-height` over a
+     `width: 100%` — that clamps the box and quietly breaks the aspect, and the
+     save maps this frame onto the canvas one-to-one. A preview whose shape does
+     not match the result is worse than no preview. */
+  .cropframe {
+    position: relative; overflow: hidden; touch-action: none;
+    height: 44vh; aspect-ratio: 540 / 1170; width: auto;
+    margin: 4px auto 10px; border-radius: var(--r-m);
+    background: var(--plate-2); background-image:
+      linear-gradient(45deg, rgba(255,255,255,0.03) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.03) 75%),
+      linear-gradient(45deg, rgba(255,255,255,0.03) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.03) 75%);
+    background-size: 18px 18px; background-position: 0 0, 9px 9px;
+  }
+  .cropimg { position: absolute; left: 50%; top: 50%; transform-origin: 50% 50%; max-width: none; user-select: none; -webkit-user-drag: none; }
+  .cropedge { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 1px var(--edge-2); border-radius: var(--r-m); }
+
   /* ── Sheets ── */
   .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.68); z-index: 8; }
   .sheet {
@@ -900,7 +919,11 @@
   const WAIT_TIMEOUT_MS = 45000;
   async function api(path, options = {}) {
     const headers = Object.assign({ 'X-TaskDeck-Token': state.token }, options.headers || {});
-    if (options.body) headers['Content-Type'] = 'application/json';
+    // Commands are JSON; a picture is not. Say which, rather than labelling
+    // every body the same and hoping nothing checks.
+    if (options.body && !headers['Content-Type']) {
+      headers['Content-Type'] = typeof options.body === 'string' ? 'application/json' : 'application/octet-stream';
+    }
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const limit = path.startsWith('/api/wait') ? WAIT_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
     const timer = controller ? setTimeout(() => controller.abort(), limit) : null;
@@ -2598,6 +2621,7 @@
       // Notes used to be a third of the bottom bar, for something opened once a
       // week. It lives beside the tasks it is about instead.
       state.sheet === 'tray' ? el('button', { text: 'Notes', onclick: () => openSheet('notes') }) : null,
+      state.sheet === 'tray' ? el('button', { text: 'Look', onclick: () => openSheet('look') }) : null,
       el('button', { text: 'Close', onclick: closeSheet }),
     ]);
   }
@@ -2609,11 +2633,168 @@
     else if (state.sheet === 'tray') renderTraySheet(sheet);
     else if (state.sheet === 'new') renderNewSheet(sheet);
     else if (state.sheet === 'notes') renderNotesSheet(sheet);
+    else if (state.sheet === 'look') renderLookSheet(sheet);
+    else if (state.sheet === 'look') renderLookSheet(sheet);
     sheet.append(sheetFoot());
   }
 
   // The desktop notepad. Read here, and replaced whole with Save — never per
   // keystroke, so the desk and the phone cannot fight over a sentence.
+  /* ─────────────────────────── Choosing the picture ───────────────────────
+   *
+   * Pick, move, save. The crop happens here rather than on the server because
+   * only the person holding the phone knows which part of the picture they
+   * want behind their week — and because sending the crop rather than the
+   * original means a twelve-megapixel photograph never crosses the link.
+   *
+   * The image is moved with a CSS transform on an `<img>`, not redrawn on a
+   * canvas per frame: a transform is composited and a canvas redraw is not,
+   * and this has to be smooth on a phone that struggles. The canvas is touched
+   * exactly once, on Save.
+   */
+  const CROP_W = 540, CROP_H = 1170;
+
+  function renderLookSheet(sheet) {
+    sheet.append(el('h2', { text: 'Background' }));
+    sheet.append(el('div', {
+      class: 'kindline',
+      text: 'Pick a picture, move and pinch it into the frame, then save. It is cropped here and kept on the desk.',
+    }));
+
+    const frame = el('div', { class: 'cropframe' });
+    const img = el('img', { class: 'cropimg', alt: '' });
+    frame.append(img);
+    // The frame is the shape of the phone's own screen, so what you line up is
+    // what you get.
+    frame.append(el('div', { class: 'cropedge' }));
+    sheet.append(frame);
+
+    const hint = el('div', { class: 'nothing', text: 'No picture chosen yet.' });
+    sheet.append(hint);
+
+    // Where the picture sits inside the frame: a scale and an offset, in the
+    // frame's own pixels, with the origin at its centre.
+    let art = null;     // { w, h } natural size
+    let view = { scale: 1, x: 0, y: 0 };
+    const place = () => {
+      img.style.transform = `translate(-50%, -50%) translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+    };
+    const fit = () => {
+      if (!art) return;
+      const box = frame.getBoundingClientRect();
+      // Cover, never contain: an empty corner is not a background.
+      view.scale = Math.max(box.width / art.w, box.height / art.h);
+      view.x = 0; view.y = 0;
+      place();
+    };
+
+    const file = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+    file.addEventListener('change', () => {
+      const chosen = file.files && file.files[0];
+      if (!chosen) return;
+      hint.textContent = 'Reading…';
+      const url = URL.createObjectURL(chosen);
+      img.onload = () => {
+        art = { w: img.naturalWidth, h: img.naturalHeight };
+        hint.textContent = `${art.w} × ${art.h} — drag to move, pinch to zoom`;
+        img.style.width = `${art.w}px`;
+        img.style.height = `${art.h}px`;
+        fit();
+        save.disabled = false;
+      };
+      img.onerror = () => { hint.textContent = 'That file could not be read as a picture.'; };
+      img.src = url;
+    });
+    sheet.append(file);
+
+    // Drag with one finger, pinch with two. Scoped to the frame, and
+    // `touch-action: none` on it so the page underneath does not scroll away
+    // while the picture is being placed.
+    let hold = null;
+    const span = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    frame.addEventListener('touchstart', (e) => {
+      if (!art) return;
+      e.preventDefault();
+      const t = e.touches;
+      hold = { x: t[0].clientX, y: t[0].clientY, view: { ...view }, span: t.length > 1 ? span(t) : 0 };
+    }, { passive: false });
+    frame.addEventListener('touchmove', (e) => {
+      if (!hold || !art) return;
+      e.preventDefault();
+      const t = e.touches;
+      if (t.length > 1 && hold.span > 0) {
+        view.scale = Math.max(0.05, hold.view.scale * (span(t) / hold.span));
+      } else {
+        view.x = hold.view.x + (t[0].clientX - hold.x);
+        view.y = hold.view.y + (t[0].clientY - hold.y);
+      }
+      place();
+    }, { passive: false });
+    for (const done of ['touchend', 'touchcancel']) {
+      frame.addEventListener(done, () => { hold = null; }, { passive: true });
+    }
+
+    const save = el('button', { class: 'primary', text: 'Save', disabled: true, onclick: async () => {
+      if (!art) return;
+      save.disabled = true;
+      hint.textContent = 'Sending…';
+      try {
+        await sendBackground(img, art, view, frame.getBoundingClientRect());
+        hint.textContent = 'Saved. It is on the desk now.';
+        await load({ quiet: true });
+        closeSheet();
+        toast('Background changed');
+      } catch (error) {
+        hint.textContent = error.message || 'That did not go through.';
+        save.disabled = false;
+      }
+    } });
+
+    sheet.append(el('div', { class: 'section actions' }, [
+      el('button', { text: 'Choose picture…', onclick: () => file.click() }),
+      save,
+    ]));
+    sheet.append(el('div', { class: 'section actions' }, [
+      el('button', { text: 'Use the desk\u2019s picture', onclick: async () => {
+        hint.textContent = 'Clearing…';
+        try {
+          // An empty body means "use the desk's": sent as a header rather than
+          // as zero bytes, because a zero-length body is indistinguishable from
+          // no body at all on the way out.
+          await api('/api/background', { method: 'POST', headers: { 'X-TaskDeck-Clear': '1' }, body: ' ' });
+          await load({ quiet: true });
+          closeSheet();
+          toast('Back to the desk\u2019s picture');
+        } catch (error) { hint.textContent = error.message; }
+      } }),
+    ]));
+  }
+
+  // The one moment a canvas is touched: the frame's contents, redrawn at the
+  // size the server serves, and handed over as a JPEG.
+  async function sendBackground(img, art, view, box) {
+    const canvas = document.createElement('canvas');
+    canvas.width = CROP_W;
+    canvas.height = CROP_H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('This browser cannot crop a picture.');
+    ctx.imageSmoothingQuality = 'high';
+    // The frame maps onto the canvas by one factor, so everything below is the
+    // same arithmetic the transform did, in canvas units.
+    const k = CROP_W / box.width;
+    const drawn = { w: art.w * view.scale * k, h: art.h * view.scale * k };
+    ctx.drawImage(
+      img,
+      CROP_W / 2 + view.x * k - drawn.w / 2,
+      CROP_H / 2 + view.y * k - drawn.h / 2,
+      drawn.w,
+      drawn.h,
+    );
+    const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/jpeg', 0.92));
+    if (!blob) throw new Error('The picture could not be prepared.');
+    await api('/api/background', { method: 'POST', body: await blob.arrayBuffer() });
+  }
+
   function renderNotesSheet(sheet) {
     sheet.append(el('h2', { text: 'Notes' }));
     sheet.append(el('div', { class: 'kindline', text: 'The notepad on the desktop. Saved when you press Save.' }));

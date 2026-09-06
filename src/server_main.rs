@@ -258,8 +258,25 @@ fn main() {
     // The picture behind the phone's page, prepared once before anything can
     // ask for it: a decode, a crop, a resize and up to four JPEG encodes is not
     // work that may land on a request.
-    if !config.background.trim().is_empty() {
-        let picture = dirs.images.join(config.background.trim());
+    // Where an uploaded crop is kept, and how dark to prepare anything with.
+    let desk_picture = Some(config.background.trim())
+        .filter(|name| !name.is_empty())
+        .map(|name| dirs.images.join(name));
+    phone::set_backdrop_home(dirs.data.clone(), desk_picture.clone(), config.background_image_tint_percent);
+    // A picture sent from the phone wins over the desk's own: it was cropped
+    // for this screen by the person looking at it.
+    let uploaded = dirs.data.join(phone::BACKGROUND_FILE);
+    if uploaded.exists() {
+        let made = phone::prepare_backdrop(&uploaded, config.background_image_tint_percent);
+        match &made {
+            Some(ready) => eprintln!(
+                "  picture:     the one sent from the phone → {} KB for it",
+                ready.avif.as_ref().unwrap_or(&ready.jpeg).len() / 1024
+            ),
+            None => eprintln!("  picture:     the one sent from the phone could not be read"),
+        }
+        phone::set_backdrop(made);
+    } else if let Some(picture) = desk_picture {
         let made = phone::prepare_backdrop(&picture, config.background_image_tint_percent);
         match &made {
             Some(ready) => eprintln!(
