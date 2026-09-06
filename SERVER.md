@@ -95,6 +95,16 @@ both.
 *without* `serve`, set it to the tailnet address (`phone_bind_address = "100.x.y.z"`), and the phone
 can open `http://<machine>.<tailnet>.ts.net:7373/?token=…` from mobile data.
 
+**These two are alternatives, never both.** Setting the tailnet address while `serve` is still
+configured is the one combination that fails, and it fails twice over: `serve`'s upstream is
+`127.0.0.1:7373`, so with nothing listening there the HTTPS link — the one the phone has on its
+home screen — answers **502**, and the raw `http://…:7373` link is a *different origin* that has
+no service worker and no installed app, so the page opens as an ordinary browser tab. If the app
+suddenly becomes a webpage and the link 502s, this is why: check `tailscale serve status` against
+`phone_bind_address` before changing anything else. Going without `serve` also costs the installed
+app permanently, because `http://` is not a secure context and no service worker can be registered
+on one.
+
 **Do not set it to `0.0.0.0` to save yourself the trouble.** That opens the port on every network
 the machine ever joins — a café, a campus, a hotel. The token still refuses to hand out anything,
 but the port is a door, and two connections that declare a body and never send it are enough to

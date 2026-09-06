@@ -827,7 +827,7 @@ existing comments, key order, and unknown keys** and writes each value with its 
 | `ui_scale_percent` | u32 | `0` (automatic) | `0` = fit to window, else clamped `UI_SCALE_MIN..=MAX` (`40..=100`) |
 | `phone_server_enabled` | bool | `false` | serve the phone view (§21) while the app runs |
 | `phone_server_port` | u16 | `7373` | `phone::PORT_MIN` (1024) or above; anything else falls back to the default |
-| `phone_bind_address` | string | `"127.0.0.1"` | an IP address (trimmed) to listen on alone; anything that is not one falls back to this machine alone (§21.7). **The default reaches no phone** — `100.x.y.z` serves the tailnet, `0.0.0.0` every interface. File only — not on the settings sheet — and read at start: a change takes effect at the next start |
+| `phone_bind_address` | string | `"127.0.0.1"` | an IP address (trimmed) to listen on alone; anything that is not one falls back to this machine alone (§21.7). The default is what `tailscale serve` proxies to, which is the recommended setup and the only one that gets HTTPS (and so the installed app); `100.x.y.z` serves the tailnet over plain HTTP on the raw port, `0.0.0.0` every interface. **Do not set the tailnet address while `tailscale serve` is configured** — the proxy's upstream is loopback, and it answers 502. File only — not on the settings sheet — and read at start: a change takes effect at the next start |
 | `phone_token` | string | `""` → minted | the key in the phone's link; `main` mints one on the first start and keeps it. **A credential**: anyone holding the link can edit the calendar |
 | `frame_cap_fps` | u32 | `0` (uncapped) | `0` = the uncapped loop of §14.1, else clamped `FRAME_CAP_MIN..=MAX` (`15..=360`) |
 | `server_url` | string | `""` | a `taskdeck-server` to keep the board on, `http://host:port`; empty means the board lives here (§22) |
@@ -2752,15 +2752,29 @@ encrypted end to end, so plain HTTP inside the tunnel is fine and the TLS-certif
 never comes up. The link is the key — the sheet says to share it like a password — and it should
 not be port-forwarded to the open internet.
 
-**The server binds this machine alone by default (`phone_bind_address = "127.0.0.1"`), which no
-phone can reach.** That is deliberate: which network the reader wants to serve is not something a
-default can guess, and the failure mode of guessing *wide* is a port on the café or campus network
-the laptop joined, while the failure mode of guessing *narrow* is a phone that says it cannot
-connect. Setting the key to one address in `userconfig.toml` — the Tailscale one, `100.x.y.z` —
-binds that address alone, and the links shown are then for that address only
-(`phone::addresses_for`); `0.0.0.0` opens every interface, and the startup banner says so out loud
-when it does. A key that is not an address falls back to the default rather than to something
-wider. There is no control for it on the sheet: it is a posture decided once, in the file, read at
+**The server binds this machine alone by default (`phone_bind_address = "127.0.0.1"`).** That is
+deliberate, and it is not the same thing as serving nobody: the recommended setup puts
+`tailscale serve` in front of loopback (SERVER.md §3), which is what gets the phone an **HTTPS**
+origin — and HTTPS is what lets the browser install the service worker and run the page as a
+standalone app rather than a tab. Loopback is therefore the *right* answer for the setup the
+documentation recommends, and the wrong one only when nothing is proxying.
+
+The alternative is to bind the tailnet address (`phone_bind_address = "100.x.y.z"`), which serves
+that address alone over plain HTTP on the raw port. It works, and it costs the service worker and
+the installed app, because `http://` is not a secure context. `0.0.0.0` opens every interface, and
+the startup banner says so out loud when it does. A key that is not an address falls back to the
+default rather than to something wider.
+
+> **The failure this pairing produces is worth naming, because it looks like nothing.** Bind the
+> tailnet address while `tailscale serve` is still configured, and the proxy's upstream —
+> `127.0.0.1:7373` — has nothing listening: every request through the HTTPS origin comes back
+> **502**, the installed app opens to an error page, and the raw `http://…:7373` link that
+> `--print-link` now prints is a *different origin* that has no service worker and no installed
+> app. Two symptoms, one cause. The banner states which case it is in rather than asserting a
+> failure, precisely so that reading it does not talk anyone into changing the setting that was
+> already right.
+
+There is no control for it on the sheet: it is a posture decided once, in the file, read at
 start — a change there takes effect at the next start, like the server fields (§22.3).
 
 ### 21.8 What this deliberately does not do

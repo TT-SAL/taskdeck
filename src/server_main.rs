@@ -339,16 +339,23 @@ fn main() {
              \x20              phone reaches this through `tailscale serve`, which is the usual case."
         );
     } else if bind == phone::DEFAULT_BIND {
-        // The other half of the same duty, and the one that actually bit: bound
-        // to loopback the server comes up perfectly, answers every local
-        // request, and is unreachable from the phone. Nothing else in the
-        // system says so — the phone just keeps showing its cached week — so
-        // the only place it can be said is here, at the moment it happens.
+        // Loopback is both the recommended setting and a way to serve nobody,
+        // and this line cannot tell which without knowing whether something is
+        // proxying to it. So it states the condition rather than asserting a
+        // failure: saying "no phone can reach this" to someone running
+        // `tailscale serve` would send them to change the one setting that is
+        // already right — which is exactly how the port ends up open wider.
+        let proxied = !config.phone_public_url.is_empty();
         eprintln!(
-            "  listening:   this machine only. No phone can reach it as it stands.\n\
-             \x20              That is right if `tailscale serve` is in front of it (SERVER.md §3);\n\
-             \x20              otherwise set `phone_bind_address` to this machine's tailnet address\n\
-             \x20              (100.x.y.z) in userconfig.toml and start again."
+            "  listening:   this machine only — reachable through a proxy in front of it, not directly.{}",
+            if proxied {
+                "\n\x20              `phone_public_url` is set, so that is the intended setup: the\n\
+                 \x20              link below is the one to use, and `tailscale serve` must be running."
+            } else {
+                "\n\x20              If nothing is proxying (`tailscale serve --bg 7373`, SERVER.md §3),\n\
+                 \x20              no phone can reach this. Either start one, or set\n\
+                 \x20              `phone_bind_address` to this machine's tailnet address (100.x.y.z)."
+            }
         );
     }
     // The zone the phone's day is drawn in. Said out loud because getting it
