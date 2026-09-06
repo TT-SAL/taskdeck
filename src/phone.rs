@@ -76,7 +76,20 @@ pub const DEFAULT_PORT: u16 = 7373;
 /// Address the server binds when the setting says nothing: every interface,
 /// because the phone is sometimes on the LAN and sometimes on the tailnet and
 /// the token guards the door either way. One address serves that one only.
-pub const DEFAULT_BIND: &str = "0.0.0.0";
+/// Where a fresh install listens: **this machine only**.
+///
+/// The phone reaches the server through `tailscale serve`, which connects to
+/// `127.0.0.1` — so loopback is the whole of what the deployed path needs, and
+/// every interface is a door nothing walks through except strangers. Measured
+/// on a real server: two TCP connections that declare a body and never send it
+/// hold both workers for as long as they stay open, and `tiny_http` 0.12 has no
+/// socket read timeout to break that. Bound to `0.0.0.0` that is anyone on the
+/// café or campus network the laptop joined; bound here it is nobody.
+///
+/// A LAN setup with no Tailscale sets `phone_bind_address` in the file. An
+/// install that already names an address keeps it — this only decides what a
+/// new one starts as, and the server says at startup which door is open.
+pub const DEFAULT_BIND: &str = "127.0.0.1";
 /// Lowest port the settings accept: the privileged range needs root and is
 /// full of things that are not calendars.
 pub const PORT_MIN: u16 = 1024;
@@ -745,6 +758,19 @@ fn handle(
             Ok(value) => encoding.json(value),
             Err(error) => json_error(error.status, &error.message),
         },
+        // The content type is checked before the body is read, and this is the
+        // only reason a browser cannot be made to write to the board from
+        // somewhere else. A cross-origin `fetch` or form can send `text/plain`,
+        // `multipart/form-data` or `application/x-www-form-urlencoded` with no
+        // permission asked; asking for `application/json` puts the request in
+        // the class that needs a CORS preflight, and this server answers no
+        // preflight at all. Nothing else here stops it: there is no session
+        // cookie to be `SameSite`, but the token rides in the query string, and
+        // a token that has leaked once should not also be a write key for every
+        // page the phone visits.
+        (Method::Post, "/api/command") if !is_json(request.headers()) => {
+            json_error(415, "Commands are sent as application/json.")
+        }
         (Method::Post, "/api/command") => match read_body(&mut request) {
             Ok(body) => match serde_json::from_slice::<Command>(&body) {
                 Ok(command) if command.is_query() => json_error(400, "That is a query, not a command."),
@@ -793,7 +819,11 @@ fn handle(
         _ => json_error(404, "No such page."),
     };
 
-    let _ = request.respond(response.with_header(caching_for(path)));
+    let mut response = response.with_header(caching_for(path));
+    for guard in guards() {
+        response.add_header(guard);
+    }
+    let _ = request.respond(response);
 }
 
 /// Hand a command to the UI thread and wait for its answer.
@@ -990,8 +1020,54 @@ fn header(name: &str, value: &str) -> Header {
     Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static header text is ASCII")
 }
 
+/// Whether the body is offered as JSON. The parameters after `;` are the
+/// sender's business — `application/json; charset=utf-8` is still JSON.
+fn is_json(headers: &[Header]) -> bool {
+    headers.iter().any(|header| {
+        header.field.equiv("Content-Type")
+            && header
+                .value
+                .as_str()
+                .split(';')
+                .next()
+                .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("application/json"))
+    })
+}
+
 fn no_store() -> Header {
     header("Cache-Control", "no-store")
+}
+
+/// Headers every answer carries, whatever it is.
+///
+/// `Referrer-Policy` is the load-bearing one: the token travels in the query
+/// string — it has to, because that is the only place a calendar app
+/// subscribing to the feed can put it — and without this any request the page
+/// makes to somewhere else would carry the whole link, token and all, in the
+/// `Referer` header.
+///
+/// The policy is what a page that is one self-contained file can afford:
+/// nothing loads from anywhere, so everything is denied and only `'self'` and
+/// inline are allowed back. `'unsafe-inline'` for script is not a compromise
+/// here but a description — the script *is* the page. `frame-ancestors 'none'`
+/// keeps it out of somebody else's iframe, and `form-action 'none'` means a
+/// injected form has nowhere to post to.
+///
+/// `worker-src 'self'` is not decoration: without it the service worker falls
+/// back to `script-src` and is refused, which costs the offline shell and the
+/// instant open that the whole page is shaped around. Found by loading the page
+/// rather than by reading the policy.
+fn guards() -> [Header; 3] {
+    [
+        header("Referrer-Policy", "no-referrer"),
+        header("X-Content-Type-Options", "nosniff"),
+        header(
+            "Content-Security-Policy",
+            "default-src 'none'; script-src 'self' 'unsafe-inline'; worker-src 'self'; \
+             style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; \
+             manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        ),
+    ]
 }
 
 /// How long a phone may keep this path before asking again.
@@ -2203,6 +2279,50 @@ mod tests {
         assert_eq!(icon_at(192).len(), small.len());
     }
 
+    #[test]
+    fn a_command_must_be_offered_as_json() {
+        // The one thing stopping a web page the phone visits from writing to
+        // the board with a leaked token: a cross-origin form or `fetch` can
+        // send text/plain or a form encoding with nobody's permission, but
+        // asking for JSON puts the request in the class that needs a preflight,
+        // and this server answers none.
+        assert!(is_json(&headers(&[("Content-Type", "application/json")])));
+        assert!(is_json(&headers(&[("content-type", "application/json; charset=utf-8")])));
+        assert!(is_json(&headers(&[("Content-Type", " APPLICATION/JSON ")])));
+        for simple in ["text/plain", "text/plain;charset=UTF-8", "multipart/form-data", "application/x-www-form-urlencoded", "application/json-patch+json"] {
+            assert!(!is_json(&headers(&[("Content-Type", simple)])), "{simple}");
+        }
+        assert!(!is_json(&headers(&[])), "a body offered as nothing is not JSON");
+    }
+
+    #[test]
+    fn every_answer_carries_the_guards() {
+        // `Referrer-Policy` is the load-bearing one: the token is in the query
+        // string, so without it any request out of the page would hand the
+        // whole link to somewhere else in the `Referer` header.
+        let names: Vec<String> = guards().iter().map(|h| h.field.as_str().as_str().to_ascii_lowercase()).collect();
+        assert!(names.contains(&"referrer-policy".to_string()));
+        assert!(names.contains(&"x-content-type-options".to_string()));
+        assert!(names.contains(&"content-security-policy".to_string()));
+        let policy = guards()[2].value.as_str().to_string();
+        assert!(policy.contains("default-src 'none'"), "{policy}");
+        assert!(policy.contains("frame-ancestors 'none'"), "{policy}");
+        assert!(policy.contains("form-action 'none'"), "{policy}");
+        // The service worker is refused without this — `worker-src` falls back
+        // to `script-src`, and the offline shell goes with it.
+        assert!(policy.contains("worker-src 'self'"), "{policy}");
+    }
+
+    #[test]
+    fn a_fresh_install_listens_on_this_machine_only() {
+        // The setting that decides who can reach any of this. Two connections
+        // that declare a body and never send it hold both workers for as long
+        // as they stay open, and `tiny_http` 0.12 has no read timeout to break
+        // that — so the bind is the whole defence, and it starts closed.
+        assert_eq!(DEFAULT_BIND, "127.0.0.1");
+        assert_eq!(addresses_for(DEFAULT_BIND), vec!["127.0.0.1".to_string()]);
+    }
+
     fn headers(pairs: &[(&str, &str)]) -> Vec<Header> {
         pairs.iter().map(|(k, v)| header(k, v)).collect()
     }
@@ -2502,8 +2622,10 @@ mod tests {
     fn links_follow_the_bind_and_a_bad_bind_is_refused_before_anything_listens() {
         assert_eq!(addresses_for("127.0.0.1"), vec!["127.0.0.1".to_string()]);
         assert_eq!(addresses_for(" 100.64.0.7 "), vec!["100.64.0.7".to_string()]);
-        // Everywhere, or nonsense, means every address this machine has.
-        assert_eq!(addresses_for(DEFAULT_BIND), local_addresses());
+        // Everywhere, or nonsense, means every address this machine has — and
+        // the default is no longer that: a fresh install listens on loopback.
+        assert_eq!(addresses_for("0.0.0.0"), local_addresses());
+        assert_eq!(addresses_for(DEFAULT_BIND), vec!["127.0.0.1".to_string()]);
         assert_eq!(addresses_for("::"), local_addresses());
         assert_eq!(addresses_for("kitchen"), local_addresses());
 

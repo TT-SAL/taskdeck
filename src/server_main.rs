@@ -281,6 +281,18 @@ fn main() {
         phone::host_for_url(&bind),
         board.items.len()
     );
+    // Which door is open, in one line, because it is the setting that decides
+    // who can reach any of this and it is otherwise invisible. `tailscale serve`
+    // connects to 127.0.0.1, so a tailnet setup needs nothing wider — and
+    // anything wider is reachable from whatever café or campus network this
+    // machine is on, where nobody has any business here.
+    if bind == "0.0.0.0" {
+        eprintln!(
+            "  listening:   every interface — including any untrusted network this machine joins.\n\
+             \x20              Set `phone_bind_address = \"127.0.0.1\"` in userconfig.toml if the\n\
+             \x20              phone reaches this through `tailscale serve`, which is the usual case."
+        );
+    }
     // The zone the phone's day is drawn in. Said out loud because getting it
     // wrong is the quiet failure: everything works, both desktops look right,
     // and only the phone's dates are off at the edges of the day (SERVER.md §4).

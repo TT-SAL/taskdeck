@@ -423,8 +423,8 @@ pub struct Config {
     /// The secret in the phone's link. Empty until `main` mints one, which
     /// happens once and is then kept, so the link on the phone keeps working.
     pub phone_token: String,
-    /// The address the phone view listens on: `phone::DEFAULT_BIND` (every
-    /// interface) unless the file names one address, which then serves alone.
+    /// The address the phone view listens on: `phone::DEFAULT_BIND` (this
+    /// machine only) unless the file names another, which then serves alone.
     /// Not on the settings sheet — a posture decided once, in the file.
     pub phone_bind_address: String,
     /// The address to *hand out*, when it is not the one to listen on.
@@ -1144,8 +1144,10 @@ mod tests {
         assert_eq!(clean_bind_address(" 127.0.0.1 "), "127.0.0.1");
         assert_eq!(clean_bind_address("100.64.0.7"), "100.64.0.7");
         assert_eq!(clean_bind_address("::1"), "::1");
-        // Not an address: the phone view still comes up, everywhere, rather
-        // than not at all — the setting narrows, it never switches off.
+        // Not an address: the phone view still comes up, on this machine,
+        // rather than not at all. The default is loopback now — `tailscale
+        // serve` reaches it there, so the ordinary setup needs nothing wider,
+        // and a fresh install is not on every network it ever joins.
         for bad in ["", "kitchen", "192.168.1", "0.0.0.0:7373"] {
             assert_eq!(clean_bind_address(bad), crate::phone::DEFAULT_BIND, "{bad:?}");
         }
@@ -1159,7 +1161,7 @@ mod tests {
         fs::write(&path, "phone_server_port = 7373\n").unwrap();
         assert_eq!(get_check_and_set_config(&path).phone_bind_address, crate::phone::DEFAULT_BIND);
         // And the normalised file carries the key from then on.
-        assert!(fs::read_to_string(&path).unwrap().contains("phone_bind_address = \"0.0.0.0\""));
+        assert!(fs::read_to_string(&path).unwrap().contains("phone_bind_address = \"127.0.0.1\""));
     }
 
     #[test]

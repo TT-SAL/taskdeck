@@ -2319,6 +2319,40 @@ alphabet that survives a QR code and a phone keyboard; on a platform without `/d
 standard library's per-process hash seed is stirred with the clock and the pid — not a CSPRNG,
 but unguessable from outside the machine, which is the threat.
 
+**The bind is the defence, and it starts closed.** `phone_bind_address` is `127.0.0.1` on a fresh
+install, because `tailscale serve` — the deployment SERVER.md describes — hands requests to exactly
+there, so the ordinary setup needs nothing wider. Every interface is a door nothing walks through
+except strangers: measured on a real server, **two TCP connections that declare a body and never
+send it hold both worker threads for as long as they stay open**, because `tiny_http` 0.12 sets no
+socket read timeout (verified: the crate contains no `set_read_timeout`) and `EqualReader::drop`
+drains a body that will never arrive. The token is untouched by this — nothing is read, nothing is
+written, every route still answers 401 — but the phone view stops answering, and on `0.0.0.0` the
+attacker is anyone on the café or campus network the laptop joined. A durable fix needs a patched
+`tiny_http`; the bind removes the attacker instead, and the server says at startup when it is open
+wide.
+
+**Every answer carries three guards.** `Referrer-Policy: no-referrer` is the load-bearing one: the
+token is in the query string, so without it any request out of the page would hand the whole link
+to somewhere else in the `Referer` header. `X-Content-Type-Options: nosniff`, and a
+`Content-Security-Policy` that a one-file page can afford — `default-src 'none'` with `'self'` and
+inline allowed back, `frame-ancestors 'none'` so it cannot be framed, `form-action 'none'` so an
+injected form has nowhere to post. `worker-src 'self'` is not decoration: without it the service
+worker falls back to `script-src`, is refused, and the offline shell goes with it — found by
+loading the page rather than by reading the policy.
+
+**A command must be offered as `application/json`**, and that is the only thing stopping a page the
+phone visits from writing to the board with a leaked token. A cross-origin form or `fetch` may send
+`text/plain`, `multipart/form-data` or `application/x-www-form-urlencoded` with nobody's permission;
+asking for JSON puts the request in the class that needs a CORS preflight, and this server answers
+no preflight at all. There is no cookie here to be `SameSite` — the token rides in the URL, and a
+token that has leaked once should not also be a write key for every page the phone opens.
+
+**Calendar fetches are pinned to https and three redirects.** `checked_url` refuses `http` and says
+why — a calendar link is a password. Without `.https_only(true)` and an explicit
+`redirect::Policy` that promise would be the *calendar server's* to keep: `reqwest` follows ten
+redirects by default and permits an https→http downgrade, so one `302` puts the credential on the
+wire in clear, and one to `http://127.0.0.1/` points the fetcher at whatever else is listening here.
+
 **Times on the wire are what the page's native inputs produce**: a day is `YYYY-MM-DD`, a time
 of day is minutes from midnight, a deadline is a naive local `YYYY-MM-DDTHH:MM` (what
 `<input type="datetime-local">` yields; RFC 3339 with an offset is accepted too). Everything is

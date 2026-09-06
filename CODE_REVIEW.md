@@ -192,6 +192,41 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **A security review of the network stack** (`phone.rs`, `subscriptions.rs`, `server_main.rs`,
+  `initialization.rs`). The confidentiality side held: the 160-bit token is real entropy, compared
+  in constant time, every data route is behind it, the parser and the client's DOM handling survived
+  attack, and the body caps and reply cache are properly bounded. Availability did not. Four fixes:
+  the bind starts at `127.0.0.1` rather than `0.0.0.0` (see below); every answer carries
+  `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff` and a CSP; a command must be
+  offered as `application/json`; and calendar fetches are pinned to https with at most three
+  redirects.
+- **Two connections stopped the phone server answering** (`phone.rs`, `DEFAULT_BIND`): a TCP
+  connection that sends complete headers with a `Content-Length` and then nothing holds a worker
+  forever — `EqualReader::drop` drains a body that will never arrive and `tiny_http` 0.12 sets no
+  socket read timeout (verified: no `set_read_timeout` anywhere in the crate). With `WORKERS = 2`,
+  two such connections are the whole pool. Reproduced: `GET /` answered in 5 ms, then timed out
+  entirely with two sockets held, then answered in 2 ms when they closed — no token needed. A
+  durable fix needs a patched `tiny_http`; binding to loopback removes the attacker, and the server
+  now says at startup when it is bound wide.
+- **`reqwest`'s default redirect policy voided the https promise** (`subscriptions.rs`): `checked_url`
+  refuses `http` and tells the user a calendar link is a password — but the client set no redirect
+  policy and `https_only` defaults to `false`, so the calendar server could `302` to `http://` and
+  put the credential on the wire in clear, or to `http://127.0.0.1/` and aim the fetcher at this
+  machine. Verified in the crate source rather than assumed.
+- **A cross-site form could write to the board with a leaked token** (`phone.rs`): `/api/command`
+  accepted any content type, and a `text/plain` POST is something any page can send cross-origin
+  with no preflight. Confirmed over the wire before the fix (`415` after it).
+- **The token could leak in a `Referer` header** (`phone.rs`): it travels in the query string, and
+  the server set no `Referrer-Policy` — nor `nosniff`, nor a CSP, nor `frame-ancestors`. The only
+  headers it had ever sent were `Content-Type`, `Cache-Control` and `Content-Encoding`.
+- **An unauthenticated request could leak two file descriptors** (`phone.rs`): the oversized-body
+  guard `std::mem::forget`s the request, before the token is checked, and the socket never comes
+  back. Measured at exactly 2 fds per request, linear and unreclaimed — 200 requests took a process
+  from 11 descriptors to 411. Still present: the leak needs the same reachability as the denial of
+  service above, which the loopback bind removes, and removing the `forget` without first bounding
+  `EqualReader::drop`'s allocation would trade it for a worse failure. Recorded here so the next
+  person meets it rather than the measurement.
+
 - **Every control was in the hardest place to reach** (`phone.html`, §21.5): all four navigation
   buttons sat 10px from the top of the screen, taking 237px of a 347px row, while the three easiest
   targets on the whole surface went to Tray, Notes and ＋ New. The masthead is read-only now and the

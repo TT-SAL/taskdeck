@@ -90,9 +90,16 @@ sandboxed version does not give a usable `tailscale serve`, which is what puts H
 page. Sign in on the Mac and on the phone with the same account, and `tailscale status` should list
 both.
 
-Nothing about the server needs changing: `phone_bind_address` defaults to `0.0.0.0`, which is every
-interface, and the tailnet's is one of them. The phone can open
-`http://<machine>.<tailnet>.ts.net:7373/?token=…` from mobile data straight away.
+`phone_bind_address` starts at `127.0.0.1` — this machine only. That is deliberate, and it is what
+`tailscale serve` below wants anyway. If you want the phone to reach the raw port over the tailnet
+*without* `serve`, set it to the tailnet address (`phone_bind_address = "100.x.y.z"`), and the phone
+can open `http://<machine>.<tailnet>.ts.net:7373/?token=…` from mobile data.
+
+**Do not set it to `0.0.0.0` to save yourself the trouble.** That opens the port on every network
+the machine ever joins — a café, a campus, a hotel. The token still refuses to hand out anything,
+but the port is a door, and two connections that declare a body and never send it are enough to
+stop the server answering the phone for as long as they are held open: `tiny_http` has no socket
+read timeout, and there are two worker threads. On a laptop that travels, the bind is the defence.
 
 **HTTPS is a separate switch**, and worth throwing. It is what lets the browser install the service
 worker, which is what makes the page open at all when the phone has no signal (§21.5). Enable
@@ -102,8 +109,8 @@ HTTPS certificates for the tailnet once, in the admin console under DNS, then:
 sudo tailscale serve --bg 7373
 ```
 
-Leave `phone_bind_address` at `0.0.0.0` when you do. `serve` hands requests to `127.0.0.1`, and a
-single-address bind refuses them — the same trap §2 records for the Linux side.
+Leave `phone_bind_address` at `127.0.0.1` when you do — `serve` hands requests to exactly there, so
+the default is already right, and nothing else on any network can reach the port at all.
 
 Then tell the server the name, so the printed links and the QR carry it instead of a raw address:
 
@@ -153,9 +160,8 @@ port-forward TaskDeck instead: it speaks plain HTTP with a key in the URL, which
 tailnet and not fine on the open internet. If the box also sits on a LAN you would rather not
 serve, bind to the Tailscale address alone — `phone_bind_address = "100.x.y.z"` in
 `userconfig.toml`, or `--bind 100.x.y.z` for one run — and the port is not open anywhere else.
-(Not together with `tailscale serve` below, which hands requests to `127.0.0.1:7373`: with it,
-keep the default bind, or serve the tailnet address explicitly with
-`sudo tailscale serve --bg http://100.x.y.z:7373`.)
+(With `tailscale serve` below, which hands requests to `127.0.0.1:7373`, the default `127.0.0.1`
+bind is already what you want.)
 
 **Optional: HTTPS on the tailnet name.** Tailscale can front the server with a real certificate,
 so the phone opens `https://spare.tail1234.ts.net/?token=…` instead of an IP address:
@@ -214,7 +220,7 @@ server does not have and is ignored:
 ```toml
 phone_server_port = 7373
 phone_token = "…"              # minted on first start if missing — see the log
-phone_bind_address = "0.0.0.0" # every interface; a single address serves that one only (§2)
+phone_bind_address = "127.0.0.1" # this machine only; name another address to serve that one (§2)
 ```
 
 `selected_colorscheme_id` is honoured if present: the phone paints in that scheme.

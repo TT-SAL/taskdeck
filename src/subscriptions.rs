@@ -730,6 +730,16 @@ pub fn start(list: Vec<Subscription>, cached: Overlay, wake: Wake) -> Feeds {
 fn run(mut list: Vec<Subscription>, rx: Receiver<FeedCommand>, overlay: Arc<RwLock<Overlay>>, version: Arc<AtomicU64>, wake: Wake) {
     let client = match reqwest::blocking::Client::builder()
         .timeout(FETCH_TIMEOUT)
+        // `checked_url` refuses http and says why: a calendar link is a
+        // password, and http sends it in clear. Without these two lines that
+        // promise is the *calendar server's* to keep, not ours — reqwest
+        // follows ten redirects by default and `https_only` is off, so one
+        // `302` to `http://` puts the credential on the wire in clear, and one
+        // to `http://127.0.0.1/` points the fetcher at whatever else is
+        // listening on this machine. Three hops is more than any real feed
+        // needs and fewer than a loop.
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .https_only(true)
         .user_agent(concat!("TaskDeck/", env!("CARGO_PKG_VERSION")))
         .build()
     {
