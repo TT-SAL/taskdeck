@@ -51,8 +51,9 @@ it shows a link (and a QR code); open that on a phone on the same Wi-Fi — or o
 [Tailscale](https://tailscale.com) from anywhere — and you get the day as a timeline, the tray of
 unplanned tasks, and a sheet for editing whatever you tap: move or resize a block, book more
 time, set a due date, change severity, make a routine repeat, add a task, tick one off. Hold a
-block to drag it to another hour. **Week** shows the whole week as seven narrow columns, a tap
-on one opening the day. When the day is running late, **Reflow** is there too, and your
+block to drag it to another hour. The one button under the scrubber cycles the three views:
+the **day** as a timeline, the **agenda** as a continuous list of days, and the **weather**.
+When the day is running late, **Reflow** is there too, and your
 notepad is a tap away, to read or to change. Every
 change lands in the desktop app the moment you make it, through exactly the same code a drag on
 the planner uses, so there is nothing to sync and nothing to merge. Out of reach of the desktop,
@@ -60,6 +61,17 @@ an edit made on the page is kept on the phone — shown as waiting, not as done 
 order, when the desktop answers again; over a secure link (Tailscale's HTTPS, see `SERVER.md`)
 the page itself also opens offline and shows the last day it saw, which a plain `http://` LAN
 link cannot offer. Add the page to your home screen and it behaves like an app.
+
+**The weather view** is a forecast for the place you picked on the map in Settings — not for
+wherever the phone happens to be — and it is drawn for a calendar rather than for its own sake.
+It opens with the answer in one line: *Rain from 14:00 · during Write the term report*. Under the
+temperature there is a chart of the next twenty-four hours — the sky along the top, the
+temperature through the middle, the chance of rain rising from the baseline — and beneath it, on
+the same hours, **your day**: every block and every event you have booked, so you can see the rain
+land on the walk to the shops. Drag along the chart to read any hour exactly. Then sunrise, sunset,
+UV and wind, and the week as seven rows on one temperature scale. Tap a day to move the chart to
+it. The last forecast is kept on the phone, so the view still reads with the desktop switched off,
+and says how old it is.
 
 The same settings section gives you a **calendar feed** link. Subscribe to it from Google
 Calendar or your phone's own calendar app and your events, due dates, day plan and routines show

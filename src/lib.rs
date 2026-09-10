@@ -5,7 +5,9 @@ pub mod tasks;
 #[cfg(feature = "desk")]
 pub mod ui;
 pub mod utilities;
-#[cfg(feature = "desk")]
+// The forecast. Not behind `desk`: the fetch, the report and the symbol table
+// are plain data the headless server serves to the phone too, and only the
+// toolkit's own `ImageSource` inside it is feature-gated.
 pub mod weather;
 #[cfg(feature = "desk")]
 pub mod calendarwidgets;

@@ -270,7 +270,7 @@ async fn run() {
         background_blur_percent,
         background_light_percent,
         ui_scale_percent,
-        weather_service: get_weather(coordinates, proxy.clone()),
+        weather_service: get_weather(coordinates, Arc::clone(&wake)),
         calendars,
         startup_error: if startup_errors.is_empty() {
             None

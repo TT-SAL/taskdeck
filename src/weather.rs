@@ -1,21 +1,51 @@
 use std::{
-    sync::{Arc, RwLock, atomic::{AtomicU64, Ordering}},
+    sync::{Arc, Mutex, RwLock, atomic::{AtomicU64, Ordering}},
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::NaiveDateTime;
+#[cfg(feature = "desk")]
 use egui::ImageSource;
 use reqwest::blocking::Client;
 use reqwest::header::USER_AGENT;
-use serde::Deserialize;
-use winit::event_loop::EventLoopProxy;
+use serde::{Deserialize, Serialize};
 
 use std::sync::mpsc::{channel, Receiver, Sender};
+
+use crate::phone::Wake;
+
+/* ── What Open-Meteo answers with ──────────────────────────────────────────
+ *
+ * One request, three blocks: `current` for the headline, `hourly` for the day
+ * ahead, `daily` for the week. The desktop column has always used the hourly
+ * temperature and code alone; everything else here exists for the phone's
+ * weather view (`DOCUMENTATION.md` §21.9), which is asked to answer *should I
+ * take a coat, and will it rain on the thing at three* rather than to draw a
+ * grid of numbers.
+ *
+ * Every value arrives as an array parallel to `time`, and any of them may be
+ * `null` — a station with no probability model, a UV index the API does not
+ * publish past a few days. So they are `Option`s, filled in with a defensible
+ * zero at the point of use rather than refused: a missing gust reading is not
+ * a reason to have no weather.
+ */
 
 #[derive(Debug, Deserialize)]
 struct WeatherResponse {
     hourly: HourlyData,
+    /// Absent only if the request did not ask for them, which it does.
+    #[serde(default)]
+    current: Option<CurrentData>,
+    #[serde(default)]
+    daily: Option<DailyData>,
+    /// The named zone the local timestamps below are in, and its offset from
+    /// UTC. The phone needs the offset to know what "now" is *there*, which is
+    /// not always what it is in its own pocket.
+    #[serde(default)]
+    timezone: String,
+    #[serde(default)]
+    utc_offset_seconds: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +54,73 @@ struct HourlyData {
     temperature_2m: Vec<f64>,
     weather_code: Vec<i32>,
     is_day: Vec<i32>,
+    #[serde(default)]
+    apparent_temperature: Vec<Option<f64>>,
+    #[serde(default)]
+    precipitation_probability: Vec<Option<f64>>,
+    #[serde(default)]
+    precipitation: Vec<Option<f64>>,
+    #[serde(default)]
+    wind_speed_10m: Vec<Option<f64>>,
+    #[serde(default)]
+    wind_gusts_10m: Vec<Option<f64>>,
+    #[serde(default)]
+    wind_direction_10m: Vec<Option<f64>>,
+    #[serde(default)]
+    uv_index: Vec<Option<f64>>,
+    #[serde(default)]
+    relative_humidity_2m: Vec<Option<f64>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CurrentData {
+    #[serde(default)]
+    temperature_2m: Option<f64>,
+    #[serde(default)]
+    apparent_temperature: Option<f64>,
+    #[serde(default)]
+    weather_code: Option<i32>,
+    #[serde(default)]
+    is_day: Option<i32>,
+    #[serde(default)]
+    wind_speed_10m: Option<f64>,
+    #[serde(default)]
+    wind_gusts_10m: Option<f64>,
+    #[serde(default)]
+    wind_direction_10m: Option<f64>,
+    #[serde(default)]
+    relative_humidity_2m: Option<f64>,
+    #[serde(default)]
+    precipitation: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DailyData {
+    time: Vec<String>,
+    #[serde(default)]
+    weather_code: Vec<Option<i32>>,
+    #[serde(default)]
+    temperature_2m_max: Vec<Option<f64>>,
+    #[serde(default)]
+    temperature_2m_min: Vec<Option<f64>>,
+    #[serde(default)]
+    apparent_temperature_max: Vec<Option<f64>>,
+    #[serde(default)]
+    apparent_temperature_min: Vec<Option<f64>>,
+    #[serde(default)]
+    precipitation_sum: Vec<Option<f64>>,
+    #[serde(default)]
+    precipitation_probability_max: Vec<Option<f64>>,
+    #[serde(default)]
+    wind_speed_10m_max: Vec<Option<f64>>,
+    #[serde(default)]
+    wind_gusts_10m_max: Vec<Option<f64>>,
+    #[serde(default)]
+    uv_index_max: Vec<Option<f64>>,
+    #[serde(default)]
+    sunrise: Vec<Option<String>>,
+    #[serde(default)]
+    sunset: Vec<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -32,6 +129,129 @@ pub struct WeatherData {
     pub temp: f64,
     pub weather_code: i32,
     pub time: String,
+}
+
+/* ── The report the phone reads ────────────────────────────────────────────
+ *
+ * Plain data, serialised straight down `/api/weather`. The field names are
+ * short because there are a hundred and sixty-eight hours in it and the phone
+ * is often on mobile data; they are documented here, which is the only place
+ * they need to be.
+ *
+ * Every timestamp is **local to the forecast's own place**, in Open-Meteo's
+ * `YYYY-MM-DDTHH:MM` shape, and is passed through as text. The page slices it
+ * rather than parsing it: a bare date-time string is read as the *reader's*
+ * local time by every JavaScript engine, which is the one thing it must not
+ * mean here.
+ */
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Hour {
+    /// Local time at the place, `YYYY-MM-DDTHH:MM`.
+    pub t: String,
+    /// Temperature, °C.
+    pub temp: f64,
+    /// What it feels like, °C — wind chill and humidity folded in.
+    pub feels: f64,
+    /// WMO weather code.
+    pub code: i32,
+    /// The symbol to draw it with — `/weather/<sym>.svg`. Chosen here rather
+    /// than on the phone so the page can only ever ask for a picture this
+    /// binary actually carries: a code the page mapped by itself and got wrong
+    /// would be a broken image, once an hour, on somebody else's screen.
+    pub sym: &'static str,
+    /// Whether the sun is up in this hour.
+    pub day: bool,
+    /// Chance of precipitation, per cent.
+    pub pop: i32,
+    /// How much precipitation, millimetres.
+    pub mm: f64,
+    /// Wind, metres per second, and the gusts with it.
+    pub wind: f64,
+    pub gust: f64,
+    /// Where the wind comes *from*, degrees clockwise from north.
+    pub dir: i32,
+    /// UV index.
+    pub uv: f64,
+    /// Relative humidity, per cent.
+    pub humidity: i32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Day {
+    /// `YYYY-MM-DD`, local to the place.
+    pub date: String,
+    pub code: i32,
+    /// The day's symbol, always the daylight variant of it.
+    pub sym: &'static str,
+    pub high: f64,
+    pub low: f64,
+    pub feels_high: f64,
+    pub feels_low: f64,
+    /// Millimetres over the whole day, and the highest hourly chance in it.
+    pub mm: f64,
+    pub pop: i32,
+    pub wind: f64,
+    pub gust: f64,
+    pub uv: f64,
+    /// Local `YYYY-MM-DDTHH:MM`, or empty where the sun does not do it — a
+    /// polar summer has no sunset and the page says so rather than showing a
+    /// time that never comes.
+    pub sunrise: String,
+    pub sunset: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Now {
+    pub temp: f64,
+    pub feels: f64,
+    pub code: i32,
+    pub sym: &'static str,
+    pub day: bool,
+    pub wind: f64,
+    pub gust: f64,
+    pub dir: i32,
+    pub humidity: i32,
+    /// Precipitation in the last hour, millimetres.
+    pub mm: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Report {
+    /// The nearest marked city to the coordinate, so the reader can tell at a
+    /// glance that the forecast is for where they think it is.
+    pub place: String,
+    pub latitude: f32,
+    pub longitude: f32,
+    /// The place's own zone, and its offset from UTC in seconds.
+    pub timezone: String,
+    pub utc_offset_seconds: i64,
+    /// When this was fetched, seconds since the epoch. The page turns it into
+    /// "as of 14:03" whenever the answer is no longer fresh.
+    pub fetched_at: u64,
+    pub now: Option<Now>,
+    pub hours: Vec<Hour>,
+    pub days: Vec<Day>,
+}
+
+/// The last report fetched, for whoever serves the phone.
+///
+/// Same shape as the backdrop in `phone.rs`: a process-global behind a mutex,
+/// set by the thread that fetches and read by the HTTP workers, so a request
+/// for the weather never has to reach the UI thread or the board. An `Arc` so
+/// a worker can take a reference and let go of the lock before it starts
+/// writing bytes down a slow link.
+static REPORT: Mutex<Option<Arc<Report>>> = Mutex::new(None);
+
+/// What the phone view is served. `None` until the first fetch lands, and then
+/// never `None` again — a fetch that fails leaves the last good answer in
+/// place, because a forecast an hour old is worth far more than no forecast.
+pub fn latest_report() -> Option<Arc<Report>> {
+    REPORT.lock().unwrap_or_else(|held| held.into_inner()).clone()
+}
+
+fn publish_report(report: Report) {
+    *REPORT.lock().unwrap_or_else(|held| held.into_inner()) = Some(Arc::new(report));
 }
 
 enum WeatherCommand {
@@ -57,16 +277,25 @@ impl Drop for WeatherService {
     }
 }
 
+/// A value from one of the parallel arrays, or a stand-in when the API left it
+/// out. Reading past the end is the same case as a `null` in it, and both mean
+/// "not published for this hour" rather than "something is wrong".
+fn at(values: &[Option<f64>], index: usize, missing: f64) -> f64 {
+    values.get(index).copied().flatten().unwrap_or(missing)
+}
+
 fn fetch_weather_once(
     client: &Client,
     coordinates: [f32; 2],
-) -> Result<Vec<Vec<WeatherData>>, Box<dyn std::error::Error>> {
+) -> Result<(Vec<Vec<WeatherData>>, Report), Box<dyn std::error::Error>> {
     let url = format!(
         "https://api.open-meteo.com/v1/forecast\
         ?latitude={}&longitude={}\
-        &hourly=temperature_2m,weather_code,is_day\
-        &timezone=auto&forecast_days=3",
-        coordinates[0], coordinates[1]
+        &current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,wind_gusts_10m,wind_direction_10m,relative_humidity_2m,precipitation\
+        &hourly=temperature_2m,apparent_temperature,weather_code,is_day,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m,wind_direction_10m,uv_index,relative_humidity_2m\
+        &daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,uv_index_max,sunrise,sunset\
+        &wind_speed_unit=ms&timezone=auto&forecast_days={}",
+        coordinates[0], coordinates[1], FORECAST_DAYS
     );
 
     let resp = client
@@ -94,10 +323,113 @@ fn fetch_weather_once(
         new_data[i % 24].push(item);
     }
 
-    Ok(new_data)
+    Ok((new_data, build_report(&json, coordinates)))
 }
 
-pub fn get_weather(initial_coordinates: [f32; 2], proxy: EventLoopProxy<()>) -> WeatherService {
+/// Turn one answer into the report the phone reads.
+///
+/// Nothing here can fail: a short or half-null response yields a shorter
+/// report, not an error. The desktop column is stricter (`ui.rs` refuses a
+/// shape it cannot reshape into its grid) because it indexes blindly; this
+/// walks what it was given.
+fn build_report(json: &WeatherResponse, coordinates: [f32; 2]) -> Report {
+    let hourly = &json.hourly;
+    let mut hours = Vec::with_capacity(hourly.time.len());
+    for (i, t) in hourly.time.iter().enumerate() {
+        let temp = hourly.temperature_2m.get(i).copied().unwrap_or(0.0);
+        let code = hourly.weather_code.get(i).copied().unwrap_or(0);
+        let day = hourly.is_day.get(i).copied().unwrap_or(1) == 1;
+        hours.push(Hour {
+            t: t.clone(),
+            temp,
+            // Falls back to the real temperature, which is what "feels like"
+            // means when nothing is making it feel like anything else.
+            feels: at(&hourly.apparent_temperature, i, temp),
+            code,
+            sym: sky_symbol(code, day),
+            day,
+            pop: at(&hourly.precipitation_probability, i, 0.0).round() as i32,
+            mm: at(&hourly.precipitation, i, 0.0),
+            wind: at(&hourly.wind_speed_10m, i, 0.0),
+            gust: at(&hourly.wind_gusts_10m, i, 0.0),
+            dir: at(&hourly.wind_direction_10m, i, 0.0).round() as i32,
+            uv: at(&hourly.uv_index, i, 0.0),
+            humidity: at(&hourly.relative_humidity_2m, i, 0.0).round() as i32,
+        });
+    }
+
+    let mut days = Vec::new();
+    if let Some(daily) = &json.daily {
+        for (i, date) in daily.time.iter().enumerate() {
+            let high = at(&daily.temperature_2m_max, i, 0.0);
+            let low = at(&daily.temperature_2m_min, i, 0.0);
+            let code = daily.weather_code.get(i).copied().flatten().unwrap_or(0);
+            days.push(Day {
+                date: date.clone(),
+                code,
+                // A whole day is drawn as its daylight self: a week list of
+                // moons would say only that the nights are dark.
+                sym: sky_symbol(code, true),
+                high,
+                low,
+                feels_high: at(&daily.apparent_temperature_max, i, high),
+                feels_low: at(&daily.apparent_temperature_min, i, low),
+                mm: at(&daily.precipitation_sum, i, 0.0),
+                pop: at(&daily.precipitation_probability_max, i, 0.0).round() as i32,
+                wind: at(&daily.wind_speed_10m_max, i, 0.0),
+                gust: at(&daily.wind_gusts_10m_max, i, 0.0),
+                uv: at(&daily.uv_index_max, i, 0.0),
+                sunrise: daily.sunrise.get(i).cloned().flatten().unwrap_or_default(),
+                sunset: daily.sunset.get(i).cloned().flatten().unwrap_or_default(),
+            });
+        }
+    }
+
+    let now = json.current.as_ref().map(|current| {
+        let temp = current.temperature_2m.unwrap_or(0.0);
+        let code = current.weather_code.unwrap_or(0);
+        let day = current.is_day.unwrap_or(1) == 1;
+        Now {
+            temp,
+            feels: current.apparent_temperature.unwrap_or(temp),
+            code,
+            sym: sky_symbol(code, day),
+            day,
+            wind: current.wind_speed_10m.unwrap_or(0.0),
+            gust: current.wind_gusts_10m.unwrap_or(0.0),
+            dir: current.wind_direction_10m.unwrap_or(0.0).round() as i32,
+            humidity: current.relative_humidity_2m.unwrap_or(0.0).round() as i32,
+            mm: current.precipitation.unwrap_or(0.0),
+        }
+    });
+
+    Report {
+        place: nearest_city(coordinates[0], coordinates[1])
+            .map(|city| city.name.to_string())
+            .unwrap_or_default(),
+        latitude: coordinates[0],
+        longitude: coordinates[1],
+        timezone: json.timezone.clone(),
+        utc_offset_seconds: json.utc_offset_seconds,
+        fetched_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|since| since.as_secs())
+            .unwrap_or(0),
+        now,
+        hours,
+        days,
+    }
+}
+
+/// How far ahead one fetch reaches.
+///
+/// Three, once: the desktop column shows at most three days and asked for
+/// exactly what it drew. The phone's view is a week, and a week costs one
+/// request rather than two — the desktop's reshape wants the first three days
+/// of the answer and is unbothered by what follows them.
+const FORECAST_DAYS: u32 = 7;
+
+pub fn get_weather(initial_coordinates: [f32; 2], wake: Wake) -> WeatherService {
     const REFRESH_INTERVAL: Duration = Duration::from_secs(600);
     const MAX_RETRIES: u32 = 3;
 
@@ -128,13 +460,16 @@ pub fn get_weather(initial_coordinates: [f32; 2], proxy: EventLoopProxy<()>) -> 
 
             for attempt in 0..MAX_RETRIES {
                 match fetch_weather_once(&client, coordinates) {
-                    Ok(new_data) => {
+                    Ok((new_data, report)) => {
                         if let Ok(mut w) = data_clone.write() {
                             *w = new_data;
                         }
+                        // Published before the wake, so whoever the wake brings
+                        // round finds the new report rather than the old one.
+                        publish_report(report);
                         version_clone.fetch_add(1, Ordering::Relaxed);
 
-                        let _ = proxy.send_event(());
+                        wake();
 
                         #[cfg(debug_assertions)] {
                             println!("Weather thread updating!");
@@ -230,130 +565,117 @@ pub fn get_weather(initial_coordinates: [f32; 2], proxy: EventLoopProxy<()>) -> 
 // 49 - Light snow (lightsnow) - no day/night variant
 // 50 - Heavy snow (heavysnow) - no day/night variant
 
-static CLEAR_DAY: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/01d.svg");
-static CLEAR_NIGHT: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/01n.svg");
+/* ── One list, two tables ──────────────────────────────────────────────────
+ *
+ * The desktop draws these as embedded `ImageSource`s through `egui_extras`;
+ * the phone asks for the same file over HTTP and its browser draws it. Both
+ * used to mean writing the file name out again, which is exactly the kind of
+ * pair that drifts — a symbol added for the desk and missing on the phone
+ * shows up as a blank square on somebody's lock screen and nowhere else.
+ *
+ * So the names are written once, here, and the two tables are generated from
+ * them. There is no way for one to know a symbol the other does not.
+ */
+macro_rules! sky_symbols {
+    ($($stem:literal),+ $(,)?) => {
+        /// One symbol's SVG, by file stem — what the phone view is served.
+        ///
+        /// `None` for anything not in the list, which is what makes this safe
+        /// to hand a name out of a URL: it is a lookup in a fixed table, not a
+        /// path join, so nothing here can be talked into reading a file.
+        pub fn symbol_svg(stem: &str) -> Option<&'static [u8]> {
+            match stem {
+                $($stem => Some(include_bytes!(concat!("../weather_svgs_2/", $stem, ".svg"))),)+
+                _ => None,
+            }
+        }
 
-static FAIR_DAY: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/02d.svg");
-static FAIR_NIGHT: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/02n.svg");
+        /// The same file, as the toolkit wants it.
+        #[cfg(feature = "desk")]
+        fn symbol_image(stem: &str) -> ImageSource<'static> {
+            match stem {
+                $($stem => egui::include_image!(concat!("../weather_svgs_2/", $stem, ".svg")),)+
+                // Unreachable through `sky_symbol`, which only ever names a
+                // stem from this list. Overcast is the honest thing to draw
+                // when the sky is unknown.
+                _ => egui::include_image!("../weather_svgs_2/04.svg"),
+            }
+        }
 
-static PARTLY_CLOUDY_DAY: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/03d.svg");
-static PARTLY_CLOUDY_NIGHT: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/03n.svg");
+        /// Every stem the tables carry, so the mapping can be walked in a test.
+        #[cfg(test)]
+        const SYMBOLS: &[&str] = &[$($stem),+];
+    };
+}
 
-static CLOUDY: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/04.svg");
+sky_symbols![
+    // Clear, fair, partly cloudy, overcast, fog
+    "01d", "01n", "02d", "02n", "03d", "03n", "04", "15",
+    // Rain, in three weights
+    "46", "09", "10",
+    // Sleet and snow
+    "47", "48", "49", "13", "50",
+    // Showers: light, ordinary, heavy — rain then snow
+    "40d", "40n", "05d", "05n", "41d", "41n", "44d", "44n", "45d", "45n",
+    // Thunder
+    "22", "11",
+];
 
-static FOG: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/15.svg");
-
-// --- Rain ---
-static LIGHT_RAIN: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/46.svg");
-static RAIN: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/09.svg");
-static HEAVY_RAIN: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/10.svg");
-
-// --- Sleet ---
-static LIGHT_SLEET: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/47.svg");
-static HEAVY_SLEET: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/48.svg");
-
-// --- Snow ---
-static LIGHT_SNOW: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/49.svg");
-static SNOW: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/13.svg");
-static HEAVY_SNOW: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/50.svg");
-
-// --- Showers ---
-static LIGHT_RAIN_SHOWERS_DAY: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/40d.svg");
-static LIGHT_RAIN_SHOWERS_NIGHT: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/40n.svg");
-
-static RAIN_SHOWERS_DAY: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/05d.svg");
-static RAIN_SHOWERS_NIGHT: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/05n.svg");
-
-static HEAVY_RAIN_SHOWERS_DAY: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/41d.svg");
-static HEAVY_RAIN_SHOWERS_NIGHT: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/41n.svg");
-
-static LIGHT_SNOW_SHOWERS_DAY: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/44d.svg");
-static LIGHT_SNOW_SHOWERS_NIGHT: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/44n.svg");
-
-static HEAVY_SNOW_SHOWERS_DAY: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/45d.svg");
-static HEAVY_SNOW_SHOWERS_NIGHT: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/45n.svg");
-
-// --- Thunder ---
-static RAIN_THUNDER: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/22.svg");
-static HEAVY_RAIN_THUNDER: ImageSource<'static> =
-    egui::include_image!("../weather_svgs_2/11.svg");
-
-
-pub fn icon_for_wmo(
-    code: i32,
-    is_day: bool,
-) -> &'static egui::ImageSource<'static> {
+/// The symbol a WMO code is drawn as, and the one place that decision is made.
+///
+/// Both the desktop's icon and the phone's `<img>` come from here, so the two
+/// screens can never disagree about what the sky looks like.
+pub fn sky_symbol(code: i32, is_day: bool) -> &'static str {
     match code {
         // --- Clear & clouds ---
-        0 => if is_day { &CLEAR_DAY } else { &CLEAR_NIGHT },
-        1 => if is_day { &FAIR_DAY } else { &FAIR_NIGHT },
-        2 => if is_day { &PARTLY_CLOUDY_DAY } else { &PARTLY_CLOUDY_NIGHT },
-        3 => &CLOUDY,
+        0 => if is_day { "01d" } else { "01n" },
+        1 => if is_day { "02d" } else { "02n" },
+        2 => if is_day { "03d" } else { "03n" },
+        3 => "04",
 
         // --- Fog ---
-        45 | 48 => &FOG,
+        45 | 48 => "15",
 
         // --- Drizzle ---
-        51 | 53 => &LIGHT_RAIN,
-        55 => &RAIN,
-        56 | 57 => &LIGHT_SLEET,
+        51 | 53 => "46",
+        55 => "09",
+        56 | 57 => "47",
 
         // --- Rain ---
-        61 => &LIGHT_RAIN,
-        63 => &RAIN,
-        65 => &HEAVY_RAIN,
-        66 => &LIGHT_SLEET,
-        67 => &HEAVY_SLEET,
+        61 => "46",
+        63 => "09",
+        65 => "10",
+        66 => "47",
+        67 => "48",
 
         // --- Snow ---
-        71 | 77 => &LIGHT_SNOW,
-        73 => &SNOW,
-        75 => &HEAVY_SNOW,
+        71 | 77 => "49",
+        73 => "13",
+        75 => "50",
 
         // --- Rain showers ---
-        80 => if is_day { &LIGHT_RAIN_SHOWERS_DAY } else { &LIGHT_RAIN_SHOWERS_NIGHT },
-        81 => if is_day { &RAIN_SHOWERS_DAY } else { &RAIN_SHOWERS_NIGHT },
-        82 => if is_day { &HEAVY_RAIN_SHOWERS_DAY } else { &HEAVY_RAIN_SHOWERS_NIGHT },
+        80 => if is_day { "40d" } else { "40n" },
+        81 => if is_day { "05d" } else { "05n" },
+        82 => if is_day { "41d" } else { "41n" },
 
         // --- Snow showers ---
-        85 => if is_day { &LIGHT_SNOW_SHOWERS_DAY } else { &LIGHT_SNOW_SHOWERS_NIGHT },
-        86 => if is_day { &HEAVY_SNOW_SHOWERS_DAY } else { &HEAVY_SNOW_SHOWERS_NIGHT },
+        85 => if is_day { "44d" } else { "44n" },
+        86 => if is_day { "45d" } else { "45n" },
 
         // --- Thunderstorms ---
-        95 => &RAIN_THUNDER,
-        96 | 99 => &HEAVY_RAIN_THUNDER,
+        95 => "22",
+        96 | 99 => "11",
 
         // --- Fallback ---
-        _ => &CLOUDY,
+        _ => "04",
     }
 }
+
+#[cfg(feature = "desk")]
+pub fn icon_for_wmo(code: i32, is_day: bool) -> ImageSource<'static> {
+    symbol_image(sky_symbol(code, is_day))
+}
+
 
 pub struct City {
     pub name: &'static str,
@@ -722,6 +1044,129 @@ pub static CITIES: &[City] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every code the API can send, drawn as something.
+    ///
+    /// `sky_symbol`'s fallback makes this hard to fail outright; what it really
+    /// guards is that the stem it answers with is one the *tables* carry. A
+    /// symbol renamed in `weather_svgs_2/` and updated in one arm of the match
+    /// would otherwise be a 404 on the phone and a missing icon on the desk,
+    /// found by looking at a screen rather than by running anything.
+    #[test]
+    fn every_wmo_code_has_a_symbol_to_draw() {
+        for code in 0..=99 {
+            for is_day in [true, false] {
+                let stem = sky_symbol(code, is_day);
+                assert!(
+                    SYMBOLS.contains(&stem),
+                    "WMO {code} maps to `{stem}`, which is not in the symbol list"
+                );
+                assert!(
+                    symbol_svg(stem).is_some_and(|svg| svg.starts_with(b"<svg")),
+                    "`{stem}` is not an SVG the phone can be served"
+                );
+            }
+        }
+    }
+
+    /// The night is a different picture from the day, and only where there is
+    /// one to be had: overcast has no sun in it either way.
+    #[test]
+    fn day_and_night_differ_only_where_the_sun_shows() {
+        assert_eq!(sky_symbol(0, true), "01d");
+        assert_eq!(sky_symbol(0, false), "01n");
+        assert_eq!(sky_symbol(3, true), sky_symbol(3, false));
+        assert_eq!(sky_symbol(65, true), sky_symbol(65, false));
+    }
+
+    /// A name that is not a symbol is not a file, however it is spelled. The
+    /// route hands whatever sits between `/weather/` and `.svg` straight to
+    /// this, so it is the whole of that route's defence.
+    #[test]
+    fn symbol_svg_is_a_table_and_not_a_path() {
+        assert!(symbol_svg("../../etc/passwd").is_none());
+        assert!(symbol_svg("01d/../01d").is_none());
+        assert!(symbol_svg("").is_none());
+        assert!(symbol_svg("01D").is_none(), "the table is exact, not case-folded");
+        assert!(symbol_svg("01d").is_some());
+    }
+
+    /// A response with holes in it is a shorter report, never an error: the
+    /// probability model is missing at some stations, the UV index stops a few
+    /// days out, and `current` is a block the API can decline to send. None of
+    /// that is a reason to leave the phone with no forecast at all.
+    #[test]
+    fn a_half_null_answer_still_builds_a_report() {
+        let json = serde_json::json!({
+            "timezone": "Europe/Helsinki",
+            "utc_offset_seconds": 10800,
+            "hourly": {
+                "time": ["2026-09-10T00:00", "2026-09-10T01:00"],
+                "temperature_2m": [11.0, 10.5],
+                "weather_code": [3, 61],
+                "is_day": [0, 0],
+                "apparent_temperature": [9.4, null],
+                "precipitation_probability": [null, 70],
+                "precipitation": [0.0, 1.2],
+                "uv_index": [],
+            },
+            "daily": {
+                "time": ["2026-09-10"],
+                "weather_code": [61],
+                "temperature_2m_max": [15.1],
+                "temperature_2m_min": [9.2],
+                "precipitation_sum": [3.2],
+                "precipitation_probability_max": [null],
+                "sunrise": ["2026-09-10T06:32"],
+                "sunset": [null],
+            },
+        });
+        let wire: WeatherResponse = serde_json::from_value(json).expect("the shape is the API's");
+        let report = build_report(&wire, [60.17, 24.94]);
+
+        assert_eq!(report.place, "Helsinki");
+        assert_eq!(report.utc_offset_seconds, 10800);
+        assert_eq!(report.hours.len(), 2);
+        // No apparent temperature published for this hour: it feels like what
+        // it is, rather than like absolute zero.
+        assert_eq!(report.hours[1].feels, 10.5);
+        assert_eq!(report.hours[0].pop, 0);
+        assert_eq!(report.hours[1].pop, 70);
+        // Asked for and answered with nothing at all.
+        assert_eq!(report.hours[0].uv, 0.0);
+        // The symbol travels with the hour, so the page never maps a code.
+        assert_eq!(report.hours[0].sym, "04");
+        assert_eq!(report.hours[1].sym, "46");
+        assert_eq!(report.days.len(), 1);
+        assert_eq!(report.days[0].feels_high, 15.1, "falls back on the real high");
+        assert_eq!(report.days[0].sunrise, "2026-09-10T06:32");
+        assert!(report.days[0].sunset.is_empty(), "a sunset that never comes is not a time");
+        assert!(report.now.is_none(), "no current block was sent");
+    }
+
+    /// The report carries the place's own clock, not the reader's: the
+    /// timestamps are passed through as the API wrote them and the offset says
+    /// what they mean.
+    #[test]
+    fn hours_keep_the_places_own_local_time() {
+        let json = serde_json::json!({
+            "timezone": "Pacific/Auckland",
+            "utc_offset_seconds": 43200,
+            "hourly": {
+                "time": ["2026-09-10T13:00"],
+                "temperature_2m": [17.0],
+                "weather_code": [0],
+                "is_day": [1],
+            },
+        });
+        let wire: WeatherResponse = serde_json::from_value(json).expect("the shape is the API's");
+        let report = build_report(&wire, [-36.85, 174.76]);
+        assert_eq!(report.hours[0].t, "2026-09-10T13:00");
+        assert!(report.hours[0].day);
+        assert_eq!(report.hours[0].sym, "01d", "the sun is up in Auckland at one");
+        assert_eq!(report.timezone, "Pacific/Auckland");
+        assert!(report.days.is_empty(), "no daily block was sent");
+    }
 
     #[test]
     fn nearest_city_finds_the_obvious_one() {

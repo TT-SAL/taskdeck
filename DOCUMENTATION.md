@@ -623,22 +623,58 @@ parts.
 
 ## 9. Weather Subsystem (`weather.rs`)
 
+**Not behind `desk`.** The fetch, the report and the symbol table are plain data, and
+`taskdeck-server` — which has no window and draws nothing — runs the same thread for the same
+reason it prepares the phone's background picture: the phone view has a forecast in it (§21.9),
+and the phone is what that binary exists to answer. Only the toolkit's own `ImageSource` inside
+this module is feature-gated. The wake is a `phone::Wake` (`Arc<dyn Fn() + Send + Sync>`) rather
+than a `winit` proxy for the same reason: the desktop hands in a closure that pokes its event
+loop, the server hands in one that does nothing.
+
 - **`WeatherService`**: `data: Arc<RwLock<Vec<Vec<WeatherData>>>>`, `version: Arc<AtomicU64>`,
   and a command `Sender`. `Drop` sends `Stop` to the thread.
 - **Background thread** (`get_weather`): builds a 10 s-timeout blocking `reqwest::Client`, then
   loops:
-  - fetch from Open-Meteo (`forecast_days=3`, hourly temp/weather_code/is_day, `timezone=auto`)
-    with up to 3 retries and exponential backoff;
-  - on success, write `data`, bump `version`, and wake the UI via the proxy;
+  - fetch from Open-Meteo (`forecast_days=7`, `timezone=auto`, `wind_speed_unit=ms`) with up to
+    3 retries and exponential backoff — one request carrying three blocks: `current` for the
+    headline, `hourly` (temperature, apparent temperature, code, is_day, chance and amount of
+    precipitation, wind, gusts, direction, UV, humidity) and `daily` (code, high and low, feels
+    like, precipitation, wind, gusts, UV, sunrise, sunset);
+  - on success, write `data`, publish the report, bump `version`, and wake whoever is serving;
   - wait up to `REFRESH_INTERVAL` (600 s) on the command channel, or apply a new coordinate.
+- **Three days became seven** when the phone's view arrived, and it cost nothing: the desktop's
+  reshape below wants the first three days of the answer and is unbothered by what follows them,
+  so a week is one request rather than two.
+- **The report** (`Report`, published through `latest_report`) is what `/api/weather` serves —
+  place, coordinate, time zone, UTC offset, when it was fetched, the current conditions, every
+  hour and every day. It is a process-global behind a mutex holding an `Arc`, exactly like the
+  phone's backdrop: set by the thread that fetches and read by the HTTP workers, so a request for
+  the weather never has to reach the UI thread or the board, and a worker can take a reference and
+  let go of the lock before it starts writing bytes down a slow link. A fetch that fails leaves
+  the last good report in place.
+- **Every field of the wire arrays is an `Option`** and is read through one `at()` helper that
+  fills in a defensible value: a station with no probability model, a UV index the API stops
+  publishing a few days out, a `current` block the API declines to send. A missing gust reading is
+  not a reason to have no weather, so a half-null answer builds a shorter report rather than an
+  error — where the desktop's reshape is stricter, because it indexes blindly.
+- **Timestamps are local to the forecast's own place** and are passed through as text, never
+  parsed into a `DateTime`: the phone slices them, because a bare date-time string is read as the
+  *reader's* local time by every JavaScript engine, which is the one thing it must not mean.
 - **Data shaping** (`fix_and_cache_weather_data`, in `ui.rs`): the raw hourly data is reshaped
   into 3 days × 12 two-hour slots, averaging consecutive hours' temperature, taking the **worse**
   (max) weather code, and treating the slot as "day" if either hour was day. If the raw shape
   isn't the expected 24 hourly buckets (each with at least 3 days), `weather_is_broken_flag` is
   set; the forecast grids are then replaced by a "WEATHER IS BROKEN" notice, while the notepad (when
   3-day weather is off) stays available regardless.
-- **Icons** (`icon_for_wmo`): maps WMO codes → one of the embedded SVGs, choosing day/night
-  variants where available. The big comment block documents the `weather_svgs_2` naming scheme.
+- **Symbols** (`sky_symbol`): maps WMO codes → a file stem in `weather_svgs_2/`, choosing
+  day/night variants where available, and it is the **one place that decision is made**. Two
+  tables are generated from one list by the `sky_symbols!` macro: `symbol_image` for the desktop
+  (`egui::include_image!`) and `symbol_svg` for the phone (`include_bytes!`), so there is no way
+  for one to know a symbol the other does not — the pair that would otherwise drift into a blank
+  square on somebody's lock screen and nowhere else. `symbol_svg` is a lookup in a fixed table and
+  never a path join, which is the whole of `/weather/<stem>.svg`'s defence. A test walks every WMO
+  code from 0 to 99 through both. The big comment block documents the `weather_svgs_2` naming
+  scheme.
 - **Cells are allocated at exactly `WEATHER_CELL` and painted**, not laid out from their contents.
   Laid out, a cell was as wide as its widest line — so a slot reading `-34` was twenty points wider
   than one reading `7`, its column grew to fit, and **the grid changed shape when the weather did**.
@@ -1987,7 +2023,7 @@ ambiguity: they are never live at the same time, and each is the obvious mnemoni
 | Dialogs | `Enter` / `Esc` | Accept / cancel |
 | Phone page (§21.5) | `←` `→` | Previous / next day (or month, in the agenda) |
 | | `T` | Today |
-| | `W` | Day ↔ agenda |
+| | `W` | Day → agenda → weather → day |
 
 The shortcuts are named in the menu buttons' hover text and in the planner's own hint line, because
 a single-letter shortcut nobody knows about is not a feature.
@@ -2308,6 +2344,8 @@ A few public routes, which carry no data, and the authorised ones:
 | `GET /api/wait?version=N` | long poll: answers `{version}` the moment the version moves past `N`, or after 25 s unchanged |
 | `GET /api/board` | the whole board — items, archive, notes, version — for a desktop that keeps a replica of it (§22.3) |
 | `POST /api/command` | one `Command`, as JSON tagged by `op`; a query sent here is refused (`400`). `X-TaskDeck-Request: <key>` names the request, the same on every retry, so a repeat is answered with the first reply rather than applied again (§22.4) |
+| `GET /api/weather` | the forecast (§21.9), off the weather thread's own shelf — it never touches the board. `503` with a sentence when nothing has been fetched yet |
+| `GET /weather/<symbol>.svg` | one sky symbol, the same file the desktop draws. Public like the icon, and `immutable` for a year: it is the program, not the data, and an `<img>` carries no token header |
 | `GET /calendar.ics` | the feed (§21.6) |
 
 **Everything textual is gzipped when the client offers to take it**, which is every browser. The
@@ -2584,7 +2622,7 @@ colours, the same budget a calendar cell has. The dots are drawn from the same s
 fills, so the week costs no request of its own; a day the page has not been told about yet simply
 has no dots.
 
-**The agenda** (`W`) is the other view, and the one the page opens in — a continuous list of days,
+**The agenda** (`W`) is the second of the three views, and the one the page opens in — a continuous list of days,
 each a heading with a count and the day's things beneath it in clock order: the start over the end
 in the left column, the name, and the room under it when the event came from a subscribed calendar.
 It is one run, not a week: it grows a month at a time downward on its own as you reach the end, and
@@ -2842,6 +2880,85 @@ start — a change there takes effect at the next start, like the server fields 
   without changing anything on the wire.
 - **Become a second TaskDeck.** The page is a companion. Scoring, the calendar grid, the archive
   window and colour schemes stay at the desk.
+- **Ask the phone where it is.** The weather view (§21.9) forecasts the coordinate in Settings, not
+  the phone's own position, and that is only half a choice: `navigator.geolocation` needs a secure
+  context, and the deployment this page is built for is plain http on a LAN or tailnet address.
+  Behind `tailscale serve` it would be available — but the forecast a wall calendar wants is the
+  one for the wall, so the setting stays the source and the place is named on screen.
+
+### 21.9 The weather view
+
+The third view, reached by the same button as the other two — the deck cycles **day → agenda →
+weather → day**, and the button is labelled with where it goes rather than with where you are. A
+ring of three rather than a fourth button: the deck's four are already the four verbs, and a
+segmented control in the masthead would put the most-tapped control on the page as far from a
+thumb as the screen allows.
+
+**Why a calendar draws weather at all.** Three of the reasons are consequences of it living here
+rather than in the weather app already on the phone:
+
+- **It is the desk's weather.** The coordinate is the one picked on the map in Settings (§9.2), so
+  the forecast is for where the calendar is — the house, not the airport the phone is standing in.
+  The report carries the nearest marked city by name so that can be checked rather than assumed.
+- **It knows the day.** Under the hourly chart, on the *same axis*, is today's plan: every block
+  and every subscribed event as a coloured segment. "Rain from three" and "the thing at three" are
+  two facts worth nothing apart, and the answer line at the top says the collision in words —
+  *Rain from 14:00 · 14:00–18:00 · during Write the term report*.
+- **It works with the desk off.** The last report is kept in `localStorage`, drawn on the first
+  frame, and marked *as of 14:03* once it is more than three quarters of an hour old — the same
+  bargain the day and the agenda already make with their snapshots.
+
+**What is on it**, top to bottom: the answer line in the masthead; the temperature now, with the
+symbol, the condition, what it feels like and the day's high and low; the chart; sunrise, sunset,
+daylight, UV, wind and rain for the day being read; and the week as seven rows, each with a
+temperature bar drawn on **one scale for the whole week** so a cold Thursday is visible without
+reading a number, and a mark on today's bar showing where the temperature is in it right now. The
+scrubber in the bar — the row the week strip and the month rail live in — is the seven forecast
+days; tapping one moves the chart and the facts to it.
+
+**The chart** is one inline SVG built as text and given a `viewBox` the width of the box it goes
+in, so nothing is scaled and a 10px label is 10px. Twenty-four columns share one x axis, and the
+sharing is the whole design — read down any vertical line and the answer is there:
+
+| Band | What it says |
+|------|--------------|
+| The strip along the top | the sky, an hour a cell, in the colour of what it is doing. Falling water is one blue whatever hour it falls in; cloud is grey; clear is the amber the page uses for today, and a clear *night* is an indigo, because a strip of amber across the small hours reads as a sunny night |
+| The curve | temperature, drawn twice — a dark stroke under a light one — so it reads on a photograph as well as on a plate, the same trick the agenda's route thread uses. Only its two ends are labelled |
+| The bars | the chance of rain, because that is the number a decision is made on; how *solid* the bar is says how much would fall, because a certainty of nothing measurable and a long shot at four millimetres are not the same warning |
+| The axis | every third hour, which is the most that can be set at ten pixels without labels touching. Midnight gets a dashed rule and the name of the day on the far side of it |
+| The band beneath | the board's day |
+
+Drag along it and the line above says that hour exactly — temperature, feels-like, condition,
+chance and amount, wind and gusts, UV. Nothing is re-rendered while the finger is down: the marker
+is one line's two attributes and the readout is one element's children, because replacing the SVG
+under a pointer capture ends the gesture. `touch-action: pan-y` leaves the vertical scroll to the
+browser, which cancels the scrub itself the moment it decides the gesture was a scroll.
+
+Today's window **rolls**: one hour back, so what has just happened is still on screen, and
+twenty-three forward. Any other day is drawn midnight to midnight, because that is what *Thursday*
+means.
+
+**Two clocks, and only ever drawn together when they agree.** The forecast is stamped in the
+*place's* local time and the phone is in its own, and for a wall calendar at home those are the
+same clock every day of the year. They are not on a work trip, and then everything the view says
+about "now" has to be about the place — it is that sky the forecast describes — while everything
+it says about the plan is the board's. So the report carries `utc_offset_seconds`, the page
+computes the place's clock from it, and the plan band draws **only when the two offsets match**;
+otherwise the headline card says *Novosibirsk · 10:40 there* and the band is empty. A band an hour
+out of step is worse than no band, because it looks exactly as right as a correct one.
+
+**The page never maps a weather code to a picture.** Every hour and every day carries the *name* of
+its own symbol, chosen by `weather::sky_symbol` (§9), so the only pictures this can ask for are
+ones the binary is carrying — and the phone and the desktop cannot disagree about what the sky
+looks like. The service worker keeps them in a cache of their own, cache-first and never swept: the
+set is fixed and small, and without it the forecast opens offline with the numbers and none of the
+pictures, which is the half of it that reads from across a room.
+
+**It is fetched on a clock of its own.** No edit changes the weather and no `/api/wait` wake-up
+announces it, so it is neither polled with the day nor listened for: it is asked for when the view
+is opened and once a minute while it is being looked at, and `loadWeather` refuses to ask again for
+a report that is only minutes old. A fetch that fails never replaces the last report — a forecast
+from an hour ago is worth far more than an apology — and says so in the footer instead.
 
 ---
 

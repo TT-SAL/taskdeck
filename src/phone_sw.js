@@ -15,7 +15,11 @@ const CACHE = 'taskdeck-shell-v2';
 // changes on its own schedule, so keeping the two separate means a shell
 // version bump does not throw the picture away and vice versa.
 const PHOTO = 'taskdeck-photo-v1';
-const KEEP = [CACHE, PHOTO];
+// The sky symbols. Their own cache, like the photo and for the same reason:
+// they change only when the binary does, and a shell version bump should not
+// throw away fifty kilobytes of artwork that is still correct.
+const SKY = 'taskdeck-sky-v1';
+const KEEP = [CACHE, PHOTO, SKY];
 // The page and nothing else. The icon used to be here, which cost 660 KB of
 // cache for a picture only the operating system ever looks at, and only when
 // the app is installed. The page's own icon links point at the scaled 50 KB
@@ -58,6 +62,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // A weather symbol, cache-first and kept for good. Without this the forecast
+  // opens offline with the numbers and none of the pictures, which is the half
+  // of it that reads from across a room. The set is fixed and small — a couple
+  // of dozen files, fifty kilobytes in total — so unlike the photo there is
+  // nothing to sweep: every name in it stays valid for as long as the app does.
+  if (path.startsWith('/weather/') && path.endsWith('.svg')) {
+    event.respondWith(sky(request, path));
+    return;
+  }
+
   const shellPath = (path === '/' || path === '/index.html' || request.mode === 'navigate') ? '/' : path;
   if (!SHELL.includes(shellPath)) return;
   // `request.mode === 'navigate'` is true for a top-level load of ANY path on
@@ -97,6 +111,22 @@ self.addEventListener('fetch', (event) => {
   event.waitUntil(fresh.catch(() => {}));
   event.respondWith(caches.match(shellPath).then((cached) => cached || fresh));
 });
+
+async function sky(request, path) {
+  const cache = await caches.open(SKY);
+  const hit = await cache.match(path);
+  if (hit) return hit;
+  let response;
+  try {
+    response = await fetch(request);
+  } catch (_) {
+    // Offline and not kept yet: the page shows the alt text, which is the
+    // condition in words, and the rest of the forecast is unaffected.
+    return Response.error();
+  }
+  if (response.ok) await cache.put(path, response.clone());
+  return response;
+}
 
 async function photo(request, path) {
   const cache = await caches.open(PHOTO);

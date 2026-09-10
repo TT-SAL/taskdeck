@@ -1998,7 +1998,7 @@ impl TaskApp {
                     // sitting on the floor of it. The readings are laid over its
                     // top corners, which have very little sky in them — that
                     // overlap is the arrangement, not an accident of it.
-                    egui::Image::new(weather::icon_for_wmo(*wmo_code, *is_day).clone()).paint_at(
+                    egui::Image::new(weather::icon_for_wmo(*wmo_code, *is_day)).paint_at(
                         ui,
                         Rect::from_center_size(
                             pos2(rect.center().x, rect.bottom() - WEATHER_ICON * 0.5 - 2.0),

@@ -6,7 +6,8 @@
 > §7 anticipated: the board was extracted from the GUI, **`taskdeck-server`** hosts it on an
 > always-on machine with no window, and the desktop runs as a client of it with an offline queue
 > ([`DOCUMENTATION.md` §22](DOCUMENTATION.md), [`SERVER.md`](SERVER.md)). The phone page has since
-> gained subscribed calendars, a continuously scrolling agenda and an offline queue of its own,
+> gained subscribed calendars, a continuously scrolling agenda, a weather view with the day's plan
+> drawn on the same hours as the rain ([§21.9](DOCUMENTATION.md)), and an offline queue of its own,
 > and `deploy/install.sh` sets the server up in one command. This document is kept as the comparison that led there, and as the costed
 > design for Proposal B should native two-way calendar sync ever be wanted on top.
 >

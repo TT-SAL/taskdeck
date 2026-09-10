@@ -254,7 +254,12 @@ phone_token = "…"              # minted on first start if missing — see the 
 phone_bind_address = "127.0.0.1" # this machine only; name another address to serve that one (§2)
 ```
 
-`selected_colorscheme_id` is honoured if present: the phone paints in that scheme.
+`selected_colorscheme_id` is honoured if present: the phone paints in that scheme, and
+`coordinates` is honoured too — the server fetches the forecast for that point so the phone's
+weather view has something to show. That is the one thing besides the board this process reaches
+the internet for; it costs one request every ten minutes, and a box with no route out simply
+serves a view that says so. `background`, `background_blur_percent` and `background_light_percent`
+are read for the same reason: they are what the phone looks like.
 
 ### The time zone
 

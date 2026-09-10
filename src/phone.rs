@@ -2,8 +2,13 @@
 //!
 //! The running desktop app hosts a small HTTP server on a background thread and
 //! serves one embedded page (`phone.html`) that shows a day — timeline, tray,
-//! due markers, routines — and edits it. The phone is a *thin client of the one
-//! live process*: every change it makes arrives here as a [`Command`], is handed
+//! due markers, routines — and edits it. The same page carries an agenda of
+//! continuous days and a weather view (`/api/weather`, §21.9); the forecast is
+//! the one thing here that is not the board's, and it is answered off the
+//! weather thread's own shelf rather than through the queue below.
+//!
+//! The phone is a *thin client of the one live process*: every change it makes
+//! arrives here as a [`Command`], is handed
 //! to the UI thread over a channel, and is applied through the same setters a
 //! gesture on the desktop planner uses, ending in `summarize_calendar` and a
 //! save exactly as if the edit had been made at the desk.
@@ -757,6 +762,25 @@ fn handle(
             static PACKED: OnceLock<Option<Vec<u8>>> = OnceLock::new();
             encoding.fixed(SERVICE_WORKER, &PACKED, "application/javascript; charset=utf-8")
         }
+        // The sky symbols, which are the program rather than the data — the same
+        // files the desktop draws, named by `weather::sky_symbol`. Public like
+        // the app's icon and for the same reason: they are identical in every
+        // install, and an `<img>` carries no token header, so guarding them
+        // would mean writing the secret into a hundred and sixty-eight image
+        // URLs to hide artwork that hides nothing.
+        //
+        // The name is looked up in a fixed table and never joined onto a path,
+        // so `/weather/../../etc/passwd.svg` is a 404 like any other name that
+        // is not a symbol.
+        (Method::Get | Method::Head, path)
+            if path.starts_with("/weather/") && path.ends_with(".svg") =>
+        {
+            let stem = &path["/weather/".len()..path.len() - ".svg".len()];
+            match crate::weather::symbol_svg(stem) {
+                Some(svg) => with_type(Response::from_data(svg.to_vec()), "image/svg+xml"),
+                None => json_error(404, "No such symbol."),
+            }
+        }
         (Method::Get | Method::Head, "/manifest.webmanifest") => {
             with_type(Response::from_string(manifest(query.lookup("token").map(String::as_str))), "application/manifest+json")
         }
@@ -824,6 +848,22 @@ fn handle(
                 Err(_) => json_error(400, "That is not a pair of dials."),
             },
             Err(error) => json_error(error.status, &error.message),
+        },
+        // The forecast, off the weather thread's own shelf. It never touches
+        // the board: the weather is not the board's, and a view that refreshes
+        // itself every ten minutes has no business waking the UI thread to do
+        // it. `no-store` like every other answer here, because it goes stale on
+        // a clock of its own.
+        (Method::Get, "/api/weather") => match crate::weather::latest_report() {
+            Some(report) => match serde_json::to_value(&*report) {
+                Ok(value) => encoding.json(value),
+                Err(error) => json_error(500, &format!("The forecast came back in the wrong shape: {error}")),
+            },
+            // 503 and not 404: the route exists, the answer does not yet.
+            // Either nothing has fetched one — a copy with no weather thread,
+            // or one whose first fetch is still in the air — or every attempt
+            // has failed, and the phone shows what it kept and says as of when.
+            None => json_error(503, "No forecast yet. TaskDeck fetches one when it starts and every ten minutes after."),
         },
         (Method::Get, "/api/state") => match snapshot_command(&query) {
             Ok(command) => match ask(command, tx, wake) {
@@ -1198,6 +1238,10 @@ fn caching_for(path: &str) -> Header {
         "/icon.png" | "/icon-192.png" | "/icon-512.png" => header("Cache-Control", "public, max-age=604800"),
         // Immutable, because the name contains the content's own hash.
         p if p.starts_with("/bg-") && p.ends_with(".jpg") => header("Cache-Control", "private, max-age=31536000, immutable"),
+        // A symbol changes only when the binary does, and the page names them
+        // one per hour of a week — twenty-eight files fetched once and then
+        // never again, against a hundred and sixty-eight `<img>` tags.
+        p if p.starts_with("/weather/") && p.ends_with(".svg") => header("Cache-Control", "public, max-age=31536000, immutable"),
         _ => no_store(),
     }
 }
@@ -3408,9 +3452,33 @@ mod tests {
         assert_eq!(caching_for("/icon.png").value.as_str(), "public, max-age=604800");
         // Everything else is the board, or carries the token, and must not be
         // kept by anything between here and the phone.
-        for path in ["/", "/index.html", "/sw.js", "/manifest.webmanifest", "/api/state", "/calendar.ics"] {
+        for path in ["/", "/index.html", "/sw.js", "/manifest.webmanifest", "/api/state", "/api/weather", "/calendar.ics"] {
             assert_eq!(caching_for(path).value.as_str(), "no-store", "{path}");
         }
+        // The sky symbols are the program too, and their names never change
+        // meaning — so they are fetched once and never again.
+        assert_eq!(
+            caching_for("/weather/01d.svg").value.as_str(),
+            "public, max-age=31536000, immutable",
+        );
+    }
+
+    /// The two halves of the weather route, without a socket: the name is cut
+    /// out of the path the way the route cuts it, and looked up in the table
+    /// the route looks it up in.
+    #[test]
+    fn a_symbol_is_named_out_of_the_path_and_found_in_a_table() {
+        fn stem_of(path: &str) -> Option<&str> {
+            (path.starts_with("/weather/") && path.ends_with(".svg"))
+                .then(|| &path["/weather/".len()..path.len() - ".svg".len()])
+        }
+        assert_eq!(stem_of("/weather/01d.svg"), Some("01d"));
+        assert!(crate::weather::symbol_svg(stem_of("/weather/01d.svg").unwrap()).is_some());
+        // Nothing between the two fixed ends is a symbol here, so nothing is
+        // served — the lookup is what refuses it, not a check on the spelling.
+        assert!(crate::weather::symbol_svg(stem_of("/weather/../../Cargo.toml.svg").unwrap()).is_none());
+        assert_eq!(stem_of("/weather/01d.png"), None);
+        assert_eq!(stem_of("/weatherman/01d.svg"), None);
     }
 
     #[test]
