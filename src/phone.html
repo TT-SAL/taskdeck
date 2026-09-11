@@ -362,7 +362,7 @@
   /* Sticky on the heading and never on the section. Gecko refuses a sticky
      frame as a scroll anchor, so a sticky section would compensate none of a
      prepend while a sticky heading leaves the section itself eligible. */
-  .aday > button {
+  .aday > .ahead {
     display: flex; align-items: baseline; gap: 8px; width: 100%;
     /* One pixel further under, so no seam can appear between two sticky layers
        even when the arithmetic is exact: a compositor rounding each of them to
@@ -373,17 +373,26 @@
     color: var(--muted); padding: 16px 0 8px; text-align: left; font: inherit;
   }
   /* A day the calendars were never read for. Not the same as a free one. */
-  .aday.unknown > button { border-bottom-style: dashed; }
-  .aday > button .adate {
+  .aday.unknown > .ahead { border-bottom-style: dashed; }
+  .aday > .ahead .adate {
     font: 600 11px/1 var(--mono-stack); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
   }
-  .aday > button .aword { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
-  .aday > button .acount { margin-left: auto; font: 600 11px/1 var(--mono-stack); letter-spacing: 0.16em; color: var(--muted); }
-  .aday.today > button .adate { color: var(--today); }
+  .aday > .ahead .aword { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+  .aday > .ahead .acount { margin-left: auto; font: 600 11px/1 var(--mono-stack); letter-spacing: 0.16em; color: var(--muted); }
+  .aday.today > .ahead .adate { color: var(--today); }
 
   /* The row. The time is the headline, a route line threads the day, and the
      room is set like a platform number. */
   .arow { display: flex; gap: 12px; padding: 0 0 14px; }
+  /* A row of your own is a button: tap it and its sheet opens on that day,
+     without leaving the list. A subscribed row and a ghost are not — there is
+     nothing on them to edit, so nothing on them invites a tap. */
+  /* The heading's rules above are on `.ahead`, not `.aday > button`, because
+     a row is a button too now: written the old way they gave every row the
+     heading's padding and baseline alignment, which pulled the dot to the
+     middle of the row and gave the route line a negative height. */
+  button.arow { width: 100%; text-align: left; touch-action: manipulation; }
+  button.arow:active .an, button.arow:active .at { opacity: 0.55; }
   .arow .at { flex: 0 0 var(--spine); text-align: right; }
   .arow .at { font: 600 16px/1 var(--mono-stack); color: var(--text); font-variant-numeric: tabular-nums; }
   .arow .at .ae { display: block; font: 400 11px/1.6 var(--mono-stack); color: var(--muted); }
@@ -636,7 +645,7 @@
   /* Kills the 300ms tap delay on the things that are only ever tapped. Never
      `.entry`, which is a button too and carries the press-and-hold that lifts
      a block. */
-  .deck button, .aday > button, .actions button, .btn { touch-action: manipulation; }
+  .deck button, .aday > .ahead, .actions button, .btn { touch-action: manipulation; }
   .count { display: inline-block; min-width: 22px; padding: 0 6px; margin-left: 6px; border-radius: 11px; background: var(--plate-2); font-size: 13px; }
   .count.urgent { background: var(--today); color: #0f1113; }
 
@@ -1526,9 +1535,36 @@
   // its days. Fourteen places read `state.snap.days[0]` as "the day on screen",
   // and one of them puts that date on a command, so `state.snap` stays a
   // one-day object however many days were asked for.
-  function anchorOf(snap) {
-    return snap.days.length === 1 ? snap : Object.assign({}, snap, { days: snap.days.slice(0, 1) });
+  function anchorOf(snap, asked) {
+    if (snap.days.length === 1) return snap;
+    const day = snap.days.find((d) => d.date === asked) || snap.days[0];
+    return Object.assign({}, snap, { days: [day] });
   }
+
+  // What one load asks for. The shown day and `span` days on, as ever — and in
+  // the agenda, widened to cover the days on screen and the day an open sheet
+  // is about, so that the long poll's wake-up after an edit at the desk, and
+  // the refetch after an edit made here from a row, redraw the rows they
+  // changed rather than today's alone. Before this a block moved at the desk
+  // on Thursday stayed where it was on the phone's list until a jump or a
+  // reload happened to fetch that month again. One request, never two: a
+  // range that would not fit the server's ceiling falls back to the shown
+  // day, and those far days wait for the page fetch that reaches them.
+  function spanFor(asked, span) {
+    if (state.mode !== 'agenda') return { from: asked, days: span };
+    let from = asked, until = shiftDay(asked, span - 1);
+    const wanted = Array.from(state.agenda.onScreen);
+    if (state.selected && state.selected.day) wanted.push(state.selected.day);
+    for (const iso of wanted) {
+      if (iso < from) from = iso;
+      if (iso > until) until = iso;
+    }
+    const days = Math.round((Date.parse(until) - Date.parse(from)) / 86400000) + 1;
+    if (days > MAX_SNAPSHOT_DAYS) return { from: asked, days: span };
+    return { from, days };
+  }
+  // The server's own ceiling (`phone::MAX_SNAPSHOT_DAYS`): a longer month.
+  const MAX_SNAPSHOT_DAYS = 31;
 
   async function load({ quiet = false, span = 1 } = {}) {
     // Two loads can be in flight — › tapped twice, a poll under a swipe. Only
@@ -1567,8 +1603,10 @@
     if (replayed && replayed.sent) sheetStale = true;
 
     try {
-      const snap = await api(`/api/state?from=${asked}&days=${span}`);
-      remember(snap.days[0].date, anchorOf(snap));
+      const range = spanFor(asked, span);
+      const snap = await api(`/api/state?from=${range.from}&days=${range.days}`);
+      const anchor = anchorOf(snap, asked);
+      remember(anchor.days[0].date, anchor);
       // The days go into the store whatever else happens: they are true, and a
       // load that has been overtaken still fetched real days.
       const moved = absorb(snap);
@@ -1580,7 +1618,7 @@
       // moves. Anything the board did changes the version, and then it is
       // drawn whole.
       const sameBoard = state.mode === 'weather' && !!state.snap && state.snap.version === snap.version;
-      takeSnapshot(anchorOf(snap));
+      takeSnapshot(anchor);
       state.staleAt = null;
       settleBanner();
       if (sameBoard) renderDeck(state.snap); else render();
@@ -1814,6 +1852,10 @@
     return el('span', { class: 'stalenote', text: ` · as of ${when}` });
   }
 
+  function shortDay(iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  }
   function longDay(iso) {
     const [y, m, d] = iso.split('-').map(Number);
     return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
@@ -1941,6 +1983,10 @@
           ground: groundOf(entry.color),
           ink: inkOf(entry.color),
           sub: false,
+          // The row names its own day, so the sheet it opens edits that day's
+          // block and not today's — a tap on a row is explicit about its
+          // target in a way a scroll position never is.
+          act: () => openItem(entry.id, entry.session, iso),
         });
       }
       for (const ghost of day.ghosts) {
@@ -1979,6 +2025,7 @@
       'data-date': iso,
     });
     section.append(el('button', {
+      class: 'ahead',
       'aria-label': `Open ${when.toDateString()}`,
       onclick: () => openDay(iso),
     }, [
@@ -1990,9 +2037,12 @@
     ]));
 
     for (const row of rows) {
-      const line = el('div', {
+      const line = el(row.act ? 'button' : 'div', {
         class: 'arow' + (row.sub ? ' sub' : '') + (row.done ? ' done' : ''),
         style: `--accent:${row.accent}; --ground:${row.ground}; --ink:${row.ink}`,
+        type: row.act ? 'button' : null,
+        'aria-label': row.act ? `${row.name}, ${row.label}${row.until ? ' to ' + row.until : ''}` : null,
+        onclick: row.act || null,
       });
       const at = el('span', { class: 'at', text: row.label });
       if (row.until) at.append(el('span', { class: 'ae', text: row.until }));
@@ -4187,11 +4237,24 @@
     ]));
   }
 
-  function openItem(id, session) {
-    state.selected = { id, session: session == null ? null : session };
+  // `day` is the date the tap named — an agenda row's own — and is absent for
+  // a tap on the day view or in the tray, which mean the shown day.
+  function openItem(id, session, day) {
+    state.selected = { id, session: session == null ? null : session, day: day || null };
     state.renaming = false;
     render();
     openSheet('item');
+  }
+
+  // The day the item sheet is about. The shown day, unless the sheet was
+  // opened from a row on another day of the agenda — then that day, from the
+  // same store the row was drawn from, so the block section shows the block
+  // that was tapped. A day the store has since dropped is drawn empty rather
+  // than as today, which would edit the wrong day.
+  function sheetDay(sel) {
+    const shown = state.snap.days[0];
+    if (!sel || !sel.day || sel.day === shown.date) return shown;
+    return state.agenda.days.get(sel.day) || { date: sel.day, entries: [], ghosts: [], subscribed: [] };
   }
 
   function field(labelText, control) {
@@ -4212,7 +4275,11 @@
     const sel = state.selected;
     const item = sel && state.items.get(sel.id);
     if (!item) { closeSheet(); return; }
-    const day = state.snap.days[0];
+    const day = sheetDay(sel);
+    // Decided now, not read off the day: a cached day carries the `is_today`
+    // it was fetched with.
+    const isToday = day.date === todayIso();
+    const elsewhere = day !== state.snap.days[0];
     const entry = day.entries.find((e) => e.id === item.id && (e.session === sel.session || (sel.session == null && e.session == null)));
     const accent = colorOf(item.color);
     const isTask = item.kind === 'task', isEvent = item.kind === 'event', isRoutine = item.kind === 'routine';
@@ -4267,12 +4334,12 @@
     // The block on this day, if one is selected.
     if (entry && !entry.marker) {
       const section = el('div', { class: 'section' });
-      section.append(el('h3', { text: isRoutine ? 'This block (moves the rule)' : 'This block' }));
+      section.append(el('h3', { text: (isRoutine ? 'This block (moves the rule)' : 'This block') + (elsewhere ? ` · ${shortDay(day.date)}` : '') }));
       // The other half of a move — the length when the start changes, the
       // start when the length does — is read at the moment of the tap, not
       // from when the sheet was drawn: the desk may have moved the block
       // since, and a stale half would move it back.
-      const live = () => ((state.snap && state.snap.days[0].entries) || []).find((e) => e.id === entry.id && e.session === entry.session) || entry;
+      const live = () => ((state.snap && sheetDay(sel).entries) || []).find((e) => e.id === entry.id && e.session === entry.session) || entry;
       const start = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(entry.start) });
       start.addEventListener('change', () => {
         const minutes = minutesOf(start.value);
@@ -4287,7 +4354,8 @@
           el('button', { text: '↩ Remove this block', onclick: () => send({ op: 'remove_block', id: item.id, session: entry.session }) }),
         ]));
       }
-      section.append(el('div', { class: 'nothing', text: 'Or hold the block on the timeline and drag it.' }));
+      // Only where there is a timeline under the sheet to hold it on.
+      if (state.mode === 'day' && !elsewhere) section.append(el('div', { class: 'nothing', text: 'Or hold the block on the timeline and drag it.' }));
       sheet.append(section);
     }
 
@@ -4324,9 +4392,9 @@
       section.append(field('Takes', durationSelect(item.duration || null, (minutes) => send({ op: 'set_estimate', id: item.id, minutes }))));
 
       const remaining = item.remaining == null ? 30 : Math.max(SNAP, item.remaining);
-      const planAt = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(day.is_today ? nextQuarter() : 9 * 60) });
+      const planAt = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(isToday ? nextQuarter() : 9 * 60) });
       section.append(el('div', { class: 'field' }, [
-        el('label', { text: '＋ Block', title: 'Book another block on this day' }),
+        el('label', { text: elsewhere ? `＋ Block · ${shortDay(day.date)}` : '＋ Block', title: 'Book another block on this day' }),
         el('div', { style: 'display:flex; gap:6px; align-items:center; white-space:nowrap' }, [
           planAt,
           el('button', { class: 'chip', text: `Book ${dur(remaining || 30)}`, onclick: () => {

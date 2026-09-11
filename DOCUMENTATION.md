@@ -2683,7 +2683,20 @@ sixty-second timer, the tab becoming visible and the network returning, and woul
 page a minute with the phone in a pocket. In this view the shown day is pinned to **today**, so
 **＋ New**, **Reflow** and **Tray** all mean today and the masthead says so in words. That is not a
 limitation working around a problem; a scroll position quietly retargeting an edit is how work gets
-booked on the wrong date. To act on another day, tap its heading, which opens it in the day view.
+booked on the wrong date. To act on another day, tap its heading, which opens it in the day view —
+or **tap the row itself**. A row of your own — a block, a due time, a routine's hour — is a button,
+and opens its sheet **on its own day**: the sheet's block section names the day when it is not the
+shown one, and every edit made from it sends that day, because a tap on a row is explicit about its
+target in a way a scroll position never is. A subscribed row and a ghost are not buttons; there is
+nothing on them to edit, so nothing on them invites a tap. Before this, acting on anything in the
+agenda meant leaving it for the day view first.
+
+A quiet load in this view asks for **the days on screen**, and the day an open sheet is about, rather
+than today alone — one request, widened, never two — so the long poll's wake-up after an edit at the
+desk redraws the rows it changed, and so does the refetch after an edit made here from a row. Before
+this a block moved at the desk on Thursday stayed where it had been on the phone's list until a jump
+or a reload happened to fetch that month again. A range that would not fit the server's ceiling
+(§21.4) falls back to the shown day, and those far days wait for the page fetch that reaches them.
 
 A **month rail** replaces the week strip inside this view: seven cells, the month you are reading
 in the middle, a tap on an end cell three months away. Pure scrolling is O(distance) in
