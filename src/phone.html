@@ -1529,10 +1529,17 @@
       // load that has been overtaken still fetched real days.
       const moved = absorb(snap);
       if (mine !== loadSeq || asked !== state.day) return;
+      // Whether this is the board already on screen. The weather view is drawn
+      // from the forecast and takes only the plan band and the deck from here,
+      // so a poll that found the same board — the usual minute — redraws the
+      // deck and leaves the chart alone; `tickWeather` moves what the minute
+      // moves. Anything the board did changes the version, and then it is
+      // drawn whole.
+      const sameBoard = state.mode === 'weather' && !!state.snap && state.snap.version === snap.version;
       takeSnapshot(anchorOf(snap));
       state.staleAt = null;
       settleBanner();
-      render();
+      if (sameBoard) renderDeck(state.snap); else render();
       refreshStale();
       // Absorb and patch, and NEVER grow the ribbon from here. `load({quiet})`
       // runs from the long poll, from a sixty-second timer, from the tab
@@ -3050,12 +3057,13 @@
 
     // Now, and the hour the reader has a finger on. The now-line is the
     // desktop's own colour, so it means the same thing here as it does there.
+    // Named, because the minute moves them rather than redrawing the chart
+    // (`tickWeather`). Only today has a now, so only today draws them.
     if (win.isToday) {
       const at = ((win.clock.minutes / 60) - win.startHour) * colW;
-      if (at >= 0 && at <= width) {
-        parts.push(`<line x1="${at.toFixed(2)}" x2="${at.toFixed(2)}" y1="0" y2="${WX_PLOT.base + 4}" style="stroke:var(--now)" stroke-width="2"/>`);
-        parts.push(`<circle cx="${at.toFixed(2)}" cy="${WX_PLOT.base + 4}" r="3" style="fill:var(--now)"/>`);
-      }
+      const shown = at >= 0 && at <= width ? 1 : 0;
+      parts.push(`<line id="wxNowLine" x1="${at.toFixed(2)}" x2="${at.toFixed(2)}" y1="0" y2="${WX_PLOT.base + 4}" opacity="${shown}" style="stroke:var(--now)" stroke-width="2"/>`);
+      parts.push(`<circle id="wxNowDot" cx="${at.toFixed(2)}" cy="${WX_PLOT.base + 4}" r="3" opacity="${shown}" style="fill:var(--now)"/>`);
     }
     parts.push(`<line id="wxMark" x1="0" x2="0" y1="0" y2="${WX_PLOT.base}" opacity="0" style="stroke:var(--text)" stroke-width="1.5" stroke-dasharray="3 3"/>`);
 
@@ -3151,6 +3159,49 @@
         mark.setAttribute('x2', at);
       }
     }
+    renderWxReadout();
+  }
+
+  // The now-line, moved rather than redrawn. It is the one mark on the chart
+  // that the minute changes, and the chart is the one thing on the page that
+  // must not be replaced under a finger — so, like the scrub mark, it is a few
+  // attributes on elements the SVG already has.
+  function paintNow() {
+    const win = state.weather.win;
+    const line = $('wxNowLine');
+    const dot = $('wxNowDot');
+    if (!win || !line || !dot) return;
+    const at = ((win.clock.minutes / 60) - win.startHour) * (state.weather.width / WX_COLS);
+    const shown = at >= 0 && at <= state.weather.width ? '1' : '0';
+    const x = at.toFixed(2);
+    line.setAttribute('x1', x);
+    line.setAttribute('x2', x);
+    line.setAttribute('opacity', shown);
+    dot.setAttribute('cx', x);
+    dot.setAttribute('opacity', shown);
+  }
+
+  // Once a minute while the view is open. The whole view is redrawn only when
+  // the minute has changed what the chart is *of* — the hour rolled, so
+  // today's window shifts a column; midnight passed; the day being read is no
+  // longer the one to read — and otherwise only the three things that are
+  // wrong the moment they are old are touched: the answer line, the readout,
+  // and the now-line. Redrawing everything every sixty seconds replaced seven
+  // images, seven rows and the chart to move one line two pixels, and took
+  // away any tap that was landing on a week row at that instant.
+  function tickWeather() {
+    const win = state.weather.win;
+    if (!win) { renderWeather(); return; }
+    const clock = placeClock();
+    const isToday = win.day === clock.iso;
+    const startHour = isToday ? Math.max(0, Math.floor(clock.minutes / 60) - 1) : 0;
+    if (win.day !== wxDay() || win.clock.iso !== clock.iso || isToday !== win.isToday || startHour !== win.startHour) {
+      renderWeather();
+      return;
+    }
+    win.clock = clock;
+    renderWeatherGlance();
+    paintNow();
     renderWxReadout();
   }
 
@@ -4695,8 +4746,9 @@
       if (document.visibilityState !== 'visible') return;
       if (state.mode !== 'weather') return;
       // The now-line, the readout and the answer in the masthead are all wrong
-      // the minute they are old, and the chart's window rolls on the hour.
-      renderWeather();
+      // the minute they are old, and the chart's window rolls on the hour:
+      // `tickWeather` moves the first three and redraws only for the last.
+      tickWeather();
       loadWeather();
     }, 60000);
     setInterval(() => {

@@ -2960,6 +2960,28 @@ is opened and once a minute while it is being looked at, and `loadWeather` refus
 a report that is only minutes old. A fetch that fails never replaces the last report — a forecast
 from an hour ago is worth far more than an apology — and says so in the footer instead.
 
+**Once per report, not once per request.** `/api/weather` used to serialise the report and gzip
+it for every phone that asked — the same hundred and sixty-eight hours, the same bytes, again for
+each request in the ten minutes before the next fetch. `Encoding::report` makes the body once per
+report, at the best compression setting rather than the fastest, and keeps it beside the `Arc` it
+was made from; the next report is a different allocation, compared by identity, so stale bytes can
+never be served for it. Measured on the debug build over loopback, a hundred requests each: 1.08 →
+0.31 ms per plain request and 1.20 → 0.32 ms gzipped, and the gzipped body went from 6.4 KB to
+4.0 KB for having been packed properly the one time it is packed.
+
+**Once a minute, three things.** The view is looked at once a minute while it is open, and it used
+to redraw itself whole each time — seven images, seven rows and the chart replaced to move the
+now-line two pixels, which also took away any tap that was landing on a week row at that instant.
+`tickWeather` redraws the whole view only when the minute has changed what the chart is *of* — the
+hour rolled and today's window shifts a column, midnight passed, or the day being read stopped
+being the one to read — and otherwise touches only the three things that are wrong the moment they
+are old: the answer line, the readout, and the now-line, which like the scrub mark is a few
+attributes on elements the SVG already has. A new report still redraws everything, because
+everything changed. The board's own minute poll used to redraw it as well — a quiet load lands a
+snapshot and calls `render()`, which in this view is the whole view — and now compares the
+snapshot's version with the one on screen first: the same board redraws only the deck, and a board
+that changed is drawn whole, because the band under the chart is what it changed.
+
 ---
 
 ## 22. The Board, the Server, and the Desktop as a Client
@@ -2999,7 +3021,9 @@ holds the folder's lock.
 **The window is a Cargo feature, and the server is built without it.** Both binaries live in one
 crate, so for a long time building the headless server compiled the whole graphics stack and threw
 it away at link time. `desk` (on by default, `required-features` on the `TaskDeck` bin) now gates
-`ui`, `calendarwidgets` and `weather` in `lib.rs`, the window half of `initialization.rs` — from
+`ui` and `calendarwidgets` in `lib.rs` (`weather` was gated too, until the phone's forecast made it
+the server's business — §21.9; only its `ImageSource` table is behind `desk` now), the window half
+of `initialization.rs` — from
 `AppState` down, the config half above it is shared — the one function in `utilities.rs` that
 speaks in `Color32`, and `mimalloc`, which only `main.rs` installs. Nothing else needed touching:
 `phone`, `board`, `tasks`, `archive`, `ics`, `subscriptions`, `sync`, `paths`, `color` and

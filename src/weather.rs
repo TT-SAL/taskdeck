@@ -702,11 +702,13 @@ pub fn nearest_city(latitude: f32, longitude: f32) -> Option<&'static City> {
             .acos()
     };
 
-    CITIES.iter().min_by(|a, b| {
-        central_angle(a)
-            .partial_cmp(&central_angle(b))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    })
+    // Each angle once. `min_by` compares pairs, and a comparison that measures
+    // both sides afresh is two arc-cosines per step for numbers it already had.
+    CITIES
+        .iter()
+        .map(|city| (central_angle(city), city))
+        .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(_, city)| city)
 }
 
 pub static CITIES: &[City] = &[

@@ -855,10 +855,7 @@ fn handle(
         // it. `no-store` like every other answer here, because it goes stale on
         // a clock of its own.
         (Method::Get, "/api/weather") => match crate::weather::latest_report() {
-            Some(report) => match serde_json::to_value(&*report) {
-                Ok(value) => encoding.json(value),
-                Err(error) => json_error(500, &format!("The forecast came back in the wrong shape: {error}")),
-            },
+            Some(report) => encoding.report(&report),
             // 503 and not 404: the route exists, the answer does not yet.
             // Either nothing has fetched one — a copy with no weather thread,
             // or one whose first fetch is still in the air — or every attempt
@@ -1269,6 +1266,16 @@ pub struct Encoding {
     gzip: bool,
 }
 
+/// The forecast as bytes, made once per report. See [`Encoding::report`].
+struct PackedReport {
+    /// The report the bytes were made from — held, not merely remembered by
+    /// address, so an address reused by a later allocation cannot match it.
+    of: Arc<crate::weather::Report>,
+    json: String,
+    /// Gzipped at the best setting; `None` if that did not help.
+    packed: Option<Vec<u8>>,
+}
+
 impl Encoding {
     /// Nothing negotiated: for bodies built where no request is in hand.
     pub const PLAIN: Encoding = Encoding { gzip: false };
@@ -1306,6 +1313,37 @@ impl Encoding {
                 .with_header(header("Content-Encoding", "gzip"));
         }
         with_type(Response::from_string(body), content_type)
+    }
+
+    /// The forecast: one body per report, made the first time a report is
+    /// asked for and served as-is until the weather thread publishes the next.
+    ///
+    /// Between `fixed` and `json`. The report is not the program — it changes
+    /// every ten minutes — but it is not the board either: it is the same
+    /// bytes for every phone and every request in between, and serialising a
+    /// hundred and sixty-eight hours and packing them again for each of those
+    /// was work done over for an identical answer. So it is done once, at the
+    /// best setting, and the cache keeps the `Arc` it was made from: the next
+    /// report is a different allocation, compared by identity, so the old
+    /// bytes can never be served for it.
+    fn report(self, report: &Arc<crate::weather::Report>) -> Body {
+        static PACKED: Mutex<Option<PackedReport>> = Mutex::new(None);
+        const CONTENT_TYPE: &str = "application/json; charset=utf-8";
+        let mut held = PACKED.lock().unwrap_or_else(|held| held.into_inner());
+        if !held.as_ref().is_some_and(|made| Arc::ptr_eq(&made.of, report)) {
+            let json = match serde_json::to_string(&**report) {
+                Ok(json) => json,
+                Err(error) => return json_error(500, &format!("The forecast came back in the wrong shape: {error}")),
+            };
+            let packed = gzipped(json.as_bytes(), Compression::best());
+            *held = Some(PackedReport { of: Arc::clone(report), json, packed });
+        }
+        let made = held.as_ref().expect("set just above");
+        if self.gzip && let Some(bytes) = &made.packed {
+            return with_type(Response::from_data(bytes.clone()), CONTENT_TYPE)
+                .with_header(header("Content-Encoding", "gzip"));
+        }
+        with_type(Response::from_string(made.json.clone()), CONTENT_TYPE)
     }
 }
 

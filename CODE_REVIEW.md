@@ -192,6 +192,21 @@ _(B4, E8 and E10 are resolved.)_
 
 Fixes already landed (newest first). Kept here as history so the open list above stays focused.
 
+- **The weather view lands on the day planner, and the forecast is packed once** (`phone.rs`
+  `Encoding::report`, `phone.html` `tickWeather`, `weather.rs` `nearest_city`): merging the weather
+  branch was clean — one commit on top of this line, and the only file both sides had touched was
+  the tests at the bottom of `phone.rs` — but that commit had rewritten `lib.rs` to LF, which was
+  put back. Three things were then done over rather than merely kept. `/api/weather` serialised and
+  gzipped the report for every request, and now does it once per report at the best setting, keyed
+  on the `Arc` it was made from: 1.08 → 0.31 ms plain and 1.20 → 0.32 ms gzipped per request, 6.4 →
+  4.0 KB on the wire (debug build, loopback, a hundred requests each). The page redrew the whole
+  view every minute — seven images, seven rows and the chart, to move one line two pixels — and now
+  moves the now-line and rewrites the answer and the readout, redrawing only when the hour or the
+  day rolls — and the board's minute poll, which redrew it a second time through `render()`, now
+  redraws only the deck when the snapshot's version has not moved. And the nearest-city search measured each city's angle twice per comparison and now
+  once. Verified in the browser against a scratch server: the plan band draws the day's blocks
+  under the chart, the tick leaves the chart in place, and 281 tests pass.
+
 - **The phone gets the desk's picture, and the darkening is solved rather than set** (`phone.rs`,
   `prepare_backdrop`): the first attempt applied the desktop's tint as a flat multiply and left the
   brightest pixels at 0.363 relative luminance — nearly three times what 14px text survives — which
