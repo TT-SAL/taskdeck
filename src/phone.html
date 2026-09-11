@@ -446,6 +446,122 @@
     html.has-photo .arow.sub .dot { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px rgba(4,6,8,0.55); }
   }
 
+  /* ── The weather ─────────────────────────────────────────────────────────
+   *
+   * A third view, on the same chrome as the other two: the masthead answers
+   * before anything is read, the bar's scrubber picks a day, and everything
+   * between them scrolls. See §21.9.
+   *
+   * The colours are the sky's, not the palette's: five tints that say what
+   * kind of weather a mark stands for without a legend. They are the only
+   * colours on the page that mean something by themselves, so they are set
+   * once here and used by name everywhere below. */
+  :root {
+    --w-sun: #f0c36b;
+    --w-cloud: #9aa6b2;
+    --w-rain: #5aa9e6;
+    --w-snow: #cfe3f5;
+    --w-storm: #b48ce8;
+    --w-night: #7183b8;
+  }
+  .wx { padding: 0 10px; }
+  /* Every box on this view is the same object: a plate on the field, with the
+     ten pixels of passe-partout the agenda's days have. */
+  .wxbox {
+    margin: 10px 0; padding: 12px 14px; border-radius: var(--r-m);
+    background: var(--plate); border: 1px solid var(--line);
+  }
+  html.has-photo .wx { text-shadow: 0 1px 2px rgba(4,6,8,0.95), 0 0 9px rgba(4,6,8,0.7); }
+
+  /* The headline. The temperature is the largest thing in the view because it
+     is the one number anybody opens a forecast for. */
+  .wxnow { display: flex; align-items: center; gap: 14px; }
+  .wxnow img { width: 76px; height: 76px; flex: 0 0 76px; }
+  .wxnow .figure { min-width: 0; flex: 1; }
+  .wxnow .temp {
+    font: 800 44px/1 var(--mono-stack); letter-spacing: -0.03em; color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .wxnow .word { font-size: 15px; font-weight: 700; margin-top: 4px; overflow-wrap: anywhere; }
+  .wxnow .aside { font-size: 12px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
+  .wxnow .hilo { flex: 0 0 auto; text-align: right; font: 600 14px/1.5 var(--mono-stack); color: var(--muted); }
+  .wxnow .hilo b { display: block; color: var(--text); font-size: 18px; font-weight: 800; }
+
+  /* The scrubbed hour, above the chart it belongs to. Fixed height: it changes
+     under a moving thumb, and a line that grew would move the chart with it. */
+  .wxread {
+    display: flex; align-items: baseline; gap: 10px; min-height: 34px;
+    font: 500 13px/1.3 var(--mono-stack); color: var(--muted);
+    border-bottom: 1px solid var(--line); margin-bottom: 8px; padding-bottom: 6px;
+    overflow: hidden; white-space: nowrap;
+  }
+  .wxread .when { font-weight: 800; font-size: 16px; color: var(--text); flex: 0 0 auto; }
+  .wxread .bits { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .wxread .bits b { color: var(--text); font-weight: 700; }
+  /* The chart is drawn at the width it is measured at, so nothing inside it is
+     scaled: `touch-action: pan-y` lets the page scroll under a finger that
+     starts on it, while a sideways drag scrubs the hours. */
+  .wxchart svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+  .wxchart .legend { display: flex; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .wxchart .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: 0; }
+
+  /* Sunrise, UV, wind — the numbers you look up rather than read. Two columns
+     of label-over-value, which fits a phone at any width worth having. */
+  .wxfacts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+  .wxfacts .k { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  .wxfacts .v { font: 600 15px/1.3 var(--mono-stack); color: var(--text); margin-top: 2px; }
+  .wxfacts .n { font-size: 11px; color: var(--muted); font-family: inherit; font-weight: 400; }
+
+  /* The week. One row per day, and the bar is the point of it: where this
+     day's range sits inside the whole week's, so a cold Thursday is visible
+     without reading a single number. */
+  .wxweek h3, .wxbox > h3 {
+    margin: 0 0 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); font-weight: 700;
+  }
+  .wxrow {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 7px 4px; border-radius: 10px; color: var(--text); font: inherit;
+  }
+  .wxrow.on { background: var(--plate-2); }
+  .wxrow:active { background: var(--plate-2); filter: brightness(1.15); }
+  .wxrow .wd { flex: 0 0 44px; font: 700 12px/1.2 var(--mono-stack); letter-spacing: 0.06em; text-transform: uppercase; }
+  .wxrow.today .wd { color: var(--today); }
+  .wxrow img { width: 30px; height: 30px; flex: 0 0 30px; }
+  .wxrow .pop { flex: 0 0 40px; font: 600 11px/1 var(--mono-stack); color: var(--w-rain); text-align: right; }
+  .wxrow .lo, .wxrow .hi { flex: 0 0 34px; font: 600 14px/1 var(--mono-stack); font-variant-numeric: tabular-nums; }
+  .wxrow .lo { color: var(--muted); text-align: right; }
+  .wxrow .hi { color: var(--text); }
+  .wxrow .range { flex: 1 1 auto; min-width: 40px; height: 6px; border-radius: 3px; background: var(--edge); position: relative; }
+  .wxrow .range i {
+    position: absolute; top: 0; bottom: 0; border-radius: 3px;
+    background: linear-gradient(90deg, var(--w-rain), var(--w-sun));
+  }
+  /* Where the temperature is right now inside today's own range. */
+  .wxrow .range b {
+    position: absolute; top: -2px; width: 4px; height: 10px; border-radius: 2px;
+    background: var(--text); box-shadow: 0 0 0 1px rgba(4,6,8,0.6);
+  }
+
+  /* The day strip in the bar: the weather view's scrubber, in the place the
+     week and the month rail live in the other two. */
+  .wxdays { display: flex; gap: 4px; height: 44px; }
+  .wxdays button {
+    flex: 1; min-width: 0; height: 44px; border-radius: 10px; background: transparent; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1;
+  }
+  .wxdays button .wd { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .wxdays button .t { font: 700 13px/1.2 var(--mono-stack); color: var(--text); }
+  .wxdays button.today .wd { color: var(--today); }
+  .wxdays button.on { background: var(--plate); }
+  .wxdays button:active { background: var(--plate-2); }
+
+  /* Nothing to show, and why. Not a banner: the banners on this page are about
+     the board, and the weather failing is not the board failing. */
+  .wxnone { color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .wxnone b { color: var(--text); font-weight: 700; }
+  .wxfoot { color: var(--muted); font-size: 11px; padding: 2px 4px 10px; line-height: 1.5; }
+
   /* ── Bottom bar ── */
   .bar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: block;
@@ -662,6 +778,22 @@
   <div class="aend" id="agendaTail"></div>
 </section>
 
+<!-- The weather (§21.9). Four plates and a footer, all of them permanent
+     children: the chart is drawn at the width it is measured at, and an empty
+     box in the layout is the only thing that can be measured before there is
+     anything to put in it. -->
+<section class="wx" id="weather" hidden>
+  <div class="wxbox wxnow" id="wxNow"></div>
+  <div class="wxbox wxchart" id="wxChart">
+    <div class="wxread" id="wxRead"></div>
+    <div id="wxPlot"></div>
+    <div class="legend" id="wxLegend"></div>
+  </div>
+  <div class="wxbox" id="wxFacts"></div>
+  <div class="wxbox wxweek" id="wxWeek"></div>
+  <div class="wxfoot" id="wxFoot"></div>
+</section>
+
 <!-- Two rows. The scrubber says where you are and takes you a few days or a
      few months either way; the deck holds the four verbs. Both are within reach
      of the hand already holding the phone, which is the whole point: navigation
@@ -670,6 +802,7 @@
   <div class="scrub">
     <div class="week" id="week" role="group" aria-label="This week" hidden></div>
     <div class="rail" id="rail" role="group" aria-label="Months" hidden></div>
+    <div class="wxdays" id="wxdays" role="group" aria-label="Days of the forecast" hidden></div>
   </div>
   <div class="deck">
     <button id="trayBtn" aria-label="Tray">Tray<span class="count" id="trayCount" aria-hidden="true">0</span></button>
@@ -748,8 +881,23 @@
       pending: null,        // 'after' | 'before' when the sentinel fired mid-flight
       stalled: false,       // the network failed; the sentinel waits for a tap
     },
-    mode: 'agenda',         // 'day' | 'agenda'
+    mode: 'agenda',         // 'day' | 'agenda' | 'weather'
     notice: null,           // a refusal to show in the banner until acknowledged
+    // The forecast, and where the reader is in it. Kept apart from `snap`
+    // because it is not the board's and does not arrive with it: the weather
+    // is fetched on its own clock, from its own endpoint, and the view is
+    // readable when the board is not.
+    weather: {
+      report: null,       // the last report, from the server or from store
+      byTime: new Map(),  // 'YYYY-MM-DDTHH:00' -> index into `report.hours`
+      at: 0,              // when it was fetched, on this phone's clock
+      day: null,          // the day being shown, or null for "today, always"
+      hour: null,         // the hour under the thumb, or null for now
+      win: null,          // the 24 columns the chart is currently drawn from
+      width: 0,           // the pixel width it was drawn at
+      asking: false,
+      error: null,        // what the last try said, when it did not answer
+    },
   };
   // A refusal is kept until it is acknowledged, reload or not: it is the only
   // trace of an edit that was made here and is not on the board.
@@ -784,7 +932,7 @@
   // button gets the agenda, which is what this page is mostly for.
   try {
     const stored = localStorage.getItem('taskdeck-mode');
-    if (stored === 'day') state.mode = 'day';
+    if (stored === 'day' || stored === 'weather') state.mode = stored;
   } catch (_) {}
 
   const $ = (id) => document.getElementById(id);
@@ -1489,6 +1637,9 @@
   // masthead still claims to be current. Redrawing the whole view here instead
   // would throw away scroll position every sixty seconds for a line of text.
   function refreshStale() {
+    // The weather view's masthead is about the forecast, not the board, and it
+    // has its own note for its own age.
+    if (state.mode === 'weather') return;
     if (!state.snap) return;
     if (state.mode === 'agenda') renderGlance();
     else {
@@ -1497,12 +1648,28 @@
     }
   }
 
-  function render() {
-    const snap = state.snap;
-    if (!snap) return;
+  // Which view is on screen, and which scrubber is in the bar with it. One
+  // place, so a view added later cannot forget to hide something — which is
+  // what the three scattered pairs of assignments here used to invite.
+  //
+  // The all-day row is only ever hidden from here: whether it shows in the day
+  // view is `renderAllDay`'s to say, and it says "not unless there is a band
+  // to draw".
+  function showView(mode) {
+    $('timeline').hidden = mode !== 'day';
+    $('week').hidden = mode !== 'day';
+    if (mode !== 'day') $('alldayRow').hidden = true;
+    $('weekgrid').hidden = mode !== 'agenda';
+    $('rail').hidden = mode !== 'agenda';
+    $('weather').hidden = mode !== 'weather';
+    $('wxdays').hidden = mode !== 'weather';
+  }
+
+  // The four buttons under the scrubber. They act on today in every view, so
+  // they are drawn from the snapshot and not from whatever is being read.
+  function renderDeck(snap) {
     const day = snap.days[0];
     const late = day.behind_minutes > 0;
-
     const trayCount = snap.tray.due.length + snap.tray.later.length;
     const count = $('trayCount');
     count.textContent = String(trayCount);
@@ -1518,25 +1685,38 @@
     const todayLabel = day.is_today ? 'Scroll to now' : 'Jump to today';
     $('todayBtn').title = todayLabel;
     $('todayBtn').setAttribute('aria-label', todayLabel);
+  }
+
+  function render() {
+    const snap = state.snap;
+    if (snap) renderDeck(snap);
+
+    // Decided before the early return below, and that is the point of it: the
+    // weather is not the board's, so this is the one view that can be drawn
+    // with the desk unreachable and nothing kept of it. It has a forecast of
+    // its own or it says exactly why it has not.
+    if (state.mode === 'weather') {
+      showView('weather');
+      renderWeather();
+      measureSticky();
+      return;
+    }
+
+    if (!snap) return;
+    const day = snap.days[0];
+    const late = day.behind_minutes > 0;
 
     if (state.mode === 'agenda') {
-      $('timeline').hidden = true;
-      $('alldayRow').hidden = true;
-      $('week').hidden = true;
-      $('rail').hidden = false;
-      $('weekgrid').hidden = false;
+      showView('agenda');
       railAndMasthead();
       measureSticky();
       return;
     }
 
+    showView('day');
     mastheadFor(day.date, day.is_today);
     daySummary(day, late);
-    $('rail').hidden = true;
-    $('week').hidden = false;
     renderWeek(day);
-    $('weekgrid').hidden = true;
-    $('timeline').hidden = false;
     renderHours();
     renderLanes(day);
     renderNow(day);
@@ -1547,10 +1727,18 @@
   // returns at its first line when there is no snapshot, which is exactly the
   // offline cold open the boot block exists for — and a button labelled from
   // there would be wrong for as long as the desk stayed unreachable.
+  // Three views and one button, so the button is a ring: day → agenda →
+  // weather → day. It is labelled with where it goes rather than with where
+  // you are, which is what it has always done and what keeps one tap
+  // predictable; the deck has no room for a fourth button and a segmented
+  // control up in the masthead would put the most-tapped control on the page
+  // furthest from a thumb.
+  const NEXT_MODE = { day: 'agenda', agenda: 'weather', weather: 'day' };
+  const MODE_NAMES = { day: 'Day', agenda: 'Agenda', weather: 'Weather' };
   function labelChrome() {
-    const toAgenda = state.mode !== 'agenda';
-    $('modeBtn').textContent = toAgenda ? 'Agenda' : 'Day';
-    $('modeBtn').setAttribute('aria-label', toAgenda ? 'Show the agenda' : 'Show the day');
+    const next = NEXT_MODE[state.mode] || 'agenda';
+    $('modeBtn').textContent = MODE_NAMES[next];
+    $('modeBtn').setAttribute('aria-label', `Show the ${next}`);
   }
 
   // Text, and the behind-schedule note when there is one. `replaceChildren`
@@ -1656,9 +1844,19 @@
     try { localStorage.setItem('taskdeck-mode', mode); } catch (_) {}
     labelChrome();
     // Entering the agenda pins the shown day to today. This is the invariant
-    // that lets the verbs in the bar keep meaning something exact.
-    if (mode === 'agenda') state.day = todayIso();
+    // that lets the verbs in the bar keep meaning something exact — and the
+    // weather view keeps it for the same reason: ＋ New and Tray still mean
+    // today there, whichever day's forecast is being read.
+    if (mode !== 'day') state.day = todayIso();
     render();
+    if (mode === 'weather') {
+      // Asked for whenever the view is opened, and answered from store in the
+      // meantime. `loadWeather` refuses to ask again for a report that is only
+      // minutes old, so flicking between views costs nothing.
+      window.scrollTo(0, 0);
+      loadWeather();
+      return;
+    }
     if (mode === 'agenda') {
       // The store may have grown since boot — a day view fetches seven days of
       // its own — so the run is derived again here rather than assumed.
@@ -2306,6 +2504,911 @@
     if (!state.agenda.last) return;
     const tail = $('agendaTail').getBoundingClientRect();
     if (tail.top < window.innerHeight * 2) serial(extendAfter);
+  }
+
+  /* ─────────────────────────────── The weather ───────────────────────────
+   *
+   * The third view. It answers one question — *what is it going to do, and
+   * does it land on anything I have to be at* — and it is built out of the
+   * same parts as the other two: the masthead says the answer before anything
+   * is read, the scrubber in the bar picks a day, and the plates scroll.
+   *
+   * Three things make it worth having over the weather app already on the
+   * phone, and each of them is a consequence of it living here:
+   *
+   * **It is the desk's weather.** The coordinate is the one picked on the map
+   * in Settings, so the forecast is for where the calendar is, not for
+   * wherever the phone happens to be standing. The report says which place, by
+   * name, so that can be checked at a glance rather than assumed.
+   *
+   * **It knows the day.** The strip under the hours is *today's plan* on the
+   * same axis as the rain, which is the whole reason a calendar should draw
+   * weather at all: "rain from three" and "the thing at three" are two facts
+   * that mean something only together.
+   *
+   * **It works with the desk off.** The last report is kept here, drawn
+   * immediately on opening, and marked with when it was fetched — the same
+   * bargain the day and the agenda already make.
+   *
+   * The page never maps a weather code to a picture: every hour and every day
+   * carries the name of its own symbol (`weather::sky_symbol`), so the only
+   * pictures this can ask for are ones the binary is carrying.
+   */
+
+  // How many hours the chart draws. A day, so the axis needs no explanation,
+  // and 24 columns across a phone is 15 pixels each — enough for a bar to be
+  // read and not enough for an icon, which is why the sky is a strip of colour
+  // along the top rather than a row of little suns.
+  const WX_COLS = 24;
+  // Fetched no oftener than this from the page's side. The server refreshes on
+  // its own ten-minute clock, so asking faster only moves bytes.
+  const WX_FRESH_MS = 5 * 60 * 1000;
+  const WEATHER_KEY = 'taskdeck-weather';
+
+  function recallWeather() {
+    try {
+      const held = JSON.parse(localStorage.getItem(WEATHER_KEY) || 'null');
+      if (held && held.report && Array.isArray(held.report.hours)) {
+        adoptWeather(held.report, held.at || 0);
+      }
+    } catch (_) {}
+  }
+  function keepWeather(report, at) {
+    try { localStorage.setItem(WEATHER_KEY, JSON.stringify({ at, report })); } catch (_) {}
+  }
+  // One report, plus the index that turns a local timestamp into an hour. The
+  // index is built once here rather than by searching the array: every draw
+  // asks for a handful of specific hours, and a week is a hundred and
+  // sixty-eight of them.
+  function adoptWeather(report, at) {
+    const byTime = new Map();
+    for (let i = 0; i < report.hours.length; i++) byTime.set(report.hours[i].t, i);
+    state.weather.report = report;
+    state.weather.byTime = byTime;
+    state.weather.at = at;
+    state.weather.error = null;
+  }
+
+  async function loadWeather({ force = false } = {}) {
+    const wx = state.weather;
+    if (wx.asking) return;
+    if (!force && wx.report && Date.now() - wx.at < WX_FRESH_MS) return;
+    wx.asking = true;
+    try {
+      const report = await api('/api/weather');
+      if (report && Array.isArray(report.hours)) {
+        const at = Date.now();
+        adoptWeather(report, at);
+        keepWeather(report, at);
+      }
+    } catch (error) {
+      if (error.status === 401) { showGate(); return; }
+      // Never over the last report: a forecast from an hour ago is worth far
+      // more than an apology, and the footer says how old it is either way.
+      wx.error = error.message;
+    } finally {
+      wx.asking = false;
+      if (state.mode === 'weather') renderWeather();
+    }
+  }
+
+  /* ── Two clocks ──────────────────────────────────────────────────────────
+   *
+   * The forecast is stamped in the *place's* local time and the phone is in
+   * its own, and for a wall calendar at home those are the same clock every
+   * day of the year. They are not the same clock on a work trip, and then
+   * everything the view says about "now" has to be about the place — it is
+   * that sky the forecast describes — while everything it says about the plan
+   * is about the board's day.
+   *
+   * So the two are computed separately and only ever drawn together when they
+   * agree. `sameClock` is what the plan band hangs off: two hours out of step
+   * and the band would draw a lecture an hour from where the rain is.
+   */
+  function placeClock() {
+    const report = state.weather.report;
+    const mineSeconds = -new Date().getTimezoneOffset() * 60;
+    const offset = report && typeof report.utc_offset_seconds === 'number'
+      ? report.utc_offset_seconds
+      : mineSeconds;
+    const at = new Date(Date.now() + offset * 1000);
+    return {
+      iso: `${at.getUTCFullYear()}-${pad(at.getUTCMonth() + 1)}-${pad(at.getUTCDate())}`,
+      minutes: at.getUTCHours() * 60 + at.getUTCMinutes(),
+      sameClock: offset === mineSeconds,
+    };
+  }
+  function daysBetween(a, b) {
+    const [ay, am, ad] = a.split('-').map(Number);
+    const [by, bm, bd] = b.split('-').map(Number);
+    return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000);
+  }
+  // The hour containing a moment at the place, or null where the report does
+  // not reach — before its first day, past its last, or the hour a spring
+  // clock change skips over.
+  function wxHour(iso, minutes) {
+    const index = state.weather.byTime.get(`${iso}T${pad(Math.floor(minutes / 60))}:00`);
+    return index === undefined ? null : state.weather.report.hours[index];
+  }
+  // Which day the hours, the facts and the headline are showing. Today at the
+  // place unless a day was picked, and today again as soon as the picked one
+  // falls off the back of the forecast.
+  function wxDay() {
+    const clock = placeClock();
+    const days = (state.weather.report && state.weather.report.days) || [];
+    const picked = state.weather.day;
+    if (picked && days.some((day) => day.date === picked)) return picked;
+    if (days.some((day) => day.date === clock.iso)) return clock.iso;
+    return days.length ? days[0].date : clock.iso;
+  }
+
+  /* ── Saying what the sky is doing ──────────────────────────────────────── */
+
+  // WMO 4677, in the words a person would use. The symbol comes off the wire
+  // with the hour; this is only the caption, and it is here because it is the
+  // one part of the forecast that is prose rather than data.
+  const SKY_WORDS = {
+    0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Overcast',
+    45: 'Fog', 48: 'Freezing fog',
+    51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle',
+    56: 'Freezing drizzle', 57: 'Freezing drizzle',
+    61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
+    66: 'Freezing rain', 67: 'Freezing rain',
+    71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
+    80: 'Light showers', 81: 'Showers', 82: 'Heavy showers',
+    85: 'Light snow showers', 86: 'Snow showers',
+    95: 'Thunderstorm', 96: 'Thunderstorm, hail', 99: 'Thunderstorm, hail',
+  };
+  const skyWord = (code) => SKY_WORDS[code] || 'Cloudy';
+
+  // What is falling, if anything — the distinction the whole view turns on.
+  const WET = {
+    snow: [71, 73, 75, 77, 85, 86],
+    sleet: [56, 57, 66, 67],
+    storm: [95, 96, 99],
+    rain: [51, 53, 55, 61, 63, 65, 80, 81, 82],
+  };
+  function wetKind(code) {
+    for (const kind of Object.keys(WET)) if (WET[kind].includes(code)) return kind;
+    return null;
+  }
+  const WET_WORDS = { snow: 'Snow', sleet: 'Sleet', storm: 'Thunder', rain: 'Rain' };
+  // The tint a mark of this weather is drawn in, and how strongly.
+  //
+  // Falling water is the one blue whatever hour it falls in — rain at midnight
+  // is rain — and cloud is grey for the same reason. What the sun is doing is
+  // the part that has to know: clear is the amber the rest of the page uses
+  // for today, and a clear *night* is an indigo, because a strip of amber
+  // across the small hours reads as a sunny night.
+  function skyTint(code, isDay) {
+    const kind = wetKind(code);
+    if (kind === 'storm') return { tint: 'var(--w-storm)', alpha: 0.9 };
+    if (kind === 'snow') return { tint: 'var(--w-snow)', alpha: 0.85 };
+    if (kind === 'sleet') return { tint: 'var(--w-snow)', alpha: 0.7 };
+    if (kind === 'rain') return { tint: 'var(--w-rain)', alpha: 0.85 };
+    if (code === 45 || code === 48) return { tint: 'var(--w-cloud)', alpha: 0.75 };
+    const open = isDay === false ? 'var(--w-night)' : 'var(--w-sun)';
+    if (code === 0) return { tint: open, alpha: 0.9 };
+    if (code === 1) return { tint: open, alpha: 0.5 };
+    if (code === 2) return { tint: 'var(--w-cloud)', alpha: 0.45 };
+    return { tint: 'var(--w-cloud)', alpha: 0.7 };
+  }
+
+  // An hour counts as wet when the forecast is more than half-hearted about
+  // it. Both halves matter: a high chance of nothing measurable is drizzle you
+  // would not turn back for, and a low chance of four millimetres is worth
+  // knowing about.
+  const wet = (hour) => !!hour && (hour.pop >= 40 || hour.mm >= 0.2);
+
+  const temp = (value) => `${Math.round(value)}°`;
+  // Metres per second, which is what the wind is quoted in where this app
+  // comes from — and a word beside it, because the word is the part anyone
+  // acts on and it means the same thing in any unit.
+  function windWord(ms) {
+    if (ms < 1.5) return 'calm';
+    if (ms < 4) return 'light';
+    if (ms < 8) return 'breezy';
+    if (ms < 14) return 'windy';
+    if (ms < 21) return 'gale';
+    return 'storm';
+  }
+  const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  const dirWord = (deg) => COMPASS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+  function uvWord(uv) {
+    if (uv < 3) return 'low';
+    if (uv < 6) return 'moderate';
+    if (uv < 8) return 'high';
+    if (uv < 11) return 'very high';
+    return 'extreme';
+  }
+  // `13:45` out of `2026-09-10T13:45`, without going through `Date` — which
+  // would read it as the reader's own local time and shift a foreign sunrise
+  // by however many hours the two places are apart.
+  const clockOf = (stamp) => (stamp && stamp.length >= 16 ? stamp.slice(11, 16) : '');
+  const dateOf = (stamp) => (stamp ? stamp.slice(0, 10) : '');
+  function minutesOfStamp(stamp) {
+    if (!stamp || stamp.length < 16) return null;
+    return Number(stamp.slice(11, 13)) * 60 + Number(stamp.slice(14, 16));
+  }
+
+  /* ── The answer, before you read ────────────────────────────────────────
+   *
+   * The same line the agenda uses, asking the weather's version of the
+   * question: *is anything going to fall on me, and when*. It is the only part
+   * of this view that is always on screen, so it is written to be read at a
+   * glance and never to need the chart underneath it to make sense.
+   *
+   * The order of the cases is the order the facts matter in. Rain that has
+   * already started beats rain that might; rain beats wind; and a day with
+   * none of that is described by its sky, which is the honest headline for a
+   * dry Tuesday.
+   */
+  function weatherGlance() {
+    const wx = state.weather;
+    if (!wx.report) {
+      return {
+        lead: 'No forecast',
+        // Whatever TaskDeck said, said once. The card below explains where a
+        // forecast comes from; repeating the failure in both is how a view
+        // with nothing in it ends up saying the same sentence three times.
+        detail: wx.error || 'None fetched yet — this fills in when the first one lands',
+        accent: 'var(--muted)',
+        hollow: true,
+      };
+    }
+    const clock = placeClock();
+    const start = wx.byTime.get(`${clock.iso}T${pad(Math.floor(clock.minutes / 60))}:00`);
+    const now = wx.report.now;
+    if (start === undefined) {
+      // The report does not reach this hour — it is old, or the clocks have
+      // moved. Say what is known and nothing more.
+      return {
+        lead: now ? `${temp(now.temp)} · ${skyWord(now.code)}` : 'Weather',
+        detail: 'This forecast does not reach the hour it is now',
+        accent: 'var(--muted)',
+        hollow: true,
+      };
+    }
+    // Thirteen, so that "the next twelve hours" has a twelfth hour in it.
+    const ahead = wx.report.hours.slice(start, start + 13);
+    const today = wx.report.days.find((day) => day.date === clock.iso);
+
+    // How long a run of wet hours starting at `from` goes on for, and the
+    // absolute minutes (from midnight today, at the place) it covers.
+    const runFrom = (from) => {
+      let end = from;
+      while (end + 1 < ahead.length && wet(ahead[end + 1])) end += 1;
+      const at = (index) => daysBetween(clock.iso, dateOf(ahead[index].t)) * 1440 + minutesOfStamp(ahead[index].t);
+      return { from: at(from), until: at(end) + 60, hours: end - from + 1 };
+    };
+    // What this rain is going to land on. The point of drawing weather in a
+    // calendar: the two facts are worth nothing apart and everything together.
+    const clashWith = (run) => {
+      if (!clock.sameClock) return null;
+      const dates = [clock.iso, shiftDay(clock.iso, 1)];
+      return wxCommitments(clock.iso, dates).find((c) => c.end > run.from && c.start < run.until) || null;
+    };
+
+    // Two witnesses, and either will do. `now` is an observation — what is
+    // actually coming down — and `ahead[0]` is what the model says about the
+    // hour it is falling in. They disagree exactly when rain is starting or
+    // stopping, and of the two readings "it is raining" is the one worth
+    // saying: a headline of "rain from four" while it is raining is the
+    // failure this view exists to avoid.
+    const fallingNow = (now && now.mm >= 0.05 ? wetKind(now.code) : null)
+      || (wet(ahead[0]) ? wetKind(ahead[0].code) : null);
+    if (fallingNow) {
+      let dry = 1;
+      while (dry < ahead.length && wet(ahead[dry])) dry += 1;
+      const eases = dry < ahead.length
+        ? `easing about ${clockOf(ahead[dry].t)}`
+        : 'set in for the next twelve hours';
+      const tint = skyTint(now ? now.code : ahead[0].code, ahead[0].day);
+      return { lead: `${WET_WORDS[fallingNow]} now`, detail: eases, accent: tint.tint, hollow: false };
+    }
+
+    const soon = ahead.findIndex((hour, i) => i > 0 && wet(hour));
+    if (soon > 0) {
+      const run = runFrom(soon);
+      const away = run.from - clock.minutes;
+      const kind = wetKind(ahead[soon].code) || 'rain';
+      const word = WET_WORDS[kind];
+      const clash = clashWith(run);
+      const spell = run.hours >= 2 ? `${clockOf(ahead[soon].t)}–${hhmm(run.until % 1440)}` : clockOf(ahead[soon].t);
+      return {
+        lead: away <= 90 ? `${word} in ${dur(Math.max(5, away))}` : `${word} from ${clockOf(ahead[soon].t)}`,
+        detail: clash
+          ? `${spell} · during ${shortName(clash.name)}`
+          : `${spell} · ${ahead[soon].pop}% chance`,
+        accent: skyTint(ahead[soon].code, ahead[soon].day).tint,
+        hollow: false,
+      };
+    }
+
+    const gust = ahead.reduce((worst, hour) => Math.max(worst, hour.gust), 0);
+    if (gust >= 14) {
+      const at = ahead.reduce((worst, hour) => (hour.gust > worst.gust ? hour : worst), ahead[0]);
+      return {
+        lead: `${windWord(gust) === 'gale' ? 'Gale' : 'Windy'} · gusts ${Math.round(gust)} m/s`,
+        detail: `strongest about ${clockOf(at.t)}, from the ${dirWord(at.dir)}`,
+        accent: 'var(--w-cloud)',
+        hollow: false,
+      };
+    }
+
+    const sky = skyWord(now ? now.code : ahead[0].code);
+    const tint = skyTint(now ? now.code : ahead[0].code, now ? now.day : ahead[0].day);
+    return {
+      lead: `${sky} · ${temp(now ? now.temp : ahead[0].temp)}`,
+      detail: today
+        ? `Dry for twelve hours · ${temp(today.high)} / ${temp(today.low)} today`
+        : 'Dry for the next twelve hours',
+      accent: tint.tint,
+      hollow: true,
+    };
+  }
+
+  // Everything on the board that takes time, over the given dates, counted in
+  // minutes from midnight of `baseIso` so a window that crosses midnight can
+  // be compared against it in one number.
+  function wxCommitments(baseIso, dates) {
+    const out = [];
+    for (const date of dates) {
+      const shift = daysBetween(baseIso, date) * 1440;
+      for (const c of commitments(state.agenda.days.get(date))) {
+        if (c.end <= c.start) continue;
+        out.push(Object.assign({}, c, { start: c.start + shift, end: c.end + shift }));
+      }
+    }
+    return out.sort((a, b) => a.start - b.start);
+  }
+
+  function renderWeatherGlance() {
+    const box = $('summary');
+    box.classList.add('glance');
+    const at = weatherGlance();
+    const detail = el('span', { class: 'gdetail', text: at.detail });
+    const stale = wxStaleNote();
+    if (stale) detail.append(stale);
+    box.replaceChildren(
+      el('span', { class: 'gdot' + (at.hollow ? ' hollow' : ''), style: `--accent:${at.accent}` }),
+      el('span', { class: 'glead', text: at.lead }),
+      detail,
+    );
+  }
+
+  // The forecast's age, said only once it is worth saying. The weather is
+  // allowed to be a few minutes old — that is what a forecast is — so this
+  // stays quiet until it is old enough that somebody should know.
+  const WX_OLD_MS = 45 * 60 * 1000;
+  function wxStaleNote() {
+    const wx = state.weather;
+    if (!wx.report || Date.now() - wx.at < WX_OLD_MS) return null;
+    const when = new Date(wx.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return el('span', { class: 'stalenote', text: ` · as of ${when}` });
+  }
+
+  /* ── Drawing it ──────────────────────────────────────────────────────────
+   *
+   * The chart is one inline SVG, built as text and measured in real pixels: a
+   * `viewBox` the width of the box it goes in, so nothing is scaled and a
+   * 10px label is 10px. It is redrawn when the day changes, when a new report
+   * lands, and when the window is resized to a different width — and never
+   * while a finger is on it, which is why scrubbing moves two attributes
+   * instead of re-rendering.
+   *
+   * Five things share one x axis, and that sharing is the whole design:
+   * the strip of sky along the top, the temperature curve, the chance of rain
+   * rising from the baseline, the hours, and — underneath — what the board
+   * says you are doing. Read down any vertical line and you have the answer.
+   */
+  const WX_PLOT = {
+    sky: 12,          // the strip of sky: 0 → 12
+    curveTop: 26,     // the temperature curve lives between these two
+    curveBottom: 94,
+    rain: 40,         // how tall a 100% bar is, rising from the baseline
+    base: 122,        // the baseline everything below hangs from
+    axis: 137,        // where the hour labels sit
+    plan: 143,        // the plan band: 143 → 157
+    planH: 14,
+    height: 159,
+  };
+
+  const xml = (text) => String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  // Roughly how many characters fit, at the 10px face the band is set in.
+  function clipText(text, pixels) {
+    const fits = Math.floor(pixels / 5.6);
+    if (fits < 2) return '';
+    return text.length <= fits ? text : `${text.slice(0, fits - 1)}…`;
+  }
+
+  function wxWindow(day) {
+    const clock = placeClock();
+    const isToday = day === clock.iso;
+    // Today rolls: one hour back, so what has just happened is still on
+    // screen, and twenty-three forward. Any other day is drawn midnight to
+    // midnight, because that is what "Thursday" means.
+    const startHour = isToday ? Math.max(0, Math.floor(clock.minutes / 60) - 1) : 0;
+    const cols = [];
+    let iso = day;
+    let hour = startHour;
+    for (let i = 0; i < WX_COLS; i++) {
+      cols.push({ iso, hour, at: wxHour(iso, hour * 60) });
+      hour += 1;
+      if (hour === 24) { hour = 0; iso = shiftDay(iso, 1); }
+    }
+    return { cols, day, isToday, clock, startHour };
+  }
+
+  function wxChartSvg(win, width) {
+    const known = win.cols.filter((col) => col.at);
+    if (!known.length) return '';
+    const colW = width / WX_COLS;
+    const cx = (i) => (i + 0.5) * colW;
+
+    const temps = known.map((col) => col.at.temp);
+    let lo = Math.min.apply(null, temps);
+    let hi = Math.max.apply(null, temps);
+    // A flat day would otherwise be drawn as a wild line through a
+    // half-degree range. Four degrees is the least the axis ever spans.
+    if (hi - lo < 4) { const mid = (hi + lo) / 2; lo = mid - 2; hi = mid + 2; }
+    const y = (value) => WX_PLOT.curveBottom - ((value - lo) / (hi - lo)) * (WX_PLOT.curveBottom - WX_PLOT.curveTop);
+
+    const parts = [];
+
+    // Night, first and behind everything: the hours the sun is down, so the
+    // shape of the day is visible without reading a sunrise time.
+    win.cols.forEach((col, i) => {
+      if (!col.at || col.at.day) return;
+      parts.push(`<rect x="${(i * colW).toFixed(2)}" y="0" width="${(colW + 0.4).toFixed(2)}" height="${WX_PLOT.base}" style="fill:rgba(0,0,0,0.28)"/>`);
+    });
+
+    // The strip of sky. One cell an hour, in the colour of what it is doing —
+    // which reads as "grey until two, then blue" from across a room.
+    win.cols.forEach((col, i) => {
+      if (!col.at) return;
+      const { tint, alpha } = skyTint(col.at.code, col.at.day);
+      parts.push(`<rect x="${(i * colW).toFixed(2)}" y="0" width="${(colW + 0.4).toFixed(2)}" height="${WX_PLOT.sky}" style="fill:${tint};opacity:${alpha}"/>`);
+    });
+
+    // Midnight, and whose day it is on the far side of it.
+    win.cols.forEach((col, i) => {
+      if (col.hour !== 0 || i === 0) return;
+      const x = (i * colW).toFixed(2);
+      const [dy, dm, dd] = col.iso.split('-').map(Number);
+      const name = new Date(dy, dm - 1, dd).toLocaleDateString(undefined, { weekday: 'short' });
+      parts.push(`<line x1="${x}" x2="${x}" y1="${WX_PLOT.sky}" y2="${WX_PLOT.base}" style="stroke:var(--edge-2)" stroke-width="1" stroke-dasharray="2 3"/>`);
+      parts.push(`<text x="${(i * colW + 3).toFixed(2)}" y="${WX_PLOT.sky + 11}" style="fill:var(--muted);font:700 9px var(--mono-stack);letter-spacing:0.1em">${xml(name.toUpperCase())}</text>`);
+    });
+
+    // The baseline the rain stands on and the hours are labelled under.
+    parts.push(`<line x1="0" x2="${width.toFixed(2)}" y1="${WX_PLOT.base}" y2="${WX_PLOT.base}" style="stroke:var(--line)" stroke-width="1"/>`);
+
+    // The chance of rain, and how much of it. The bar's height is the chance,
+    // because that is the number a decision is made on; how solid it is says
+    // how much would fall, because a certainty of nothing measurable and a
+    // long shot at four millimetres are not the same warning.
+    win.cols.forEach((col, i) => {
+      if (!col.at || col.at.pop <= 0) return;
+      const tall = (col.at.pop / 100) * WX_PLOT.rain;
+      if (tall < 0.6) return;
+      const solid = 0.3 + Math.min(col.at.mm, 3) / 3 * 0.55;
+      const kind = wetKind(col.at.code);
+      const tint = kind === 'snow' || kind === 'sleet' ? 'var(--w-snow)' : 'var(--w-rain)';
+      parts.push(`<rect x="${(i * colW + colW * 0.18).toFixed(2)}" y="${(WX_PLOT.base - tall).toFixed(2)}" width="${(colW * 0.64).toFixed(2)}" height="${tall.toFixed(2)}" rx="1" style="fill:${tint};opacity:${solid.toFixed(2)}"/>`);
+    });
+
+    // The temperature. Drawn twice — a dark stroke under a light one — so the
+    // line reads over a photograph as well as over a plate, the same trick the
+    // agenda's route thread uses.
+    const points = win.cols
+      .map((col, i) => (col.at ? `${cx(i).toFixed(2)},${y(col.at.temp).toFixed(2)}` : null))
+      .filter(Boolean)
+      .join(' ');
+    parts.push(`<polyline points="${points}" fill="none" style="stroke:rgba(4,6,8,0.6)" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>`);
+    parts.push(`<polyline points="${points}" fill="none" style="stroke:var(--w-sun)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`);
+
+    // The two ends of the day, labelled where they happen. Nothing else on the
+    // curve is worth a number: the readout above says any hour exactly.
+    const warmest = known.reduce((best, col) => (col.at.temp > best.at.temp ? col : best), known[0]);
+    const coldest = known.reduce((best, col) => (col.at.temp < best.at.temp ? col : best), known[0]);
+    for (const [col, above] of [[warmest, true], [coldest, false]]) {
+      if (warmest === coldest && !above) continue;
+      const i = win.cols.indexOf(col);
+      const at = cx(i);
+      const anchor = at < 26 ? 'start' : at > width - 26 ? 'end' : 'middle';
+      const nudge = anchor === 'start' ? -4 : anchor === 'end' ? 4 : 0;
+      parts.push(`<circle cx="${at.toFixed(2)}" cy="${y(col.at.temp).toFixed(2)}" r="2.5" style="fill:var(--w-sun);stroke:rgba(4,6,8,0.6)" stroke-width="1.5"/>`);
+      parts.push(`<text x="${(at + nudge).toFixed(2)}" y="${(y(col.at.temp) + (above ? -7 : 14)).toFixed(2)}" text-anchor="${anchor}" style="fill:var(--text);font:700 11px var(--mono-stack);paint-order:stroke;stroke:rgba(4,6,8,0.75);stroke-width:3px">${xml(temp(col.at.temp))}</text>`);
+    }
+
+    // The hours. Every third, which on a phone is the most that can be set at
+    // ten pixels without the labels touching.
+    win.cols.forEach((col, i) => {
+      if (col.hour % 3 !== 0) return;
+      const at = cx(i);
+      if (at < 8 || at > width - 8) return;
+      parts.push(`<text x="${at.toFixed(2)}" y="${WX_PLOT.axis}" text-anchor="middle" style="fill:var(--muted);font:600 10px var(--mono-stack)">${pad(col.hour)}</text>`);
+    });
+
+    // What the board says you are doing, on the same axis. This is the reason
+    // the weather is drawn in a calendar at all.
+    const planned = wxPlanBand(win);
+    if (planned.length) {
+      parts.push(`<rect x="0" y="${WX_PLOT.plan}" width="${width.toFixed(2)}" height="${WX_PLOT.planH}" rx="3" style="fill:var(--edge);opacity:0.6"/>`);
+      for (const block of planned) {
+        const from = Math.max(0, block.from) * colW;
+        const to = Math.min(WX_COLS, block.to) * colW;
+        const wide = Math.max(2, to - from);
+        parts.push(`<rect x="${from.toFixed(2)}" y="${WX_PLOT.plan}" width="${wide.toFixed(2)}" height="${WX_PLOT.planH}" rx="3" style="fill:${block.accent};opacity:0.9"/>`);
+        const label = clipText(shortName(block.name), wide - 8);
+        if (label) {
+          parts.push(`<text x="${(from + 4).toFixed(2)}" y="${WX_PLOT.plan + 10}" style="fill:#0f1113;font:700 10px -apple-system,system-ui,sans-serif">${xml(label)}</text>`);
+        }
+      }
+    }
+
+    // Now, and the hour the reader has a finger on. The now-line is the
+    // desktop's own colour, so it means the same thing here as it does there.
+    if (win.isToday) {
+      const at = ((win.clock.minutes / 60) - win.startHour) * colW;
+      if (at >= 0 && at <= width) {
+        parts.push(`<line x1="${at.toFixed(2)}" x2="${at.toFixed(2)}" y1="0" y2="${WX_PLOT.base + 4}" style="stroke:var(--now)" stroke-width="2"/>`);
+        parts.push(`<circle cx="${at.toFixed(2)}" cy="${WX_PLOT.base + 4}" r="3" style="fill:var(--now)"/>`);
+      }
+    }
+    parts.push(`<line id="wxMark" x1="0" x2="0" y1="0" y2="${WX_PLOT.base}" opacity="0" style="stroke:var(--text)" stroke-width="1.5" stroke-dasharray="3 3"/>`);
+
+    return `<svg viewBox="0 0 ${width.toFixed(2)} ${WX_PLOT.height}" width="${width.toFixed(2)}" height="${WX_PLOT.height}" role="img" aria-label="The next day's temperature, chance of rain and plan">${parts.join('')}</svg>`;
+  }
+
+  // The board's day, in column space. Empty when the phone and the forecast
+  // are on different clocks — a band an hour out of step is worse than none,
+  // because it looks exactly as right as a correct one.
+  function wxPlanBand(win) {
+    if (!win.clock.sameClock) return [];
+    const first = win.cols[0];
+    const dates = [];
+    for (const col of win.cols) if (!dates.includes(col.iso)) dates.push(col.iso);
+    const base = first.iso;
+    return wxCommitments(base, dates)
+      .map((c) => ({
+        from: c.start / 60 - first.hour,
+        to: c.end / 60 - first.hour,
+        name: c.name,
+        accent: c.accent,
+      }))
+      .filter((block) => block.to > 0 && block.from < WX_COLS);
+  }
+
+  /* ── The hour under the thumb ────────────────────────────────────────────
+   *
+   * A chart with no numbers on it is a picture; one with a number on every
+   * hour is a table. This is the third thing: drag along the chart and the
+   * line above it says that hour exactly. Nothing is re-rendered while the
+   * finger is down — the marker is one line's two attributes and the readout
+   * is one element's children — because replacing the SVG under a pointer
+   * capture ends the gesture.
+   */
+  function renderWxReadout() {
+    const win = state.weather.win;
+    const box = $('wxRead');
+    if (!win) { box.replaceChildren(); return; }
+    const key = state.weather.hour;
+    const scrubbed = key ? win.cols.find((col) => col.at && col.at.t === key) : null;
+    let hour = scrubbed && scrubbed.at;
+    let when = hour ? clockOf(hour.t) : '';
+    let live = false;
+    if (!hour && win.isToday) {
+      hour = wxHour(win.clock.iso, win.clock.minutes) || (win.cols.find((col) => col.at) || {}).at;
+      when = 'Now';
+      live = true;
+    } else if (!hour) {
+      const midday = win.cols.find((col) => col.at && col.hour === 12) || win.cols.find((col) => col.at);
+      hour = midday && midday.at;
+      when = hour ? clockOf(hour.t) : '';
+    }
+    if (!hour) {
+      box.replaceChildren(el('span', { class: 'bits', text: 'This forecast has no hours for that day' }));
+      return;
+    }
+    // The current conditions are an observation and the hour is a forecast of
+    // it; where both exist, the observation wins.
+    const now = live && state.weather.report.now ? state.weather.report.now : null;
+    const reading = now || hour;
+    const bits = [`<b>${temp(reading.temp)}</b>`];
+    if (Math.round(reading.feels) !== Math.round(reading.temp)) bits.push(`feels ${temp(reading.feels)}`);
+    bits.push(xml(skyWord(reading.code)));
+    if (hour.pop > 0) bits.push(`${hour.pop}%${hour.mm >= 0.1 ? ` ${hour.mm.toFixed(1)}mm` : ''}`);
+    bits.push(`${dirWord(reading.dir)} ${Math.round(reading.wind)} m/s${reading.gust >= reading.wind + 3 ? ` (${Math.round(reading.gust)})` : ''}`);
+    if (hour.uv >= 1) bits.push(`UV ${hour.uv.toFixed(0)}`);
+    const children = [
+      el('span', { class: 'when', text: when }),
+      el('span', { class: 'bits', html: bits.join(' · ') }),
+    ];
+    if (scrubbed) {
+      children.push(el('button', {
+        class: 'chip', style: 'height:28px;min-width:0;padding:0 10px;font-size:12px;margin-left:auto',
+        text: 'Now',
+        onclick: () => { state.weather.hour = null; paintScrub(); },
+      }));
+    }
+    box.replaceChildren(...children);
+  }
+
+  function paintScrub() {
+    const win = state.weather.win;
+    const mark = $('wxMark');
+    if (mark && win) {
+      const key = state.weather.hour;
+      const index = key ? win.cols.findIndex((col) => col.at && col.at.t === key) : -1;
+      if (index < 0) {
+        mark.setAttribute('opacity', '0');
+      } else {
+        const at = ((index + 0.5) * (state.weather.width / WX_COLS)).toFixed(2);
+        mark.setAttribute('opacity', '1');
+        mark.setAttribute('x1', at);
+        mark.setAttribute('x2', at);
+      }
+    }
+    renderWxReadout();
+  }
+
+  function armChartScrub(svg) {
+    const pick = (clientX) => {
+      const win = state.weather.win;
+      const rect = svg.getBoundingClientRect();
+      if (!win || !rect.width) return;
+      const column = Math.floor(((clientX - rect.left) / rect.width) * WX_COLS);
+      const col = win.cols[Math.max(0, Math.min(WX_COLS - 1, column))];
+      const key = col && col.at ? col.at.t : null;
+      if (key === state.weather.hour) return;
+      state.weather.hour = key;
+      paintScrub();
+    };
+    svg.addEventListener('pointerdown', (e) => {
+      wxHolding = true;
+      // Captured so a finger that wanders off the chart keeps scrubbing it —
+      // and released by the browser itself, with a `pointercancel`, the moment
+      // it decides the gesture was a vertical scroll (`touch-action: pan-y`).
+      if (svg.setPointerCapture) { try { svg.setPointerCapture(e.pointerId); } catch (_) {} }
+      pick(e.clientX);
+    });
+    svg.addEventListener('pointermove', (e) => { if (wxHolding) pick(e.clientX); });
+    for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
+      svg.addEventListener(type, () => { wxHolding = false; });
+    }
+  }
+
+  /* ── The plates ──────────────────────────────────────────────────────────*/
+
+  function renderWxNow(day) {
+    const wx = state.weather;
+    const clock = placeClock();
+    const today = day === clock.iso;
+    const forecast = wx.report.days.find((entry) => entry.date === day);
+    const now = today ? wx.report.now : null;
+    const shown = now || (forecast ? { temp: forecast.high, code: forecast.code, sym: forecast.sym, feels: forecast.feels_high } : null);
+    if (!shown) { $('wxNow').replaceChildren(el('div', { class: 'wxnone', text: 'Nothing for that day.' })); return; }
+    const [dy, dm, dd] = day.split('-').map(Number);
+    const named = new Date(dy, dm - 1, dd).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    const aside = today
+      ? [wx.report.place, clock.sameClock ? null : `${hhmm(clock.minutes)} there`].filter(Boolean).join(' · ')
+      : `${wx.report.place} · ${named}`;
+    const figure = el('div', { class: 'figure' }, [
+      el('div', { class: 'temp', text: temp(shown.temp) }),
+      el('div', {
+        class: 'word',
+        text: `${skyWord(shown.code)}${Math.round(shown.feels) !== Math.round(shown.temp) ? ` · feels ${temp(shown.feels)}` : ''}`,
+      }),
+      el('div', { class: 'aside', text: aside }),
+    ]);
+    const hilo = forecast
+      ? el('div', { class: 'hilo' }, [el('b', { text: temp(forecast.high) }), temp(forecast.low)])
+      : null;
+    $('wxNow').replaceChildren(...[
+      el('img', { src: `/weather/${shown.sym}.svg`, alt: skyWord(shown.code), width: 76, height: 76 }),
+      figure,
+      hilo,
+    ].filter(Boolean));
+  }
+
+  function renderWxChart(day) {
+    const plot = $('wxPlot');
+    const width = Math.max(200, Math.round(plot.clientWidth || plot.getBoundingClientRect().width));
+    const win = wxWindow(day);
+    state.weather.win = win;
+    state.weather.width = width;
+    // A scrubbed hour that is not in the new window has stopped meaning
+    // anything: dropped rather than carried, or the readout would describe an
+    // hour with no mark under it.
+    if (state.weather.hour && !win.cols.some((col) => col.at && col.at.t === state.weather.hour)) {
+      state.weather.hour = null;
+    }
+    const svg = wxChartSvg(win, width);
+    if (!svg) {
+      plot.replaceChildren(el('div', { class: 'wxnone', text: 'No hours for this day.' }));
+      $('wxLegend').replaceChildren();
+      renderWxReadout();
+      return;
+    }
+    plot.replaceChildren(el('div', { html: svg }));
+    const drawn = plot.querySelector('svg');
+    if (drawn) armChartScrub(drawn);
+    $('wxLegend').replaceChildren(
+      el('span', { html: '<i style="background:var(--w-sun)"></i>temperature' }),
+      el('span', { html: '<i style="background:var(--w-rain)"></i>chance of rain' }),
+      el('span', { html: '<i style="background:var(--edge-2)"></i>your day' }),
+    );
+    paintScrub();
+  }
+
+  function fact(key, value, note) {
+    return el('div', {}, [
+      el('div', { class: 'k', text: key }),
+      el('div', { class: 'v' }, [value, note ? el('span', { class: 'n', text: ` ${note}` }) : null]),
+    ]);
+  }
+
+  function renderWxFacts(day) {
+    const forecast = state.weather.report.days.find((entry) => entry.date === day);
+    const box = $('wxFacts');
+    if (!forecast) { box.replaceChildren(); return; }
+    const rise = minutesOfStamp(forecast.sunrise);
+    const set = minutesOfStamp(forecast.sunset);
+    const daylight = rise !== null && set !== null && set > rise ? dur(set - rise) : null;
+    box.replaceChildren(
+      el('h3', { text: 'The day' }),
+      el('div', { class: 'wxfacts' }, [
+        fact('Sunrise', clockOf(forecast.sunrise) || '—'),
+        fact('Sunset', clockOf(forecast.sunset) || '—'),
+        fact('Daylight', daylight || (rise === null && set === null ? '—' : 'all day')),
+        fact('UV', forecast.uv >= 0.5 ? forecast.uv.toFixed(0) : '0', uvWord(forecast.uv)),
+        fact('Wind', `${Math.round(forecast.wind)} m/s`, `${windWord(forecast.wind)}, gusts ${Math.round(forecast.gust)}`),
+        fact(
+          'Rain',
+          forecast.mm >= 0.05 ? `${forecast.mm.toFixed(1)} mm` : 'none',
+          forecast.pop > 0 ? `${forecast.pop}% at its likeliest` : null,
+        ),
+      ]),
+    );
+  }
+
+  function renderWxWeek(day) {
+    const wx = state.weather;
+    const days = wx.report.days;
+    const box = $('wxWeek');
+    if (!days.length) { box.replaceChildren(); return; }
+    // One scale for the whole week, so the bars can be compared with each
+    // other — which is the only thing a row of bars is for.
+    const lows = days.map((entry) => entry.low);
+    const highs = days.map((entry) => entry.high);
+    const floor = Math.min.apply(null, lows);
+    const ceiling = Math.max.apply(null, highs);
+    const span = Math.max(1, ceiling - floor);
+    const clock = placeClock();
+    const rows = days.map((entry) => {
+      const [dy, dm, dd] = entry.date.split('-').map(Number);
+      const when = new Date(dy, dm - 1, dd);
+      const isToday = entry.date === clock.iso;
+      const bar = el('span', { class: 'range' }, [
+        el('i', {
+          style: `left:${((entry.low - floor) / span * 100).toFixed(1)}%;right:${((ceiling - entry.high) / span * 100).toFixed(1)}%`,
+        }),
+        isToday && wx.report.now
+          ? el('b', {
+              style: `left:calc(${Math.max(0, Math.min(100, (wx.report.now.temp - floor) / span * 100)).toFixed(1)}% - 2px)`,
+              title: 'now',
+            })
+          : null,
+      ]);
+      return el('button', {
+        class: `wxrow${entry.date === day ? ' on' : ''}${isToday ? ' today' : ''}`,
+        'aria-label': `${when.toDateString()}, ${skyWord(entry.code)}, ${temp(entry.high)} to ${temp(entry.low)}`,
+        'aria-current': entry.date === day ? 'true' : null,
+        onclick: () => showWeatherDay(entry.date),
+      }, [
+        el('span', { class: 'wd', text: isToday ? 'Today' : when.toLocaleDateString(undefined, { weekday: 'short' }) }),
+        el('img', { src: `/weather/${entry.sym}.svg`, alt: '', width: 30, height: 30 }),
+        el('span', { class: 'pop', text: entry.pop >= 20 ? `${entry.pop}%` : '' }),
+        el('span', { class: 'lo', text: temp(entry.low) }),
+        bar,
+        el('span', { class: 'hi', text: temp(entry.high) }),
+      ]);
+    });
+    box.replaceChildren(el('h3', { text: 'The week' }), ...rows);
+  }
+
+  function renderWxFoot() {
+    const wx = state.weather;
+    const when = new Date(wx.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    const where = `${wx.report.latitude.toFixed(2)}, ${wx.report.longitude.toFixed(2)}`;
+    const lines = [`Open-Meteo · ${where}${wx.report.timezone ? ` · ${wx.report.timezone}` : ''} · fetched ${when}`];
+    // Only when there is something on screen to be wrong about. With no report
+    // at all the failure is the whole of what the view says, up in the card.
+    if (wx.error) lines.push(`Last try: ${wx.error}`);
+    $('wxFoot').replaceChildren(...lines.map((line) => el('div', { text: line })));
+  }
+
+  // The scrubber for this view, in the row the week and the month rail use.
+  function renderWxDays(day) {
+    const rail = $('wxdays');
+    const clock = placeClock();
+    rail.replaceChildren(...state.weather.report.days.map((entry) => {
+      const [dy, dm, dd] = entry.date.split('-').map(Number);
+      const when = new Date(dy, dm - 1, dd);
+      return el('button', {
+        class: `${entry.date === day ? 'on' : ''}${entry.date === clock.iso ? ' today' : ''}`,
+        'aria-label': `${when.toDateString()}, high ${temp(entry.high)}`,
+        'aria-current': entry.date === day ? 'true' : null,
+        onclick: () => showWeatherDay(entry.date),
+      }, [
+        el('span', { class: 'wd', text: when.toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2) }),
+        el('span', { class: 't', text: temp(entry.high) }),
+      ]);
+    }));
+  }
+
+  function showWeatherDay(date) {
+    const clock = placeClock();
+    // Today is the resting state, so picking it twice is not a different thing
+    // from never having picked anything — which is what keeps the view
+    // following the day over midnight.
+    state.weather.day = date === clock.iso ? null : date;
+    state.weather.hour = null;
+    renderWeather();
+  }
+
+  // What the view is, when there is nothing of it to show. Never the failure
+  // itself — the line in the masthead above has already said that — but where
+  // a forecast comes from, which is the thing somebody staring at an empty
+  // screen actually wants to know.
+  function wxNone() {
+    $('wxNow').replaceChildren(el('div', { class: 'wxnone' }, [
+      el('b', { text: 'Nothing to show yet. ' }),
+      'TaskDeck fetches the forecast for the place set on the map in its settings — '
+      + 'when it starts, and every ten minutes after. This fills in as soon as one lands, '
+      + 'and then keeps the last one, so it still reads with the desk switched off.',
+    ]));
+    for (const id of ['wxRead', 'wxPlot', 'wxLegend', 'wxFacts', 'wxWeek', 'wxFoot', 'wxdays']) $(id).replaceChildren();
+    // Emptied and then taken away. An empty plate is a promise that something
+    // is loading, and nothing is: three of them under a card explaining that
+    // there is no forecast reads as a forecast that failed to draw.
+    wxPlates(false);
+    state.weather.win = null;
+  }
+
+  function wxPlates(shown) {
+    for (const id of ['wxChart', 'wxFacts', 'wxWeek']) $(id).hidden = !shown;
+  }
+
+  // A finger is on the chart. Everything that draws goes through the function
+  // below, and it stops here while that is true: a redraw replaces the SVG the
+  // pointer is captured on, and the minute timer would otherwise end a scrub
+  // mid-drag once every sixty seconds, at random.
+  let wxHolding = false;
+  // Cleared by a pointer ending anywhere, not only on the chart. A `pointerup`
+  // the SVG never sees — the element replaced under the finger, a gesture the
+  // system took away — would otherwise leave this set and the view frozen for
+  // the rest of the session, which is a far worse failure than a scrub that
+  // ends a moment early.
+  for (const type of ['pointerup', 'pointercancel']) {
+    document.addEventListener(type, () => { wxHolding = false; }, { passive: true, capture: true });
+  }
+
+  function renderWeather() {
+    if (wxHolding) return;
+    mastheadFor(todayIso(), true);
+    renderWeatherGlance();
+    if (!state.weather.report) { wxNone(); return; }
+    wxPlates(true);
+    const day = wxDay();
+    renderWxNow(day);
+    renderWxChart(day);
+    renderWxFacts(day);
+    renderWxWeek(day);
+    renderWxFoot();
+    renderWxDays(day);
   }
 
   /* ─────────────────────── Watching, without listening ───────────────────
@@ -3403,6 +4506,7 @@
     // The agenda is the default view now, so hiding the timeline alone left a
     // month of somebody's schedule showing behind the token field.
     $('weekgrid').hidden = true;
+    $('weather').hidden = true;
     $('alldayRow').hidden = true;
     $('bar').hidden = true;
   }
@@ -3428,10 +4532,13 @@
   // ‹ › are gone from the screen: the scrubber in the bar reaches three days or
   // three months either way in one tap, which is further than a step and nearer
   // the thumb. These two survive as what the arrow keys and the swipe call.
-  $('modeBtn').addEventListener('click', () => setMode(state.mode === 'agenda' ? 'day' : 'agenda'));
+  $('modeBtn').addEventListener('click', () => setMode(NEXT_MODE[state.mode] || 'agenda'));
   // On today already, Today brings the now-line back into view — the thing
   // you want after scrolling off to look at the evening.
   $('todayBtn').addEventListener('click', () => {
+    // In the weather view Today is what puts the forecast back on today, and
+    // takes the reader's finger off whatever hour it was on.
+    if (state.mode === 'weather') { showWeatherDay(placeClock().iso); window.scrollTo(0, 0); return; }
     if (state.mode === 'agenda') { jumpToDate(todayIso()); return; }
     if (state.day === todayIso() && state.snap) scrollToUsefulHour();
     else goTo(todayIso());
@@ -3510,8 +4617,12 @@
     }
     if (e.key === 'ArrowLeft') stepBack();
     if (e.key === 'ArrowRight') stepOn();
-    if (e.key === 't' || e.key === 'T') { if (state.mode === 'agenda') jumpToDate(todayIso()); else goTo(todayIso()); }
-    if (e.key === 'w' || e.key === 'W') setMode(state.mode === 'agenda' ? 'day' : 'agenda');
+    if (e.key === 't' || e.key === 'T') {
+      if (state.mode === 'weather') showWeatherDay(placeClock().iso);
+      else if (state.mode === 'agenda') jumpToDate(todayIso());
+      else goTo(todayIso());
+    }
+    if (e.key === 'w' || e.key === 'W') setMode(NEXT_MODE[state.mode] || 'agenda');
   });
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -3576,12 +4687,24 @@
       // Never redraw a sheet someone is typing into.
       load({ quiet: true });
     }, 60000);
+    // The forecast's own clock. It is not the board's — no edit here changes
+    // the weather and no wake-up announces it — so it is neither polled with
+    // the day nor listened for: it is asked for on a clock of its own, and
+    // only while somebody is looking at it.
+    setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (state.mode !== 'weather') return;
+      // The now-line, the readout and the answer in the masthead are all wrong
+      // the minute they are old, and the chart's window rolls on the hour.
+      renderWeather();
+      loadWeather();
+    }, 60000);
     setInterval(() => {
       if (!state.snap) return;
       // "In 25 min" is only true for a minute. The now-line and the glance line
       // are the two things on this page that are wrong the moment they are old.
       if (state.mode === 'day') renderNow(state.snap.days[0]);
-      else renderGlance();
+      else if (state.mode === 'agenda') renderGlance();
     }, 60000);
     watch();
   }
@@ -3591,14 +4714,25 @@
     // pocket for twenty minutes must not show a twenty-minute-old answer for
     // as long as a round trip takes, or on a dead network for ever.
     if (state.mode === 'agenda' && state.snap) renderGlance();
+    if (state.mode === 'weather') { renderWeather(); loadWeather(); }
     load({ quiet: true });
   });
   // The network coming back is the moment to send what waited.
   window.addEventListener('online', () => {
     if (state.agenda.stalled) { state.agenda.stalled = false; drawEnds(); }
+    if (state.mode === 'weather') loadWeather({ force: true });
     load({ quiet: true });
   });
-  window.addEventListener('resize', measureSticky);
+  window.addEventListener('resize', () => {
+    measureSticky();
+    // The chart is drawn in real pixels at the width it was measured at, so a
+    // rotation is the one thing that has to redraw it — and only then, because
+    // a resize event also fires when a phone's toolbar slides away.
+    if (state.mode === 'weather' && state.weather.report) {
+      const plot = $('wxPlot');
+      if (Math.round(plot.clientWidth) !== state.weather.width) renderWeather();
+    }
+  });
 
   state.token = readToken();
   if (!state.token) {
@@ -3607,10 +4741,17 @@
     installManifest();
     labelChrome();
     pruneMonths();
+    // Whatever forecast was kept, before anything is asked for: the weather
+    // view opens on the last one it saw and says how old it is, exactly as the
+    // day and the agenda open on the last day they saw.
+    recallWeather();
     // Whatever storage holds, in both modes. The agenda draws its first frame
     // from it; the day view's seven-tap strip takes its dots from the same
     // store, which is why the week's own request could go.
     seedAgenda();
+    // The weather view asks for a week of days too: the plan band under its
+    // chart is the board's, and the tray badge and ＋ New in the bar still act
+    // on today from inside it.
     const span = state.mode === 'agenda' ? 31 : 7;
     if (state.mode === 'agenda') {
       // Nothing is awaited above this line, so the first frame the browser
@@ -3625,6 +4766,7 @@
     if (held) { takeSnapshot(held.snap); render(); }
     measureSticky();
     if (state.mode === 'agenda') { railAndMasthead(); jumpToDate(state.day, { load: false }); }
+    else if (state.mode === 'weather') { render(); loadWeather(); }
     else scrollToUsefulHour();
     load({ span }).then(() => {
       if (state.mode === 'agenda') {
@@ -3632,6 +4774,9 @@
         else growRun();
         jumpToDate(state.day, { load: false });
         growIfShort();
+      } else if (state.mode === 'weather') {
+        // The board's days have landed; the band under the chart can be drawn.
+        renderWeather();
       } else {
         scrollToUsefulHour();
       }

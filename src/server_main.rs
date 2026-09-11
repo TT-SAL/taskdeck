@@ -3,7 +3,9 @@
 //! The same data, the same commands and the same phone page as the desktop
 //! app, served from a machine that is always on and may have no screen at
 //! all. It owns `taskdeck_data/`, answers the phone (and, later, desktop
-//! clients) over HTTP, and does nothing else — no GPU, no egui, no weather.
+//! clients) over HTTP, and does nothing else — no GPU, no egui. It does fetch
+//! the weather, on a thread of its own: not to draw it, but because the phone
+//! view has a forecast in it and this process is what the phone talks to.
 //!
 //! Where the data lives is decided exactly as it is for the desktop
 //! (`paths::AppDirs::resolve`): `$TASKDECK_HOME` if set, else next to the
@@ -24,6 +26,7 @@ use task_deck::{
     paths::{self, AppDirs},
     phone::{self, PhoneServer, Pulse},
     subscriptions,
+    weather,
 };
 
 const USAGE: &str = "\
@@ -326,6 +329,18 @@ fn main() {
         phone::set_backdrop(made);
     }
 
+    // The forecast for the phone's weather view (§21.9). Held for the whole of
+    // `main`, because dropping the handle stops the thread; nothing here reads
+    // it, and nothing needs to — the thread publishes each answer where the
+    // HTTP workers pick it up (`weather::latest_report`).
+    //
+    // This is the one thing the module header at the top of this file used to
+    // rule out. It earns its place for the same reason the picture above does:
+    // it is what the phone is served, the phone is the whole point of this
+    // binary, and the alternative is a weather view that is blank on exactly
+    // the installs that keep the calendar running when the desk is off.
+    let _weather = weather::get_weather(config.coordinates, Arc::new(|| {}));
+
     let (tx, rx) = channel();
     let pulse = Arc::new(Pulse::new());
     // Nothing to wake: this thread is only ever waiting on the queue.
@@ -395,6 +410,19 @@ fn main() {
         }
     }
     eprintln!("  feed:        /calendar.ics?token=…   (same host and port)");
+    // Where the phone's weather view is pointed. Said for the same reason the
+    // zone above is: a coordinate nobody has set is 0, 0 — the Gulf of Guinea
+    // — and a forecast for the wrong hemisphere is not obviously wrong at a
+    // glance, it is just a forecast that keeps being unlike the weather.
+    eprintln!(
+        "  weather:     {:.3}, {:.3}{}",
+        config.coordinates[0],
+        config.coordinates[1],
+        match weather::nearest_city(config.coordinates[0], config.coordinates[1]) {
+            Some(city) => format!("  (nearest marked city: {})", city.name),
+            None => String::new(),
+        }
+    );
     // Started by hand in a terminal, with the phone in the other hand: draw
     // the link so the camera can take it. Under systemd this is a journal
     // socket rather than a terminal, so the journal stays readable — which
