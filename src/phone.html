@@ -987,9 +987,11 @@
       gen: 0,               // bumped to abandon growth that is no longer wanted
       pending: null,        // 'after' | 'before' when the sentinel fired mid-flight
       stalled: false,       // the network failed; the sentinel waits for a tap
+      touched: new Set(),   // days a verb just changed; the next quiet load covers them
     },
     mode: 'agenda',         // 'day' | 'agenda' | 'weather'
     notice: null,           // a refusal to show in the banner until acknowledged
+    armed: null,            // the Delete that has been tapped once, e.g. 'delete:17'
     // The forecast, and where the reader is in it. Kept apart from `snap`
     // because it is not the board's and does not arrive with it: the weather
     // is fetched on its own clock, from its own endpoint, and the view is
@@ -1615,6 +1617,10 @@
     let from = asked, until = shiftDay(asked, span - 1);
     const wanted = Array.from(state.agenda.onScreen);
     if (state.selected && state.selected.day) wanted.push(state.selected.day);
+    // Days a verb has just changed. A verb that closes the sheet first —
+    // Done, Delete, Tomorrow — has already let go of the selection by the time
+    // the refetch asks, and Tomorrow's target day was never selected at all.
+    for (const iso of state.agenda.touched) wanted.push(iso);
     for (const iso of wanted) {
       if (iso < from) from = iso;
       if (iso > until) until = iso;
@@ -1664,6 +1670,7 @@
 
     try {
       const range = spanFor(asked, span);
+      state.agenda.touched.clear();
       const snap = await api(`/api/state?from=${range.from}&days=${range.days}`);
       const anchor = anchorOf(snap, asked);
       remember(anchor.days[0].date, anchor);
@@ -4021,6 +4028,7 @@
   }
   function closeSheet() {
     state.sheet = null;
+    state.armed = null;
     state.renaming = false;
     state.notesDraft = null;
     $('sheet').style.transform = '';
@@ -4436,11 +4444,15 @@
   // An edit the desk could not be reached for is taken back out of the queue
   // instead, before it was ever sent; one the desk refused was already said.
 
+  // A day a verb is about to change, noted for the refetch that follows.
+  const touch = (...days) => { for (const iso of days) if (iso) state.agenda.touched.add(iso); };
+
   // Finish a task. The archive key is the instant this page chose, so Undo
   // can name the row exactly (`restore`).
   async function finish(item, { close = false } = {}) {
     const at = stamp();
     const key = requestKey();
+    touch(state.selected && state.selected.day);
     if (close) closeSheet();
     const result = await send({ op: 'complete', id: item.id, at }, { refreshSheet: !close, key });
     if (!result && !kept(key)) return;
@@ -4454,6 +4466,7 @@
   async function remove(item) {
     const at = stamp();
     const key = requestKey();
+    touch(state.selected && state.selected.day);
     closeSheet();
     const result = await send({ op: 'delete', id: item.id, at }, { refreshSheet: false, key });
     if (!result && !kept(key)) return;
@@ -4477,11 +4490,21 @@
     const where = day.date === todayIso() ? '' : ` ${shortDay(day.date)}`;
     toast(`Booked ${dur(minutes)} at${where} ${hhmm(start)}`, { action: ['Undo', async () => {
       if (unqueue(key)) { if (state.sheet) renderSheet(); return; }
-      if (result && result.session != null) {
-        if (state.selected && state.selected.id === item.id && state.selected.session === result.session) state.selected.session = null;
-        await send({ op: 'remove_block', id: item.id, session: result.session });
-      }
+      // The reply named the block; failing that — kept offline and sent by a
+      // background flush meanwhile — the board's own record of the task does,
+      // by the day, start and length this booking asked for.
+      const session = result && result.session != null ? result.session : sessionAt(item.id, day.date, start, minutes);
+      if (session == null) return;
+      if (state.selected && state.selected.id === item.id && state.selected.session === session) state.selected.session = null;
+      await send({ op: 'remove_block', id: item.id, session });
     }] });
+  }
+  // The index of a task's block on `day` at `start` for `minutes`, as the last
+  // snapshot has it; null when there is no such block.
+  function sessionAt(id, day, start, minutes) {
+    const item = state.items.get(id);
+    const found = item && item.sessions.find((s) => s.day === day && s.start === start && s.minutes === minutes);
+    return found ? found.index : null;
   }
   // A block a day on, at the same time — the commonest move a phone makes and
   // one the timeline cannot make at all. The sheet closes with it, since the
@@ -4490,26 +4513,41 @@
     const to = shiftDay(day.date, 1);
     const key = requestKey();
     const move = (onDay) => ({ op: 'move_block', id: item.id, session: block.session, day: onDay, start: block.start, minutes: block.minutes });
+    touch(day.date, to);
     closeSheet();
     const result = await send(move(to), { refreshSheet: false, key });
     if (!result && !kept(key)) return;
     toast(`${item.name} → ${shortDay(to)} ${hhmm(block.start)}`, { action: ['Undo', async () => {
       if (unqueue(key)) return;
+      touch(day.date, to);
       await send(move(day.date));
     }] });
   }
   // Two taps to delete: the first arms the button and turns it into the
   // question; the second answers it. Four seconds later it is a button again.
-  function armed(label, question, onconfirm) {
-    let timer = null;
-    const node = el('button', { type: 'button', class: 'danger', text: label, onclick: () => {
-      if (!node.classList.contains('armed')) {
+  // The arming is kept in `state`, keyed by what it is for, rather than as a
+  // class on the button: a sheet can be redrawn under a finger by a background
+  // load that sent kept edits, and a fresh button would otherwise have
+  // forgotten the first tap and taken the second as another first.
+  let armedTimer = null;
+  function armed(label, question, onconfirm, forWhat) {
+    const isArmed = () => state.armed === forWhat;
+    const node = el('button', { type: 'button', class: 'danger' + (isArmed() ? ' armed' : ''), text: isArmed() ? question : label, onclick: () => {
+      if (!isArmed()) {
+        state.armed = forWhat;
         node.classList.add('armed');
         node.textContent = question;
-        timer = setTimeout(() => { node.classList.remove('armed'); node.textContent = label; }, 4000);
+        clearTimeout(armedTimer);
+        armedTimer = setTimeout(() => {
+          state.armed = null;
+          // Whichever button now stands for it — a redraw may have replaced
+          // this one — goes back to being a plain Delete.
+          for (const button of document.querySelectorAll('#sheet button.armed')) { button.classList.remove('armed'); button.textContent = label; }
+        }, 4000);
         return;
       }
-      clearTimeout(timer);
+      clearTimeout(armedTimer);
+      state.armed = null;
       onconfirm();
     } });
     return node;
@@ -4724,7 +4762,7 @@
     }
 
     // Delete last, and armed rather than asked: the first tap is the question.
-    sheet.append(el('div', { class: 'section actions' }, [armed('Delete', 'Delete? Tap again', () => remove(item))]));
+    sheet.append(el('div', { class: 'section actions' }, [armed('Delete', 'Delete? Tap again', () => remove(item), `delete:${item.id}`)]));
   }
 
   // A task as a row in the tray: the name and its line, which open the sheet,
