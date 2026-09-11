@@ -48,13 +48,15 @@ The important part is what it records. A deadline is when something is **due**; 
 
 TaskDeck can serve the day to your phone while it runs. Turn on **Phone view** in Settings and
 it shows a link (and a QR code); open that on a phone on the same Wi-Fi — or over
-[Tailscale](https://tailscale.com) from anywhere — and you get the day as a timeline, the tray of
-unplanned tasks, and a sheet for editing whatever you tap: move or resize a block, book more
-time, set a due date, change severity, make a routine repeat, add a task, tick one off. Hold a
-block to drag it to another hour. The one button under the scrubber cycles the three views:
-the **day** as a timeline, the **agenda** as a continuous list of days, and the **weather**.
-When the day is running late, **Reflow** is there too, and your
-notepad is a tap away, to read or to change. Every
+[Tailscale](https://tailscale.com) from anywhere — and you get an **agenda** of your days as one
+scrolling list over your own background picture, a **day** view as a timeline, the **weather** on
+the same hours as your plan, the **tray** of unplanned tasks, and a sheet for whatever you tap — a
+row in the agenda, a block on the timeline, a card in the tray. The sheet leads with the verbs:
+**✓ Done**, **＋ Book** at the first free hour, **→ Tomorrow**, each one tap with an Undo behind it
+rather than a dialog; below them, times and lengths and due dates are rows of chips rather than
+pickers. Tray cards carry ✓ and ＋ themselves. Hold a block to drag it to another hour. The one
+button under the scrubber cycles the three views. When the day is running late, **Reflow** is
+there too, and your notepad is a tap away, to read or to change. Every
 change lands in the desktop app the moment you make it, through exactly the same code a drag on
 the planner uses, so there is nothing to sync and nothing to merge. Out of reach of the desktop,
 an edit made on the page is kept on the phone — shown as waiting, not as done — and sent, in
