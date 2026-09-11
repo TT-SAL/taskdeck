@@ -68,11 +68,11 @@
     --r-l: 18px;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
     --safe-top: env(safe-area-inset-top, 0px);
-    /* 1 border + 6 top + 44 scrubber + 6 gap + 60 deck + 16 of keep-out below
-       the buttons, so a thumb resting at the bottom edge of the screen is not
-       already on one. The page's own bottom padding and the toast both sit off
-       this number rather than guessing at it. */
-    --bar-h: 133px;
+    /* 1 hairline + 6 top + 44 scrubber + 6 gap + 52 deck + 14 of keep-out
+       below the buttons, so a thumb resting at the bottom edge of the screen
+       is not already on one. The page's own bottom padding and the toast both
+       sit off this number rather than guessing at it. */
+    --bar-h: 123px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   /* `html` carries the ground and `body` must not. Painting order puts a
@@ -184,10 +184,13 @@
   .week button .wd { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
   .week button .dn { font-size: 15px; font-weight: 700; color: var(--text); }
   .week button.today .dn { color: var(--today); }
-  .week button.shown { background: var(--plate); }
+  /* The shown day's ground is a *lit* alpha, not the plate: the bar was the
+     plate too, so the pill had been invisible on it since the strip was
+     written, and the day you were looking at was marked by nothing. */
+  .week button.shown { background: rgba(232,230,225,0.10); }
   .week button.shown .dn { color: var(--text); }
   .week button.shown.today .dn { color: var(--today); }
-  .week button:active { background: var(--plate-2); }
+  .week button:active { background: rgba(232,230,225,0.16); }
   .week .dots { display: flex; gap: 3px; height: 4px; margin-top: 3px; }
   .week .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--c); display: block; }
   textarea.notes {
@@ -316,7 +319,7 @@
   .rail button.hastoday::after {
     content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--today); margin-top: 3px;
   }
-  .rail button.here { background: var(--plate); color: var(--text); font-weight: 700; }
+  .rail button.here { background: rgba(232,230,225,0.10); color: var(--text); font-weight: 700; }
   .rail button .yr { font-size: 9px; letter-spacing: 0; opacity: 0.55; text-transform: none; }
   .rail button.beyond { opacity: 0.4; }
   /* The reading position is moved by `holdPlace` and by nothing else. Anything
@@ -427,13 +430,15 @@
    * costs paint. */
   html.has-photo .mast,
   html.has-photo .weekgrid,
-  html.has-photo .timeline {
+  html.has-photo .timeline,
+  html.has-photo .bar {
     text-shadow: 0 1px 2px rgba(4,6,8,0.95), 0 0 9px rgba(4,6,8,0.7);
   }
   @supports (paint-order: stroke) {
     html.has-photo .mast,
     html.has-photo .weekgrid,
-    html.has-photo .timeline {
+    html.has-photo .timeline,
+    html.has-photo .bar {
       paint-order: stroke fill;
       -webkit-text-stroke: var(--halo) rgba(4,6,8,0.62);
       text-shadow: 0 1px 5px rgba(4,6,8,0.8);
@@ -563,32 +568,71 @@
   .wxfoot { color: var(--muted); font-size: 11px; padding: 2px 4px 10px; line-height: 1.5; }
 
   /* ── Bottom bar ── */
+  /* An aperture at the foot of the screen, cut the way the masthead's is at
+     the head. It was a plate: an opaque slab across a sixth of the screen,
+     with rounded corners and a shadow, standing on the one thing the page is
+     arranged to show. Now it paints the same picture at the same explicit
+     size, offset so that the picture's top lands at the top of the viewport
+     — the bar's own top edge is `100dvh - height` below that — and the list
+     scrolls in under it and is hidden by it exactly as before, because a
+     JPEG has no alpha. A veil darkens the picture toward the deck, where the
+     words are, and the same halo the list wears carries them the rest of the
+     way. On a flat ground there is no picture to show, and the bar is a
+     plate as it was, less the corners and the shadow.
+
+     `100dvh`, not `100vh`, for the offset alone. A fixed element is laid out
+     against the viewport as it is *now*, which on Firefox and Chrome for
+     Android shrinks while the toolbar is showing, whereas `100vh` is the
+     viewport at its largest; `--photo-size` stays in `vh` so both copies of
+     the picture are one size, and only where this copy *starts* follows the
+     visible height. An engine without `dvh` gets the `vh` offset and a seam
+     off by a toolbar's height for as long as the toolbar is showing.
+
+     Never `backdrop-filter`, for the masthead's reason: a blur of the
+     backdrop is repainted every frame the list moves under it. This is one
+     composited layer, painted once. */
   .bar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: block;
     height: calc(var(--bar-h) + var(--safe-bottom));
-    padding: 6px 14px calc(16px + var(--safe-bottom));
-    background: var(--plate); border-top: 0;
-    border-radius: var(--r-l) var(--r-l) 0 0;
-    box-shadow: 0 0 0 1px var(--edge), 0 -14px 30px rgba(0,0,0,0.5);
+    padding: 6px 14px calc(14px + var(--safe-bottom));
+    --bar-top: calc(var(--bar-h) + var(--safe-bottom) - 100vh);
+    background: var(--plate);
+    /* A lit hairline above, where the slab's corners and shadow were. */
+    box-shadow: 0 -1px 0 0 var(--edge);
     user-select: none; -webkit-user-select: none;
+  }
+  @supports (height: 100dvh) {
+    .bar { --bar-top: calc(var(--bar-h) + var(--safe-bottom) - 100dvh); }
+  }
+  html.has-photo .bar {
+    background:
+      linear-gradient(180deg, rgba(15,17,19,0.22) 0, rgba(15,17,19,0.58) 100%),
+      var(--photo, none) 50% var(--bar-top) / var(--photo-size) no-repeat,
+      linear-gradient(180deg, var(--plate), var(--plate));
   }
   /* Holds its height whichever scrubber is showing — and before the first
      render, when neither is — so the bar never jumps under a thumb. */
   .scrub { height: 44px; }
-  .deck { display: flex; gap: 8px; margin-top: 6px; height: 60px; }
+  .deck { display: flex; gap: 8px; margin-top: 6px; height: 52px; }
+  /* Not four boxes. Each verb is a dark, translucent pill with a lit edge —
+     glass over the picture, a recess in the plate — so the row reads as one
+     surface with four places to press rather than four objects standing on
+     it. 14px at 600 is the weight of the agenda's names; it does not need to
+     shout, because it is the only thing on the row. */
   .deck button {
-    flex: 1; min-width: 0; height: 60px; border-radius: 14px; font-weight: 700; font-size: 15px;
-    background: var(--plate); color: var(--text); border: 1px solid var(--line);
+    flex: 1; min-width: 0; height: 52px; border-radius: 14px; font-weight: 600; font-size: 14px;
+    background: rgba(15,17,19,0.38); color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--edge);
   }
   /* It was 15.17:1 — the highest-contrast object anywhere on the page, 60px
      tall, and the button pressed least often on a schedule check. Inside a
      sheet the primary IS what you came for and keeps its white fill; here it
-     is not. */
-  .deck button.primary { background: var(--plate-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--edge-2); border-color: transparent; }
-  .deck button:active { filter: brightness(1.2); }
+     is the one pill lit from within, and no more. */
+  .deck button.primary { background: rgba(232,230,225,0.10); box-shadow: inset 0 0 0 1px var(--edge-2); }
+  .deck button:active { background: rgba(232,230,225,0.16); }
   /* The day is running behind. The fact is in the masthead; this only points
      at where the verb lives. */
-  .deck button.late { box-shadow: inset 0 -3px 0 var(--today); }
+  .deck button.late { box-shadow: inset 0 0 0 1px var(--edge), inset 0 -3px 0 var(--today); }
   /* Kills the 300ms tap delay on the things that are only ever tapped. Never
      `.entry`, which is a button too and carries the press-and-hold that lifts
      a block. */

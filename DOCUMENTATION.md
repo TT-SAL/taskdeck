@@ -2603,6 +2603,26 @@ which is further than a step and nearer the hand. They survive as what `←` `�
 than anchored to Monday — a Monday-anchored week offers a Sunday reader seven days that have already
 happened.
 
+**The bar is an aperture too, cut at the foot of the screen the way the masthead's is cut at the
+head.** It was a plate — an opaque slab across a sixth of the screen, with rounded corners and a
+shadow, standing on the one thing the page is arranged to show. It now paints the same picture at the
+same explicit size, offset so that the picture's top lands at the top of the viewport (the bar's own
+top edge is `100dvh − height` below it), under a veil that darkens toward the deck, where the words
+are; the list still scrolls in under it and is hidden by it, because a JPEG has no alpha. The offset
+alone is in `dvh`, not `vh`: a fixed element is laid out against the viewport *as it is now*, which
+on Firefox and Chrome for Android shrinks while the toolbar is showing, whereas `100vh` is the
+viewport at its largest — and `--photo-size` stays in `vh` so both copies of the picture are one size.
+The slab's corners and shadow became a lit hairline; the four bordered boxes became dark translucent
+pills with a lit edge — glass over the picture, a recess in the plate — with ＋ New the one pill lit
+from within; the deck dropped from 60px to 52 and the bar from 133 to 123. On a flat ground there is
+no picture to show and the bar is a plate as before, less the corners. Two things fell out of
+putting glass there rather than paint. The shown day's pill in the week strip, and the month you are
+reading in the rail, had been the plate colour on a plate — invisible since the strip was written —
+and are a lit alpha now, so they read on either ground. And the halo the list wears against the
+photograph is worn by the bar's labels too, for the same reason and at the same cost. Not
+`backdrop-filter`, for the masthead's reason: a blur of the backdrop is repainted every frame the
+list moves under it, and this is one composited layer painted once.
+
 Two things moved out of the bar. **Notes** is a third of the width for something opened once a week;
 it is now a button in the Tray sheet's footer, beside the tasks it is about. And **Reflow** is not
 reversible, so it does not sit under a resting thumb: it is a chip at the top of the Tray sheet, on
