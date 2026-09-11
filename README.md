@@ -64,8 +64,11 @@ order, when the desktop answers again; over a secure link (Tailscale's HTTPS, se
 the page itself also opens offline and shows the last day it saw, which a plain `http://` LAN
 link cannot offer. Add the page to your home screen and it behaves like an app.
 
-**The weather view** is a forecast for the place you picked on the map in Settings — not for
-wherever the phone happens to be — and it is drawn for a calendar rather than for its own sake.
+**The weather view** is a forecast for the place you picked on the map in Settings, or — tap
+*Use my location* — for wherever the phone is. The phone asks Open-Meteo about its own place
+itself, and about the desk's place too whenever the desk cannot be reached, so the forecast keeps
+updating with the desk off; where the phone is stays on the phone and is never sent to the desk.
+It is drawn for a calendar rather than for its own sake.
 It opens with the answer in one line: *Rain from 14:00 · during Write the term report*. Under the
 temperature there is a chart of the next twenty-four hours — the sky along the top, the
 temperature through the middle, the chance of rain rising from the baseline — and beneath it, on

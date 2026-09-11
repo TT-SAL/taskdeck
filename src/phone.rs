@@ -1212,7 +1212,8 @@ fn guards() -> [Header; 3] {
         header(
             "Content-Security-Policy",
             "default-src 'none'; script-src 'self' 'unsafe-inline'; worker-src 'self'; \
-             style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; \
+             style-src 'unsafe-inline'; img-src 'self' data: blob:; \
+             connect-src 'self' https://api.open-meteo.com; \
              manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
         ),
     ]
@@ -3513,6 +3514,55 @@ mod tests {
             caching_for("/weather/01d.svg").value.as_str(),
             "public, max-age=31536000, immutable",
         );
+    }
+
+    /// A table the page defines as JSON, read out of the page the way it is
+    /// served. The page fetches forecasts for itself when the desk is out of
+    /// reach (§21.9), and to turn them into the desk's report it carries
+    /// copies of two of the desk's tables; these are what hold the copies to
+    /// the originals.
+    fn page_table(name: &str, close: &str) -> serde_json::Value {
+        let open = format!("const {name} = ");
+        let start = PAGE.find(&open).expect("the page defines the table") + open.len();
+        let end = start + PAGE[start..].find(close).expect("the table ends") + close.len() - 1;
+        serde_json::from_str(&PAGE[start..end]).expect("the table is JSON")
+    }
+
+    #[test]
+    fn the_pages_sky_table_is_the_desks() {
+        let table = page_table("WX_SKY", "};");
+        let table = table.as_object().expect("code -> [day, night]");
+        for code in 0..=110 {
+            for day in [true, false] {
+                let listed = table
+                    .get(&code.to_string())
+                    .and_then(|pair| pair.get(if day { 0 } else { 1 }))
+                    .and_then(|stem| stem.as_str())
+                    // Not listed is overcast on the page, exactly as it is here.
+                    .unwrap_or("04");
+                assert_eq!(listed, crate::weather::sky_symbol(code, day), "WMO {code}, day = {day}");
+            }
+        }
+        // And every picture the page can name is one this binary carries.
+        for pair in table.values() {
+            for stem in pair.as_array().expect("a pair") {
+                assert!(crate::weather::symbol_svg(stem.as_str().expect("a stem")).is_some(), "{stem}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_pages_city_table_is_the_desks() {
+        let table = page_table("WX_CITIES", "];");
+        let listed = table.as_array().expect("[name, latitude, longitude] rows");
+        assert_eq!(listed.len(), crate::weather::CITIES.len(), "a city added on one side only");
+        for (row, city) in listed.iter().zip(crate::weather::CITIES) {
+            assert_eq!(row[0].as_str(), Some(city.name));
+            let latitude = row[1].as_f64().expect("a number") as f32;
+            let longitude = row[2].as_f64().expect("a number") as f32;
+            assert!((latitude - city.latitude).abs() < 1e-4, "{}: {latitude} vs {}", city.name, city.latitude);
+            assert!((longitude - city.longitude).abs() < 1e-4, "{}: {longitude} vs {}", city.name, city.longitude);
+        }
     }
 
     /// The two halves of the weather route, without a socket: the name is cut

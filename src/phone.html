@@ -578,6 +578,13 @@
   .wxnone { color: var(--muted); font-size: 14px; line-height: 1.5; }
   .wxnone b { color: var(--text); font-weight: 700; }
   .wxfoot { color: var(--muted); font-size: 11px; padding: 2px 4px 10px; line-height: 1.5; }
+  /* The place: a line saying whose weather this is, and the two ways to change
+     that. The buttons are chips at the size the readout's Now button uses. */
+  .wxplace .where { font-size: 14px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+  .wxplace .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .wxplace .acts .chip { height: 36px; min-width: 0; padding: 0 12px; font-size: 13px; }
+  .wxplace .acts .chip[disabled] { opacity: 0.55; }
+  .wxplace .note { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
 
   /* ── Bottom bar ── */
   /* An aperture at the foot of the screen, cut the way the masthead's is at
@@ -898,6 +905,7 @@
   </div>
   <div class="wxbox" id="wxFacts"></div>
   <div class="wxbox wxweek" id="wxWeek"></div>
+  <div class="wxbox" id="wxPlace"></div>
   <div class="wxfoot" id="wxFoot"></div>
 </section>
 
@@ -1005,7 +1013,12 @@
       win: null,          // the 24 columns the chart is currently drawn from
       width: 0,           // the pixel width it was drawn at
       asking: false,
+      again: false,       // a forced ask arrived while one was in flight
       error: null,        // what the last try said, when it did not answer
+      here: null,         // {latitude, longitude, at}: where this phone was when last asked, or null for the desk's place
+      desk: null,         // {latitude, longitude, place}: the desk's place, remembered from its last report
+      locating: false,    // the browser is being asked where the phone is
+      placeNote: null,    // what the last ask said, when it did not answer
     },
   };
   // A refusal is kept until it is acknowledged, reload or not: it is the only
@@ -2016,6 +2029,7 @@
       // minutes old, so flicking between views costs nothing.
       window.scrollTo(0, 0);
       loadWeather();
+      warmSymbols();
       return;
     }
     if (mode === 'agenda') {
@@ -2730,6 +2744,16 @@
   // asks for a handful of specific hours, and a week is a hundred and
   // sixty-eight of them.
   function adoptWeather(report, at) {
+    // A report with no word for whose place it is came from the desk, before
+    // there was a choice to record — and any report for the desk's place says
+    // where that is, which is what the fallback below asks Open-Meteo about
+    // when the desk cannot be reached. Learned here, at the one door every
+    // report comes through, so a kept report teaches it as well as a fresh one.
+    if (report.for !== 'here') {
+      report.for = 'desk';
+      report.via = report.via || 'desk';
+      keepDesk({ latitude: report.latitude, longitude: report.longitude, place: report.place });
+    }
     const byTime = new Map();
     for (let i = 0; i < report.hours.length; i++) byTime.set(report.hours[i].t, i);
     state.weather.report = report;
@@ -2738,26 +2762,90 @@
     state.weather.error = null;
   }
 
+  /* ── Whose forecast, and who asks ───────────────────────────────────────
+   *
+   * The phone has a place of its own, or it uses the desk's; and it asks the
+   * desk, or it asks Open-Meteo itself. The two choices are made separately:
+   *
+   * - **Here** (`state.weather.here`): where this phone was when it was last
+   *   asked, kept on the phone and nowhere else — never sent to the desk. The
+   *   forecast for it is always fetched from here, because the desk knows
+   *   nothing about it.
+   * - **The desk's place**: the coordinate picked on the map in Settings. The
+   *   desk's own report is used when the desk answers, since it already has
+   *   one; when it does not, the place is remembered from its last report and
+   *   Open-Meteo is asked from here, which is reachable from a phone with a
+   *   signal whether the desk is or not.
+   *
+   * So the view keeps updating with the desk unreachable in every case but
+   * one: a phone that has never seen the desk's report and has not been given
+   * a place of its own has nothing to ask about, and says so.
+   */
+  const PLACE_KEY = 'taskdeck-weather-place';
+  const DESK_KEY = 'taskdeck-weather-desk';
+  function recallPlace() {
+    try {
+      const here = JSON.parse(localStorage.getItem(PLACE_KEY) || 'null');
+      if (here && typeof here.latitude === 'number' && typeof here.longitude === 'number') state.weather.here = here;
+    } catch (_) {}
+    try {
+      const desk = JSON.parse(localStorage.getItem(DESK_KEY) || 'null');
+      if (desk && typeof desk.latitude === 'number' && typeof desk.longitude === 'number') state.weather.desk = desk;
+    } catch (_) {}
+  }
+  function keepPlace() {
+    try {
+      if (state.weather.here) localStorage.setItem(PLACE_KEY, JSON.stringify(state.weather.here));
+      else localStorage.removeItem(PLACE_KEY);
+    } catch (_) {}
+  }
+  function keepDesk(desk) {
+    state.weather.desk = desk;
+    try { localStorage.setItem(DESK_KEY, JSON.stringify(desk)); } catch (_) {}
+  }
+
   async function loadWeather({ force = false } = {}) {
     const wx = state.weather;
-    if (wx.asking) return;
+    // A forced ask that lands during another — the place just changed under a
+    // fetch for the old one — is not dropped: it runs as soon as this one is
+    // done, or the new place would show the old place's sky until the next
+    // minute forced nothing.
+    if (wx.asking) { wx.again = wx.again || force; return; }
     if (!force && wx.report && Date.now() - wx.at < WX_FRESH_MS) return;
     wx.asking = true;
     try {
-      const report = await api('/api/weather');
+      let report = null;
+      if (wx.here) {
+        report = await fetchForecast(wx.here.latitude, wx.here.longitude, 'here');
+      } else {
+        try {
+          report = await api('/api/weather');
+          if (report && Array.isArray(report.hours)) {
+            report.for = 'desk';
+            report.via = 'desk';
+          }
+        } catch (error) {
+          if (error.status === 401) { showGate(); return; }
+          // The desk is out of reach, or has no forecast yet. Its place is
+          // known from the last time it answered, and the sky over it can be
+          // asked about from here.
+          if (!wx.desk) throw error;
+          report = await fetchForecast(wx.desk.latitude, wx.desk.longitude, 'desk');
+        }
+      }
       if (report && Array.isArray(report.hours)) {
         const at = Date.now();
         adoptWeather(report, at);
         keepWeather(report, at);
       }
     } catch (error) {
-      if (error.status === 401) { showGate(); return; }
       // Never over the last report: a forecast from an hour ago is worth far
       // more than an apology, and the footer says how old it is either way.
       wx.error = error.message;
     } finally {
       wx.asking = false;
       if (state.mode === 'weather') renderWeather();
+      if (wx.again) { wx.again = false; loadWeather({ force: true }); }
     }
   }
 
@@ -2829,6 +2917,218 @@
     95: 'Thunderstorm', 96: 'Thunderstorm, hail', 99: 'Thunderstorm, hail',
   };
   const skyWord = (code) => SKY_WORDS[code] || 'Cloudy';
+
+  /* ── The desk's tables, on the phone ─────────────────────────────────────
+   *
+   * A forecast this phone fetches for itself has to become the same report
+   * the desk sends, and two steps of that are tables the desk owns: which
+   * picture a WMO code is drawn with, and which marked city a coordinate is
+   * nearest to. They are copied here rather than asked for, because the whole
+   * point of fetching here is that the desk may be out of reach — and the
+   * copies are held to the originals by two tests in `phone.rs`, which read
+   * this page out of the binary and compare both tables against `weather.rs`
+   * entry by entry. A code the desk draws differently, or a city moved a
+   * metre, fails the build.
+   *
+   * `WX_SKY` is code → [day, night]; anything not listed is overcast, the
+   * honest picture for an unknown sky. Both are written as JSON so the tests
+   * need no JavaScript to read them.
+   */
+  const WX_SKY = {"0":["01d","01n"],"1":["02d","02n"],"2":["03d","03n"],"3":["04","04"],"45":["15","15"],"48":["15","15"],"51":["46","46"],"53":["46","46"],"55":["09","09"],"56":["47","47"],"57":["47","47"],"61":["46","46"],"63":["09","09"],"65":["10","10"],"66":["47","47"],"67":["48","48"],"71":["49","49"],"73":["13","13"],"75":["50","50"],"77":["49","49"],"80":["40d","40n"],"81":["05d","05n"],"82":["41d","41n"],"85":["44d","44n"],"86":["45d","45n"],"95":["22","22"],"96":["11","11"],"99":["11","11"]};
+  const WX_CITIES = [
+    ["Mumbai",19.0760,72.8777], ["Delhi",28.7041,77.1025], ["Bangalore",12.9716,77.5946], ["Hyderabad",17.3850,78.4867], ["Ahmedabad",23.0225,72.5714],
+    ["Shanghai",31.2304,121.4737], ["Beijing",39.9042,116.4074], ["Guangzhou",23.1291,113.2644], ["Shenzhen",22.5431,114.0579], ["Chengdu",30.5728,104.0668],
+    ["Jakarta",-6.2088,106.8456], ["Surabaya",-7.2575,112.7521], ["Bandung",-6.9175,107.6191], ["Medan",3.5952,98.6722], ["Semarang",-6.9667,110.4167],
+    ["Karachi",24.8607,67.0011], ["Lahore",31.5546,74.3572], ["Faisalabad",31.4504,73.1350], ["Rawalpindi",33.5651,73.0169], ["Multan",30.1575,71.5249],
+    ["Lagos",6.5244,3.3792], ["Kano",12.0022,8.5919], ["Ibadan",7.3775,3.9470], ["Abuja",9.0765,7.3986], ["Port Harcourt",4.8156,7.0498],
+    ["São Paulo",-23.5505,-46.6333], ["Rio de Janeiro",-22.9068,-43.1729], ["Brasília",-15.7939,-47.8828], ["Salvador",-12.9777,-38.5016], ["Fortaleza",-3.7319,-38.5267],
+    ["Dhaka",23.8103,90.4125], ["Chittagong",22.3569,91.7832], ["Khulna",22.8456,89.5403], ["Rajshahi",24.3700,88.6241], ["Sylhet",24.8949,91.8687],
+    ["Mexico City",19.4326,-99.1332], ["Guadalajara",20.6597,-103.3496], ["Monterrey",25.6866,-100.3161], ["Puebla",19.0413,-98.2062], ["Tijuana",32.5149,-117.0382],
+    ["Addis Ababa",9.0300,38.7400], ["Dire Dawa",9.6000,41.8500], ["Mekelle",13.4999,39.4758], ["Gondar",12.6000,37.4667], ["Bahir Dar",11.5936,37.3905],
+    ["Manila",14.5995,120.9842], ["Quezon City",14.6760,121.0437], ["Caloocan",14.7566,120.9822], ["Davao",7.1907,125.4553], ["Cebu City",10.3157,123.8854],
+    ["Tokyo",35.6895,139.6917], ["Yokohama",35.4437,139.6380], ["Osaka",34.6937,135.5023], ["Nagoya",35.1815,136.9066], ["Sapporo",43.0618,141.3545],
+    ["Adelaide",-34.9285,138.6007], ["Brisbane",-27.4705,153.0260], ["Canberra",-35.2809,149.1300], ["Melbourne",-37.8136,144.9631], ["Sydney",-33.8688,151.2093],
+    ["Gaborone",-24.6282,25.9231], ["Francistown",-21.1700,27.5072], ["Calgary",51.0447,-114.0719], ["Edmonton",53.5461,-113.4938], ["Montreal",45.5017,-73.5673],
+    ["Ottawa",45.4215,-75.6972], ["Toronto",43.6532,-79.3832], ["Douala",4.0511,9.7679], ["Garoua",9.3000,13.4000], ["Kumba",4.6400,9.4500],
+    ["Maroua",10.5950,14.3244], ["Yaoundé",3.8480,11.5021], ["Banjul",13.4529,-16.5780], ["Serekunda",13.4495,-16.6775], ["Accra",5.6037,-0.1870],
+    ["Kumasi",6.6666,-1.6163], ["Tamale",9.4000,-0.8393], ["Takoradi",4.8997,-1.7600], ["Tema",5.6667,-0.0167], ["Chennai",13.0827,80.2707],
+    ["Cork",51.8985,-8.4756], ["Dublin",53.3498,-6.2603], ["Galway",53.2707,-9.0568], ["Limerick",52.6680,-8.6305], ["Waterford",52.2593,-7.1101],
+    ["Kingston",17.9712,-76.7936], ["Montego Bay",18.4769,-77.9115], ["Eldoret",0.5204,35.2696], ["Kisumu",-0.0917,34.7680], ["Machakos",-1.5167,37.2667],
+    ["Mombasa",-4.0435,39.6682], ["Nairobi",-1.2921,36.8219], ["Mafeteng",-29.8200,27.4570], ["Maseru",-29.3158,27.4854], ["Bensonville",6.3400,-10.7600],
+    ["Gbarnga",7.0000,-9.5040], ["Harper",4.3667,-7.7167], ["Monrovia",6.3156,-10.8074], ["Tubmanburg",6.9962,-10.1719], ["Blantyre",-15.7861,35.0058],
+    ["Lilongwe",-13.9833,33.7833], ["Mzuzu",-11.4610,34.0201], ["Zomba",-15.3833,35.3333], ["Mangochi",-14.4814,35.2644], ["Windhoek",-22.5609,17.0658],
+    ["Walvis Bay",-22.9576,14.5058], ["Auckland",-36.8485,174.7633], ["Christchurch",-43.5321,172.6362], ["Dunedin",-45.8788,170.5028], ["Hamilton",-37.7870,175.2793],
+    ["Wellington",-41.2865,174.7762], ["Islamabad",33.6844,73.0479], ["Davao City",7.1907,125.4553], ["Zamboanga City",6.9214,122.0790], ["Jurong East",1.3330,103.7420],
+    ["Orchard",1.3048,103.8318], ["Pasir Ris",1.3727,103.9458], ["Singapore",1.3521,103.8198], ["Woodlands",1.4369,103.7861], ["Cape Town",-33.9249,18.4241],
+    ["Durban",-29.8587,31.0218], ["Johannesburg",-26.2041,28.0473], ["Port Elizabeth",-33.9715,25.6022], ["Pretoria",-25.7479,28.2293], ["Port of Spain",10.6667,-61.5167],
+    ["Entebbe",0.0500,32.4600], ["Gulu",2.7724,32.2881], ["Jinja",0.4244,33.2048], ["Kampala",0.3476,32.5825], ["Mbarara",-0.6076,30.6548],
+    ["Birmingham",52.4862,-1.8904], ["Glasgow",55.8642,-4.2518], ["Leeds",53.8008,-1.5491], ["Liverpool",53.4084,-2.9916], ["London",51.5074,-0.1278],
+    ["Chicago",41.8781,-87.6298], ["Houston",29.7604,-95.3698], ["Los Angeles",34.0522,-118.2437], ["New York City",40.7128,-74.0060], ["Phoenix",33.4484,-112.0740],
+    ["Durrës",41.3231,19.4414], ["Tirana",41.3275,19.8189], ["Antwerp",51.2194,4.4025], ["Bruges",51.2093,3.2247], ["Brussels",50.8503,4.3517],
+    ["Charleroi",50.4108,4.4446], ["Liège",50.6326,5.5797], ["Burgas",42.5048,27.4626], ["Plovdiv",42.1354,24.7453], ["Ruse",43.8510,25.9740],
+    ["Sofia",42.6977,23.3219], ["Varna",43.2141,27.9147], ["Rijeka",45.3271,14.4422], ["Split",43.5081,16.4402], ["Zagreb",45.8150,15.9785],
+    ["Brno",49.1951,16.6068], ["Ostrava",49.8347,18.2920], ["Plzen",49.7475,13.3776], ["Prague",50.0755,14.4378], ["Usti nad Labem",50.6600,14.0410],
+    ["Aarhus",56.1629,10.2039], ["Aalborg",57.0488,9.9217], ["Copenhagen",55.6761,12.5683], ["Odense",55.4038,10.4024], ["Esbjerg",55.4765,8.4594],
+    ["Tallinn",59.4370,24.7536], ["Bordeaux",44.8378,-0.5792], ["Lille",50.6292,3.0573], ["Lyon",45.7640,4.8357], ["Marseille",43.2965,5.3698],
+    ["Paris",48.8566,2.3522], ["Berlin",52.5200,13.4050], ["Cologne",50.9375,6.9603], ["Frankfurt",50.1109,8.6821], ["Hamburg",53.5511,9.9937],
+    ["Munich",48.1351,11.5820], ["Athens",37.9838,23.7275], ["Heraklion",35.3387,25.1442], ["Patras",38.2466,21.7346], ["Thessaloniki",40.6401,22.9444],
+    ["Volos",39.3617,22.9424], ["Debrecen",47.5316,21.6273], ["Miskolc",48.1031,20.7784], ["Pécs",46.0727,18.2323], ["Szeged",46.2530,20.1414],
+    ["Budapest",47.4979,19.0402], ["Bologna",44.4949,11.3426], ["Florence",43.7696,11.2558], ["Milan",45.4642,9.1900], ["Naples",40.8518,14.2681],
+    ["Rome",41.9028,12.4964], ["Riga",56.9496,24.1052], ["Kaunas",54.8985,23.9036], ["Vilnius",54.6872,25.2797], ["Amsterdam",52.3676,4.9041],
+    ["Eindhoven",51.4416,5.4697], ["Rotterdam",51.9225,4.47917], ["The Hague",52.0705,4.3007], ["Utrecht",52.0907,5.1214], ["Bitola",41.0333,21.3333],
+    ["Skopje",41.9981,21.4254], ["Gdańsk",54.3520,18.6466], ["Kraków",50.0647,19.9450], ["Łódź",51.7592,19.4550], ["Poznań",52.4064,16.9252],
+    ["Warsaw",52.2297,21.0122], ["Braga",41.5454,-8.4265], ["Coimbra",40.2033,-8.4103], ["Lisbon",38.7169,-9.1396], ["Porto",41.1579,-8.6291],
+    ["Funchal",32.6669,-16.9241], ["Bucharest",44.4268,26.1025], ["Cluj-Napoca",46.7712,23.6236], ["Iași",47.1585,27.6014], ["Timișoara",45.7489,21.2087],
+    ["Constanța",44.1598,28.6348], ["Bratislava",48.1486,17.1077], ["Košice",48.7164,21.2611], ["Nitra",48.3091,18.0866], ["Prešov",49.0000,21.2333],
+    ["Žilina",49.2231,18.7396], ["Ljubljana",46.0569,14.5058], ["Maribor",46.5547,15.6459], ["Barcelona",41.3825,2.1769], ["Madrid",40.4168,-3.7038],
+    ["Seville",37.3886,-5.9823], ["Valencia",39.4667,-0.3750], ["Zaragoza",41.6561,-0.8773], ["Ankara",39.9334,32.8597], ["Bursa",40.1950,29.0600],
+    ["Istanbul",41.0082,28.9784], ["Izmir",38.4192,27.1287], ["Konya",37.8716,32.4840], ["Frederiksberg",55.6803,12.5333], ["Helsingør",56.0333,12.6167],
+    ["Randers",56.4608,10.0364], ["Silkeborg",56.1705,9.5452], ["Vejle",55.7110,9.5369], ["Espoo",60.2055,24.6559], ["Helsinki",60.1695,24.9355],
+    ["Jyväskylä",62.2426,25.7473], ["Kuopio",62.8924,27.6780], ["Lahti",60.9827,25.6615], ["Oulu",65.0121,25.4651], ["Porvoo",60.3938,25.6636],
+    ["Tampere",61.4978,23.7610], ["Turku",60.4518,22.2666], ["Vantaa",60.2934,25.0378], ["Bergen",60.3913,5.3221], ["Drammen",59.7439,10.2040],
+    ["Fredrikstad",59.2181,10.9296], ["Kristiansand",58.1467,7.9956], ["Kristiansund",63.1113,7.7303], ["Oslo",59.9139,10.7522], ["Sandnes",58.8517,5.7385],
+    ["Stavanger",58.9690,5.7331], ["Tromsø",69.6496,18.9560], ["Trondheim",63.4305,10.3951], ["Gothenburg",57.7089,11.9746], ["Helsingborg",56.0465,12.6945],
+    ["Jönköping",57.7815,14.1562], ["Linköping",58.4108,15.6214], ["Lund",55.7047,13.1910], ["Malmö",55.6050,13.0038], ["Norrköping",58.5877,16.1929],
+    ["Stockholm",59.3293,18.0686], ["Uppsala",59.8586,17.6389], ["Västerås",59.6099,16.5448]
+  ];
+  const skySymbol = (code, isDay) => { const pair = WX_SKY[code]; return pair ? pair[isDay ? 0 : 1] : '04'; };
+  // The great-circle comparison `weather::nearest_city` makes, for the same
+  // reason it makes it: a flat difference of degrees names a Norwegian city as
+  // the nearest thing to somewhere in Canada.
+  function nearestCity(latitude, longitude) {
+    const rad = Math.PI / 180;
+    let best = null;
+    let least = Infinity;
+    for (const city of WX_CITIES) {
+      const a = latitude * rad;
+      const b = city[1] * rad;
+      const across = (city[2] - longitude) * rad;
+      const angle = Math.acos(Math.max(-1, Math.min(1, Math.sin(a) * Math.sin(b) + Math.cos(a) * Math.cos(b) * Math.cos(across))));
+      if (angle < least) { least = angle; best = city; }
+    }
+    return best;
+  }
+
+  /* ── Asking Open-Meteo from here ─────────────────────────────────────────
+   *
+   * The same request the desk makes (`weather::fetch_weather_once`), turned
+   * into the same report (`weather::build_report`), field for field, so that
+   * everything below this line draws a forecast without knowing who fetched
+   * it. The report carries two extra words: `for`, which place it describes —
+   * `desk` or `here` — and `via`, who asked — the desk or this phone.
+   *
+   * Every wire value may be null and every array may be short, and either
+   * means "not published for this hour" rather than "broken": a missing gust
+   * reading is not a reason to have no weather.
+   */
+  const OPEN_METEO = 'https://api.open-meteo.com/v1/forecast'
+    + '?current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,wind_gusts_10m,wind_direction_10m,relative_humidity_2m,precipitation'
+    + '&hourly=temperature_2m,apparent_temperature,weather_code,is_day,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m,wind_direction_10m,uv_index,relative_humidity_2m'
+    + '&daily=weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,uv_index_max,sunrise,sunset'
+    + '&wind_speed_unit=ms&timezone=auto&forecast_days=7';
+
+  function buildReport(json, latitude, longitude) {
+    const at = (values, i, missing) => {
+      const value = values ? values[i] : undefined;
+      return value === null || value === undefined ? missing : value;
+    };
+    const hourly = json.hourly || {};
+    const hours = [];
+    for (let i = 0; i < (hourly.time || []).length; i++) {
+      const temp = at(hourly.temperature_2m, i, 0);
+      const code = at(hourly.weather_code, i, 0);
+      const day = at(hourly.is_day, i, 1) === 1;
+      hours.push({
+        t: hourly.time[i],
+        temp,
+        feels: at(hourly.apparent_temperature, i, temp),
+        code,
+        sym: skySymbol(code, day),
+        day,
+        pop: Math.round(at(hourly.precipitation_probability, i, 0)),
+        mm: at(hourly.precipitation, i, 0),
+        wind: at(hourly.wind_speed_10m, i, 0),
+        gust: at(hourly.wind_gusts_10m, i, 0),
+        dir: Math.round(at(hourly.wind_direction_10m, i, 0)),
+        uv: at(hourly.uv_index, i, 0),
+        humidity: Math.round(at(hourly.relative_humidity_2m, i, 0)),
+      });
+    }
+    const daily = json.daily;
+    const days = [];
+    if (daily) {
+      for (let i = 0; i < (daily.time || []).length; i++) {
+        const high = at(daily.temperature_2m_max, i, 0);
+        const low = at(daily.temperature_2m_min, i, 0);
+        const code = at(daily.weather_code, i, 0);
+        days.push({
+          date: daily.time[i],
+          code,
+          sym: skySymbol(code, true),
+          high,
+          low,
+          feels_high: at(daily.apparent_temperature_max, i, high),
+          feels_low: at(daily.apparent_temperature_min, i, low),
+          mm: at(daily.precipitation_sum, i, 0),
+          pop: Math.round(at(daily.precipitation_probability_max, i, 0)),
+          wind: at(daily.wind_speed_10m_max, i, 0),
+          gust: at(daily.wind_gusts_10m_max, i, 0),
+          uv: at(daily.uv_index_max, i, 0),
+          sunrise: at(daily.sunrise, i, ''),
+          sunset: at(daily.sunset, i, ''),
+        });
+      }
+    }
+    const current = json.current;
+    let now = null;
+    if (current) {
+      const temp = at([current.temperature_2m], 0, 0);
+      const code = at([current.weather_code], 0, 0);
+      const day = at([current.is_day], 0, 1) === 1;
+      now = {
+        temp,
+        feels: at([current.apparent_temperature], 0, temp),
+        code,
+        sym: skySymbol(code, day),
+        day,
+        wind: at([current.wind_speed_10m], 0, 0),
+        gust: at([current.wind_gusts_10m], 0, 0),
+        dir: Math.round(at([current.wind_direction_10m], 0, 0)),
+        humidity: Math.round(at([current.relative_humidity_2m], 0, 0)),
+        mm: at([current.precipitation], 0, 0),
+      };
+    }
+    const city = nearestCity(latitude, longitude);
+    return {
+      place: city ? city[0] : '',
+      latitude,
+      longitude,
+      timezone: json.timezone || '',
+      utc_offset_seconds: typeof json.utc_offset_seconds === 'number' ? json.utc_offset_seconds : 0,
+      fetched_at: Math.floor(Date.now() / 1000),
+      now,
+      hours,
+      days,
+    };
+  }
+
+  async function fetchForecast(latitude, longitude, target) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
+    let response;
+    try {
+      response = await fetch(`${OPEN_METEO}&latitude=${latitude}&longitude=${longitude}`, { signal: controller ? controller.signal : undefined });
+    } catch (error) {
+      throw new Error(`Open-Meteo could not be reached from this phone (${error.name === 'AbortError' ? 'no answer in time' : error.message})`);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (!response.ok) throw new Error(`Open-Meteo answered ${response.status}`);
+    const report = buildReport(await response.json(), latitude, longitude);
+    report.for = target;
+    report.via = 'phone';
+    return report;
+  }
 
   // What is falling, if anything — the distinction the whole view turns on.
   const WET = {
@@ -3532,11 +3832,122 @@
     box.replaceChildren(el('h3', { text: 'The week' }), ...rows);
   }
 
+  /* ── The place ───────────────────────────────────────────────────────────
+   *
+   * Where the forecast is for, said in words, and the two things that change
+   * it. "Use my location" asks the browser once — not a watch, a question —
+   * and keeps the answer to three decimals, which is a hundred metres: more
+   * than a forecast can use and less than a stalker would want. The browser
+   * only answers over https (or on localhost), and says nothing at all on a
+   * plain-http address; the plate says so rather than showing a button that
+   * does nothing.
+   */
+  function locateMe() {
+    const wx = state.weather;
+    if (!navigator.geolocation || wx.locating) return;
+    wx.locating = true;
+    wx.placeNote = null;
+    renderWxPlace();
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        wx.locating = false;
+        wx.here = {
+          latitude: Math.round(position.coords.latitude * 1000) / 1000,
+          longitude: Math.round(position.coords.longitude * 1000) / 1000,
+          at: Date.now(),
+        };
+        keepPlace();
+        renderWxPlace();
+        loadWeather({ force: true });
+      },
+      (error) => {
+        wx.locating = false;
+        wx.placeNote = error.code === 1
+          ? 'The browser was not allowed to say where the phone is. Allow location for this site and try again.'
+          : error.code === 2
+            ? 'The phone could not work out where it is.'
+            : 'Asking where the phone is took too long.';
+        renderWxPlace();
+      },
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 },
+    );
+  }
+  function useDesksPlace() {
+    const wx = state.weather;
+    wx.here = null;
+    wx.placeNote = null;
+    keepPlace();
+    renderWxPlace();
+    loadWeather({ force: true });
+  }
+
+  function renderWxPlace() {
+    const wx = state.weather;
+    const box = $('wxPlace');
+    const report = wx.report;
+    const chosen = wx.here || wx.desk;
+    let where;
+    if (wx.here) {
+      const named = (nearestCity(wx.here.latitude, wx.here.longitude) || [''])[0];
+      const when = new Date(wx.here.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      where = `${named ? `Near ${named}` : `${wx.here.latitude.toFixed(2)}, ${wx.here.longitude.toFixed(2)}`} · where this phone was at ${when}`;
+    } else if (wx.desk && wx.desk.place) {
+      where = `${wx.desk.place} · the desk's place`;
+    } else if (wx.desk) {
+      where = `${wx.desk.latitude.toFixed(2)}, ${wx.desk.longitude.toFixed(2)} · the desk's place`;
+    } else {
+      where = "The desk's place, once the desk has said where that is";
+    }
+    const canLocate = !!navigator.geolocation;
+    const acts = [
+      el('button', {
+        class: 'chip',
+        text: wx.locating ? 'Locating…' : (wx.here ? 'Update my location' : 'Use my location'),
+        disabled: wx.locating || !canLocate,
+        onclick: locateMe,
+      }),
+    ];
+    if (wx.here) acts.push(el('button', { class: 'chip', text: "Use the desk's place", onclick: useDesksPlace }));
+    const notes = [];
+    if (!canLocate) notes.push('This page cannot ask where the phone is: browsers only allow that over https.');
+    if (wx.placeNote) notes.push(wx.placeNote);
+    // The forecast on screen is for somewhere else — the place was just
+    // changed, or the ask for the new one failed and the last one is kept.
+    if (report && chosen && (Math.abs(report.latitude - chosen.latitude) > 0.01 || Math.abs(report.longitude - chosen.longitude) > 0.01)) {
+      notes.push(`Showing the last forecast, which is for ${report.place || 'somewhere else'}.`);
+    }
+    box.replaceChildren(
+      el('h3', { text: 'The place' }),
+      el('div', { class: 'wxplace' }, [
+        el('div', { class: 'where', text: where }),
+        el('div', { class: 'acts' }, acts),
+        ...notes.map((note) => el('div', { class: 'note', text: note })),
+      ]),
+    );
+  }
+
+  // The pictures, all of them, once. The forecast fetched from here names its
+  // own symbols, and the pictures for them come from the desk — so a sky the
+  // phone has never seen would be a blank square on exactly the day the desk
+  // was unreachable. Twenty-eight small files, asked for once while the desk
+  // answers; the service worker keeps them for good, and the browser's own
+  // cache is told to as well.
+  const SKY_WARM_KEY = 'taskdeck-sky-warm';
+  function warmSymbols() {
+    try { if (localStorage.getItem(SKY_WARM_KEY) === '1') return; } catch (_) {}
+    const stems = new Set();
+    for (const pair of Object.values(WX_SKY)) { stems.add(pair[0]); stems.add(pair[1]); }
+    Promise.all([...stems].map((stem) => fetch(`/weather/${stem}.svg`).then((response) => { if (!response.ok) throw new Error(stem); })))
+      .then(() => { try { localStorage.setItem(SKY_WARM_KEY, '1'); } catch (_) {} })
+      .catch(() => {});
+  }
+
   function renderWxFoot() {
     const wx = state.weather;
     const when = new Date(wx.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
     const where = `${wx.report.latitude.toFixed(2)}, ${wx.report.longitude.toFixed(2)}`;
-    const lines = [`Open-Meteo · ${where}${wx.report.timezone ? ` · ${wx.report.timezone}` : ''} · fetched ${when}`];
+    const via = wx.report.via === 'phone' ? 'asked from this phone' : 'via the desk';
+    const lines = [`Open-Meteo, ${via} · ${where}${wx.report.timezone ? ` · ${wx.report.timezone}` : ''} · fetched ${when}`];
     // Only when there is something on screen to be wrong about. With no report
     // at all the failure is the whole of what the view says, up in the card.
     if (wx.error) lines.push(`Last try: ${wx.error}`);
@@ -3579,11 +3990,14 @@
   function wxNone() {
     $('wxNow').replaceChildren(el('div', { class: 'wxnone' }, [
       el('b', { text: 'Nothing to show yet. ' }),
-      'TaskDeck fetches the forecast for the place set on the map in its settings — '
-      + 'when it starts, and every ten minutes after. This fills in as soon as one lands, '
-      + 'and then keeps the last one, so it still reads with the desk switched off.',
+      state.weather.here
+        ? 'This phone asks Open-Meteo for the place below; the answer fills in here, and the last one is kept.'
+        : 'Until this phone is given a place of its own — Use my location, below — the forecast is for '
+          + "the desk's place: fetched from the desk when it answers, and from Open-Meteo for the desk's "
+          + 'last known place when it does not. The last one seen is kept.',
     ]));
     for (const id of ['wxRead', 'wxPlot', 'wxLegend', 'wxFacts', 'wxWeek', 'wxFoot', 'wxdays']) $(id).replaceChildren();
+    renderWxPlace();
     // Emptied and then taken away. An empty plate is a promise that something
     // is loading, and nothing is: three of them under a card explaining that
     // there is no forecast reads as a forecast that failed to draw.
@@ -3620,6 +4034,7 @@
     renderWxChart(day);
     renderWxFacts(day);
     renderWxWeek(day);
+    renderWxPlace();
     renderWxFoot();
     renderWxDays(day);
   }
@@ -5228,6 +5643,7 @@
     // Whatever forecast was kept, before anything is asked for: the weather
     // view opens on the last one it saw and says how old it is, exactly as the
     // day and the agenda open on the last day they saw.
+    recallPlace();
     recallWeather();
     // Whatever storage holds, in both modes. The agenda draws its first frame
     // from it; the day view's seven-tap strip takes its dots from the same
@@ -5250,7 +5666,7 @@
     if (held) { takeSnapshot(held.snap); render(); }
     measureSticky();
     if (state.mode === 'agenda') { railAndMasthead(); jumpToDate(state.day, { load: false }); }
-    else if (state.mode === 'weather') { render(); loadWeather(); }
+    else if (state.mode === 'weather') { render(); loadWeather(); warmSymbols(); }
     else scrollToUsefulHour();
     load({ span }).then(() => {
       if (state.mode === 'agenda') {

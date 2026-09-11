@@ -624,7 +624,10 @@ sky_symbols![
 /// The symbol a WMO code is drawn as, and the one place that decision is made.
 ///
 /// Both the desktop's icon and the phone's `<img>` come from here, so the two
-/// screens can never disagree about what the sky looks like.
+/// screens can never disagree about what the sky looks like. The phone page
+/// carries a copy (`WX_SKY`) for the forecasts it fetches when the desk is out
+/// of reach, and a test in `phone.rs` holds that copy to this, code by code —
+/// as another holds its copy of `CITIES`.
 pub fn sky_symbol(code: i32, is_day: bool) -> &'static str {
     match code {
         // --- Clear & clouds ---

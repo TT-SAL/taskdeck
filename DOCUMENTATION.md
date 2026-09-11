@@ -3050,6 +3050,41 @@ snapshot and calls `render()`, which in this view is the whole view — and now 
 snapshot's version with the one on screen first: the same board redraws only the deck, and a board
 that changed is drawn whole, because the band under the chart is what it changed.
 
+**The phone's own place, asked about from the phone.** The first version forecast the desk's
+coordinate and nothing else, fetched through the desk — so a desk pointed at the wrong place
+showed the phone Antarctica, and a desk out of reach showed it nothing new. Two choices are now
+made separately, and the plate at the bottom of the view says which:
+
+| Whose place | Who asks | When |
+|-------------|----------|------|
+| **Here** — where this phone was when *Use my location* was last tapped | this phone, from Open-Meteo | always: the desk knows nothing about it |
+| **The desk's** — the coordinate on the map in Settings | the desk, off its own report | when the desk answers |
+| **The desk's** | this phone, from Open-Meteo, for the place remembered from the desk's last report | when the desk does not |
+
+So the view keeps updating with the desk unreachable in every case but one — a phone that has
+never seen the desk's report and has not been given a place of its own has nothing to ask about,
+and the card says so. *Here* is a question, not a watch: the browser is asked once, the answer is
+kept to three decimals (a hundred metres, more than a forecast can use), stored in `localStorage`
+and never sent to the desk — the only thing it ever reaches is the Open-Meteo request, which is
+what a forecast is. Browsers answer the question only over https or on localhost; on a plain-http
+LAN address the plate says so instead of showing a button that does nothing. The server's
+`connect-src` names `api.open-meteo.com` for the same reason it names nothing else.
+
+A forecast fetched here has to become the report the desk sends, field for field, so that
+everything that draws is indifferent to who fetched. `buildReport` is `weather::build_report` in
+JavaScript, and two of its steps are tables the desk owns — which picture a WMO code is drawn with,
+and which marked city a coordinate is nearest to. The page carries copies (`WX_SKY`, `WX_CITIES`),
+written as JSON, and two tests in `phone.rs` read the page out of the binary and compare them with
+`weather.rs` entry by entry: a code the desk draws differently, or a city moved a metre, fails the
+build. That is the same guarantee the macro in `weather.rs` gives the desk and the server — no way
+for one to know a symbol the other does not — kept by a test where a macro cannot reach. The
+pictures themselves still come from the desk, so the page asks for all twenty-eight once while the
+desk answers; the service worker keeps them for good, and a sky the phone has never seen is not a
+blank square on the day the desk is unreachable.
+
+The report carries two more words than the desk's: `for` (`desk` or `here`) and `via` (`desk` or
+`phone`), and the footer says which — *Open-Meteo, asked from this phone*.
+
 ---
 
 ## 22. The Board, the Server, and the Desktop as a Client
