@@ -2616,9 +2616,10 @@ The slab's corners and shadow became a lit hairline; the four bordered boxes bec
 pills with a lit edge — glass over the picture, a recess in the plate — with ＋ New the one pill lit
 from within; the deck dropped from 60px to 52 and the bar from 133 to 123. On a flat ground there is
 no picture to show and the bar is a plate as before, less the corners. Two things fell out of
-putting glass there rather than paint. The shown day's pill in the week strip, and the month you are
-reading in the rail, had been the plate colour on a plate — invisible since the strip was written —
-and are a lit alpha now, so they read on either ground. And the halo the list wears against the
+putting glass there rather than paint. The shown day's pill in the week strip, the month you are
+reading in the rail, and the day of the forecast in the weather view's strip had been the plate
+colour on a plate — invisible since the strip was written — and are a lit alpha now, so they read
+on either ground. And the halo the list wears against the
 photograph is worn by the bar's labels too, for the same reason and at the same cost. Not
 `backdrop-filter`, for the masthead's reason: a blur of the backdrop is repainted every frame the
 list moves under it, and this is one composited layer painted once.

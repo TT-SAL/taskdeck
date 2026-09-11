@@ -567,8 +567,11 @@
   .wxdays button .wd { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
   .wxdays button .t { font: 700 13px/1.2 var(--mono-stack); color: var(--text); }
   .wxdays button.today .wd { color: var(--today); }
-  .wxdays button.on { background: var(--plate); }
-  .wxdays button:active { background: var(--plate-2); }
+  /* A lit alpha, like the week strip's shown day and the rail's month: the bar
+     is glass over the picture or the plate itself, and a plate-coloured pill
+     is invisible on either. */
+  .wxdays button.on { background: rgba(232,230,225,0.10); }
+  .wxdays button:active { background: rgba(232,230,225,0.16); }
 
   /* Nothing to show, and why. Not a banner: the banners on this page are about
      the board, and the weather failing is not the board failing. */
