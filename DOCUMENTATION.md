@@ -2746,10 +2746,39 @@ desktop. A finger that moves before the hold elapses is a scroll and is left to 
 block is lifted a non-passive `touchmove` listener keeps the page still under it, and the click
 that follows the release is swallowed so it does not open the sheet. Precise times still go
 through the sheet: on a phone, `<input type="time">` and a length picker are a better aim than a
-finger on a 15-minute block. The sheet is the footer's controls in a different arrangement — starts / length for the block; due, severity or horizon,
-takes, **＋ Block on this day**, unplan, ✓ Done for a task; when / for on an event; the seven
-weekday toggles with **All** and **Once** on a routine; Delete on everything. The two
-destructive verbs confirm, as on the desktop. The **Tray** sheet has three tabs: **Unplanned** —
+finger on a 15-minute block.
+
+**The sheet leads with its verbs, and none of them asks first.** A row of large buttons under the
+name — **✓ Done** and **＋ Book 1h** for a task, **→ Tomorrow** for any block that is not a rule —
+each one tap, each with **Undo** on the toast that follows for six seconds. Done used to be a tap, a
+native `confirm()` and a second tap; "tomorrow" used to be leaving the sheet, opening another day
+and a time picker. The undo is real rather than a dialog: `complete` and `delete` travel with an
+`at` this page chose (`stamp`, RFC 3339 to the second), which becomes the archive row's key, so Undo
+is `restore` addressed by that exact instant — the same key the Done tab's ↩ uses. An edit the desk
+could not be reached for is taken back out of the outbox before it was ever sent (`unqueue`, by the
+request key `send` was given); one the desk refused was already said in a toast and offers nothing.
+**Book** lands the estimate's unbooked remainder — `bookLength`, the desktop tray's `drop_length_for`
+— at the **first free quarter-hour** on the sheet's day (`nextFreeSlot`: clear of the day's own
+blocks and of the timed events of subscribed calendars, since a lecture is not free time whoever owns
+it; from the next quarter-hour on today, from nine on any other day; a day with no room gets the
+block at the start anyway, overlapping, which is what an over-booked day should look like), and the
+open sheet follows the new block so its time and length are right there. Undo removes that block.
+**Tomorrow** moves the block a day on at the same time and closes the sheet, since the block has
+left the day the sheet was about; Undo moves it back. **Delete** is last and armed rather than
+asked: the first tap turns the button into the question, four seconds of nothing turn it back, the
+second tap deletes, and Undo restores.
+
+**Below the verbs, the pickers are chips.** A native `<select>` or `<input type="time">` on a phone
+is a wheel, a scroll and a confirm; a row of answers with the current one lit is one tap
+(`pick`). A block's start keeps its exact input and gains **−1h −15m +15m +1h** and, on today,
+**Now**; its length is the preset list (`durationOptions`, the item's own odd length folded in) as a
+row that scrolls sideways with the current one centred — by setting `scrollLeft`, never
+`scrollIntoView`, which would scroll the sheet to it as well. A task's due date is **Today 17:00 ·
+Tomorrow 17:00 · +1 week** with its present deadline lit at the head of the row, **Pick…** for the
+exact `datetime-local` behind them, and **None** while it has one; *takes* and an event's *for* are
+the same length row; **＋ Block at** keeps a time input for the hour the first free one is not.
+Severity, horizon and the seven weekday toggles are as they were, and the New sheet's length is the
+same chip row. The **Tray** sheet has three tabs: **Unplanned** —
 the desktop tray, leading with what is **due by this day**, then the backlog, with the quick-add
 field on top (a name, and a due date if **due…** is opened — the same two shapes the desktop
 makes) — **All**, every task in the order the desktop's left column ranks them

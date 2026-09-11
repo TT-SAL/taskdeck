@@ -734,6 +734,42 @@
   .seg button { flex: 1; height: 38px; border-radius: 9px; font-weight: 700; color: var(--muted); }
   .seg button.on { background: var(--text); color: #0f1113; }
 
+  /* ── Verbs and pickers ── */
+  /* The verbs a sheet is opened for come first and large: a glyph over a
+     word, in one row that shares the width however many there are. Done
+     wears the ok colour because it is the one you came for most often; the
+     rest are the sheet's own material. Nothing here needs a dialog — a tap is
+     the decision and the toast that follows is the second thought. */
+  .verbs { display: flex; gap: 8px; margin: 0 0 12px; }
+  .verbs button {
+    flex: 1 1 0; min-width: 0; height: 58px; border-radius: 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    background: var(--plate-2); border: 1px solid var(--line); color: var(--text);
+    font-weight: 700; font-size: 12px; line-height: 1; white-space: nowrap; overflow: hidden;
+    touch-action: manipulation;
+  }
+  .verbs button .g { font-size: 19px; line-height: 1; }
+  .verbs button.ok { background: var(--ok); color: #0f1113; border-color: transparent; }
+  .verbs button:active { filter: brightness(1.2); }
+  /* A row of answers you can see all of — or scroll, when the row is long —
+     with the current one lit. One tap, where a native picker on a phone is a
+     wheel, a scroll and a confirm. The exact input is still there behind
+     "Pick…" for the answer the chips do not offer. */
+  .picklabel { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+  .pick { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px 0; margin: 6px 0 6px; }
+  .pick::-webkit-scrollbar { display: none; }
+  .pick button {
+    flex: 0 0 auto; height: 38px; padding: 0 13px; border-radius: 10px; font-weight: 600; font-size: 13px;
+    background: var(--plate-2); border: 1px solid var(--line); color: var(--text); white-space: nowrap;
+    touch-action: manipulation;
+  }
+  .pick button.on { background: var(--text); color: #0f1113; border-color: transparent; }
+  .pick button.quiet { color: var(--muted); }
+  .pick button:active { filter: brightness(1.2); }
+  /* Delete takes two taps: the first turns the button into the question, and
+     four seconds of nothing turn it back. */
+  .actions button.danger.armed { background: var(--danger); color: #0f1113; border-color: transparent; }
+
   /* ── Tray ── */
   .quickadd { display: flex; gap: 8px; margin-bottom: 8px; }
   .quickadd input { flex: 1; min-width: 0; background: var(--plate-2); border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; height: 46px; }
@@ -780,6 +816,9 @@
     background: var(--text); color: #0f1113; padding: 8px 14px; border-radius: 10px; font-weight: 600; font-size: 14px;
     z-index: 30; max-width: 90vw; text-align: center;
   }
+  /* Undo, on the toast that says what was done. Six seconds is long enough
+     to read the name and change your mind, short enough not to be a dialog. */
+  .toast button { margin-left: 14px; padding: 6px 2px; font-weight: 800; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
   .gate { padding: 24px 18px; max-width: 420px; margin: 40px auto; }
   .gate p { color: var(--muted); }
   .gate input { width: 100%; background: var(--plate); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 8px 0; }
@@ -1669,11 +1708,12 @@
     }
   }
 
-  async function send(command, { refreshSheet = true } = {}) {
+  // `key` may be given by a caller that needs to find the edit again — an Undo
+  // that has to take a kept edit back out of the queue before it is sent.
+  async function send(command, { refreshSheet = true, key = requestKey() } = {}) {
     // Kept for later, and the sheet redrawn as the success path would redraw
     // it — so it shows the board as it still is, with the waiting line, not a
     // control that looks applied.
-    const key = requestKey();
     const keep = (kept) => {
       queueEdit(kept, key);
       if (refreshSheet && state.sheet) renderSheet();
@@ -4267,8 +4307,191 @@
     }
     return node;
   }
-  function durationSelect(current, onchange) {
-    return select(durationOptions(current).map((m) => ({ value: m, label: dur(m) })), current, (v) => onchange(Number(v)));
+
+  // A row of answers, the current one lit. `options` are `{ value, label,
+  // quiet }`; `extra` are ready-made buttons for the end of the row. The lit
+  // one is scrolled into the middle of a row too long to see whole — by
+  // setting `scrollLeft`, never `scrollIntoView`, which would also scroll the
+  // sheet to it. A tap lights the tapped one at once, so a sheet that does not
+  // redraw (the New sheet, mid-typing) still shows the choice.
+  function pick(options, current, onpick, extra = []) {
+    const row = el('div', { class: 'pick' });
+    let lit = null;
+    for (const option of options) {
+      const on = current != null && String(option.value) === String(current);
+      const node = el('button', {
+        type: 'button', class: (on ? 'on' : '') + (option.quiet ? ' quiet' : ''), text: option.label,
+        onclick: () => {
+          for (const other of row.children) other.classList.remove('on');
+          node.classList.add('on');
+          onpick(option.value);
+        },
+      });
+      if (on) lit = node;
+      row.append(node);
+    }
+    for (const node of extra) if (node) row.append(node);
+    if (lit) setTimeout(() => { if (lit.isConnected) row.scrollLeft = lit.offsetLeft - row.clientWidth / 2 + lit.offsetWidth / 2; }, 0);
+    return row;
+  }
+  function durationPick(current, onpick) {
+    return pick(durationOptions(current).map((m) => ({ value: m, label: dur(m) })), current, (v) => onpick(Number(v)));
+  }
+  // ±15m, ±1h and — on today — Now, beside the exact input. A nudge is one
+  // tap where a time picker is three, and most moves are small ones.
+  function nudges(onmove, { now = false } = {}) {
+    const row = el('div', { class: 'pick' });
+    for (const [delta, label] of [[-60, '−1h'], [-15, '−15m'], [15, '+15m'], [60, '+1h']]) {
+      row.append(el('button', { type: 'button', class: 'quiet', text: label, onclick: () => onmove(delta, false) }));
+    }
+    if (now) row.append(el('button', { type: 'button', text: 'Now', onclick: () => onmove(0, true) }));
+    return row;
+  }
+  // The answers to "when is it due" a phone actually gives: this day at five,
+  // the day after, a week on — and the deadline it already has, lit, so the
+  // row shows where it stands.
+  function dueOptions(item, day) {
+    const isToday = day.date === todayIso();
+    const options = [
+      { value: `${day.date}T17:00`, label: `${isToday ? 'Today' : shortDay(day.date)} 17:00` },
+      { value: `${shiftDay(day.date, 1)}T17:00`, label: `${isToday ? 'Tomorrow' : shortDay(shiftDay(day.date, 1))} 17:00` },
+    ];
+    if (item.deadline) {
+      const [d, t] = item.deadline.split('T');
+      options.push({ value: `${shiftDay(d, 7)}T${t}`, label: `+1 week` });
+      if (!options.some((o) => o.value === item.deadline)) options.unshift({ value: item.deadline, label: localToText(item.deadline) });
+    } else {
+      options.push({ value: `${shiftDay(day.date, 7)}T17:00`, label: `${shortDay(shiftDay(day.date, 7))} 17:00` });
+    }
+    return options;
+  }
+
+  // An instant as the board is asked to record it: RFC 3339, whole seconds.
+  // Whole seconds on purpose — Undo sends the same text again to name the
+  // archive row, and two spellings of one moment would not find it.
+  function stamp() { return new Date().toISOString().replace(/\.\d+Z$/, 'Z'); }
+
+  // Take a kept edit back before it is sent. True if it was still waiting.
+  function unqueue(key) {
+    const queue = outbox();
+    const rest = queue.filter((entry) => entry.key !== key);
+    if (rest.length === queue.length) return false;
+    keepOutbox(rest);
+    settleBanner();
+    return true;
+  }
+  // Whether `send` kept the edit for later rather than being refused.
+  const kept = (key) => outbox().some((entry) => entry.key === key);
+
+  // The first quarter-hour on `day` where `minutes` fit clear of everything
+  // already on it — the day's own blocks, and the timed events of subscribed
+  // calendars, since a lecture is not free time whoever owns it. From the next
+  // quarter-hour on today, from nine on any other day. A day with no room gets
+  // the block at the start anyway, overlapping: that is what an over-booked
+  // day should look like, not a refusal.
+  function nextFreeSlot(day, minutes) {
+    const busy = [];
+    for (const e of day.entries || []) if (!e.marker) busy.push([e.start, e.start + e.minutes]);
+    for (const e of day.subscribed || []) if (!e.all_day && !e.background) busy.push([e.start, e.end]);
+    busy.sort((a, b) => a[0] - b[0]);
+    const from = day.date === todayIso() ? nextQuarter() : 9 * 60;
+    let start = from;
+    for (const [a, b] of busy) {
+      if (b <= start) continue;
+      if (a >= start + minutes) break;
+      start = Math.ceil(b / SNAP) * SNAP;
+    }
+    if (start + minutes > 24 * 60) start = from;
+    return Math.max(0, Math.min(start, 24 * 60 - minutes));
+  }
+  // What a one-tap Book lands: the estimate's unbooked remainder, as a drop
+  // from the desktop's tray does, else the default half hour.
+  function bookLength(item) {
+    return Math.max(SNAP, item.remaining > 0 ? item.remaining : 30);
+  }
+
+  // The verbs, each with its way back. None of them asks first: the tap is
+  // the decision, and the toast that follows carries Undo for six seconds.
+  // An edit the desk could not be reached for is taken back out of the queue
+  // instead, before it was ever sent; one the desk refused was already said.
+
+  // Finish a task. The archive key is the instant this page chose, so Undo
+  // can name the row exactly (`restore`).
+  async function finish(item, { close = false } = {}) {
+    const at = stamp();
+    const key = requestKey();
+    if (close) closeSheet();
+    const result = await send({ op: 'complete', id: item.id, at }, { refreshSheet: !close, key });
+    if (!result && !kept(key)) return;
+    toast(`Done · ${item.name}`, { action: ['Undo', async () => {
+      if (unqueue(key)) { if (state.sheet) renderSheet(); return; }
+      const back = await send({ op: 'restore', id: item.id, archived_at: at });
+      if (back) toast(`“${item.name}” is back on the board`);
+    }] });
+  }
+  // Delete anything. It goes to the archive, which is what makes Undo cheap.
+  async function remove(item) {
+    const at = stamp();
+    const key = requestKey();
+    closeSheet();
+    const result = await send({ op: 'delete', id: item.id, at }, { refreshSheet: false, key });
+    if (!result && !kept(key)) return;
+    toast(`Deleted · ${item.name}`, { action: ['Undo', async () => {
+      if (unqueue(key)) return;
+      const back = await send({ op: 'restore', id: item.id, archived_at: at });
+      if (back) toast(`“${item.name}” is back on the board`);
+    }] });
+  }
+  // Book a block for a task on `day`, at the first free slot. An open sheet for
+  // the task follows the new block, so its time and length are right there.
+  async function book(item, day, minutes) {
+    const start = nextFreeSlot(day, minutes);
+    const key = requestKey();
+    const result = await send({ op: 'add_block', id: item.id, day: day.date, start, minutes }, { key });
+    if (result && result.session != null && state.sheet === 'item' && state.selected && state.selected.id === item.id) {
+      state.selected.session = result.session;
+      renderSheet();
+    }
+    if (!result && !kept(key)) return;
+    const where = day.date === todayIso() ? '' : ` ${shortDay(day.date)}`;
+    toast(`Booked ${dur(minutes)} at${where} ${hhmm(start)}`, { action: ['Undo', async () => {
+      if (unqueue(key)) { if (state.sheet) renderSheet(); return; }
+      if (result && result.session != null) {
+        if (state.selected && state.selected.id === item.id && state.selected.session === result.session) state.selected.session = null;
+        await send({ op: 'remove_block', id: item.id, session: result.session });
+      }
+    }] });
+  }
+  // A block a day on, at the same time — the commonest move a phone makes and
+  // one the timeline cannot make at all. The sheet closes with it, since the
+  // block has left the day it was about; Undo brings it back.
+  async function postpone(item, block, day) {
+    const to = shiftDay(day.date, 1);
+    const key = requestKey();
+    const move = (onDay) => ({ op: 'move_block', id: item.id, session: block.session, day: onDay, start: block.start, minutes: block.minutes });
+    closeSheet();
+    const result = await send(move(to), { refreshSheet: false, key });
+    if (!result && !kept(key)) return;
+    toast(`${item.name} → ${shortDay(to)} ${hhmm(block.start)}`, { action: ['Undo', async () => {
+      if (unqueue(key)) return;
+      await send(move(day.date));
+    }] });
+  }
+  // Two taps to delete: the first arms the button and turns it into the
+  // question; the second answers it. Four seconds later it is a button again.
+  function armed(label, question, onconfirm) {
+    let timer = null;
+    const node = el('button', { type: 'button', class: 'danger', text: label, onclick: () => {
+      if (!node.classList.contains('armed')) {
+        node.classList.add('armed');
+        node.textContent = question;
+        timer = setTimeout(() => { node.classList.remove('armed'); node.textContent = label; }, 4000);
+        return;
+      }
+      clearTimeout(timer);
+      onconfirm();
+    } });
+    return node;
   }
 
   function renderItemSheet(sheet) {
@@ -4281,6 +4504,7 @@
     const isToday = day.date === todayIso();
     const elsewhere = day !== state.snap.days[0];
     const entry = day.entries.find((e) => e.id === item.id && (e.session === sel.session || (sel.session == null && e.session == null)));
+    const block = entry && !entry.marker ? entry : null;
     const accent = colorOf(item.color);
     const isTask = item.kind === 'task', isEvent = item.kind === 'event', isRoutine = item.kind === 'routine';
 
@@ -4331,27 +4555,49 @@
       sheet.append(el('div', { class: 'waiting', text: `${waiting} change${waiting === 1 ? '' : 's'} to this ${waiting === 1 ? 'is' : 'are'} waiting to be sent — what is shown here is from before ${waiting === 1 ? 'it' : 'them'}.` }));
     }
 
+    // The verbs first. Done, and a block at the first free hour, for a task;
+    // the block a day on, for anything with a block that is not a rule. Each
+    // is one tap with an Undo behind it, where Done used to be a tap, a
+    // dialog and a second tap, and "tomorrow" was leaving the sheet, opening
+    // another day and a time picker.
+    const verb = (glyph, word, onclick, cls) => el('button', { type: 'button', class: cls || '', onclick, 'aria-label': word }, [
+      el('span', { class: 'g', text: glyph }), el('span', { text: word }),
+    ]);
+    const verbs = [];
+    if (isTask) {
+      verbs.push(verb('✓', 'Done', () => finish(item, { close: true }), 'ok'));
+      const minutes = bookLength(item);
+      verbs.push(verb('＋', `Book ${dur(minutes)}`, () => book(item, day, minutes)));
+    }
+    if (block && !isRoutine) verbs.push(verb('→', 'Tomorrow', () => postpone(item, block, day)));
+    if (verbs.length) sheet.append(el('div', { class: 'verbs' }, verbs));
+
     // The block on this day, if one is selected.
-    if (entry && !entry.marker) {
+    if (block) {
       const section = el('div', { class: 'section' });
       section.append(el('h3', { text: (isRoutine ? 'This block (moves the rule)' : 'This block') + (elsewhere ? ` · ${shortDay(day.date)}` : '') }));
       // The other half of a move — the length when the start changes, the
       // start when the length does — is read at the moment of the tap, not
       // from when the sheet was drawn: the desk may have moved the block
       // since, and a stale half would move it back.
-      const live = () => ((state.snap && sheetDay(sel).entries) || []).find((e) => e.id === entry.id && e.session === entry.session) || entry;
-      const start = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(entry.start) });
+      const live = () => ((state.snap && sheetDay(sel).entries) || []).find((e) => e.id === block.id && e.session === block.session) || block;
+      const moveTo = (start) => {
+        const minutes = live().minutes;
+        send({ op: 'move_block', id: item.id, session: block.session, day: day.date, start: Math.max(0, Math.min(24 * 60 - minutes, snap(start))), minutes });
+      };
+      const start = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(block.start), 'aria-label': 'Starts' });
       start.addEventListener('change', () => {
         const minutes = minutesOf(start.value);
-        if (minutes == null) return;
-        send({ op: 'move_block', id: item.id, session: entry.session, day: day.date, start: snap(minutes), minutes: live().minutes });
+        if (minutes != null) moveTo(minutes);
       });
       section.append(field('Starts', start));
-      section.append(field('Length', durationSelect(entry.minutes, (minutes) =>
-        send({ op: 'move_block', id: item.id, session: entry.session, day: day.date, start: live().start, minutes }))));
-      if (isTask && entry.session != null) {
+      section.append(nudges((delta, toNow) => moveTo(toNow ? nextQuarter() : live().start + delta), { now: isToday }));
+      section.append(el('div', { class: 'picklabel', text: 'Length' }));
+      section.append(durationPick(block.minutes, (minutes) =>
+        send({ op: 'move_block', id: item.id, session: block.session, day: day.date, start: live().start, minutes })));
+      if (isTask && block.session != null) {
         section.append(el('div', { class: 'actions' }, [
-          el('button', { text: '↩ Remove this block', onclick: () => send({ op: 'remove_block', id: item.id, session: entry.session }) }),
+          el('button', { text: '↩ Remove this block', onclick: () => send({ op: 'remove_block', id: item.id, session: block.session }) }),
         ]));
       }
       // Only where there is a timeline under the sheet to hold it on.
@@ -4363,18 +4609,21 @@
       const section = el('div', { class: 'section' });
       section.append(el('h3', { text: 'Task' }));
 
-      const due = el('input', { type: 'datetime-local', value: item.deadline || '', step: String(SNAP * 60) });
-      due.addEventListener('change', () => {
-        if (due.value) send({ op: 'set_deadline', id: item.id, deadline: due.value });
-      });
-      const dueRow = el('div', { class: 'field' }, [
-        el('label', { text: 'Due' }),
-        el('div', { style: 'display:flex; gap:6px; align-items:center; max-width:70%' }, [
-          due,
-          item.deadline ? el('button', { class: 'chip', text: '✕', title: 'No deadline', onclick: () => send({ op: 'set_deadline', id: item.id, deadline: null }) }) : null,
-        ]),
-      ]);
-      section.append(dueRow);
+      // Due: the common answers as chips, the exact picker behind "Pick…".
+      const setDue = (deadline) => send({ op: 'set_deadline', id: item.id, deadline });
+      const due = el('input', { type: 'datetime-local', value: item.deadline || '', step: String(SNAP * 60), 'aria-label': 'Due', hidden: true });
+      due.addEventListener('change', () => { if (due.value) setDue(due.value); });
+      section.append(el('div', { class: 'picklabel', text: 'Due' }));
+      section.append(pick(dueOptions(item, day), item.deadline || null, setDue, [
+        el('button', { type: 'button', class: 'quiet', text: 'Pick…', onclick: () => {
+          due.hidden = false;
+          // `showPicker` needs a gesture and is missing on older engines; the
+          // input is on screen either way.
+          try { due.showPicker(); } catch (_) { due.focus(); }
+        } }),
+        item.deadline ? el('button', { type: 'button', class: 'quiet', text: 'None', onclick: () => setDue(null) }) : null,
+      ]));
+      section.append(el('div', { class: 'field', style: 'min-height:0; justify-content:flex-end' }, [due]));
 
       const labels = state.snap.labels;
       if (item.deadline) {
@@ -4389,30 +4638,29 @@
           (v) => send({ op: 'set_horizon', id: item.id, level: Number(v) }))));
       }
 
-      section.append(field('Takes', durationSelect(item.duration || null, (minutes) => send({ op: 'set_estimate', id: item.id, minutes }))));
+      section.append(el('div', { class: 'picklabel', text: 'Takes' }));
+      section.append(durationPick(item.duration || null, (minutes) => send({ op: 'set_estimate', id: item.id, minutes })));
 
-      const remaining = item.remaining == null ? 30 : Math.max(SNAP, item.remaining);
-      const planAt = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(isToday ? nextQuarter() : 9 * 60) });
+      // A block at an exact hour, for when the first free one is not the one.
+      const remaining = bookLength(item);
+      const planAt = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(isToday ? nextQuarter() : 9 * 60), 'aria-label': 'Block at' });
       section.append(el('div', { class: 'field' }, [
-        el('label', { text: elsewhere ? `＋ Block · ${shortDay(day.date)}` : '＋ Block', title: 'Book another block on this day' }),
+        el('label', { text: elsewhere ? `＋ Block at · ${shortDay(day.date)}` : '＋ Block at', title: 'Book another block on this day at this time' }),
         el('div', { style: 'display:flex; gap:6px; align-items:center; white-space:nowrap' }, [
           planAt,
-          el('button', { class: 'chip', text: `Book ${dur(remaining || 30)}`, onclick: () => {
+          el('button', { class: 'chip', text: `Book ${dur(remaining)}`, onclick: () => {
             const minutes = minutesOf(planAt.value);
             if (minutes == null) return;
-            send({ op: 'add_block', id: item.id, day: day.date, start: snap(minutes) });
+            send({ op: 'add_block', id: item.id, day: day.date, start: snap(minutes), minutes: remaining });
           } }),
         ]),
       ]));
 
-      const actions = el('div', { class: 'actions' });
-      if (item.sessions.length) actions.append(el('button', { text: '↩ Unplan', onclick: () => send({ op: 'unplan', id: item.id }) }));
-      actions.append(el('button', { class: 'ok', text: '✓ Done', onclick: async () => {
-        if (!confirm(`Mark "${item.name}" as finished?`)) return;
-        await send({ op: 'complete', id: item.id }, { refreshSheet: false });
-        closeSheet();
-      } }));
-      section.append(actions);
+      if (item.sessions.length) {
+        section.append(el('div', { class: 'actions' }, [
+          el('button', { text: '↩ Unplan', title: 'Give up every block, keep the estimate', onclick: () => send({ op: 'unplan', id: item.id }) }),
+        ]));
+      }
       sheet.append(section);
     }
 
@@ -4428,7 +4676,8 @@
         send({ op: 'move_block', id: item.id, day: d, start: snap(minutes), minutes: item.duration || 30 });
       });
       section.append(field('When', when));
-      section.append(field('For', durationSelect(item.duration || null, (minutes) => send({ op: 'set_estimate', id: item.id, minutes }))));
+      section.append(el('div', { class: 'picklabel', text: 'For' }));
+      section.append(durationPick(item.duration || null, (minutes) => send({ op: 'set_estimate', id: item.id, minutes })));
       sheet.append(section);
     }
 
@@ -4453,13 +4702,8 @@
       sheet.append(section);
     }
 
-    const footer = el('div', { class: 'section actions' });
-    footer.append(el('button', { class: 'danger', text: 'Delete', onclick: async () => {
-      if (!confirm(`Delete "${item.name}"? It goes to the archive.`)) return;
-      await send({ op: 'delete', id: item.id }, { refreshSheet: false });
-      closeSheet();
-    } }));
-    sheet.append(footer);
+    // Delete last, and armed rather than asked: the first tap is the question.
+    sheet.append(el('div', { class: 'section actions' }, [armed('Delete', 'Delete? Tap again', () => remove(item))]));
   }
 
   function renderTraySheet(sheet) {
@@ -4614,7 +4858,8 @@
     const start = el('input', { type: 'time', step: String(SNAP * 60), value: timeValue(draft.start) });
     start.addEventListener('change', () => { const m = minutesOf(start.value); if (m != null) draft.start = snap(m); });
     sheet.append(field('Starts', start));
-    sheet.append(field('Length', durationSelect(draft.minutes, (m) => { draft.minutes = m; })));
+    sheet.append(el('div', { class: 'picklabel', text: 'Length' }));
+    sheet.append(durationPick(draft.minutes, (m) => { draft.minutes = m; }));
 
     sheet.append(el('div', { class: 'section actions' }, [
       el('button', { text: 'Cancel', onclick: closeSheet }),
@@ -4646,12 +4891,17 @@
   }
   function hideBanner() { $('banner').hidden = true; }
   let toastTimer = null;
-  function toast(message) {
+  // `action` is `[label, fn]` — Undo, in practice. A toast with one stays up
+  // for six seconds rather than three, and goes the moment it is taken.
+  function toast(message, { action = null } = {}) {
     let node = document.querySelector('.toast');
     if (!node) { node = el('div', { class: 'toast' }); document.body.append(node); }
-    node.textContent = message;
+    node.replaceChildren(document.createTextNode(message));
+    if (action) {
+      node.append(el('button', { type: 'button', text: action[0], onclick: () => { clearTimeout(toastTimer); node.remove(); action[1](); } }));
+    }
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => node.remove(), 3200);
+    toastTimer = setTimeout(() => node.remove(), action ? 6000 : 3200);
   }
   function showGate() {
     // Nothing else stays up: a sheet would sit over the token field, and the
