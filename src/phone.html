@@ -582,7 +582,14 @@
      that. The buttons are chips at the size the readout's Now button uses. */
   .wxplace .where { font-size: 14px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
   .wxplace .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-  .wxplace .acts .chip { height: 36px; min-width: 0; padding: 0 12px; font-size: 13px; }
+  /* Lit from within, like the bar's pills: a plate-coloured chip on a plate is
+     invisible until pressed, and these two are the only way to change whose
+     forecast this is. */
+  .wxplace .acts .chip {
+    height: 36px; min-width: 0; padding: 0 12px; font-size: 13px;
+    background: rgba(232,230,225,0.10); box-shadow: inset 0 0 0 1px var(--edge);
+  }
+  .wxplace .acts .chip:active { background: rgba(232,230,225,0.16); }
   .wxplace .acts .chip[disabled] { opacity: 0.55; }
   .wxplace .note { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
 
@@ -3898,15 +3905,17 @@
     } else {
       where = "The desk's place, once the desk has said where that is";
     }
-    const canLocate = !!navigator.geolocation;
-    const acts = [
-      el('button', {
-        class: 'chip',
-        text: wx.locating ? 'Locating…' : (wx.here ? 'Update my location' : 'Use my location'),
-        disabled: wx.locating || !canLocate,
-        onclick: locateMe,
-      }),
-    ];
+    // Present, and allowed to answer: browsers keep `navigator.geolocation`
+    // defined on a plain-http LAN address and then refuse every question, so a
+    // button there could only ever say no.
+    const canLocate = !!navigator.geolocation && window.isSecureContext;
+    const acts = [];
+    if (canLocate) acts.push(el('button', {
+      class: 'chip',
+      text: wx.locating ? 'Locating…' : (wx.here ? 'Update my location' : 'Use my location'),
+      disabled: wx.locating,
+      onclick: locateMe,
+    }));
     if (wx.here) acts.push(el('button', { class: 'chip', text: "Use the desk's place", onclick: useDesksPlace }));
     const notes = [];
     if (!canLocate) notes.push('This page cannot ask where the phone is: browsers only allow that over https.');
@@ -3920,7 +3929,7 @@
       el('h3', { text: 'The place' }),
       el('div', { class: 'wxplace' }, [
         el('div', { class: 'where', text: where }),
-        el('div', { class: 'acts' }, acts),
+        ...(acts.length ? [el('div', { class: 'acts' }, acts)] : []),
         ...notes.map((note) => el('div', { class: 'note', text: note })),
       ]),
     );

@@ -2948,11 +2948,13 @@ start — a change there takes effect at the next start, like the server fields 
   without changing anything on the wire.
 - **Become a second TaskDeck.** The page is a companion. Scoring, the calendar grid, the archive
   window and colour schemes stay at the desk.
-- **Ask the phone where it is.** The weather view (§21.9) forecasts the coordinate in Settings, not
-  the phone's own position, and that is only half a choice: `navigator.geolocation` needs a secure
-  context, and the deployment this page is built for is plain http on a LAN or tailnet address.
-  Behind `tailscale serve` it would be available — but the forecast a wall calendar wants is the
-  one for the wall, so the setting stays the source and the place is named on screen.
+- **Follow the phone around.** The weather view (§21.9) forecasts the coordinate in Settings until
+  *Use my location* is tapped, and even then the browser is asked once, on the tap, and the answer
+  is kept; the page never watches. `navigator.geolocation` needs a secure context, so on the
+  plain-http LAN address this page is built for the plate says so and the button is not offered;
+  behind `tailscale serve`, or on localhost, the question can be asked. The forecast a wall
+  calendar wants is the one for the wall, so the setting stays the default and the place is named
+  on screen either way.
 
 ### 21.9 The weather view
 
@@ -2966,8 +2968,10 @@ thumb as the screen allows.
 rather than in the weather app already on the phone:
 
 - **It is the desk's weather.** The coordinate is the one picked on the map in Settings (§9.2), so
-  the forecast is for where the calendar is — the house, not the airport the phone is standing in.
-  The report carries the nearest marked city by name so that can be checked rather than assumed.
+  the forecast is for where the calendar is — the house, not the airport the phone is standing in —
+  until *Use my location* is tapped, and the plate under the view says which (the last paragraph
+  of this section). The report carries the nearest marked city by name so that can be checked
+  rather than assumed.
 - **It knows the day.** Under the hourly chart, on the *same axis*, is today's plan: every block
   and every subscribed event as a coloured segment. "Rain from three" and "the thing at three" are
   two facts worth nothing apart, and the answer line at the top says the collision in words —
