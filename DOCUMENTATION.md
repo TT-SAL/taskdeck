@@ -2786,7 +2786,12 @@ makes) — **All**, every task in the order the desktop's left column ranks them
 `DONE_ROWS_MAX` rows of the archive with their verdict lines and a **↩** that puts one back
 (`Command::Restore`, addressed by the archive's own key, through `restore_archived` exactly as the
 ledger's button is). The undo for a ✓ tapped on the wrong row; the ledger itself stays at the
-desk. **New** makes a task, event or routine at a chosen time, and tapping empty timeline opens
+desk. **Every card carries its two verbs.** At the end of the row, **＋1h** books what a drop from the
+desktop's tray would book — `drop_minutes`, the estimate's unbooked remainder — at the first free
+quarter-hour on the shown day, and **✓** finishes the task; each is the same one tap with the same
+Undo the sheet's verbs have, and the name beside them still opens the sheet. The card was one button
+and could only open, so putting a task on the day was a sheet, a time input and a chip; a button
+cannot hold buttons, so it is a row now. On the **All** tab a card carries ✓ alone. **New** makes a task, event or routine at a chosen time, and tapping empty timeline opens
 it pre-filled with that hour.
 
 The page listens on `/api/wait` while visible (§21.2), refetches after every edit and on

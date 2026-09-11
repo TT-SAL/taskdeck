@@ -777,11 +777,23 @@
   .quickadd button.chip { width: auto; height: 46px; background: var(--plate-2); color: var(--muted); font-weight: 600; padding: 0 12px; }
   .quickadd + .field input { max-width: 100%; }
   .card {
-    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
-    padding: 10px 10px 10px 12px; border-radius: 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 8px 8px 8px 12px; border-radius: 12px; margin: 6px 0;
     background: var(--plate-2); border-left: 3px solid var(--accent);
   }
   .card .chip { flex: 0 0 auto; min-width: 44px; padding: 0 10px; }
+  /* The name is the tap that opens the sheet; the verbs sit at the end of the
+     row, one square each, so finishing a task or putting it on the day is a
+     tap on the card rather than a sheet, a scroll and a tap. */
+  .card .open { flex: 1; min-width: 0; text-align: left; padding: 4px 0; touch-action: manipulation; }
+  .card .act {
+    flex: 0 0 auto; width: 44px; height: 44px; border-radius: 10px; font-weight: 800; font-size: 13px;
+    background: var(--plate); border: 1px solid var(--line); color: var(--text); white-space: nowrap;
+    touch-action: manipulation;
+  }
+  .card .act.ok { color: var(--ok); }
+  .card .act.book { width: auto; min-width: 44px; padding: 0 9px; }
+  .card .act:active { filter: brightness(1.25); }
   .card .meta { white-space: normal; }
   .card .body { flex: 1; min-width: 0; }
   .card .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1075,6 +1087,12 @@
     if (h === 0) return `${m}m`;
     if (m === 0) return `${h}h`;
     return `${h}h ${m}m`;
+  }
+  // The same, packed for a button the width of a thumb: "1h30", not "1h 30m".
+  function durShort(minutes) {
+    const h = Math.floor(minutes / 60), m = minutes % 60;
+    if (h === 0) return `${m}m`;
+    return m === 0 ? `${h}h` : `${h}h${pad(m)}`;
   }
   function snap(minutes) { return Math.round(minutes / SNAP) * SNAP; }
   function nowMinutes() { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
@@ -4706,6 +4724,22 @@
     sheet.append(el('div', { class: 'section actions' }, [armed('Delete', 'Delete? Tap again', () => remove(item))]));
   }
 
+  // A task as a row in the tray: the name and its line, which open the sheet,
+  // and the verbs at the end. A `div` with buttons in it, because a button
+  // cannot hold buttons — the card used to be one, and could only open.
+  function trayCard(item, meta, acts, dueIn) {
+    // How soon it is owed, on the end of the line, red once it is late — the
+    // column it had before made room for the verbs.
+    const soon = dueIn ? el('span', { class: 'due-in' + (dueIn === 'overdue' ? ' overdue' : ''), text: `${meta.length ? ' · ' : ''}${dueIn === 'overdue' ? 'overdue' : 'in ' + dueIn}` }) : null;
+    return el('div', { class: 'card', style: `--accent:${colorOf(item.color)}` }, [
+      el('button', { type: 'button', class: 'open', 'aria-label': `${item.name}, open`, onclick: () => openItem(item.id, null) }, [
+        el('div', { class: 'name', text: item.name }),
+        meta.length || soon ? el('div', { class: 'meta' }, [meta.join(' · '), soon]) : null,
+      ]),
+      ...acts,
+    ]);
+  }
+
   function renderTraySheet(sheet) {
     const tray = state.snap.tray;
     const day = state.snap.days[0];
@@ -4774,17 +4808,14 @@
         if (item.duration) meta.push(`takes ${dur(item.duration)}`);
         if (item.planned) meta.push(`${dur(item.planned)} booked`);
         if (!item.deadline && item.horizon != null) meta.push(state.snap.labels.horizon[item.horizon].toLowerCase());
-        sheet.append(el('button', { class: 'card', style: `--accent:${colorOf(item.color)}`, onclick: () => openItem(item.id, null) }, [
-          el('div', { class: 'body' }, [
-            el('div', { class: 'name', text: item.name }),
-            meta.length ? el('div', { class: 'meta', text: meta.join(' · ') }) : null,
-          ]),
+        sheet.append(trayCard(item, meta, [
+          el('button', { type: 'button', class: 'act ok', text: '✓', 'aria-label': `Finish ${item.name}`, onclick: () => finish(item) }),
         ]));
       }
       return;
     }
 
-    sheet.append(el('div', { class: 'kindline', text: 'Still waiting for a slot. Tap one to put it on this day.' }));
+    sheet.append(el('div', { class: 'kindline', text: 'Still waiting for a slot. ＋ books one at the first free hour; ✓ finishes it.' }));
 
     const input = el('input', { placeholder: 'Add a task…', value: state.quickAddDraft, autocapitalize: 'sentences', maxlength: NAME_MAX });
     input.addEventListener('input', () => { state.quickAddDraft = input.value; });
@@ -4820,14 +4851,12 @@
         if (card.duration) meta.push(`takes ${dur(card.duration)}${card.planned ? ` · ${dur(card.planned)} booked` : ''}`);
         else if (card.planned) meta.push(`${dur(card.planned)} booked`);
         if (card.deadline) meta.push(`due ${localToText(card.deadline)}`);
-        const node = el('button', { class: 'card', style: `--accent:${colorOf(card.color)}`, onclick: () => openItem(card.id, null) }, [
-          el('div', { class: 'body' }, [
-            el('div', { class: 'name', text: card.name }),
-            meta.length ? el('div', { class: 'meta', text: meta.join(' · ') }) : null,
-          ]),
-          card.due_in ? el('span', { class: 'due-in' + (card.due_in === 'overdue' ? ' overdue' : ''), text: card.due_in }) : null,
-        ]);
-        sheet.append(node);
+        // `drop_minutes` is what a drop from the desktop's tray would book —
+        // the unbooked remainder of the estimate — and what ＋ books here.
+        sheet.append(trayCard(card, meta, [
+          el('button', { type: 'button', class: 'act book', text: `＋${durShort(card.drop_minutes)}`, 'aria-label': `Book ${dur(card.drop_minutes)} for ${card.name} at the first free hour`, onclick: () => book(card, day, card.drop_minutes) }),
+          el('button', { type: 'button', class: 'act ok', text: '✓', 'aria-label': `Finish ${card.name}`, onclick: () => finish(card) }),
+        ], card.due_in));
       }
     };
     group(`Due by ${day.is_today ? 'today' : day.weekday}`, tray.due, true);
