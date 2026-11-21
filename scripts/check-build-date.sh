@@ -42,8 +42,9 @@ fail() {
 # and macOS runs catch it.
 host="$(rustc -vV | sed -n 's/^host: //p')"
 [ -n "$host" ] || { echo "check-build-date: could not read the host from rustc -vV" >&2; exit 1; }
+tz=XXX-14   # UTC+14: 1700000000 (22:13 UTC) is already the next day there
 check() {
-    TZ=XXX-14 cargo check --locked --no-default-features --lib --target "$host" \
+    TZ="$tz" cargo check --locked --no-default-features --lib --target "$host" \
         --message-format=json "$@"
 }
 
@@ -111,7 +112,12 @@ else
 fi
 
 echo "check-build-date: SOURCE_DATE_EPOCH unset must give today's UTC date"
-before="$(date -u +%Y-%m-%d)"
+# Pick the zone whose date differs from UTC's at this hour: UTC-12 before
+# 12:00 UTC, UTC+14 from 10:00 UTC. One zone at every hour would miss a
+# local-time fallback for part of the day. Only one run: TZ is not a rerun
+# trigger, so a second run would reuse this one's output.
+read -r before hour <<<"$(date -u '+%Y-%m-%d %H')"
+if [ "${hour#0}" -lt 12 ]; then tz=XXX+12; else tz=XXX-14; fi
 if out="$(unset SOURCE_DATE_EPOCH; check)"; then
     got="$(printf '%s\n' "$out" | build_date)"
     # The script just ran again (the variable changed since the last build),
