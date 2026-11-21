@@ -1,0 +1,8 @@
+[package]
+name = "panic-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Proves a release build unwinds: exits 0 only if a panic was caught."
+
+[dependencies]

@@ -1,3 +1,16 @@
+# The root package stays the app; the sync crates join as members (SYNC_PLAN.md
+# §4). `default-members` keeps a bare `cargo build` or `cargo test` at the root
+# building the app alone, as before the workspace existed.
+[workspace]
+resolver = "3"
+members = ["crates/panic-probe"]
+default-members = ["."]
+# A standalone package unpacked under target/ (an older build for the legacy
+# fixtures, an attack round's copy of the tree) builds on its own instead of
+# being claimed by this workspace. Elsewhere in the checkout a nested package
+# must be a member, be excluded here, or carry its own [workspace] table.
+exclude = ["target"]
+
 [package]
 name = "task_deck"
 version = "1.0.0"
@@ -91,7 +104,13 @@ opt-level = 3          # Maximum optimization for speed
 lto = "fat"            # Full link-time optimization (best performance)
 codegen-units = 1      # Forces full cross-module optimization
 strip = "symbols"      # Removes debug symbols (smaller binary)
-panic = "abort"        # Smaller + faster panic handling
+panic = "unwind"       # The sync design's catch_unwind guards (SYNC.md 4.5, poison
+                       # pills; the JNI entry points) need unwinding, and in a
+                       # workspace this profile is global to every crate.
+                       # Today's two binaries restore "any panic ends the
+                       # process" with an aborting hook (src/panic_abort.rs);
+                       # stage `desktop` removes or narrows that hook when the
+                       # new runtime's catch_unwind guards need unwinding there.
 incremental = false    # Disable incremental builds (forces full optimization)
 debug = false          # No debug info in final binary
 

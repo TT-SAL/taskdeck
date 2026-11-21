@@ -143,6 +143,8 @@ fn show_qr() -> bool {
 }
 
 fn main() {
+    #[cfg(not(debug_assertions))]
+    task_deck::panic_abort::abort_on_panic();
     let options = match parse_args(std::env::args_os().skip(1)) {
         Ok(options) => options,
         Err(message) => {

@@ -20,3 +20,4 @@ pub mod board;
 pub mod ics;
 pub mod subscriptions;
 pub mod sync;
+pub mod panic_abort;
