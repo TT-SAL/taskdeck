@@ -105,6 +105,12 @@ expect_refused ""
 expect_refused "99999999999999999"   # fits in i64, far past chrono's last year
 expect_refused "253402300800"        # 10000-01-01, not a four-digit year
 expect_refused "-62167219201"        # -0001-12-31, not a four-digit year
+# Not UTF-8: must be refused, not taken as unset. Windows keeps the
+# environment as UTF-16, so the byte may not survive there.
+case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) ;;
+    *) expect_refused $'\xff' ;;
+esac
 
 # expect_date VALUE DATE: the build must succeed with BUILD_DATE=DATE.
 expect_date() {
