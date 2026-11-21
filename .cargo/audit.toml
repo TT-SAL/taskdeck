@@ -1,0 +1,22 @@
+# cargo-audit configuration (SYNC.md §8 "Supply chain"; R4 §4.2). Read by
+# cargo-audit 0.23.0, the version scripts/dev-setup.sh pins, when run from the
+# repository root (scripts/supply-chain.sh does). It keeps the same single
+# reviewed ignore as deny.toml.
+
+[advisories]
+# RUSTSEC-2026-0543: chrono is unmaintained. Reviewed: the design keeps chrono
+# for now and plans a move to jiff later (SYNC.md sections 8 and 11). The notice
+# is informational, not a vulnerability. Remove this ignore when chrono leaves
+# the tree. (cargo-audit takes ids only, so the reason lives in this comment.)
+ignore = ["RUSTSEC-2026-0543"]
+informational_warnings = ["unmaintained", "unsound", "notice"]
+
+[output]
+# Unmaintained, unsound and yanked crates fail the run, not only vulnerabilities.
+deny = ["warnings"]
+quiet = false
+show_tree = true
+
+[yanked]
+enabled = true
+update_index = true

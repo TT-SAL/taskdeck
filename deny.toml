@@ -1,0 +1,66 @@
+# cargo-deny configuration (SYNC.md §8 "Supply chain"; R4 §4.2).
+# Run through scripts/supply-chain.sh, which checks advisories, bans and
+# sources. Written for cargo-deny 0.20.2, the version scripts/dev-setup.sh pins;
+# check the syntax against that version's documentation before changing it.
+# The licence check is not configured: the plan does not ask for it.
+
+[graph]
+# No `targets`: every platform's dependencies are in the graph (Windows, macOS,
+# Linux, Android, wasm32), so a crate used on one platform only is still seen.
+# Every feature of every workspace member, so test-only and optional code is
+# checked too.
+all-features = true
+
+[advisories]
+# Fail on unmaintained and unsound notices anywhere in the graph, not only in
+# workspace crates.
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+# An ignore that no longer matches is reported, so a stale one gets removed.
+unused-ignored-advisory = "deny"
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained. Reviewed: the design keeps chrono for now and plans a move to jiff later (SYNC.md sections 8 and 11). The notice is informational, not a vulnerability. Remove this ignore when chrono leaves the tree." },
+]
+
+[bans]
+# Duplicate versions in general are only reported; the egui, wgpu and winit
+# tree carries several and is pinned on purpose.
+multiple-versions = "warn"
+multiple-versions-include-dev = true
+wildcards = "allow"
+# One RustCrypto generation (SYNC.md §5.1): two versions of any crate below in
+# the graph is an error, so no later change can pull in a second generation of
+# the cryptographic stack. Most are not in the lockfile yet; the ban applies as
+# soon as they arrive.
+deny = [
+    { crate = "chacha20poly1305", deny-multiple-versions = true },
+    { crate = "chacha20", deny-multiple-versions = true },
+    { crate = "poly1305", deny-multiple-versions = true },
+    { crate = "universal-hash", deny-multiple-versions = true },
+    { crate = "aead", deny-multiple-versions = true },
+    { crate = "cipher", deny-multiple-versions = true },
+    { crate = "ed25519-dalek", deny-multiple-versions = true },
+    { crate = "ed25519", deny-multiple-versions = true },
+    { crate = "curve25519-dalek", deny-multiple-versions = true },
+    { crate = "x25519-dalek", deny-multiple-versions = true },
+    { crate = "signature", deny-multiple-versions = true },
+    { crate = "hpke", deny-multiple-versions = true },
+    { crate = "hkdf", deny-multiple-versions = true },
+    { crate = "hmac", deny-multiple-versions = true },
+    { crate = "sha2", deny-multiple-versions = true },
+    { crate = "digest", deny-multiple-versions = true },
+    { crate = "crypto-common", deny-multiple-versions = true },
+    { crate = "zeroize", deny-multiple-versions = true },
+    { crate = "subtle", deny-multiple-versions = true },
+    { crate = "rustls", deny-multiple-versions = true },
+    { crate = "rustls-webpki", deny-multiple-versions = true },
+    { crate = "ring", deny-multiple-versions = true },
+]
+
+[sources]
+# crates.io only: any other registry and every git source is an error.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
