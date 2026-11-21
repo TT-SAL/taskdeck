@@ -51,6 +51,55 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
   sealer traits plus the toy implementations; `taskdeck-device` adapts the real core and seal to
   them (§6.7 task 2). The engine then depends on neither and compiles for wasm32 on its own.
 
+## Rulings for the specs
+
+SYNC.md leaves these open and more than one spec touches each, so the lead fixed them before the
+drafters started. They are inputs to the drafts; the pairwise reviews and the two-readers test
+may still overturn one, and then the change is recorded here and in `spec/CHANGES.md`.
+
+- **S1. Byte order.** Big-endian everywhere (D5).
+- **S2. Genesis.** The log's first entry (seq 1) is a control entry holding a `Genesis` item,
+  authored and signed by the recovery identity (SYNC.md §9 step 6, V1-5, V1-13). It carries the
+  salt and the recovery public keys (so `board_id` certifies itself), the first device, epoch 1
+  with its wraps and commitment, rules version 1, and the hash of the genesis state plus, for an
+  imported board, the id of the genesis snapshot blob. `seal.md` owns the layout, `engine.md` the
+  bootstrap from it, `core.md` the genesis `BoardData`, `relay.md` the create route that stores it.
+- **S3. The recovery identity as an author.** It has a `dev` id of its own, derived from its
+  signing key, and its own counter; the relay lists it with role `recovery`. It holds no token.
+  The relay accepts a frame it authored from any connection that passed the Worker gate, because
+  the frame's signature is what authenticates it.
+- **S4. The Worker gate and the door.** SYNC_PLAN.md §6.4 requires unauthenticated requests to be
+  refused before the Durable Object runs, yet a new device in pairing, a device logging in on a
+  re-homed relay and the recovery tool hold no token. So every request must carry one of: a token
+  whose HMAC verifies (any generation; the object then checks state and generation); the create
+  secret, for `create` only; or the board's **door**, for the pre-token routes only (pairing as
+  the new device, login, recovery-signed reads and admin operations). The door is
+  `HMAC-SHA256(TOKEN_KEY, "taskdeck/v1/door\0" ‖ board_id)[0..5]`: stateless for the Worker,
+  fixed for the life of a deployment, and not a secret that protects data. The **relay address**
+  a person types or pastes is the host plus Crockford base32 of `board_id ‖ door` (21 bytes, 34
+  characters). It is what the pairing sheet shows beside the code, what a Fence names, and what the
+  recovery sheet prints as "relay host and board id". A leaked door lets a stranger reach the
+  object's pre-token routes and nothing else: the same exposure as a revoked device's stale token.
+- **S5. A control entry holds an ordered list of control items**, applied all or nothing (revoke
+  and rotate travel in one entry, SYNC.md §5.4).
+- **S6. Time windows are decided from the log.** Every validity rule that involves time (72 hours
+  for a recovery-key change, 30 days for a stale-epoch entry, 30 days for an active member) is
+  computed from `at_ms` fields of sequenced entries, never from the relay's clock or the applying
+  device's, so all devices decide alike. Local clocks decide only when a device offers or takes
+  an action.
+- **S7. State hash.** `SHA-256("taskdeck/v1/state\0" ‖ u32 hash_version ‖ SHA-256(canonical board)
+  ‖ SHA-256(canonical membership))`. `core.md` defines the canonical board bytes, `seal.md` the
+  canonical membership bytes (device set, epochs, per-device counters), `engine.md` the
+  composition and when it is taken.
+- **S8. No always-on device.** Any current, unhalted device, the phone included, can take every
+  duty (snapshots, acknowledgements, compaction, beats, restore tail, upgrade proposals). Backups
+  are written by whichever desktop is awake. A week with only the phone awake loses nothing and
+  blocks nothing except backups.
+- **S9. Push or poll is a capability the relay states.** The Worker pushes over a socket; the
+  standby answers plain HTTPS and clients poll `read`. Routes and bodies are otherwise the same.
+- **S10. Each spec ends with a Public API section**, and the skeleton crates are written from
+  those. `engine.md` owns the state-machine and sealer traits (D6).
+
 ## Deviations from the plan
 
 None so far.
