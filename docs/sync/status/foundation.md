@@ -1,72 +1,120 @@
 # Stage `foundation`: status
 
-**State: in progress** (wave 0). Lead session started 2026-11-21 on branch `claude/focused-volta-tbqufb`.
-This file is the stage's memory (SYNC_PLAN.md §3.5). A fresh session resumes from it alone:
-read SYNC_PLAN.md, then this file, then continue at the first task below that is not `done`.
+**State: in progress** (wave 0), **handed off** on 2026-11-21 at about 19:45 UTC. The first lead
+session ran from 12:39 UTC on branch `claude/focused-volta-tbqufb` and stopped at a clean point
+because its context was nearly full. Its pull request, TT-SAL/taskdeck#1, is merged into
+`day-planner` with everything described here; it was not the exit pull request.
+This file is the stage's memory (SYNC_PLAN.md §3.5).
+
+## Resuming: read this first
+
+1. Read SYNC_PLAN.md in full (it is short), then this file to the end. SYNC.md and the papers in
+   `docs/sync/research/` are reference for judging what agents ask; a resuming lead need not reread
+   them all before starting.
+2. Work on the branch your session names, from `day-planner`. Open a draft pull request early.
+3. Continue at "Next steps". The working papers a lead needs are in `docs/sync/status/foundation/`
+   (see "Working papers"): a brief for every remaining task, the code digests, a ready workflow for
+   step 1, and a small journal helper.
+4. Never run two sessions on this stage. The first session has stopped and cancelled its scheduled
+   resume.
 
 ## How this stage is run
 
-- Workflows of Opus agents (`model: 'opus'`), at most two agents at a time, one workflow at a time.
-- Agents write; the lead runs every gate and reads CI itself. Agents never commit or push.
+- Workflows of Opus agents (`model: 'opus'`; agents report Opus 5.5), at most two agents at a time,
+  one workflow at a time. Queued calls run first in, first out, so two long queues in one workflow
+  keep both slots busy.
+- Agents write; the lead runs every gate and reads CI itself. Agents never commit or push and never
+  run a git command that changes state.
 - Every implementation task goes through the task loop of SYNC_PLAN.md §7 (implement, attack through
   three lenses, fix, until two dry rounds). Spec work uses drafters, pairwise interface reviews and
   the two-readers test (§6.1).
-- Pull requests go from `claude/focused-volta-tbqufb` into `day-planner`, merged with a merge commit
-  so the branch stays valid for the next one. The exit pull request is the one that sets this file
-  to `final`.
+- Each task has a brief the agents read (scope, owned paths, gate, lead rulings, findings already
+  handled). The lead adds a ruling to the brief the moment a loop starts to circle (D12, D14).
+- A running loop reads a lead inbox each round (`<scratch>/lead-findings/<task>.md`, one `## ` section
+  per finding), so the lead can feed in a finding or a ruling without stopping the workflow.
+- The session's stop hook wants a clean tree whenever the lead's turn ends: commit and push a
+  snapshot of a spec that is still being written; for code, wait until no fixer is running, verify,
+  then commit.
+- Pull-request CI runs the full matrix on every push, about 13 minutes; results arrive as
+  notifications. Every pushed head of the first session was green.
+- Usage (D13): one five-hour window of the account allows about 60 agent runs at these settings.
+  Size a workflow to about 20 runs, stop launching at about four-fifths of a window, and ask the
+  owner for the meter when unsure. A workflow cut by the limit loses only its unfinished agents.
+
+## Working papers (`docs/sync/status/foundation/`)
+
+| Path | What |
+|---|---|
+| `briefs/drafter-common.md`, `briefs/{seal,core,relay,engine,device,bridge}.md` | the rules and briefs the six specs were drafted under; spec fixers reread them |
+| `briefs/reviews.md` | task descriptions for the pairwise interface reviewer, the resolver, the per-spec fixer, and the requirement map |
+| `briefs/task-1a.md` | baseline task 1a: scope, gate, the lead's seven rulings, every finding already handled |
+| `briefs/supply-chain.md`, `briefs/ci.md`, `briefs/workspace.md`, `briefs/fixtures.md`, `briefs/tooling.md` | the lead's designs for tasks 1b, 1c, 2, 5 and 6, ready to hand to an implementer |
+| `briefs/core-digest.md`, `briefs/device-bridge-digest.md` | what the code digests were asked to contain |
+| `digests/core-digest.md`, `digests/device-digest.md`, `digests/bridge-digest.md` | facts about today's code with file and line, written for the drafters; useful to `core`, `device` and `android-shell` too |
+| `workflows/interface-reviews-and-1a.js` | the next workflow, ready: nine reviews, one resolver, six spec fixers; and task 1a's loop, then task 1b. Launch with `args: { scratch: <session scratchpad> }` after creating `lead-findings/` and `resolutions/` in it |
+| `tools/wf.py` | prints which agents of a running workflow have finished and their reports (`WF_JOURNAL=<transcript dir>/journal.jsonl`) |
+
+These are working papers of the stage, not contracts. The exit pull request may delete them.
 
 ## Tasks
 
 | # | Task (SYNC_PLAN.md §6.1) | State | Evidence |
 |---|---|---|---|
-| 0 | Status file, draft pull request | done | this file; draft pull request TT-SAL/taskdeck#1 |
-| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented, with the panic hook of D11. Three loops so far: 5 rounds (14 findings), 5 rounds (9), 3 rounds (5); every finding fixed or ruled on. No finding against the product changes themselves since the hook landed; all recent ones are about which hypothetical edits the checks detect, now a closed list (D14). Not yet two dry rounds: the loop continues after the usage window resets | commits `a743020` onwards; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`; full CI matrix green on `eef1ba0` |
-| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | todo | |
-| 1c | CI: path filters at job level, aggregate `gate` job | todo | |
-| 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
+| 0 | Status file, first pull request | done | this file; TT-SAL/taskdeck#1, merged |
+| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented, with the panic hook of D11. Three loops so far: 5 rounds (14 findings), 5 rounds (9), 3 rounds (5); every finding fixed or ruled on. No finding against the product changes themselves since the hook landed; all recent ones are about which hypothetical edits the checks detect, now a closed list (D14). Not yet two dry rounds: the loop must run again from round 1 (`briefs/task-1a.md`) | commits `a743020` onwards; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`, `src/panic_abort.rs`; full CI matrix green on the merged head |
+| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | todo; brief ready (`briefs/supply-chain.md`) | |
+| 1c | CI: path filters at job level, aggregate `gate` job | todo; design and brief ready (`briefs/ci.md`) | |
+| 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo; brief ready (`briefs/workspace.md`). Today the workspace has the root package and `crates/panic-probe` | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
 | 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge drafted (1,655 lines, 110 clauses). All six are first drafts: 11,635 lines, 852 clauses | `docs/sync/spec/*.md` |
-| 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
+| 3c | Pairwise interface reviews: the plan's six pairs (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) plus core–device, seal–device, relay–device | todo; the workflow is ready (`workflows/interface-reviews-and-1a.js`) | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
 | 4 | Skeleton crates: public types and traits, toy state machine, fake sealer | todo | |
-| 5 | Fixtures as data: boards, legacy `main` formats, snapshot JSON, transcripts | todo | |
-| 6 | Tooling: `scripts/gate.sh`, `scripts/spec-coverage.sh`, `scripts/dev-setup.sh` | todo | |
+| 5 | Fixtures as data: boards, legacy `main` formats, snapshot JSON, transcripts | todo; brief ready (`briefs/fixtures.md`) | |
+| 6 | Tooling: `scripts/gate.sh`, `scripts/spec-coverage.sh`, `scripts/dev-setup.sh` | todo; brief ready (`briefs/tooling.md`) | |
 | 7 | Stage exit review, exit pull request, merge | todo | |
 
-## Next steps (as of 2026-11-21 19:10 UTC)
+## Next steps
 
-In this order; a fresh session picks up at the first one not done.
+In this order; a resuming session starts at the first.
 
-1. **Interface reviews of the six spec drafts**: nine pairs (the plan's six plus core–device,
-   seal–device, relay–device), each reviewer also checking that the rulings S1 to S31 are reflected;
-   then one resolver writes the exact change per spec; then one fixer per spec applies it. Repeat
-   until a round brings nothing of substance.
-2. **Task 1a's attack loop** again from round 1, with the closed mutation list of D14, until two
-   dry rounds. The task's brief and the lead's seven rulings are summarised in D11, D12 and D14.
-3. **Task 1b** (deny.toml, cargo-deny, cargo-audit, the cooldown script, `scripts/dev-setup.sh`,
-   `scripts/supply-chain.sh`), then the lead decides on any advisory left in the lockfile, then its
-   attack loop.
-4. **Task 1c** (CI by path, per-stage jobs with hooks, the `gate` job named `gate` only on
-   pull-request runs), pushed early so real CI runs can be read; then its attack loop.
-5. **Merge the baseline pull request** (TT-SAL/taskdeck#1) once 1a to 1c have converged and CI is
-   green; open the next one for specs, workspace, fixtures and tooling.
-6. **Task 2** (workspace crates and pinned dependencies), **task 5** (fixtures), **task 6**
-   (tooling), each with its attack loop.
-7. **Two-readers test** on the reviewed specs (six scenarios, two rounds without a difference or four
-   rounds), then the **requirement map** in `spec/README.md`, then **task 4** (skeleton crates from
-   the specs' Public API sections, toy state machine, fake sealer).
-8. **Stage exit review**, status `final`, exit pull request, merge; tell the owner to start wave 1.
-
-Usage: the account's five-hour window allows about 60 agent runs. Each workflow is sized to about
-20 runs, and no workflow is started once a window is about four-fifths used (D13).
+1. **Interface reviews of the six spec drafts.** Nine pairs, each reviewer also checking that the
+   rulings S1 to S31 are reflected; then one resolver writes the exact change per spec; then one fixer
+   per spec applies it. The ready workflow does this, with step 2 and the start of step 3 in its
+   second queue. Read the resolver's "For the lead" list before the fixers' output is committed.
+   Repeat with a second, lighter round until a round brings nothing of substance.
+2. **Task 1a's attack loop** again from round 1 until two dry rounds. Scope and the closed mutation
+   list are in `briefs/task-1a.md` (D11, D12, D14).
+3. **Task 1b** (`briefs/supply-chain.md`). When the implementer reports which advisories remain in
+   the lockfile, the lead decides for each between a targeted `cargo update -p` and a reviewed
+   ignore, then runs its attack loop. SYNC_PLAN.md §6.1 allows `cargo update -p` only for rustls,
+   rustls-webpki, webpki-roots and tokio, so any other crate needs a written reason here.
+4. **Task 1c** (`briefs/ci.md`). Push it early in a pull request: only a real CI run shows whether
+   the path filter, the per-stage jobs and the `gate` job behave. Then its attack loop.
+5. **Task 2** (`briefs/workspace.md`), **task 5** (`briefs/fixtures.md`), **task 6**
+   (`briefs/tooling.md`), each with its attack loop. Task 2 needs task 1b's scripts; task 6 comes
+   after the crates and fixtures exist.
+6. **Two-readers test** on the reviewed specs: two independent readers per scenario (first edit,
+   offline edit replayed, pairing, revocation with rotation, relay rollback, snapshot bootstrap), a
+   third agent lists the differences, spec fixers resolve them; stop after two rounds without a
+   difference or after four, recording what remains in `spec/CHANGES.md`. The lead must first write
+   each scenario's fixed starting state so both readers begin alike.
+7. **Requirement map** in `spec/README.md` (`briefs/reviews.md`, part D), then `scripts/spec-lint.sh`
+   over it.
+8. **Task 4**: skeleton crates from the specs' Public API sections, with the toy state machine and the
+   fake sealer in `taskdeck-sync`.
+9. **Stage exit**: an agent that did no work here lists what is missing; then remove the draft notice
+   from `spec/README.md`, set this file to `final`, write "What the next stages need to know", open
+   the exit pull request with what was built and measured, merge on green, and tell the owner to
+   start wave 1 (`core`, `seal`, `relay`, `engine`, `android-shell`).
 
 ## Decisions (with reasons)
 
 - **D1. Agent model.** `model: 'opus'` (Opus 5.5), as the owner's start prompt says.
-- **D2. Pull requests.** Several, merged in order with merge commits (baseline first), instead of one
-  long-lived one: the CI restructure is best proven by a real pull-request run early, and
-  `day-planner` gains the `gate` check the owner may protect it with (§1.4).
+- **D2. Pull requests.** Several, merged in order with merge commits, instead of one long-lived
+  one: `day-planner` then always holds the stage's work, a new session starts from it, and the CI
+  restructure can be proven by a real pull-request run before the exit.
 - **D3. Cooldown without a new tool.** The crates.io sparse index publishes a `pubtime` for every
   version (checked 2026-11-21), so the seven-day cooldown is a script of our own over `Cargo.lock`.
   `cargo-cooldown` is not on §3.4's pre-approved list and is not needed.
@@ -74,6 +122,9 @@ Usage: the account's five-hour window allows about 60 agent runs. Each workflow 
   start without a download; today's code is tested on it here.
 - **D5. Fixed-width integers in every wire and file layout are big-endian.** SYNC.md gives layouts
   without a byte order; HPKE (RFC 9180) and the relay's `DataView` default agree on network order.
+- **D6. Generic traits live in the engine crate.** `taskdeck-sync` defines the state-machine and
+  sealer traits plus the toy implementations; `taskdeck-device` adapts the real core and seal to
+  them (§6.7 task 2). The engine then depends on neither and compiles for wasm32 on its own.
 - **D7. tokio moves forward, to 1.53.3.** RUSTSEC-2026-0386 is patched in 1.51.6 (an older line) and
   from 1.53.3. A refresh does not downgrade, so the lowest patched release above today's 1.52.3 is
   taken. Cargo also re-pointed the `windows-sys` edge of six crates whose own versions did not move;
@@ -116,10 +167,6 @@ Usage: the account's five-hour window allows about 60 agent runs. Each workflow 
   guarded hook call or naming the hook twice; the hook not printing as the default hook does, or not
   aborting. The hook's test reads the two main files only and runs in the debug profile. Anything else
   is left to review.
-- **D6. Generic traits live in the engine crate.** `taskdeck-sync` defines the state-machine and
-  sealer traits plus the toy implementations; `taskdeck-device` adapts the real core and seal to
-  them (§6.7 task 2). The engine then depends on neither and compiles for wasm32 on its own.
-
 ## Rulings for the specs
 
 SYNC.md leaves these open and more than one spec touches each, so the lead fixed them before the
@@ -298,29 +345,51 @@ Rulings on what the bridge draft raised (2026-11-21):
 | Today's headless tests in the container | 264 passed, 1 ignored (`codec_bake_off`, already ignored); 5 min 53 s cold, about 3 min of it tests | `cargo test --locked --no-default-features --lib` |
 | Release build of `taskdeck-server` with `panic = "unwind"` and fat LTO | builds in 4 min 3 s; 9,240,728 bytes; `--version` prints the build date | container, commit `c7b3d07` |
 | Full CI matrix with the pin, the refresh and the unwinding profile | green: Linux headless, desktop on Windows, macOS and Ubuntu, emulators at API 26 and 36 | pull-request run on `c7b3d07` |
+| Today's tests after the panic hook | 265 passed, 1 ignored, on Linux, Windows and macOS | pull-request runs from `a813998` on |
+| A full pull-request CI run | about 13 minutes | every run of the first session |
+| The six spec drafts | 11,635 lines, 852 clauses (seal 155, core 93, relay 166, engine 182, device 146, bridge 110) | `docs/sync/spec/` |
+| Agent runs in the first session | about 110 finished, of them 13 attack rounds on task 1a | workflow journals |
 
 ## Facts found along the way
 
 - Versions named in SYNC.md §2.3 and §5.1 all exist on crates.io. Youngest on 2026-11-21:
   `zeroize` 1.9.2 (2026-11-17, inside the cooldown until 2026-11-24). `Cargo.lock` has 1.9.0 today.
 - `origin/main` (the older build, commit `03554d6`) is fetchable: `git fetch origin main`.
-- `Cargo.lock` today: rustls 0.23.43, rustls-webpki 0.103.14, webpki-roots 1.0.9, tokio 1.52.3.
-
+- `Cargo.lock` before the refresh: rustls 0.23.43, rustls-webpki 0.103.14, webpki-roots 1.0.9,
+  tokio 1.52.3. After it: 0.23.46, 0.103.17, 1.0.12, 1.53.3.
 - Under `panic = "abort"` a panic on any background thread killed the app at once. With `unwind`
   only that thread dies (weather, calendars, the phone workers, the sync sender or listener) and
   the process carries on without it; a panic on the main thread exits with 101 after running
   destructors. `src/` has no `catch_unwind`, no panic hook and no `lock().unwrap()` outside tests.
-  Debug builds always behaved this way. `desktop` should decide whether the app wants a panic hook.
-- CI accepts `rust-toolchain.toml` as it is: the Linux job passed on the pinned toolchain with the
-  old toolchain step still in place (run of commit `a743020`).
-
+  Debug builds always behaved this way. D11 restores the old behaviour for release builds.
+- CI accepts `rust-toolchain.toml` as it is: every job passed on the pinned toolchain with the old
+  toolchain step (`rustup default stable`) still in place. Task 1c replaces that step.
 - The root manifest is a workspace root with `exclude = ["target"]`. A Cargo package anywhere else
   in the checkout must be a workspace member, be listed in `exclude`, or carry its own `[workspace]`
   table (as `cargo fuzz init` writes). A tree unpacked under `target/` builds on its own.
 
+- Agents left to harden a check script will keep finding one more hypothetical edit it misses, and
+  each fix grows the script. Name the mutations a check must catch before the loop starts.
+- A spec drafter cut off late leaves a nearly complete file; a finishing pass that runs the closing
+  checks is far cheaper than a redraft (this is how `relay.md` was completed).
+
 ## Open questions for the owner
 
-None so far.
+None. Nothing so far needed the owner under SYNC_PLAN.md §3.5.
+
+## To tell the owner at exit
+
+Decisions the lead took that the owner may want to overrule:
+
+- `foundation` touched three files under `src/` for the panic hook (D11, "Deviations").
+- `unsafe` is allowed in platform FFI only (S26).
+- Rules version 1 has size caps SYNC.md does not name (S18).
+- The Android app declares `ACCESS_NETWORK_STATE` (S31); device-authenticated actions on the phone
+  need API 30 (S30).
+- Reminder defaults are a starting point; SYNC.md's open question 11 is still the owner's (S19).
+- A backup's file name carries a writer tag (S28).
+- `zeroize` stays at the lockfile's 1.9.0 until 1.9.2 (named by SYNC.md §5.1, published 2026-11-17)
+  is seven days old, on 2026-11-24; then one `cargo update -p zeroize --precise 1.9.2`.
 
 ## What the next stages need to know
 
