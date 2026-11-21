@@ -29,6 +29,14 @@ This file is the stage's memory (SYNC_PLAN.md §3.5).
   agents wide.
 - Agents write; the lead runs every gate and reads CI itself. Agents never commit or push and never
   run a git command that changes state.
+- Since the second session, writers never touch the main checkout (D18). Each track has a working
+  copy, a clone under `target/work/` (`c` for code, `s` for specs), which git ignores. Implementers,
+  fixers and attackers work on the clone; reviewers read the main checkout. When a writer has
+  finished, the lead copies its files into the main checkout, runs the gate there, commits and
+  pushes, then moves the clone's HEAD to the new commit
+  (`git -C target/work/c fetch -q origin && git -C target/work/c reset -q --mixed origin/<branch>`).
+  The main checkout is clean whenever the lead's turn ends, and nothing reaches the public
+  repository before the lead has read it.
 - Every implementation task goes through the task loop of SYNC_PLAN.md §7 (implement, attack through
   three lenses, fix, until two dry rounds). Spec work uses drafters, pairwise interface reviews and
   the two-readers test (§6.1).
@@ -36,9 +44,9 @@ This file is the stage's memory (SYNC_PLAN.md §3.5).
   handled). The lead adds a ruling to the brief the moment a loop starts to circle (D12, D14).
 - A running loop reads a lead inbox each round (`<scratch>/lead-findings/<task>.md`, one `## ` section
   per finding), so the lead can feed in a finding or a ruling without stopping the workflow.
-- The session's stop hook wants a clean tree whenever the lead's turn ends: commit and push a
-  snapshot of a spec that is still being written; for code, wait until no fixer is running, verify,
-  then commit.
+- The session's stop hook wants a clean tree whenever the lead's turn ends. With the working copies
+  that holds by construction. A background `tools/waitwriter.py <journal> <seen>` wakes the lead
+  when the next implementer or fixer has finished.
 - Pull-request CI runs the full matrix on every push, about 13 minutes; results arrive as
   notifications. Every pushed head of the first session was green.
 - Usage (D13): one five-hour window of the account allows about 60 agent runs at these settings.
@@ -55,8 +63,9 @@ This file is the stage's memory (SYNC_PLAN.md §3.5).
 | `briefs/supply-chain.md`, `briefs/ci.md`, `briefs/workspace.md`, `briefs/fixtures.md`, `briefs/tooling.md` | the lead's designs for tasks 1b, 1c, 2, 5 and 6, ready to hand to an implementer |
 | `briefs/core-digest.md`, `briefs/device-bridge-digest.md` | what the code digests were asked to contain |
 | `digests/core-digest.md`, `digests/device-digest.md`, `digests/bridge-digest.md` | facts about today's code with file and line, written for the drafters; useful to `core`, `device` and `android-shell` too |
-| `workflows/s1-interface-reviews.js` | spec track, round 1: nine pairwise reviews, then one resolver per spec in dependency order, writing `<scratch>/resolutions/r1-<spec>.md`. It stops there: the lead rules on each "For the lead" list before fixers edit a spec (D16). Launch with `args: { scratch: <session scratchpad>, width: 1 }` |
-| `workflows/c1-supply-chain-1a-loop-ci.js` | code track: task 1b's implementation, task 1a's attack loop until two dry rounds, task 1c's implementation. Launch with `args: { scratch: <session scratchpad> }` after creating `lead-findings/` in it and warming `target/attack-0` to `-2` (copies of `target/debug` after `cargo test --locked --no-default-features --lib --no-run`) |
+| `workflows/s1-interface-reviews.js` | spec track, round 1: nine pairwise reviews, then one resolver per pair, one after another, writing `<scratch>/resolutions/r1-<a>-<b>.md`. It stops there: the lead rules on each "For the lead" list before fixers edit a spec (D16). Launch with `args: { scratch: <session scratchpad>, width: 1 }` |
+| `workflows/c1-supply-chain-1a-loop-ci.js` | code track, on the working copy `target/work/c`: finishing task 1b, task 1a's attack loop until two dry rounds, task 1c's implementation. Launch with `args: { scratch: <session scratchpad> }` after creating `lead-findings/` in the scratchpad, cloning the working copy and warming its `target/debug` and `target/attack-0` to `-2` (copies of the main `target/debug` after `cargo test --locked --no-default-features --lib --no-run`) |
+| `tools/waitwriter.py`, `tools/speccheck.py` | the lead's waiter for finished writers, and a quick format check of the six specs (clause lines, unique ids, owners, MUST outside clauses, closing sections, dangling references). Neither is the stage's tooling; `scripts/spec-lint.sh` comes with task 6 |
 | `tools/wf.py` | prints which agents of a running workflow have finished and their reports (`WF_JOURNAL=<transcript dir>/journal.jsonl`) |
 
 These are working papers of the stage, not contracts. The exit pull request may delete them.
@@ -85,7 +94,8 @@ These are working papers of the stage, not contracts. The exit pull request may 
 In this order; a resuming session starts at the first. Steps 1 and 6 to 8 are the spec track, steps
 2 to 5 the code track (D15); the two run side by side. Started in the second session, 21:28 UTC:
 step 1 (`workflows/s1-interface-reviews.js`) and steps 2 to 4 up to task 1c's implementation
-(`workflows/c1-supply-chain-1a-loop-ci.js`). Nothing of either is committed yet.
+(`workflows/c1-supply-chain-1a-loop-ci.js`). Nothing of either is committed yet; task 1b's files
+exist, unverified, in the working copy `target/work/c`.
 
 1. **Interface reviews of the six spec drafts.** Nine pairs, each reviewer also checking that the
    rulings S1 to S31 are reflected; then one resolver per spec, in dependency order, writes the exact
@@ -179,15 +189,21 @@ step 1 (`workflows/s1-interface-reviews.js`) and steps 2 to 4 up to task 1c's im
   lead's decision on task 1b's advisories while the first ran for hours. Two workflows, each
   strictly sequential, keep the plan's "two agents at a time" and let the lead restart either track
   alone. Only the code track compiles, so no two agents ever build at once.
-- **D16. Resolutions per spec, and the lead rules before a spec is edited.** One resolver for every
-  finding of nine reviews would have to hold six specs at once. Findings are grouped by the first
-  spec, in the order seal, core, relay, engine, device, bridge, that each says must change; one
-  resolver per group, in that order, each reading what the earlier ones settled. The workflow stops
-  after the resolvers; the lead reads every "For the lead" list, writes its rulings beside them
-  (`r1-lead.md`), and only then starts the fixers.
+- **D16. One resolver per pair, and the lead rules before a spec is edited.** The first review
+  alone (seal with relay) brought 16 findings, so nine bring about 140: too many for one resolver,
+  and grouping by spec would give seal's resolver a third of them. Each pair's findings go to one
+  resolver; the nine run one after another, each reading what the earlier ones settled and building
+  on it. The workflow stops after the resolvers; the lead reads every "For the lead" list, writes
+  its rulings beside them (`r1-lead.md`), and only then starts one fixer per spec.
 - **D17. The start prompt of the second session names the agents' model as "opus 5.5".** The
-  workflows keep `model: 'opus'`, which is that model (D1); the first agents of the session are
-  asked to report the model they run on.
+  workflows keep `model: 'opus'`, which is that model (D1): the session's first agent reported
+  `claude-opus-5-5`.
+- **D18. Writers work on clones, the lead integrates.** The first implementer of the session wrote
+  into the main checkout, so the stop hook met untracked, unfinished files as soon as the lead
+  paused. Committing them would have pushed work nobody had read to a public repository; hiding
+  them from the hook would have defeated it. So the code track and the spec track each write in a
+  clone under `target/work/`, and only what the lead has read and verified enters the main
+  checkout. It also keeps the two tracks, and the lead's own gate runs, out of each other's way.
 
 ## Rulings for the specs
 
@@ -371,6 +387,8 @@ Rulings on what the bridge draft raised (2026-11-21):
 | A full pull-request CI run | about 13 minutes | every run of the first session |
 | The six spec drafts | 11,635 lines, 852 clauses (seal 155, core 93, relay 166, engine 182, device 146, bridge 110) | `docs/sync/spec/` |
 | Agent runs in the first session | about 110 finished, of them 13 attack rounds on task 1a | workflow journals |
+| Task 1a's gate in the second session's container, run by the lead | both check scripts pass, the server builds, 265 tests passed and 1 ignored in 157 s; a cold build of the test binary took 7 min 34 s | `target/lead`, 2026-11-21 21:36 UTC |
+| A pairwise interface review | about 11 minutes; the first returned 16 findings (3 high, 6 medium, 7 low) and 17 points found sound | spec track, seal with relay |
 
 ## Facts found along the way
 

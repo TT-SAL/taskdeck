@@ -1,28 +1,32 @@
 export const meta = {
   name: 'foundation-c1-supply-chain-1a-loop-ci',
-  description: 'Foundation, code track: implement the supply-chain task (1b), run the attack loop on baseline 1a until two dry rounds, then implement the CI restructure (1c); one agent at a time',
+  description: 'Foundation, code track, in a working copy: finish the supply-chain task (1b), run the attack loop on baseline 1a until two dry rounds, then implement the CI restructure (1c); one agent at a time',
   phases: [
-    { title: 'Implement', detail: 'supply chain (1b), then the CI restructure (1c)', model: 'opus' },
+    { title: 'Implement', detail: 'finish supply chain (1b), then the CI restructure (1c)', model: 'opus' },
     { title: 'Attack', detail: 'baseline 1a: three lenses per round, plus the lead inbox', model: 'opus' },
     { title: 'Fix', detail: 'reproduce first, then fix', model: 'opus' },
   ],
 }
 
 // args: { scratch: '<session scratchpad>' }. S/lead-findings is the lead's inbox.
+// Writers and attackers work on WORK, a clone of the repository under target/ (ignored by git in the
+// main checkout). The main checkout stays clean: the lead copies verified work into it and commits.
 const S = args.scratch
-const REPO = '/home/user/taskdeck'
-const BRIEFS = `${REPO}/docs/sync/status/foundation/briefs`
+const MAIN = '/home/user/taskdeck'
+const WORK = `${MAIN}/target/work/c`
+const BRIEFS = `${MAIN}/docs/sync/status/foundation/briefs`
 const INBOX = `${S}/lead-findings`
 
 const GROUND = `
-GROUND RULES for every worker in stage "foundation" of SYNC_PLAN.md (repository ${REPO}, branch claude/upbeat-hamilton-klp7n9):
-- First read SYNC_PLAN.md sections 2, 3, 4 and 6.1. Where SYNC_PLAN.md and SYNC.md disagree, SYNC_PLAN.md wins.
-- Do NOT run any git command that changes state (no add, commit, push, fetch, pull, checkout, switch, stash, reset, restore, merge, rebase, worktree, clean). Read-only git (status, diff, log, show, ls-files, archive) is fine. The lead commits.
+GROUND RULES for every worker in stage "foundation" of SYNC_PLAN.md:
+- TWO DIRECTORIES. ${MAIN} is the lead's main checkout: READ-ONLY for you (the plan, SYNC.md, the specs and the task briefs are read there). ${WORK} is YOUR WORKING COPY, a full clone of the same repository (branch claude/upbeat-hamilton-klp7n9) that also holds the uncommitted work of the tasks in progress: every file you create or change is under ${WORK}, and every command you run for the task runs there (cd ${WORK} first). Never create, change or delete anything under ${MAIN} outside ${WORK} (attackers may also use their own scratch directory, named in their task). The lead copies verified work from the working copy into the main checkout and commits it.
+- First read ${MAIN}/SYNC_PLAN.md sections 2, 3, 4 and 6.1. Where SYNC_PLAN.md and SYNC.md disagree, SYNC_PLAN.md wins.
+- Do NOT run any git command that changes state, in either directory (no add, commit, push, fetch, pull, checkout, switch, stash, reset, restore, merge, rebase, worktree, clean). Read-only git (status, diff, log, show, ls-files, archive) is fine. In the working copy, "git status" shows the uncommitted work; "origin/day-planner" there is the base branch.
 - Change only the paths your task names. Do not edit anything under src/ (unless a lead ruling for your task names the exact files), and do not edit DOCUMENTATION.md, SYNC.md or SYNC_PLAN.md.
-- The repository is public: never write a secret, a real relay address, a token, an account name, an email address or anything from a real board. Made-up data only.
+- The repository is public: never write a secret, a real relay address, a token, an account name, an email address, a path that names a person, or anything from a real board. Made-up data only.
 - No dependency or tool beyond SYNC_PLAN.md section 3.4's pre-approved list. If you think one is needed, do not add it: report it.
 - Never weaken, skip or ignore a test. Never claim something passes unless you ran it and saw it pass; list the exact commands you ran.
-- Another agent works in the same checkout at the same time on other paths (the specs under docs/sync/spec/). Touch nothing outside your task; do not tidy files you did not create. Files of other tasks may be uncommitted in the working tree: leave them alone.
+- Files of other tasks may be uncommitted in the working copy: leave them alone; do not tidy files you did not create.
 - Be economical: do the task well, then stop. Do not re-verify what your task did not change.
 `
 
@@ -70,27 +74,27 @@ const T1A = {
 const T1B = { id: 'baseline-1b', brief: `${BRIEFS}/supply-chain.md`, gate: 'bash scripts/tests/run.sh && bash scripts/supply-chain.sh' }
 const T1C = { id: 'baseline-1c', brief: `${BRIEFS}/ci.md`, gate: 'bash scripts/tests/run.sh' }
 
-const COMPILE_IMPL = 'You are the only implementer or fixer compiling right now: use the default target directory (do not set CARGO_TARGET_DIR). Attackers use their own directories under target/attack-N; leave those alone.'
+const COMPILE_IMPL = `You are the only implementer or fixer compiling right now: in the working copy use its default target directory (${WORK}/target; do not set CARGO_TARGET_DIR). It holds a warm debug build.`
 const rulingsNote = (t) => `The lead's standing rulings for this task are at the end of the brief and, if the file exists, in ${INBOX}/${t.id}.rulings.md : read them and never contradict them.`
 const safe = async (thunk) => { try { return await thunk() } catch (e) { return null } }
 
 const fix = (t, found, round) => safe(() => agent(`${GROUND}
-YOUR TASK: handle findings against the task described in ${t.brief} (read it in full first).
+YOUR TASK: handle findings against the task described in ${t.brief} (read it in full first; where it says "repository root" or names a path, that is in your working copy ${WORK}).
 ${rulingsNote(t)}
 ${COMPILE_IMPL}
 For each finding: reproduce it first. If it does not reproduce, say so and drop it. If it reproduces but the task brief or a lead ruling puts it out of scope, drop it and say why. If it is a real defect within the task's owned paths (as the brief and the rulings extend them), fix it in the smallest correct way and add or keep a check that would have caught it. If the right fix lies outside those paths, do not make it: describe it under questions_for_lead. Never weaken a check to make it pass. Keep scripts short: prefer removing a fragile mechanism to guarding it with more code.
 Findings (JSON):
 ${JSON.stringify(found, null, 2)}
-Finish by running the task's gate: ${t.gate}. Report every command and result. In your summary list each finding as fixed, dropped (with the reason) or deferred to the lead.`,
+Finish by running the task's gate in the working copy: ${t.gate}. Report every command and result. In files_changed list every path you changed, relative to the working copy. In your summary list each finding as fixed, dropped (with the reason) or deferred to the lead.`,
   { label: `fix:${t.id}:r${round}`, phase: 'Fix', model: 'opus', effort: 'high', schema: REPORT }))
 
 const attacker = (t, lens, i, round, seen) => safe(() => agent(`${GROUND}
 YOU ARE AN ATTACKER, not an implementer. You did not write this code. Try to break the task below through ONE lens.
 The task, its owned paths, the lead's standing rulings and the list of findings already raised and handled are in ${t.brief} : read it in full first. ${rulingsNote(t)}
-The thing under attack is the working tree as it is now ("git status", "git diff"; it may be ahead of HEAD). Uncommitted files of other tasks (deny.toml, .cargo/, scripts/dev-setup.sh, scripts/supply-chain.sh, scripts/cooldown*, scripts/tests/, scripts/ci/, .github/) are not part of this task: do not attack them.
+The thing under attack is the working copy ${WORK} as it is now (its "git status" and "git diff" show what is ahead of the last commit). Uncommitted files of other tasks there (deny.toml, .cargo/, scripts/dev-setup.sh, scripts/supply-chain.sh, scripts/cooldown*, scripts/tests/, scripts/ci/, .github/) are not part of this task: do not attack them.
 YOUR LENS: ${lens.text}.
 Rules:
-- Do not edit tracked files and create nothing in the repository outside your scratch directory ${REPO}/target/attack-${i} . Use CARGO_TARGET_DIR=${REPO}/target/attack-${i} for every cargo command (it holds a warm debug build of the root package's library tests) and keep scratch files under ${REPO}/target/attack-${i}/scratch (the workspace excludes target/, so a copied tree there builds on its own). To test a modified file, copy what you need there ("git archive HEAD | tar -x -C <scratch>/tree", then copy the working-tree versions of this task's files over it); "git worktree" is not allowed.
+- You change NOTHING in the working copy: no edits, and do not run the task's scripts or cargo inside it (the check scripts touch files and build into its target directory). Your scratch directory is ${MAIN}/target/attack-${i} : make a copy of the working copy's tree there ("mkdir -p ${MAIN}/target/attack-${i}/scratch/tree && tar -C ${WORK} --exclude=./target --exclude=./.git -cf - . | tar -C ${MAIN}/target/attack-${i}/scratch/tree -xf -"; the main checkout's workspace excludes target/, so the copy builds on its own) and run everything in the copy, with CARGO_TARGET_DIR=${MAIN}/target/attack-${i} for every cargo command (it holds a warm debug build of the root package's dependencies). Mutate only your copy. Where a check needs a git repository, run "git init -q && git add -A && git commit -qm base" inside your copy (that is allowed there, and only there).
 - Report only what you reproduced: the exact command or small test, the output you saw, and what should have happened. A doubt you could not reproduce goes under checked_and_fine with a note.
 - No style preferences, nothing the brief or a lead ruling puts out of scope, nothing in the brief's "Already raised and handled" lists, and none of these, raised in this run: ${JSON.stringify(seen)}.
 - Severity: high = today's app, a later stage or a security rule of SYNC_PLAN.md section 3.4 would be broken; medium = a check can pass when it should fail in CI or documented use, or behaviour differs from what the task states; low = robustness within the documented usage.
@@ -98,7 +102,7 @@ Rules:
 Return the structured findings. An empty findings list after a real attempt is a valid and useful answer; list what you checked.`,
   { label: `attack:${t.id}:${lens.key}:r${round}`, phase: 'Attack', model: 'opus', effort: 'high', schema: FINDINGS }))
 
-const inbox = (t, round) => safe(() => agent(`You are the lead's inbox reader for task "${t.id}" in stage "foundation" (repository ${REPO}). Do only this: check whether the file ${INBOX}/${t.id}.md exists and is non-empty. If it does not exist or is empty, return an empty findings list with checked_and_fine ["no lead findings"]. If it exists: read it. Each section that starts with a line beginning "## " is one finding written by the lead: return each as a finding (title = the heading text; severity = the value after "severity:" in the section if present, otherwise "medium"; repro = the whole section text verbatim; expected = the text after "expected:" if present, otherwise "see repro"). Then rename the file (mv) to ${INBOX}/${t.id}.consumed-r${round}.md so it is not read twice. Change nothing else anywhere.`,
+const inbox = (t, round) => safe(() => agent(`You are the lead's inbox reader for task "${t.id}" in stage "foundation". Do only this: check whether the file ${INBOX}/${t.id}.md exists and is non-empty. If it does not exist or is empty, return an empty findings list with checked_and_fine ["no lead findings"]. If it exists: read it. Each section that starts with a line beginning "## " is one finding written by the lead: return each as a finding (title = the heading text; severity = the value after "severity:" in the section if present, otherwise "medium"; repro = the whole section text verbatim; expected = the text after "expected:" if present, otherwise "see repro"). Then rename the file (mv) to ${INBOX}/${t.id}.consumed-r${round}.md so it is not read twice. Change nothing else anywhere.`,
   { label: `inbox:${t.id}:r${round}`, phase: 'Attack', model: 'opus', effort: 'low', schema: FINDINGS }))
 
 // One agent at a time: the lenses of a round run one after another.
@@ -129,9 +133,10 @@ const out = {}
 
 phase('Implement')
 out.impl1b = await safe(() => agent(`${GROUND}
-YOUR TASK is described in ${T1B.brief} . Read it in full and do exactly what it says; where it gives a design, implement that design and report anything that cannot work instead of substituting your own.
+YOUR TASK is described in ${T1B.brief} . Read it in full; where it says "repository" or names a path, that is in your working copy ${WORK}. Where it gives a design, that design stands: report anything that cannot work instead of substituting your own.
+An earlier implementer wrote the task's files and was interrupted before it could finish verifying and report. Its files are in the working copy, uncommitted ("git status" there lists them: deny.toml, .cargo/audit.toml, scripts/dev-setup.sh, scripts/supply-chain.sh, scripts/cooldown.sh, scripts/cooldown.py, scripts/cooldown-exemptions.txt, scripts/tests/). cargo-deny and cargo-audit are already installed in ~/.cargo/bin by its dev-setup.sh. You did not write these files: read every one against the brief, point by point, as a reviewer who must sign for them; fix what is wrong or missing; then finish the task. Do not rewrite what is right.
 ${COMPILE_IMPL}
-When you are done, run the task's gate (${T1B.gate}) and every proof the brief asks for. The supply-chain script is expected to report the advisories the brief describes until the lead decides on them: report them exactly, and do not change Cargo.lock or Cargo.toml. Return the structured report: what you built, each command and its result, the decisions you took, what you could not verify, and questions for the lead. In model_self_report give the exact model name or id your own system prompt says you are.`,
+When you are done, run the task's gate in the working copy (${T1B.gate}) and every proof the brief asks for, including a fresh install into an empty directory to prove dev-setup.sh works from nothing (use a temporary tools directory if the script supports one; otherwise say how you proved it). The supply-chain script is expected to report the advisories the brief describes until the lead decides on them: report them exactly as the brief's last paragraph asks (id, crate and version, what it is, the lowest fixed version at least 7 days old, whether it is compiled into today's binaries, your recommendation), and do not change Cargo.lock or Cargo.toml. Return the structured report: what exists now, what you changed in the earlier work and why, each command and its result, the decisions taken, what you could not verify, and questions for the lead. In files_changed list every file of the task, relative to the working copy. In model_self_report give the exact model name or id your own system prompt says you are.`,
   { label: 'impl:baseline-1b', phase: 'Implement', model: 'opus', effort: 'high', schema: REPORT }))
 log(`baseline-1b implementation: ${out.impl1b ? 'reported' : 'FAILED'}`)
 
@@ -141,9 +146,9 @@ out.loop1a = await attackLoop(T1A)
 phase('Implement')
 if (out.impl1b !== null) {
   out.impl1c = await safe(() => agent(`${GROUND}
-YOUR TASK is described in ${T1C.brief} . Read it in full and do exactly what it says; where it gives a design, implement that design and report anything that cannot work instead of substituting your own. The scripts of the supply-chain task (scripts/dev-setup.sh, scripts/supply-chain.sh, scripts/cooldown.sh, scripts/tests/run.sh) exist in the working tree now: read them and wire the CI job to their real interface; do not change them except to add your own test files under scripts/tests/.
+YOUR TASK is described in ${T1C.brief} . Read it in full and do exactly what it says; where it says "repository" or names a path, that is in your working copy ${WORK}. Where it gives a design, implement that design and report anything that cannot work instead of substituting your own. The scripts of the supply-chain task (scripts/dev-setup.sh, scripts/supply-chain.sh, scripts/cooldown.sh, scripts/tests/run.sh) exist in the working copy now: read them and wire the CI job to their real interface; do not change them except to add your own test files under scripts/tests/.
 ${COMPILE_IMPL}
-When you are done, run the task's gate (${T1C.gate}) and every validation the brief asks for. Return the structured report: what you built, each command and its result, the decisions you took, precisely what you could not verify locally, and questions for the lead.`,
+When you are done, run the task's gate in the working copy (${T1C.gate}) and every validation the brief asks for. Return the structured report: what you built, each command and its result, the decisions you took, precisely what you could not verify locally, and questions for the lead. In files_changed list every path you created or changed, relative to the working copy.`,
     { label: 'impl:baseline-1c', phase: 'Implement', model: 'opus', effort: 'high', schema: REPORT }))
   log(`baseline-1c implementation: ${out.impl1c ? 'reported' : 'FAILED'}`)
 }
