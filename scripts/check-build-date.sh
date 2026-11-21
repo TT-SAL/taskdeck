@@ -9,8 +9,21 @@
 # cargo prints even when the script did not need to run again.
 #
 # Runs from any directory, on Linux, macOS and Git-Bash on Windows. Honours
-# CARGO_TARGET_DIR and cargo's own target-dir configuration.
+# CARGO_TARGET_DIR (a relative value is taken from the caller's directory, as
+# cargo would) and cargo's own target-dir configuration.
 set -euo pipefail
+
+# Make a relative target dir from the environment absolute against the
+# caller's directory before moving to the repository root. `pwd -W` gives the
+# Windows form under Git-Bash, which native cargo understands.
+caller="$(pwd -W 2>/dev/null || pwd)"
+for var in CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; do
+    value="${!var-}"
+    case "$value" in
+        "" | /* | [A-Za-z]:[\\/]* | \\\\*) ;;
+        *) export "$var=$caller/$value" ;;
+    esac
+done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
@@ -25,12 +38,30 @@ check() {
     cargo check --locked --no-default-features --lib --message-format=json "$@"
 }
 
-# Prints the BUILD_DATE the root package's build script emitted.
+# Prints the BUILD_DATE the root package's build script emitted, or nothing.
+# Cargo writes the root package's id as `path+file:///.../dir#task_deck@1.0.0`,
+# or as `path+file:///.../task_deck#1.0.0` when the directory is named after
+# the package. Never fails, so a missing date reaches the caller's fail().
 build_date() {
-    grep '"reason":"build-script-executed"' \
-        | grep '"package_id":"[^"]*#task_deck@' \
+    { grep '"reason":"build-script-executed"' \
+        | grep -E '"package_id":"[^"]*(#task_deck@|/task_deck#)' \
         | sed -n 's/.*\["BUILD_DATE","\([^"]*\)"\].*/\1/p' \
-        | tail -n 1
+        | tail -n 1; } || true
+}
+
+# build_date's own check, on made-up messages: both package-id forms are
+# found, another package's date is not, and no match prints nothing.
+self_test() {
+    local msg='{"reason":"build-script-executed","package_id":"%s","env":[["BUILD_DATE","%s"]]}\n'
+    local got
+    got="$(printf "$msg" 'path+file:///x/checkout#task_deck@1.0.0' 2001-01-01 | build_date)"
+    [ "$got" = 2001-01-01 ] || fail "build_date missed the name@version package id (got \"$got\")"
+    got="$(printf "$msg" 'path+file:///x/task_deck#1.0.0' 2002-02-02 | build_date)"
+    [ "$got" = 2002-02-02 ] || fail "build_date missed the bare-version package id (got \"$got\")"
+    got="$(printf "$msg" 'path+file:///x/task_deck/crates/panic-probe#0.0.0' 2003-03-03 | build_date)"
+    [ -z "$got" ] || fail "build_date took another package's date (got \"$got\")"
+    got="$(printf 'no messages\n' | build_date)"
+    [ -z "$got" ] || fail "build_date printed \"$got\" for no messages"
 }
 
 # expect_refused VALUE: the build must fail, and say why.
@@ -48,6 +79,9 @@ expect_refused() {
         echo "check-build-date:   refused as expected"
     fi
 }
+
+echo "check-build-date: build_date finds the root package's date"
+self_test
 
 expect_refused "abc"
 expect_refused ""

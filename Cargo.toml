@@ -5,6 +5,11 @@
 resolver = "3"
 members = ["crates/panic-probe"]
 default-members = ["."]
+# A standalone package unpacked under target/ (an older build for the legacy
+# fixtures, an attack round's copy of the tree) builds on its own instead of
+# being claimed by this workspace. Elsewhere in the checkout a nested package
+# must be a member, be excluded here, or carry its own [workspace] table.
+exclude = ["target"]
 
 [package]
 name = "task_deck"

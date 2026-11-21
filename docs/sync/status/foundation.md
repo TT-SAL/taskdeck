@@ -125,6 +125,9 @@ None so far.
 | What | Value | Where |
 |---|---|---|
 | Container | 4 CPUs, 15 GB RAM, 60 GB free, Rust 1.97.0, Node 22.23.5, Java 21, Gradle | this session |
+| Today's headless tests in the container | 264 passed, 1 ignored (`codec_bake_off`, already ignored); 5 min 53 s cold, about 3 min of it tests | `cargo test --locked --no-default-features --lib` |
+| Release build of `taskdeck-server` with `panic = "unwind"` and fat LTO | builds in 4 min 3 s; 9,240,728 bytes; `--version` prints the build date | container, commit `c7b3d07` |
+| Full CI matrix with the pin, the refresh and the unwinding profile | green: Linux headless, desktop on Windows, macOS and Ubuntu, emulators at API 26 and 36 | pull-request run on `c7b3d07` |
 
 ## Facts found along the way
 
@@ -140,6 +143,10 @@ None so far.
   Debug builds always behaved this way. `desktop` should decide whether the app wants a panic hook.
 - CI accepts `rust-toolchain.toml` as it is: the Linux job passed on the pinned toolchain with the
   old toolchain step still in place (run of commit `a743020`).
+
+- The root manifest is a workspace root with `exclude = ["target"]`. A Cargo package anywhere else
+  in the checkout must be a workspace member, be listed in `exclude`, or carry its own `[workspace]`
+  table (as `cargo fuzz init` writes). A tree unpacked under `target/` builds on its own.
 
 ## Open questions for the owner
 
