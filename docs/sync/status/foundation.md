@@ -25,7 +25,7 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 | 1c | CI: path filters at job level, aggregate `gate` job | todo | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
-| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted (1,804 lines, 162 clauses; its drafter was cut off in its final checks, a finishing pass is running); engine in progress; then device, bridge | `docs/sync/spec/seal.md`, `core.md`, `relay.md` |
+| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine in progress; then device, bridge | `docs/sync/spec/seal.md`, `core.md`, `relay.md` |
 | 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
@@ -169,6 +169,22 @@ Rulings on what the core draft raised (2026-11-21):
 - The snapshot JSON keeps today's names and shape. `core.md` §14.3 lists every difference: the
   inputs that were process globals, deterministic tie-breaks, block ids in place of indexes,
   canonical UTC text, and one new field, `notes_base`.
+
+Rulings on what the relay draft raised (2026-11-21):
+
+- **S21. The recovery tool may hold a read-only token it minted itself.** A recovery-signed
+  `mint_read_token` gives the recovery tool a backup-read token for topping up a restore when the
+  token inside the backup has been revoked by a rotation. "No relay token" (SYNC.md §5.5, ruling S3)
+  means the sheet carries none and the recovery identity never appends by token.
+- **S22. The create secret gates the create family**: `create`, and seeding a moved board on a new
+  relay. A new relay has no door for the board until the seed has run.
+- **S23. The relay counts appends, the client counts requests.** The 3,000-appends budget lives in
+  the author's row and costs no extra write; the 5,000-requests budget is kept by the client, since
+  counting requests at the relay would write a row per request. A member that floods the relay is
+  a compromised device and is answered by revoking it.
+- For the seal–relay review to settle: narrow the relay's share of the Genesis checks to what it can
+  verify without keys; cap a host at 255 bytes so it fits its one-byte length; record that an
+  identical repeat of a pairing slot post is answered again rather than refused.
 
 ## Deviations from the plan
 

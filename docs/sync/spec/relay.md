@@ -70,7 +70,7 @@ One object serves one board, named `env.BOARD.idFromName(<board_id as 32 lowerca
 - **RELAY-SHAPE-001** (relay) Every rule of this spec that decides a status, a response body, a socket message or a storage effect MUST be implemented once, in `relay-core.js`; `worker.js` and `standby.js` MUST call it and MUST NOT implement any such rule themselves, except reading the body under its deadline (§6.2 step 9) and the socket plumbing of §11.
 - **RELAY-SHAPE-002** (relay) `relay/package.json` MUST declare no `dependencies`, `optionalDependencies`, `peerDependencies` or `bundledDependencies`; its only `devDependencies` entry MUST be `wrangler` at an exact pinned version.
 - **RELAY-SHAPE-003** (relay) The relay code MUST import only `node:crypto` (for `createHash`, `createHmac`, `timingSafeEqual`), the platform globals `crypto.subtle` and `crypto.getRandomValues`, `cloudflare:workers` (in `worker.js` only), and `node:http`, `node:https`, `node:sqlite`, `node:fs` and `node:path` (in `standby.js` only).
-- **RELAY-SHAPE-004** (relay) No response of the relay MUST carry a `Content-Type` other than `application/json` or `application/octet-stream`, and none MUST carry any `Access-Control-` header.
+- **RELAY-SHAPE-004** (relay) A response of the relay MUST NOT carry a `Content-Type` other than `application/json` or `application/octet-stream`, and MUST NOT carry any `Access-Control-` header.
 - **RELAY-SHAPE-005** (relay) The relay code MUST NOT call any `console` method, write to any log, or emit analytics, and `relay/wrangler.toml` MUST set `[observability] enabled = false`.
 - **RELAY-SHAPE-006** (relay) `worker.js` MUST NOT call `fetch` or open any connection other than the call to the board's object stub.
 - **RELAY-SHAPE-007** (relay) The object MUST NOT call `setTimeout`, `setInterval` or `storage.setAlarm`, MUST NOT define an `alarm` handler, and MUST answer every request from the state at the time it handles it, never by waiting for a later event.
@@ -151,6 +151,10 @@ Every request body is binary, with a layout table in this spec; the relay contai
 |---|---|---|---|---|
 | `error` | string | required | a code of §19 | what went wrong |
 | `until` | integer | optional; present exactly for `relay/budget` and `relay/delete_budget` | ms since the epoch | when the budget resets: `(UTC day + 1) × 86,400,000` |
+| `index` | integer | optional; present exactly when one frame of a `seed-tail` or `restore_tail` request refused the whole request (§12.7, §12.9) | 0 to 255 | the 0-based position of that frame in the request |
+| `head` | object | optional; present exactly for `relay/not_next` | `{"seq": integer, "chain": hex32}` | the relay head (§7.3), so that a device whose earlier answer was lost learns where to resume |
+
+A client parses an error body strictly too: a field outside this table, or a field present where its row says it is absent, is a protocol error it reports as a relay bug.
 
 **Headers on every response.** `Cache-Control: no-store`, `X-TD-Relay: gate` when the front produced the response without calling the object, `X-TD-Relay: object` when the core produced it, and `Content-Type` as above. No other header is set by relay code (the platform may add its own).
 
@@ -197,7 +201,7 @@ The MAC input is `ctx("token")` (18 bytes) followed by the first 37 token bytes:
 | Event | `devices.gen` of the device | Effect on its tokens |
 |---|---|---|
 | registered by `create` (first device) or `register` (§12.3) | set to 1; a token with `gen = 1` is returned | the new token is valid |
-| registered by `seed` (§12.7) | set to 0 | none exists; the device logs in |
+| registered by `seed` (§12.7) | set to 0; the seed's signer: set to 1 | none exists, and the device logs in; the signer's token with `gen = 1` is returned by `seed` |
 | `login` succeeds (§10.3) | set to the requested value, which must be stored + 1 | every older token is invalid at once; sockets with an older `gen` are closed with 4003 |
 | `revoke` (§12.4) | stored + 1 | every token is invalid at once; the device's sockets are closed with 4003 |
 | `reinstate` (§12.5) | unchanged | tokens stay invalid (revoke moved `gen`); the device logs in |
@@ -286,6 +290,7 @@ The front runs these steps in order; the first that fails answers with its code 
 
 | Step | Check | On failure |
 |---|---|---|
+| 0 | the configuration is valid (§17.1; on the standby it was checked at start, §17.2) | `503 relay/misconfigured` |
 | 1 | method and path match a route of §10.1 (§4.1) | `404 relay/not_found` |
 | 2 | the query is allowed (§4.1) | `400 relay/bad_query` |
 | 3 | a route without a body: no `Transfer-Encoding` header and `Content-Length` absent or `0`. A route with a body: no `Transfer-Encoding` header and exactly one `Content-Length` header in decimal | `400 relay/unexpected_body`; `411 relay/length_required` |
@@ -300,7 +305,7 @@ The front runs these steps in order; the first that fails answers with its code 
 The deadline is 10 seconds of grace plus 1 second per 64 KiB: a 1 MiB blob part has 26 seconds, a full 16-frame batch 74 seconds. A test drives "too slowly" by declaring `Content-Length: 1000`, sending 10 bytes and then nothing: the front must answer `408 relay/slow` between 10,016 and 11,016 ms after the request, and the object must not have been called.
 
 - **RELAY-GATE-003** (relay) The front MUST run the steps of §6.2 in order and MUST answer with the code of the first failing step.
-- **RELAY-GATE-004** (relay) The front MUST NOT call the object for a request that fails any of steps 1 to 9 of §6.2, and every response to such a request MUST carry `X-TD-Relay: gate`.
+- **RELAY-GATE-004** (relay) The front MUST NOT call the object for a request that fails any of steps 0 to 9 of §6.2, and every response to such a request MUST carry `X-TD-Relay: gate`.
 - **RELAY-GATE-005** (relay) The front MUST refuse with `413 relay/too_large`, without reading the body, a request whose `Content-Length` exceeds the route's cap in §10.1.
 - **RELAY-GATE-006** (relay) The front MUST read the body to completion before calling the object, and MUST answer `408 relay/slow`, without calling the object, when the body is not complete within `deadline_ms` of §6.2.
 - **RELAY-GATE-007** (relay) The front MUST refuse with `400 relay/bad_body` a body whose received length differs from its `Content-Length`.
@@ -472,7 +477,7 @@ Every table except `log` and `parts` is `WITHOUT ROWID` with no secondary index,
 | `open` | `admin/fence` succeeds | §12.6 | `fenced` |
 | any | any other request | | unchanged |
 
-A request that its board's state does not allow is refused: on an empty board with `404 relay/no_board`; on a seeding board with `409 relay/seeding`; on a fenced board with `403 relay/fenced`; a `create` on a non-empty board with `409 relay/exists` (§10.2 says when a repeat succeeds instead).
+A request that its board's state does not allow is refused: on an empty board with `404 relay/no_board`; on a seeding board with `409 relay/seeding`; on a fenced board with `403 relay/fenced`; but a request with the create secret on an `open` or `fenced` board (`create`, `admin-nonce`, `admin/seed`) with `409 relay/exists` (§10.2 says when a `create` repeat succeeds instead). On a seeding board, `create` is `409 relay/seeding`.
 
 - **RELAY-OBJ-001** (relay) The object MUST allow in each board state only the routes the first table of §8.1 lists, and MUST refuse every other with the code §8.1 gives for that state.
 - **RELAY-OBJ-002** (relay) The board state MUST change only as the second table of §8.1 states, so that a `fenced` board never becomes `open` again.
@@ -499,9 +504,12 @@ The object reads `now()` once per request or socket message, at the start of its
 
 ### 8.4 Ordering, transactions and acknowledgements
 
-The object handles one request or socket message at a time between awaits; its only awaits are the signature verifications of a request, which run before its transaction. Every storage effect of a request runs in one `transaction` of the `Storage` interface (in the Worker `ctx.storage.transactionSync`), which first re-reads every row its checks depend on (SYNC.md §4.3). Nothing is sent before the transaction has committed. In the Worker the output gate holds the response until SQLite has confirmed the commit on 3 of 5 replicas (R3 §2.3); on the standby SQLite runs with `journal_mode = WAL` and `synchronous = FULL`, so a commit has reached the disk.
+The object handles one request or socket message at a time between awaits; its only awaits are the signature verifications of a request, which run before its transaction. Every storage effect of a request runs in one `transaction` of the `Storage` interface (in the Worker `ctx.storage.transactionSync`), which first re-reads every row its checks depend on (SYNC.md §4.3). Nothing is sent before the transaction has committed.
+
+**How checks and verifications interleave.** A request runs in three phases: (1) it parses its body and reads, outside any transaction, the keys its signature checks need (the author rows of its frames, the signer's row, the device row for a login); (2) it awaits every `verifyStrict` the request needs and keeps the results; (3) it runs its one transaction, which re-reads every row its checks depend on and evaluates the checks in the order its section lists, using the results of phase 2 at the step where each signature check stands (a key that changed between phase 1 and phase 3 fails that step). The code returned is that of the first failing step in the section's order, exactly as if the steps had run one after another. Where a section says a row is deleted "whatever follows" or "also when a later check fails" (the nonces of §10.3 and §12.1, the tries of §10.8, expired tickets and blobs), that write is part of this one transaction and is committed alone when a later step refuses the request. In the Worker the output gate holds the response until SQLite has confirmed the commit on 3 of 5 replicas (R3 §2.3); on the standby SQLite runs with `journal_mode = WAL` and `synchronous = FULL`, so a commit has reached the disk.
 
 - **RELAY-OBJ-006** (relay) Every request that writes MUST write all its rows in one transaction of the `Storage` interface, which MUST re-read every row its checks depend on after the last await of the request.
+- **RELAY-OBJ-009** (relay) A request whose checks include a signature verification MUST return the code of the first failing step in the order its section lists, and MUST commit no write other than those its section names as surviving a refusal, whichever phase of §8.4 detected the failure.
 - **RELAY-OBJ-007** (relay) The object MUST NOT send a response or socket message that reports a write before that write's transaction has committed.
 - **RELAY-OBJ-008** (relay) The standby MUST open every database with `PRAGMA journal_mode = WAL` and `PRAGMA synchronous = FULL`.
 
@@ -634,7 +642,7 @@ Each result starts with a status byte:
 | `slot-get` | GET | `/v1/b/{board}/pair/{tid}/{label}` | labels `a`, `c`, `d`: D + P; label `b`: T1 | 0 | 0 | yes | §10.8 |
 | `pair-close` | DELETE | `/v1/b/{board}/pair/{tid}` | T1 | 0 | 0 | yes | §10.8 |
 | `admin-nonce` | POST | `/v1/b/{board}/admin/nonce` | T1, D, C | 16 | 16 | yes | §12.1 |
-| `admin` | POST | `/v1/b/{board}/admin/{op}` | T1, D; and C for `{op}` = `seed` only | per operation, §12.1 | per operation | yes | §12 |
+| `admin` | POST | `/v1/b/{board}/admin/{op}` | per operation (§12.1 "Credentials"): `seed` C only; every other `{op}` T1, or T1 and D | per operation, §12.1 | per operation | yes | §12 |
 | `seed-tail` | POST | `/v1/b/{board}/seed/tail` | T1 | 1,049,610 | | yes | §12.7 |
 
 `slot-post` with label `a` and any route with an `{op}` outside the registry, a `{label}` outside the four, or a `{part}` above 63 do not match and are `404 relay/not_found`.
@@ -675,7 +683,7 @@ The relay cannot see that the Genesis item names the same first device; a mismat
 | `token` | string | required | the first device's token, `gen = 1` |
 | `door` | hex, 5 | required | the board's door (§5.3) |
 
-**Repeat.** A `create` on a non-empty board whose `log` row at seq 1 exists with `hash` equal to `H(frame)` and whose devices row `dev` exists with `role = 1`, `state = 1` and the request's `sign_pk`, is answered 200 with the same fields and a new token: `gen` of `dev` = stored + 1 (one row written). Any other `create` on a non-empty board is `409 relay/exists`, with no write. A lost response therefore costs nothing but a retry.
+**Repeat.** A `create` on an `open` board whose `log` row at seq 1 exists with `hash` equal to `H(frame)` and whose devices row `dev` exists with `role = 1`, `state = 1` and the request's `sign_pk`, is answered 200 with the same fields and a new token: `gen` of `dev` = stored + 1 (one row written). Any other `create` on a non-empty board is `409 relay/exists`, with no write. A lost response therefore costs nothing but a retry.
 
 - **RELAY-CREATE-001** (relay) `create` MUST run the checks of §10.2 in order and MUST write nothing when any fails.
 - **RELAY-CREATE-002** (relay) A successful `create` MUST store exactly the rows §10.2 lists, with the Genesis frame as the `log` row at seq 1.
@@ -799,15 +807,17 @@ A blob is the sealed bytes of `seal.md` §20, stored in parts of at most 1 MiB. 
 | 25 | `size` | 8 | u64 | the sealed length, 67 to 67,108,864 |
 | 33 | `sha256` | 32 | bytes | `H(sealed bytes)` |
 
-Checks, in order (each failure `400 relay/bad_blob` unless stated):
+The lazy deletions of §13.2 run first, in the request's transaction, and are kept whatever the checks decide. Checks, in order (each failure `400 relay/bad_blob` unless stated):
 
 1. The board is `open`.
 2. `size` from 67 to 67,108,864.
-3. By purpose: 1: `seq ≥ 64`, `seq ≡ 0 mod 64`, `seq ≤ head_seq`; 2: `1 ≤ seq ≤ head_seq`; 3: `seq = 1` and no blob of purpose 3 exists (else `409 relay/blob_exists`); 4: `seq = 0`.
+3. By purpose: 1: `seq ≥ 64`, `seq ≡ 0 mod 64`, `seq ≤ head_seq`; 2: `1 ≤ seq ≤ head_seq`; 3: `seq = 1` and no blob of purpose 3 with another `id` exists (else `409 relay/blob_exists`); 4: `seq = 0`.
 4. No `blobs` row with `id` exists; else `409 relay/blob_exists`.
-5. The lazy deletions of §13.2 run; then at most 3 incomplete blobs exist and the sum of `size` of all `blobs` rows plus `size` is at most 805,306,368 (768 MiB); else `409 relay/blob_quota`.
+5. Fewer than 3 incomplete blobs exist, and the sum of `size` of all `blobs` rows plus `size` is at most 805,306,368 (768 MiB); else `409 relay/blob_quota`.
 
 Effects: insert the `blobs` row with `slot` = 1 + the largest `slot` in `blobs` (1 when none), `author` = the token's `dev`, `parts = ceil(size / 1,048,576)`, `received = 0`, `complete = 0`, `at = now`. Response (200): `{"id": hex16, "parts": integer}`.
+
+**Repeat.** When step 4 finds a `blobs` row with this `id` whose `author` is the token's `dev` and whose `purpose`, `seq`, `size` and `sha256` equal the request's, the answer is 200 with the same response and no write other than the lazy deletions; the uploader then reads `blob-meta` and sends the parts it lacks. Any other existing `id` is `409 relay/blob_exists`.
 
 **`blob-put`** of part `i`: the body is the part's bytes. Checks: the blob exists (else `404 relay/no_blob`); its `author` is the token's `dev` (else `403 relay/forbidden`); `i < parts` (else `400 relay/bad_blob`); the body length is exactly `1,048,576` for `i < parts − 1` and `size − (parts − 1) × 1,048,576` for the last part (else `400 relay/bad_blob`). If the part is already stored: identical bytes give 200 with no write; different bytes `409 relay/part_conflict`. Otherwise, in one transaction: insert `parts` row `slot × 64 + i`; `received += 1`; when `received = parts`, set `complete = 1` and run the retention of §13.1. Response (200): `{"received": integer, "complete": boolean}`.
 
@@ -825,11 +835,12 @@ Effects: insert the `blobs` row with `slot` = 1 + the largest `slot` in `blobs` 
 | `received` | integer | required | |
 | `complete` | boolean | required | |
 
-**`blob-list`** answers `{"blobs": [...]}`: the objects of `blob-meta` for every complete blob, ordered by `purpose` ascending, then `seq` descending, then `at` descending, then `id` ascending; at most 64 objects (the retention of §13 keeps fewer).
+**`blob-list`** answers `{"blobs": [...]}`: the objects of `blob-meta` for every complete blob, ordered by `purpose` ascending, then `seq` descending, then `at` descending, then `id` ascending; only the first 64 objects in that order. Retention (§13) does not bound the count by 64 (each author's newest snapshot and two other blobs per author are kept), so a client looks up any blob a signed entry names by its id with `blob-meta`, never by its presence in the list.
 
 **`blob-get`** of part `i` of a complete blob answers the part's bytes (`application/octet-stream`). An unknown blob is `404 relay/no_blob`, an incomplete one `409 relay/blob_incomplete`, `i ≥ parts` `400 relay/bad_blob`.
 
 - **RELAY-BLOB-001** (relay) `blob-begin` MUST run the checks of §10.7 in order and MUST create the `blobs` row only when all pass.
+- **RELAY-BLOB-008** (relay) A `blob-begin` that repeats an existing blob's `id`, author, purpose, seq, size and `sha256` MUST be answered 200 with that blob's `id` and `parts` and MUST write no row other than the lazy deletions of §13.2.
 - **RELAY-BLOB-002** (relay) The relay MUST accept a part only from the blob's author, only with exactly the length §10.7 gives for its index, and MUST store each part index at most once, answering a different second upload with `409 relay/part_conflict`.
 - **RELAY-BLOB-003** (relay) The relay MUST mark a blob complete exactly when all its parts are stored, and MUST serve parts and list a blob only once it is complete.
 - **RELAY-BLOB-004** (relay) The relay MUST NOT decrypt, decompress or parse any blob part.
@@ -840,7 +851,7 @@ The relay carries the four slots of `seal.md` §17 between E (with its token) an
 
 **Expiry, checked lazily.** A ticket with `expires ≤ now` is treated as absent by every route and is deleted in the transaction of the request that finds it.
 
-**`pair-open`** (E). Request (100 bytes): `tid[16] ‖ slot A[84]`. Checks: the board is `open`; slot A is `label 0x41 ‖ role 0x45 ‖ u16 48 ‖ body[48] ‖ mac[32]` (else `400 relay/bad_slot`); delete expired tickets; no ticket `tid` exists (else `409 relay/ticket_exists`); fewer than 4 tickets exist (else `409 relay/ticket_cap`). Effect: insert `(tid, creator = token dev, expires = now + 600,000, tries = 0, a)`. Response (200): `{"expires": integer}`.
+**`pair-open`** (E). Request (100 bytes): `tid[16] ‖ slot A[84]`. Checks: the board is `open`; slot A is `label 0x41 ‖ role 0x45 ‖ u16 48 ‖ body[48] ‖ mac[32]` (else `400 relay/bad_slot`); delete expired tickets; no ticket `tid` exists (else the repeat below, or `409 relay/ticket_exists`); fewer than 4 tickets exist (else `409 relay/ticket_cap`). Effect: insert `(tid, creator = token dev, expires = now + 600,000, tries = 0, a)`. Response (200): `{"expires": integer}`. **Repeat:** when the existing unexpired ticket `tid` has `creator` = the token's `dev` and `a` equal to the request's slot A, the answer is 200 with its stored `expires` and no write other than the deletion of expired tickets.
 
 **Slot layouts the relay checks** (`seal.md` §17.4; it checks the label, role and length only):
 
@@ -861,16 +872,29 @@ In every case the total must equal `36 + body_len`.
 | `c` | T1, the ticket's `creator` | `b` present, `c` absent | else `409 relay/slot_order`; other device `403 relay/forbidden` |
 | `d` | T1, the ticket's `creator` | `c` present, `d` absent | else `409 relay/slot_order`; other device `403 relay/forbidden` |
 
-Order of checks: the board is `open`; the ticket exists and is unexpired (else `404 relay/no_ticket`); for label `b`, `tries += 1`, and when `tries` becomes 5 the ticket is deleted and the post refused with `409 relay/tries` (for tries 1 to 4 the new `tries` value is written even when a later check refuses the post); the slot layout (else `400 relay/bad_slot`); the progress rule above. Effect: store the slot. For label `b`, after commit the object sends the slot notice (§11.4) to the creator's sockets. Response (200): `{}`.
+Order of checks:
+
+1. The board is `open`.
+2. The ticket exists and is unexpired (else `404 relay/no_ticket`; an expired one is deleted).
+3. For labels `c` and `d`: the token's `dev` is the ticket's `creator` (else `403 relay/forbidden`).
+4. For label `b`: `tries += 1`; when `tries` becomes 5 the ticket is deleted and the post refused with `409 relay/tries`. For tries 1 to 4 the new `tries` value is written even when a later step refuses the post.
+5. The slot layout of the table above (else `400 relay/bad_slot`).
+6. **Repeat:** the label is already stored with exactly the posted bytes: answer 200 `{}`, storing nothing more (for `b` the try of step 4 stays counted), and send no notice.
+7. The progress rule of the table (else `409 relay/slot_order`).
+
+Effect: store the slot. For label `b`, after commit the object sends the slot notice (§11.4) to the creator's sockets. Response (200): `{}`.
 
 **What counts as a try.** Every slot-B post that reaches the object for an existing, unexpired ticket, stored or refused. Tries 1 to 4 are examined, and the first well-formed one is stored; the fifth burns the ticket. So a code holder racing N, or N repeating a post whose answer was lost, has at most four attempts in all. A wrong proof never reaches the object (§6.2 step 7). A slot read is not a try.
 
 **`slot-get`**: N reads `a`, `c`, `d` with the door and the proof; E reads `b` with its token as the ticket's creator (else `403 relay/forbidden`). The ticket must exist and be unexpired (else `404 relay/no_ticket`); an absent slot is `404 relay/slot_empty`; a present one is answered with its bytes (`application/octet-stream`). N polls for C and D; E is told of B on its socket and otherwise polls.
 
-**Single use.** Each label is stored at most once, so one ticket pairs at most one slot B. The ticket lives until it expires, its creator closes it (`pair-close`, response `{}`), or the fifth try. Reading D does not delete it, so a lost response can be retried.
+**Single use.** Each label is stored at most once, so one ticket pairs at most one slot B; a repeat of the identical bytes is answered as if it had been stored now, so a lost answer can be retried, and any other second post is `409 relay/slot_order`. The ticket lives until it expires, its creator closes it, or the fifth try. Reading D does not delete it, so a lost response can be retried.
+
+**`pair-close`** (E): the board is `open`; the ticket exists and is unexpired (else `404 relay/no_ticket`); the token's `dev` is its `creator` (else `403 relay/forbidden`). Effect: delete the ticket. Response (200): `{}`. It is the `DeleteTicket{tid}` effect of `seal.md` §17.10.
 
 - **RELAY-PAIR-001** (relay) The relay MUST treat a ticket whose `expires` is at or before the relay clock as absent, and MUST delete it in the transaction of the request that found it.
 - **RELAY-PAIR-002** (relay) The relay MUST store each slot label of a ticket at most once, only in the order A, B, C, D, and only from the credential §10.8 assigns to that label.
+- **RELAY-PAIR-007** (relay) A `pair-open` or `slot-post` that repeats exactly the bytes already stored for that ticket and label, from the credential allowed for it, MUST be answered 200 without storing anything new, and any other post of a stored label MUST be refused with `409 relay/slot_order` (`pair-open`: `409 relay/ticket_exists`).
 - **RELAY-PAIR-003** (relay) The relay MUST count every slot-B post that reaches the object for an unexpired ticket as a try, and MUST delete the ticket and refuse the post with `409 relay/tries` when the count reaches 5.
 - **RELAY-PAIR-004** (relay) The relay MUST check each slot's label byte, role byte and length as the table of §10.8 states and MUST NOT check or strip its MAC.
 - **RELAY-PAIR-005** (relay) The relay MUST NOT store a ticket proof and MUST keep at most 4 tickets per board.
@@ -964,15 +988,15 @@ The client's first message must be hello; the object answers with welcome. Until
 | fence part | 0 or `1 + h + 9` | | when `has_fence = 1`: `vb8(host) ‖ door[5] ‖ u32 home_gen` from the board row |
 | | **93 + fence part** | | |
 
-**On hello**, in order: if the attachment already has a session, or the message is not exactly 21 bytes, close with 4004. Otherwise, for every other socket tagged with the same `dev`:
+**On hello**, in order: if the attachment already has a session, or the message is not exactly 21 bytes, close with 4004. Otherwise, for every other socket tagged with the same `dev` that has a session (a socket that has not said hello yet is left alone; it is handled by these steps when it says hello):
 
-1. if it has no session yet, or the same session as this hello: close it with 4002 (a reconnect of the same process);
+1. if it has the same session as this hello: close it with 4002 (a reconnect of the same process);
 2. otherwise: send it `displaced` with this session, close it with 4001, and send this socket `second` with that socket's session.
 
-Then store `session`, `features` and `ready = true` in the attachment and send the welcome. So a device has at most one live socket, a reconnect of one process is silent, and two processes sharing one identity are reported to both ends (V2-21, SYNC.md §4.3). What a client does with `second` and `displaced` is `engine.md`'s.
+Then store `session`, `features` and `ready = true` in the attachment and send the welcome. So a device has at most one live socket, a reconnect of one process is silent, and two processes sharing one identity are reported to both ends whichever of them says hello first (V2-21, SYNC.md §4.3). What a client does with `second` and `displaced` is `engine.md`'s. Bits of `features` the relay does not know are stored and otherwise ignored.
 
 - **RELAY-SOCK-002** (relay) The object MUST close with code 4004 a socket whose first message is not a well-formed hello, or that sends a second hello.
-- **RELAY-SOCK-003** (relay) On a hello, the object MUST close every other socket of the same device as the steps of §11.3 state, sending `displaced` and `second` exactly when the two sessions differ, so that at most one socket per device has completed hello.
+- **RELAY-SOCK-003** (relay) On a hello, the object MUST close every other socket of the same device that has completed hello, as the steps of §11.3 state, sending `displaced` and `second` exactly when the two sessions differ, so that at most one socket per device has completed hello; it MUST NOT close a socket that has not yet said hello because of another socket's hello.
 - **RELAY-SOCK-004** (relay) The object MUST NOT send any message other than the answers of §11.3 to a socket whose attachment has `ready = false`.
 - **RELAY-SOCK-005** (relay) The object MUST NOT send a socket message type whose feature bit the socket's hello did not set, other than the types of §11.3.
 
@@ -1004,7 +1028,7 @@ Between events the object hibernates; the attachment (§11.2) and SQLite are all
 | Code | Sent when | The client |
 |---|---|---|
 | 4001 | another process of the same device said hello (§11.3) | does not reconnect on its own; `engine.md` decides |
-| 4002 | the same session reconnected, or an older socket never said hello | nothing: it is already on the new socket |
+| 4002 | the same session said hello on a newer socket | nothing: it is already on the new socket |
 | 4003 | the device was revoked, or a login raised its generation | logs in again (or stops, when revoked) |
 | 4004 | protocol violation | reconnects with backoff; a repeat is a bug to report |
 | 1009 | message too big | as 4004 |
@@ -1057,7 +1081,7 @@ An admin operation changes what the relay will accept, or deletes what it holds.
 |---|---|---|
 | A1 | the envelope's lengths add up to the body; `args` has the registry layout and width for `op` (counts within §20); `extra` has the layout of the table | `400 relay/bad_body`; `400 relay/bad_args` |
 | A2 | the board state allows `op`: `seed` on an empty or seeding board, every other `op` on an `open` one | `404 relay/no_board`, `409 relay/seeding`, `403 relay/fenced`, `409 relay/exists` (a `seed` on an open or fenced board) |
-| A3 | the credential: with a role-1 token, `signer` is the token's `dev` or a role-2 row; with the door, `signer` is a role-2 row; the create secret only for `seed` | `403 relay/forbidden` |
+| A3 | the credential is one the "Credentials" column allows for `op` (the gate has refused any other form, §6.2 step 6); with a role-1 token, `signer` is the token's `dev` or a role-2 row; with the door, `signer` is a role-2 row; `seed` only with the create secret, and the create secret only for `seed` | `403 relay/forbidden` |
 | A4 | a `nonces` row with this `nonce`, `purpose = 2`, `dev = signer` and `at ≥ now − 120,000`; it is deleted now, whatever follows | `401 relay/no_nonce` |
 | A5 | the signer's row (for `seed`, its entry in `args`) exists, is current, and has a role allowed by the "Signer must be" column | `403 relay/not_signer` |
 | A6 | `verifyStrict(signer.sign_pk, admin message, sig)`, the admin message being `seal.md` §16.2's first table with `op` the path's operation name | `401 relay/bad_admin_sig` |
@@ -1135,7 +1159,7 @@ Effects, in one transaction: the append (outcome `new`; a `dup` stores nothing);
 **After a lost response.** A fenced board refuses `admin-nonce` and every admin request with `403 relay/fenced`, so a `fence` is never repeated. A device whose `fence` answer was lost reads `hello`: when `state` is `"fenced"` and `fence` equals its arguments, its fence took effect (`engine.md`).
 
 - **RELAY-FENCE-001** (relay) A successful `fence` MUST set the board state to fenced with the host, door and home generation of its arguments, in the same transaction as the append of its frame when one is carried.
-- **RELAY-FENCE-002** (relay) On a fenced board the object MUST refuse every append, slot post, blob upload, ticket, seed tail, admin nonce and admin operation with `403 relay/fenced`, and MUST keep answering `caps`, `login-nonce`, `login`, `hello`, `socket`, `read`, `blob-list`, `blob-meta` and `blob-get`.
+- **RELAY-FENCE-002** (relay) On a fenced board the object MUST refuse with `403 relay/fenced` every request with a token or the door to a route other than `login-nonce`, `login`, `hello`, `socket`, `read`, `blob-list`, `blob-meta` and `blob-get` (among them every append over HTTPS or a socket, `blob-begin`, `blob-put`, every pairing route, `seed-tail`, `admin-nonce` and every admin operation), and MUST keep answering those eight with the effects of their sections; a request with the create secret is refused with `409 relay/exists` (§10.2, §12.1).
 
 ### 12.7 `seed` and `seed-tail`
 
@@ -1143,7 +1167,7 @@ Seeds an empty relay after a re-home: the device set, the newest acknowledged sn
 
 `args` (`seal.md` §16.2): `u32 home_gen ‖ u64 first_seq ‖ chain_before[32] ‖ u64 last_seq ‖ chain_last[32] ‖ blob_id[16] ‖ u16 n ‖ n × (dev[16] ‖ sign_pk[32] ‖ u8 role ‖ u8 status ‖ u64 last_ctr)`.
 
-Meanings this spec fixes: `first_seq` is the seq of the first tail frame; `chain_before = C_{first_seq − 1}`; `last_seq` the last tail seq (`first_seq − 1` for no tail) and `chain_last = C_{last_seq}`; `blob_id` names the snapshot the seeding device will upload (informational; the relay does not reserve it); each entry's `last_ctr` is that author's counter at `first_seq − 1`, before the tail, so the relay checks the tail's counters as they arrive.
+Meanings this spec fixes: `first_seq` is the seq of the first tail frame; `chain_before = C_{first_seq − 1}`; `last_seq` the last tail seq (`first_seq − 1` for no tail) and `chain_last = C_{last_seq}`; `blob_id` names the snapshot the seeding device will upload (informational; the relay does not reserve it); each entry's `last_ctr` is that author's counter at `first_seq − 1`, before the tail, so the relay checks the tail's counters as they arrive. The seeded set is every device and recovery identity of the membership at `last_seq` (after the whole tail), each with its `role` and its `status` there: a device added inside the tail is listed with `last_ctr = 0`, a device revoked inside the tail with `status = 2`, a recovery identity retired inside the tail with `status = 2`. The new relay then accepts appends after the tail from exactly the authors that are current at its end. Members revoked before `first_seq` may be omitted unless they author a tail frame; a tail frame whose author is not listed is refused (`relay/unknown_author`), and the seeding device re-seeds with a complete set.
 
 Checks (A7), in order, each failing with `400 relay/bad_args`:
 
@@ -1197,11 +1221,14 @@ Checks, in order:
 
 Effects, in one transaction: delete every `log` row with `lo ≤ seq < hi` whose seq is not a `keep_seq` (`d` rows); `compact_floor = hi`; `compact_snap` = the chosen snapshot's id; `del_day` = today, `del_count` = the used count + `d`; delete every blob of purpose 3 with its parts (§13.3). Response (200): `{"deleted": d, "floor": hi, "more": hi < below_seq}`. A device repeats the request on a later day while `more` is true (`engine.md`).
 
+**Skip targets (ruling S15).** The relay cannot see which frames a later `Skip` may name, so it guarantees the one thing it can: a `log` row at or above `purge_floor` is deleted only by a signed `compact` that puts it below `below_seq` and leaves it out of `keep_seq`, or by a re-seed of an unfinished seed (§12.7); purge deletes only below `purge_floor`, and `seal.md` §13.6 already refuses a Skip target below `purge_seq`. Every other row at or above `purge_floor` stays readable, and a device that lacks a target frame `t` fetches it with `read` (`after = t − 1`, `limit = 1`; the entry returned has seq `t` exactly when the frame is held). So the floor of ruling S15 holds at the relay exactly when every compacting device sends `below_seq` no higher than that floor or lists the frames above it as `keep_seq`; `engine.md` owns the floor and that duty (§22).
+
 - **RELAY-COMPACT-001** (relay) `compact` MUST run the seven checks of §12.8 in order and MUST delete nothing unless all pass.
 - **RELAY-COMPACT-002** (relay) `compact` MUST delete only `log` rows with `max(compact_floor, purge_floor) ≤ seq < hi` that are not named as `keep_seq`, and MUST then set `compact_floor` to `hi`.
 - **RELAY-COMPACT-003** (relay) `compact` MUST refuse a request whose newest deleted candidate seq `hi − 1` has an `at` younger than 31,536,000,000 ms with `409 relay/too_recent`.
 - **RELAY-COMPACT-004** (relay) `compact` MUST record the snapshot it relied on in `compact_snap`, and the retention of §13 MUST NOT delete that snapshot while it is recorded there.
 - **RELAY-COMPACT-005** (relay) Compaction and purge together MUST delete at most 5,000 `log` rows per board per UTC day of the relay clock.
+- **RELAY-COMPACT-006** (relay) The object MUST NOT delete a `log` row at or above `purge_floor` except by a `compact` whose `below_seq` is above that row's seq and whose `keep_seq` list does not name it, or by the replacement of an unfinished seed (§12.7).
 
 ### 12.9 `restore_tail`
 
@@ -1209,7 +1236,7 @@ After a plain relay rollback, the most advanced device re-uploads frames at thei
 
 `args = u64 first_seq ‖ u32 n ‖ n × frame_hash[32]` (`n` from 1 to 64). `extra = chain_before[32] ‖ n × (u32 len ‖ frame)`, the frames in seq order, their lengths summing to at most 1,048,576. `chain_before` is the client's `C_{first_seq − 1}`; it is not signed, because it only lets the relay refuse a client that disagrees with its head.
 
-Checks, in order: `first_seq = head_seq + 1` (else `409 relay/not_next`); `chain_before = head_chain` (else `409 relay/chain_mismatch`); for each frame `i` in order: `H(frame_i) = frame_hash_i` (`400 relay/frame_mismatch`); P1 to P3 of §9.3; an author row exists, of any role and state (`400 relay/unknown_author`); `verifyStrict` (`400 relay/bad_signature`); `ctr` = the author's `last_ctr` + 1 counting earlier frames of this request (`409 relay/gap` above, `409 relay/conflict` below). Any failure refuses the whole request with `index` and writes nothing.
+Checks, in order: `first_seq = head_seq + 1` (else `409 relay/not_next`); `chain_before = head_chain` (else `409 relay/chain_mismatch`); for each frame `i` in order: `H(frame_i) = frame_hash_i` (`400 relay/frame_mismatch`); P1 to P3 of §9.3; an author row exists, of any role and state (`400 relay/unknown_author`); `verifyStrict` (`400 relay/bad_signature`); `ctr` = the author's `last_ctr` + 1 counting earlier frames of this request (`409 relay/gap` above, `409 relay/conflict` below). A failing frame refuses the whole request, with its `index` in the error body (§4.2); a refused `restore_tail` writes nothing but the nonce deletion of A4.
 
 Effects, in one transaction: store every frame as §9.4 T5, without the budget; each author row written once. After commit: push. Response (200): `{"head": {"seq": integer, "chain": hex32}}`.
 
@@ -1241,6 +1268,8 @@ From step 1 on, no row below `purge_floor` is ever served (RELAY-STORE-005), so 
 
 Minted per writer and generation, revoked with that device and at every rotation (SYNC.md §5.2, V1-2). The recovery tool, holding no token, mints one for the recovery identity itself (`dev = dev_R`), which is how it reads with a recovery signature (ruling S4).
 
+This keeps ruling S3: the recovery identity never holds a device token. It never logs in, its `devices` row keeps `gen = 0`, no route accepts a role-1 token for it, and its frames are accepted because of their signatures (§9.3), never because of a token. A backup-read token minted for `dev_R` is the role-2 credential of §5.1: it reaches only the read routes of §6.3, is revoked with every other backup-read token at each rotation (§5.2), and exists only because a recovery signature on `mint_read_token` asked for it, which is ruling S4's "recovery-signed read".
+
 **`mint_read_token`**, `args = dev[16] ‖ u32 epoch`. Checks: `dev` equals the signer (else `403 relay/not_signer`); `epoch ≥ 1` (else `400 relay/bad_args`); `epoch ≥ read_epoch` (else `409 relay/stale_epoch`); the row's `gen < 2^32 − 1` (else `409 relay/gen_exhausted`). Effects: if `epoch > read_epoch`, every `read_tokens` row with a lower `epoch` gets `state = 2` and `read_epoch = epoch`; then the row of `dev` gets `gen` = stored + 1 (1 if new), `epoch`, `state = 1`. Response (200): `{"token": string, "gen": integer}` with a role-2 token.
 
 **`revoke_read_token`**, `args = dev[16]`. Checks: a `read_tokens` row for `dev` exists (else `409 relay/target`). Effect: `state = 2`. Response (200): `{}`.
@@ -1259,7 +1288,7 @@ Registers a new recovery identity in the same call that appends the `K`-shape en
 
 Checks, in order: `dev_R = H(ctx("recovery-dev") ‖ board_id ‖ sign_pk)[0..16]` (else `400 relay/bad_args`); `dev_R` and `sign_pk` are in no row (else the repeat below, or `409 relay/duplicate_key`); fewer than 64 role-2 rows (else `409 relay/device_cap`); the frame checks of §12.3 steps 3 and 4.
 
-Effects, in one transaction: the append (frame mode); every role-2 row with `state = 1` gets `state = 2` (retired: its later frames are refused at P6); insert the new row (`role = 2`, `state = 1`, `gen = 0`, `last_ctr = 0`, `last_seq = 0`); every `read_tokens` row `state = 2` (the entry rotates). After commit: push (frame mode). Response (200): `{"seq": integer, "chain": hex32}`. **Repeat:** a row for `dev_R` with `role = 2`, `state = 1` and the same `sign_pk`, with the frame's outcome `dup` (or step 4 of §12.3 passing in seq mode), is answered 200 with no write.
+Effects, in one transaction: the append (frame mode); every role-2 row with `state = 1` gets `state = 2` (retired: its later frames are refused at P6); insert the new row (`role = 2`, `state = 1`, `gen = 0`, `last_ctr = 0`, `last_seq = 0`); every `read_tokens` row `state = 2` (the entry rotates). After commit: push (frame mode). Response (200): `{"seq": integer, "chain": hex32}`. **Repeat:** a row for `dev_R` with `role = 2`, `state = 1` and the same `sign_pk`, with the frame's outcome `dup` (or step 4 of §12.3 passing in seq mode), is answered 200 with the stored seq and chain and no write other than the nonce deletion of A4.
 
 - **RELAY-RECKEY-001** (relay) `recovery_register` MUST check that `dev_R` derives from `sign_pk` and the board id (SEAL-KEY-006), and MUST append its frame, retire the previous current recovery identity and insert the new one in one transaction.
 
@@ -1277,7 +1306,7 @@ In the transaction of the `blob-put` that completes a blob:
 
 ### 13.2 When a blob begins
 
-In the transaction of every `blob-begin`, before its checks of size and count (§10.7 step 5): delete every incomplete blob with `at ≤ now − 3,600,000`, and every complete purpose-2 blob with `at ≤ now − 3,600,000`. A pairing takes at most 10 minutes (`seal.md` §17.11), so an hour covers N's download with room to retry.
+In the transaction of every `blob-begin`, before its checks (§10.7): delete every incomplete blob with `at ≤ now − 3,600,000`, and every complete purpose-2 blob with `at ≤ now − 3,600,000`. A pairing takes at most 10 minutes (`seal.md` §17.11), so an hour covers N's download with room to retry.
 
 ### 13.3 Compaction and purge
 
@@ -1341,7 +1370,7 @@ Every response the relay's own code produces carries `X-TD-Relay` (§4.2), so a 
 When a storage call throws inside a transaction (the platform's rows-written limit, or a full database), the core rolls the transaction back and answers `507 relay/storage_refused`. Any other exception escaping the core in the Worker makes the object call throw, and the Worker answers `503 relay/object_unavailable`.
 
 - **RELAY-BUDGET-003** (relay) When a storage call throws during a request, the core MUST roll back the request's transaction and answer `507 relay/storage_refused`, and the front MUST answer `503 relay/object_unavailable` when the object call itself throws.
-- **RELAY-CLIENT-002** (device) A client MUST classify every failed exchange with the relay into exactly one case of the table of §14.5, by the presence of `X-TD-Relay`, the status and the code, and MUST act as that row states.
+- **RELAY-CLIENT-002** (device) A client MUST classify every exchange with the relay that matches a row of the table of §14.5 into exactly that row, by the presence of `X-TD-Relay`, the status and the code, and MUST act as that row states; every other relay answer it MUST handle by its code (§19).
 - **RELAY-CLIENT-003** (device) A client MUST NOT delete local data or keys, or forget a token, because of any relay answer or the lack of one (V2-21), except that it replaces a token after a successful login.
 
 ## 15. Capabilities and the standby
@@ -1393,11 +1422,14 @@ Rows written are exact; rows read are upper bounds (the platform counts rows sca
 | append with `f` new frames by `a` authors (the rest `dup` or stopped) | `2f + a` | 3 + 3 × frames in the batch |
 | append whose frames are all `dup`, `conflict`, `gap` or refused | 0 | 3 + 3 × frames in the batch |
 | `blob-begin` | 1 + Σ(1 + `P`) over blobs cleaned up | 2 + `B` |
+| `blob-begin` repeat | Σ(1 + `P`) over blobs cleaned up | 2 + `B` |
 | `blob-put` (part already stored, identical) | 0 | 3 |
 | `blob-put` | 2 (part, blob row) + Σ(1 + `P`) over blobs deleted on completion | 3 + `B` |
 | `blob-list`, `blob-meta`, `blob-get` | 0 | 2 + `B` |
 | `pair-open` | 1 + `x` | 2 + 4 |
+| `pair-open` repeat | `x` | 2 + 4 |
 | `slot-post`, `pair-close`, fifth try | 1 | 3 |
+| `slot-post` repeat of a stored slot | 1 for label `b` (the try); 0 for `c` and `d` | 3 |
 | `slot-get` | 0 (1 if it deletes an expired ticket) | 3 |
 | `register` (frame mode) | 5 (nonce, log row and index, signer row, new device) | 8 |
 | `register` (seq mode) | 2 | 6 |
@@ -1409,10 +1441,11 @@ Rows written are exact; rows read are upper bounds (the platform counts rows sca
 | `compact` | 2 + 2`d` + Σ(1 + `P`) over genesis blobs | 8 + `B` + `d` + (`hi − lo`) |
 | `restore_tail` | 1 + `2f + a` | 5 + 3`f` |
 | `purge` | 2 + `r` + 2`d` + Σ(1 + `P`) over deleted blobs | 5 + `B` + 256 + `d` |
-| `mint_read_token` | 2 + `r` | 4 + 256 |
+| `mint_read_token` | 2 + `r` (nonce, the writer's row); 3 + `r` when it raises `read_epoch` (the board row too) | 4 + 256 |
 | `revoke_read_token` | 2 | 4 |
 | `recovery_register` (frame mode) | 6 + `r` (nonce, log row and index, signer row, old and new recovery rows) when a device signs; 5 + `r` when the retiring recovery identity signs (its row is written once) | 10 + 64 |
 | `recovery_register` (seq mode) | 3 + `r` (nonce, old and new recovery rows) | 8 + 64 |
+| `recovery_register` repeat | 1 (the nonce) | 10 + 64 |
 | any admin request refused after A4 | 1 (the nonce) | 4 |
 
 - **RELAY-ROWS-001** (relay) Every operation MUST write exactly the rows the table of §16.1 states for it on the Worker's platform counters and on the suite's counting storage, and MUST read at most the rows it states.
@@ -1511,7 +1544,7 @@ HTTP refusals carry the JSON body of §4.2; per-frame refusals are results of §
 | `relay/bad_proof` | ticket proof does not match `tid` (403; gate) | §6.2 step 7 | N re-enters the code |
 | `relay/slow` | body not complete within its deadline (408; gate) | §6.2 step 9 | retry with backoff |
 | `relay/object_unavailable` | the object call threw (503; gate) | §6.2 step 10, §14.5 | as unreachable (§14.5) |
-| `relay/misconfigured` | invalid relay configuration (503; gate) | §17.1 | as unreachable; the owner fixes the deploy |
+| `relay/misconfigured` | invalid relay configuration (503; gate) | §6.2 step 0, §17.1 | as unreachable; the owner fixes the deploy |
 | `relay/no_push` | the standby has no socket (501; gate) | §15.2 | poll |
 | `relay/no_board` | the board does not exist here (404) | §8.1 | check the relay address |
 | `relay/seeding` | the board is being seeded (409) | §8.1, §12.7 | retry later |
@@ -1542,24 +1575,24 @@ HTTP refusals carry the JSON body of §4.2; per-frame refusals are results of §
 | `relay/target` | the target or seq range is not allowed in the relay's state (409) | §12.4, §12.5, §12.7, §12.8, §12.10, §12.11 | re-read state; usually already done |
 | `relay/last_device` | the revocation would leave no current device (409) | §12.4 | refuse in the UI (ruling S14) |
 | `relay/home_gen` | the fence's home generation is not above the stored one (409) | §12.6 | a client bug |
-| `relay/not_next` | the tail does not start at the relay head + 1 (409) | §12.7, §12.9 | re-read the head; a fork means a re-home |
+| `relay/not_next` | the tail does not start at the relay head + 1 (409, with `head`) | §12.7, §12.9 | compare `head` with its own chain: equal means an earlier request landed, so resume after it; a fork means a re-home |
 | `relay/chain_mismatch` | the chain does not extend the relay's, or the seed tail ends on another chain (409) | §12.7, §12.9 | restore impossible: re-home, or re-seed |
 | `relay/no_snapshot` | no qualifying snapshot for the compaction (409) | §12.8 | upload or wait for an acknowledged snapshot |
 | `relay/too_recent` | entries younger than 365 days by the relay clock (409) | §12.8 | retry later with a lower bound |
 | `relay/delete_budget` | 5,000 deletions already today (429, with `until`) | §12.8, §14.2 | retry on the next UTC day |
 | `relay/stale_epoch` | a read token for an epoch below the relay's (409) | §12.11 | mint for the current epoch |
 | `relay/bad_blob` | blob arguments, part index or part length wrong (400) | §10.7 | a client bug |
-| `relay/blob_exists` | a blob with this id, or a second genesis snapshot, exists (409) | §10.7 | draw a new id; or nothing |
+| `relay/blob_exists` | a blob with this id but other fields, or a second genesis snapshot, exists (409) | §10.7 | draw a new id; or nothing |
 | `relay/blob_quota` | too many incomplete blobs or too many bytes (409) | §10.7 | retry after an hour |
 | `relay/no_blob` | no such blob (404) | §10.7 | the blob was deleted: use another snapshot |
 | `relay/blob_incomplete` | the blob is not complete (409) | §10.7 | wait for the uploader |
 | `relay/part_conflict` | a different part with this index is stored (409) | §10.7 | a client bug: start a new blob |
 | `relay/bad_slot` | slot label, role or length wrong (400) | §10.8 | a client bug |
-| `relay/ticket_exists` | the ticket id is registered (409) | §10.8 | draw a new code |
+| `relay/ticket_exists` | the ticket id is registered with another creator or slot A (409) | §10.8 | draw a new code |
 | `relay/ticket_cap` | 4 tickets are open (409) | §10.8 | wait 10 minutes |
 | `relay/no_ticket` | no such ticket, or it expired (404) | §10.8 | pair again |
 | `relay/tries` | the fifth slot-B post burned the ticket (409) | §10.8 | pair again with a new code |
-| `relay/slot_order` | the slot is already posted, or posted before its predecessor (409) | §10.8 | abort the pairing (`seal.md` §17.10) |
+| `relay/slot_order` | the slot is already posted with other bytes, or posted before its predecessor (409) | §10.8 | abort the pairing (`seal.md` §17.10) |
 | `relay/slot_empty` | the slot is not posted yet (404) | §10.8 | poll again |
 | `relay/bad_message` | a malformed socket message (400; then close 4004) | §11.4 | a client bug |
 | `relay/storage_refused` | the platform refused a write (507) | §14.5 | §14.5 |
@@ -1659,14 +1692,18 @@ Wycheproof `ed25519_test.json` and `seal`'s `seal-signatures.json`, `seal-frame.
 
 **`seal.md`.**
 - Requires: the frame layout and signature (SEAL-FRAME-001 to SEAL-FRAME-003), the login message (SEAL-SIG-001), the admin message and its registry of operation names and `args` layouts (SEAL-SIG-003, SEAL-SIG-004), the chain (SEAL-CHAIN-001), `board_id` and `dev_R` derivations (SEAL-KEY-005, SEAL-KEY-006), the ticket id (SEAL-PAIR-001), the slot layouts (`seal.md` §17.4), the host and origin forms (`seal.md` §5.4) and Crockford base32 (`seal.md` §5.2). It uses only registered context strings: `frame`, `login`, `admin`, `chain`, `board`, `recovery-dev`, `pair-tid`, `token`, `door`; it registers none.
-- Requires: SEAL-GEN-007, SEAL-GEN-008 and SEAL-GEN-010 name `relay` as an owner; this spec realises them as RELAY-GEN-002, RELAY-GEN-003 and RELAY-GEN-009.
+- Requires: the clauses of `seal.md` that name `relay` as an owner, realised here as follows: SEAL-GEN-007 by RELAY-GEN-002; SEAL-GEN-008 by RELAY-GEN-003; SEAL-GEN-010 by RELAY-GEN-009 and RELAY-GEN-010; SEAL-CTX-001 by using only `ctx(...)` of the registry (§5, §9.3, §10.2); SEAL-ENC-005 by the login message of §10.3 with `RELAY_ORIGIN`; SEAL-KEY-005 and SEAL-KEY-006 by §10.2 and §12.12; SEAL-FRAME-001 to SEAL-FRAME-003 by §9.3 P1 and P7; SEAL-CHAIN-001 by RELAY-STORE-003; SEAL-SIG-001 by RELAY-LOGIN-003; SEAL-SIG-003 and SEAL-SIG-004 by RELAY-ADMIN-003 and §12.1 A1; SEAL-PAIR-001 by §6.2 step 7.
+- Requires: SEAL-MEM-004 names `relay` as an owner, but a keyless relay can check only its frame-level part: `dev = dev_R` from the supplied `rsign_pk`, `ctr = 1`, the signature under `rsign_pk`, and `board_id` from `rsign_pk` and `salt` (§10.2). The epoch, the opening under `K_entry,1`, `based_on` and the Genesis item lie inside `body`, which the relay never reads (RELAY-GEN-004). I assume `seal.md` narrows the relay's share of SEAL-MEM-004 to those four checks (or drops `relay` from its owners); until then stage `relay` cites it only for them.
 - I assume `seal.md` accepts, without a change to its bytes, these meanings this spec gives to its registry (and ask that its "Sent with" column say so): `register` and `recovery_register` may name an entry already stored, by `seq` in the unsigned `extra`, after a restore tail (§12.3, §12.12); `fence` carries its `Fence` frame in the same call or none (§12.6); `seed`'s per-device `last_ctr` is the author's counter at `first_seq − 1` and `blob_id` is informational (§12.7); `restore_tail`'s `chain_before` travels unsigned beside the arguments (§12.9); `mint_read_token` may be signed by the recovery identity with `dev = dev_R` (§12.11).
-- I assume `seal.md` §17.10's `RegisterTicket{tid, slot A}` is `pair-open`, `FetchSlot` is `slot-get` with the door and `X-TD-Proof: ticket_key`, and `PostSlot` is `slot-post`; that "what counts as a try" (`seal.md` §17.11) is §10.8 here; and that the bundle's `token` (`seal.md` §17.8) is the 96-character token of §5.1.
+- I assume `seal.md` §17.10's `RegisterTicket{tid, slot A}` is `pair-open`, `FetchSlot` is `slot-get` with the door and `X-TD-Proof: ticket_key`, `PostSlot` is `slot-post`, and `DeleteTicket{tid}` is `pair-close`; that "what counts as a try" (`seal.md` §17.11) is §10.8 here; and that the bundle's `token` (`seal.md` §17.8) is the 96-character token of §5.1.
+- I assume `seal.md` §17.11's "a second post of the same label is refused by the relay" reads as "a second post with other bytes": an identical repeat is answered 200 and stores nothing (RELAY-PAIR-007), so a lost answer does not abort a pairing, and the single-use property is unchanged.
+- I assume the hosts carried in `vb8(host)` (`seal.md` §12.7, §16.2 `fence`, and the welcome and `state` messages here) are at most 255 bytes. `seal.md` §5.4 allows 253 bytes before the `:` plus a port of up to 6 bytes (259 in all), which a `vb8` cannot carry; the `fence` body cap of §12.1 (262,533) is computed for 259 and is therefore an upper bound. A Fence host longer than 255 bytes cannot be encoded and is refused by the encoder (`seal.md` should say so).
+- I assume `seal.md` §13.6's Skip floor (`t ≥ purge_seq`) is what ruling S15 settles, or that the settled floor is computed from the log so that `engine.md` can bound compaction by it (§12.8 "Skip targets").
 - Provides: the token, the door, the relay address and its parsing (§5); the token text that `seal.md` treats as opaque.
 
 **`engine.md`.**
 - Requires: the engine's model relay implements every clause owned by `engine` here (the sequencing outcomes, the read pages, the floors and push), and the faults of SYNC_PLAN.md §6.5 on top.
-- Requires, of the engine's duties: compaction sends `below_seq` no higher than the Skip floor of ruling S15 and than the snapshot acknowledged by a device other than the snapshot's author, lists every control entry below `below_seq` as `keep_seq`, is signed by a device other than that author, and repeats daily while `more` is true (§12.8); purge appends the rotation with `purge_before`, then sends `purge`, and repeats daily until `done = purge_floor` (§12.10); after a purge the shared picture is re-uploaded under the new epoch (§13.3); restore tail sends the seq-mode `register` and `recovery_register` and the `revoke` and `reinstate` operations of the restored control entries in log order (§12.9); a revocation sends `revoke` before appending its `R`-shape entry, and retries that entry until it is sequenced (§12.4); the move appends the `Fence` with the `fence` operation, using the new relay's door (§10.9, §12.6).
+- Requires, of the engine's duties: the Skip floor of ruling S15 is computed from the log, and compaction sends `below_seq` no higher than that floor (or names every frame between the floor and `below_seq` as `keep_seq`) and no higher than the snapshot acknowledged by a device other than the snapshot's author, lists every control entry below `below_seq` as `keep_seq`, is signed by a device other than that author, and repeats daily while `more` is true (§12.8); purge appends the rotation with `purge_before`, then sends `purge`, and repeats daily until `done = purge_floor` (§12.10); after a purge the shared picture is re-uploaded under the new epoch (§13.3); restore tail sends the seq-mode `register` and `recovery_register` and the `revoke` and `reinstate` operations of the restored control entries in log order (§12.9); a revocation sends `revoke` before appending its `R`-shape entry, and retries that entry until it is sequenced (§12.4); the move appends the `Fence` with the `fence` operation, using the new relay's door (§10.9, §12.6); seeding sends the device set of the membership at the end of the tail with each author's counter before the tail (§12.7), and resumes a seed tail or restore tail after a lost answer from the `head` of `relay/not_next` (§4.2).
 - Requires: the engine decides what `second`, `displaced` and close code 4001 mean (an alarm policy that tolerates one displacement after a crash and restart), what `truncated` triggers, and how it reconciles with `last_ctr`, `last_seq`, `gap` and `conflict` (SYNC.md §4.3 rules 3 and 4, V1-16), never trusting `at` or `relay_now` (RELAY-STORE-006).
 - Requires: snapshot uploads use purpose 1 for periodic snapshots, 2 for the pairing bundle's, 3 for the genesis snapshot of an imported board, and 4 for the shared picture (§10.7).
 - Provides: nothing to the relay; the relay reads no engine data.
@@ -1802,3 +1839,8 @@ Non-normative. Each states the default this spec takes.
 18. **`revoke` precedes its `R`-shape entry** (`seal.md` §16.2), so if the entry never lands the relay has locked the target out while the log still lists it; the engine retries the entry. Default kept.
 19. **The second-socket notice can fire once after a crash and restart**, when the old connection is still open at the relay; the engine's alarm policy absorbs one (§22). Decided here.
 20. **The standby can listen on plain HTTP** behind a TLS proxy (SYNC.md §6.7, Caddy) or on loopback for tests; clients still use `https://` origins. Decided here.
+21. **Identical repeats succeed** for `create`, `register`, `recovery_register`, `blob-begin`, `blob-put`, `pair-open` and every slot post, so a lost answer costs only a retry; a different second request under the same id is still refused. Decided here (SYNC.md is silent on retries other than appends).
+22. **A seed or restore tail resumes from `relay/not_next`**, whose error body carries the relay head, because a seeding board answers no `hello`. Decided here (SYNC.md is silent).
+23. **The seeded device set is the membership at the end of the tail**, with counters from before it (§12.7). Decided here (SYNC.md §6.7 says only "the device set").
+24. **A socket that has not said hello is never closed by another socket's hello** (§11.3), so a second process is always reported by `second` and `displaced` whichever process speaks first. Decided here.
+25. **Signature checks run before the one transaction of a request and their results are applied in the section's order** (§8.4), so a refused login or admin request commits only its nonce deletion in the same single transaction. Decided here.
