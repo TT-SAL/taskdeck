@@ -1,9 +1,9 @@
 # Stage `foundation`: status
 
-**State: in progress** (wave 0), **handed off** on 2026-11-21 at about 19:45 UTC. The first lead
-session ran from 12:39 UTC on branch `claude/focused-volta-tbqufb` and stopped at a clean point
-because its context was nearly full. Its pull request, TT-SAL/taskdeck#1, is merged into
-`day-planner` with everything described here; it was not the exit pull request.
+**State: in progress** (wave 0). The second lead session started on 2026-11-21 at 21:20 UTC on
+branch `claude/upbeat-hamilton-klp7n9`. The first ran from 12:39 to about 19:45 UTC on branch
+`claude/focused-volta-tbqufb` and stopped at a clean point because its context was nearly full; its
+pull request, TT-SAL/taskdeck#1, is merged into `day-planner` and was not the exit pull request.
 This file is the stage's memory (SYNC_PLAN.md §3.5).
 
 ## Resuming: read this first
@@ -17,12 +17,16 @@ This file is the stage's memory (SYNC_PLAN.md §3.5).
    step 1, and a small journal helper.
 4. Never run two sessions on this stage. The first session has stopped and cancelled its scheduled
    resume.
+5. A workflow cannot be resumed from another session. What a session's workflows finished is in this
+   file and in the commits; what they had not finished starts again from "Next steps".
 
 ## How this stage is run
 
-- Workflows of Opus agents (`model: 'opus'`; agents report Opus 5.5), at most two agents at a time,
-  one workflow at a time. Queued calls run first in, first out, so two long queues in one workflow
-  keep both slots busy.
+- Workflows of Opus agents (`model: 'opus'`; agents report Opus 5.5), at most two agents at a time.
+  Since the second session: two workflows side by side, each running strictly one agent at a time
+  (D15). The **spec track** only reads and writes under `docs/sync/spec/`; the **code track** is the
+  only one that compiles. When one track waits for the lead or has no work, the other may run two
+  agents wide.
 - Agents write; the lead runs every gate and reads CI itself. Agents never commit or push and never
   run a git command that changes state.
 - Every implementation task goes through the task loop of SYNC_PLAN.md §7 (implement, attack through
@@ -51,7 +55,8 @@ This file is the stage's memory (SYNC_PLAN.md §3.5).
 | `briefs/supply-chain.md`, `briefs/ci.md`, `briefs/workspace.md`, `briefs/fixtures.md`, `briefs/tooling.md` | the lead's designs for tasks 1b, 1c, 2, 5 and 6, ready to hand to an implementer |
 | `briefs/core-digest.md`, `briefs/device-bridge-digest.md` | what the code digests were asked to contain |
 | `digests/core-digest.md`, `digests/device-digest.md`, `digests/bridge-digest.md` | facts about today's code with file and line, written for the drafters; useful to `core`, `device` and `android-shell` too |
-| `workflows/interface-reviews-and-1a.js` | the next workflow, ready: nine reviews, one resolver, six spec fixers; and task 1a's loop, then task 1b. Launch with `args: { scratch: <session scratchpad> }` after creating `lead-findings/` and `resolutions/` in it |
+| `workflows/s1-interface-reviews.js` | spec track, round 1: nine pairwise reviews, then one resolver per spec in dependency order, writing `<scratch>/resolutions/r1-<spec>.md`. It stops there: the lead rules on each "For the lead" list before fixers edit a spec (D16). Launch with `args: { scratch: <session scratchpad>, width: 1 }` |
+| `workflows/c1-supply-chain-1a-loop-ci.js` | code track: task 1b's implementation, task 1a's attack loop until two dry rounds, task 1c's implementation. Launch with `args: { scratch: <session scratchpad> }` after creating `lead-findings/` in it and warming `target/attack-0` to `-2` (copies of `target/debug` after `cargo test --locked --no-default-features --lib --no-run`) |
 | `tools/wf.py` | prints which agents of a running workflow have finished and their reports (`WF_JOURNAL=<transcript dir>/journal.jsonl`) |
 
 These are working papers of the stage, not contracts. The exit pull request may delete them.
@@ -77,12 +82,14 @@ These are working papers of the stage, not contracts. The exit pull request may 
 
 ## Next steps
 
-In this order; a resuming session starts at the first.
+In this order; a resuming session starts at the first. Steps 1 and 6 to 8 are the spec track, steps
+2 to 5 the code track (D15); the two run side by side. Started in the second session, 21:28 UTC:
+step 1 (`workflows/s1-interface-reviews.js`) and steps 2 to 4 up to task 1c's implementation
+(`workflows/c1-supply-chain-1a-loop-ci.js`). Nothing of either is committed yet.
 
 1. **Interface reviews of the six spec drafts.** Nine pairs, each reviewer also checking that the
-   rulings S1 to S31 are reflected; then one resolver writes the exact change per spec; then one fixer
-   per spec applies it. The ready workflow does this, with step 2 and the start of step 3 in its
-   second queue. Read the resolver's "For the lead" list before the fixers' output is committed.
+   rulings S1 to S31 are reflected; then one resolver per spec, in dependency order, writes the exact
+   changes (D16); the lead rules on every "For the lead" item; then one fixer per spec applies them.
    Repeat with a second, lighter round until a round brings nothing of substance.
 2. **Task 1a's attack loop** again from round 1 until two dry rounds. Scope and the closed mutation
    list are in `briefs/task-1a.md` (D11, D12, D14).
@@ -167,6 +174,21 @@ In this order; a resuming session starts at the first.
   guarded hook call or naming the hook twice; the hook not printing as the default hook does, or not
   aborting. The hook's test reads the two main files only and runs in the debug profile. Anything else
   is left to review.
+- **D15. Two tracks, one agent each.** A workflow's own limit is two agents, and one workflow holding
+  both the spec work and the code work could not be steered: its second queue had to wait for the
+  lead's decision on task 1b's advisories while the first ran for hours. Two workflows, each
+  strictly sequential, keep the plan's "two agents at a time" and let the lead restart either track
+  alone. Only the code track compiles, so no two agents ever build at once.
+- **D16. Resolutions per spec, and the lead rules before a spec is edited.** One resolver for every
+  finding of nine reviews would have to hold six specs at once. Findings are grouped by the first
+  spec, in the order seal, core, relay, engine, device, bridge, that each says must change; one
+  resolver per group, in that order, each reading what the earlier ones settled. The workflow stops
+  after the resolvers; the lead reads every "For the lead" list, writes its rulings beside them
+  (`r1-lead.md`), and only then starts the fixers.
+- **D17. The start prompt of the second session names the agents' model as "opus 5.5".** The
+  workflows keep `model: 'opus'`, which is that model (D1); the first agents of the session are
+  asked to report the model they run on.
+
 ## Rulings for the specs
 
 SYNC.md leaves these open and more than one spec touches each, so the lead fixed them before the
