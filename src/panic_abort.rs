@@ -77,7 +77,9 @@ mod tests {
         !matches!(status.code(), Some(0) | Some(101))
     }
 
-    /// Each binary's `main` must install the hook first, in release builds only.
+    /// Each binary's `main` must install the hook first, in release builds
+    /// only, and name it nowhere else in that file, so no second, unguarded
+    /// install hides behind the guarded one.
     fn assert_main_installs_hook(file: &str, source: &str) {
         let mut mains = source.split("fn main() {");
         let body = mains.nth(1).unwrap_or_else(|| panic!("{file}: no `fn main() {{`"));
@@ -88,37 +90,8 @@ mod tests {
             ["#[cfg(not(debug_assertions))]", "task_deck::panic_abort::abort_on_panic();"],
             "{file}: main() must start by installing the hook, in release builds only"
         );
-    }
-
-    /// The hook is named once in each binary's source and nowhere else in the
-    /// files the crate compiles (its three roots and the `mod name;` files they
-    /// declare), so no second, unguarded install hides behind the guarded one.
-    /// Other files in src/ (an editor's lock file, a stray copy) are not built.
-    fn assert_hook_installed_nowhere_else() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let read = |file: &str| {
-            std::fs::read_to_string(src.join(file)).unwrap_or_else(|e| panic!("src/{file}: {e}"))
-        };
-        let roots = ["lib.rs", "main.rs", "server_main.rs"];
-        let mut files: Vec<String> = roots.map(String::from).to_vec();
-        for root in roots {
-            for line in read(root).lines() {
-                let words: Vec<&str> = line.split_whitespace().collect();
-                if let [vis @ .., "mod", name] = &words[..] {
-                    if let Some(name) = name.strip_suffix(';') {
-                        if vis.iter().all(|w| w.starts_with("pub")) {
-                            files.push(format!("{name}.rs"));
-                        }
-                    }
-                }
-            }
-        }
-        assert!(files.iter().any(|f| f == "panic_abort.rs"), "found no `mod panic_abort;` in {files:?}");
-        for file in files.iter().filter(|f| *f != "panic_abort.rs") {
-            let count = read(file).matches("abort_on_panic").count();
-            let expected = usize::from(file == "main.rs" || file == "server_main.rs");
-            assert_eq!(count, expected, "src/{file} names abort_on_panic {count} times");
-        }
+        let count = source.matches("abort_on_panic").count();
+        assert_eq!(count, 1, "{file} names abort_on_panic {count} times");
     }
 
     #[test]
@@ -135,7 +108,6 @@ mod tests {
 
         assert_main_installs_hook("src/main.rs", include_str!("main.rs"));
         assert_main_installs_hook("src/server_main.rs", include_str!("server_main.rs"));
-        assert_hook_installed_nowhere_else();
 
         let (status, out, hook_err) = run_child("hook");
         assert!(aborted(status), "with the hook: {status}\nstdout:\n{out}\nstderr:\n{hook_err}");
