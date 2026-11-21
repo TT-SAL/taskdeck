@@ -1,0 +1,92 @@
+# What the cloud sessions building SYNC.md cannot do for themselves: run the
+# code on Windows and macOS, and boot an Android emulator. This is their test
+# bench. No secrets, read-only token, actions pinned by commit.
+#
+# Every push runs the Linux job. The full matrix (desktop builds on all three
+# systems, the emulator) runs on pull requests, and on any push whose commit
+# message contains "[ci full]".
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux · headless tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version && cargo --version && nproc
+      - name: Library tests without the window
+        run: cargo test --locked --no-default-features --lib
+      - name: The server still builds
+        run: cargo build --locked --no-default-features --bin taskdeck-server
+
+  desktop:
+    name: Desktop · ${{ matrix.os }}
+    if: github.event_name == 'pull_request' || contains(github.event.head_commit.message, '[ci full]')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version && cargo --version
+      - name: Library tests with the window compiled in
+        run: cargo test --locked --lib
+      - name: The app builds
+        run: cargo build --locked --bin TaskDeck
+
+  emulator:
+    name: Android emulator · API ${{ matrix.api }}
+    if: github.event_name == 'pull_request' || contains(github.event.head_commit.message, '[ci full]')
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 36]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Let the runner use hardware virtualisation
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: Boot, and say what booted
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: ${{ matrix.api >= 30 && 'google_apis' || 'default' }}
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: |
+            adb shell getprop ro.build.version.sdk
+            adb shell getprop ro.product.cpu.abi
+            adb shell dumpsys package com.google.android.webview | grep -m1 versionName || adb shell dumpsys package com.android.webview | grep -m1 versionName || true
+            adb shell cat /proc/meminfo | head -1
