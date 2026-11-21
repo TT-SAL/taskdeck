@@ -555,6 +555,7 @@ The engine defines what it persists as records with the fields below; `device.md
 |---|---|---|
 | `seq` | u64 | the entry's seq |
 | `chain` | [32] | `C_seq` as this device computed it |
+| `tau` | i64 | `τ_seq`, the log clock after this entry as the dry run computed it (§12.3) |
 | `frame` | bytes, 670 to 262,144 | the frame exactly as the relay served it |
 
 The log holds the contiguous seqs from `log_floor` to `L`. `log_floor` is 1 for the device that created the board and `S + 1` for a device that bootstrapped from a snapshot at `S`; only retention (§7.13) and purge (§28.2) raise it. `retained_from` is `log_floor − 1` when the device holds that seq's chain value (from the snapshot, or from the record it just truncated), else `log_floor`.
@@ -993,5 +994,258 @@ pub struct RelayRefusal { pub status: u16, pub code: String, pub until: Option<i
 ### 11.8 No relay answer deletes anything
 
 - **ENG-SESS-005** (engine) No relay answer, refusal, close, silence or absence MUST lead the engine to emit `TruncateLogBelow`, `DeleteBases`, an outbox `Drop` of an unapplied record, `forget_roots_below`, or any write that removes a key (SYNC.md §4.3 rule 6, V2-21).
+
+## 12. Receive
+
+### 12.1 Pages
+
+```rust
+pub struct PageEntry { pub seq: u64, pub at: i64, pub frame: Vec<u8> }
+pub struct Page { pub head: Head, pub relay_now: i64, pub floor: u64, pub purge_floor: u64,
+                  pub more: bool, pub truncated: bool, pub fenced: bool, pub entries: Vec<PageEntry> }
+```
+
+The runtime fills a `Page` from a read answer or a push (`relay.md` §10.5, §11.4). `at` is carried and never used (RELAY-STORE-006).
+
+### 12.2 When the engine reads
+
+In `Reconciling` and `Live`, the engine emits `Read { after: L, limit: 256 }` whenever no read is outstanding and the latest relay head it knows (from a welcome or a page) is above `L`. A push whose first entry is `L + 1` is processed as a page; a push that starts above `L + 1` only raises the known relay head, which causes a read. While a stop of §21 is in force the engine reads nothing and sends `Hello` every 900,000 ms of `mono_ms`, so it can see the relay recover.
+
+- **ENG-RECV-001** (engine) The engine MUST read pages of at most 256 entries, after its log head, one read at a time, and MUST NOT read while an evidence stop is in force.
+
+### 12.3 Processing a page
+
+In order:
+
+1. **Limits.** At most 256 entries; every frame 670 to 262,144 bytes; the frames' total at most 1,048,576 bytes unless the page holds one entry. Otherwise `engine/runtime_protocol` and the page is dropped.
+2. **Clock.** `relay_now` updates the measurement (§27.1).
+3. **Head.** The checks of §11.2 steps 2 and 3 with the page's head.
+4. **Truncation.** If `truncated` and `L + 1 < floor`: the log this device needs is gone from the relay; go to §19.7 and stop processing the page.
+5. **Contiguity.** Ignore entries with seq at or below `L` whose frame equals the log's (a repeated push); an entry at or below `L` with another frame is evidence `fork`. The first remaining entry must have seq `L + 1` and each next one the seq after; otherwise evidence `withheld` (entries above the floor are contiguous on an honest relay, `relay.md` §10.5).
+6. **Dry run.** For each entry in seq order: `C_s = chain_step(C_{s−1}, s, frame)`; `classify` with `M_{s−1}` from the previous step (or `M_L` for the first). A `NeedFrames` result pauses the page until §17.2 supplies the frames, then the same entry is classified again. A `Tamper` class, or a frame at or below `L` that differs (step 5), is evidence: the **cut** is that entry, and no entry from the cut on is persisted (§21).
+7. **Head chain.** If the last entry before the cut has the page's `head.seq`, its `C` must equal `head.chain`; otherwise evidence `fork` and the cut is the first entry of the page.
+8. **Persist.** One `Persist` with `AppendLog` of the entries before the cut (seq, `C_s`, frame), `SetMarker { first, last, attempt }` over them, and `WriteIdentity` when a classification reported `keys_changed`.
+9. **Commit.** On its `Persisted`: `L` and `K` become the last persisted seq, `M_K` the dry run's last membership; the membership effects of §14 run for each entry in order; then the board applies entries `B + 1` to `K` (§12.4), unless a halt holds the board (§16).
+10. **Continue.** If `more`, or the known relay head is above `L`, read again (§12.2); otherwise the run has ended: rebase (§8.4) and, if the reconcile is complete, the session becomes `Live`.
+
+- **ENG-RECV-002** (engine) The engine MUST make a page's frames durable, with their chain values and a marker, before it commits their membership states or applies any of them (SYNC.md §4.7: "one fsync each").
+- **ENG-RECV-003** (engine) The engine MUST compute `C_s` for every entry of a page and MUST refuse to persist any entry from the first one that fails §12.3 steps 5 to 7.
+- **ENG-RECV-004** (engine) The engine MUST classify every entry with the membership state that its own classification of the previous seq produced, whatever the entry's class.
+
+### 12.4 Applying to the board
+
+For each seq `s` from `B + 1` to `K`, in order, with the receipt the dry run produced (or that a re-classification after `Start` produces):
+
+1. If `s` is a target in `M_K.skips`: the entry is treated as refused (`engine/skipped`); nothing is applied.
+2. Otherwise act on the receipt as §13.1 states.
+3. If the author is this device and the entry's `entry_id` is a record's: set the record's `seen = s`; drop it (`Outbox[Drop]`) unless §24.3 makes it re-sealable.
+4. `B = s`. If `s ≥ 64` and `s ≡ 0 mod 64`: the state hash at `s` (§18.3), a base when due (§18.2), the snapshot duty check (§19.2).
+
+The board's apply of a page runs under the page's marker and `catch_unwind` (§15).
+
+- **ENG-RECV-005** (engine) The engine MUST apply the entries to the confirmed state in seq order, each exactly once per state it rebuilds, with the action of §13.1 for its receipt.
+
+## 13. Classes, refusals and notices
+
+### 13.1 What each receipt does
+
+| Receipt (`seal.md` §14.4) | Membership | Board | Alarm or stop | Record |
+|---|---|---|---|---|
+| `Skip` | unchanged (`M_s = M_{s−1}`) | nothing | alarm `skipped_frame` with seq, code, author `dev` as the frame says, frame hash; no stop | none |
+| `Tamper` | — | — | evidence: `counter` for `seal/counter_replay` and `seal/counter_gap`, `fork` for `seal/based_on_fork` and `seal/based_on_future`; the stop of §21; the entry is the cut | none |
+| `Refuse` | as `seal.md` §13.5 | nothing | alarm `refused_frame` naming the author when the code is in §13.2's list; no stop | an own entry: a refusal record (§13.3), unless re-sealable (§24.3) |
+| `Accept`, `cmd` | as `seal.md` | `parse`; a parse failure is a refusal everywhere with alarm `refused_frame`; else `apply` under `Ctx{s, d_author, at_ms, based_on_seq}` | an `apply` panic: §15 | notices that concern this device (§13.4); an own entry's `apply` refusal or parse failure: a refusal record |
+| `Accept`, `ctl` | the items (`seal.md` §13.6) | §14.1 | banners (§14.2); the halts of §16 | none |
+| `Accept`, `beat` | `beat_ms` and lists (`seal.md` §13.10) | nothing | §22 when its state report disagrees | registry: report, verdicts (§23.3) |
+| `Accept`, `snap` | as `seal.md` | nothing | §19.5 | registry: `SnapRecord`, own verdict |
+| `NeedFrames` | — | — | §17.2 | — |
+| `own_dev_foreign` flag | — | — | stop sending with `foreign_signer` (§21.1); applying goes on | — |
+| `based_on_unchecked` flag | — | — | none: the count of such entries is in the status (V2-15) | — |
+| `halt` set | — | — | §16 | — |
+| `SealerError seal/missing_root` | — | — | §24.4 when this device is revoked in `M_{s−1}`, else the local fault `engine/missing_root` | — |
+
+`d_author` is the author's `device_no` in `M_{s−1}`.
+
+- **ENG-CLASS-001** (engine) The engine MUST act on each receipt class exactly as the table of §13.1 states.
+- **ENG-CLASS-002** (engine) A `Skip` class MUST leave the confirmed state and membership unchanged and MUST raise `skipped_frame` without stopping the engine.
+- **ENG-CLASS-003** (engine) A `Tamper` class MUST stop the engine with evidence and MUST leave the frame and every later one of the page unpersisted.
+- **ENG-CLASS-004** (engine) A `Refuse` class or a parse failure MUST leave the confirmed state unchanged on every device, the author's own included (V1-1, V2-8).
+- **ENG-CLASS-005** (engine) An `apply` refusal of an accepted `cmd` MUST leave the confirmed state unchanged and MUST NOT raise an alarm.
+
+### 13.2 Refusals that name their author in an alarm
+
+`seal/revoked_author`, `seal/bad_version`, `seal/bad_epoch`, `seal/aead`, `seal/bad_plaintext`, `seal/not_authorized`, `seal/bad_payload`, `seal/bad_ctl_sig`, `seal/ctl_shape`, `seal/ctl_author`, and a `cmd` parse failure: a validly signed frame that no honest build writes (`seal.md` §22). Every other refusal code is an ordinary refusal without an alarm.
+
+### 13.3 Refusal records
+
+When an entry authored by this device reaches the board head refused, by the sealer (a code that is not re-sealable), by a parse failure, by `apply`, or by a Skip, the engine appends a refusal record (`core.md` §10.7): `seq`, `author` (its own `device_no`), `code`, `op` (from its record when the payload did not parse), `target`, `base` and `current` (a `set_notes` conflict). The engine also keeps refusals of entries it could not apply because it was revoked (§24.4). Benign repeats (`core.md` §10.6) are successes and leave no record (V2-16).
+
+- **ENG-REF-001** (engine) The engine MUST append one refusal record for each of its own entries that reaches the board head refused for any reason other than a re-sealable code, and MUST NOT append one for an entry of another device.
+- **ENG-REF-002** (engine) The engine MUST make each refusal and notice record durable before it emits the `Notify` that announces it.
+
+### 13.4 Notices
+
+Every notice `apply` returns for the confirmed state and that `notice_concerns` this device's `device_no` is appended as a notice record (`core.md` §10.7); notices from the pending view are never recorded (ENG-SM-004). The user dismisses records (`UserAction::DismissNotice`), which appends `Dismiss`. Records are kept per §7.13.
+
+- **ENG-REF-003** (engine) The engine MUST record exactly the notices from confirmed applies that concern its own `device_no`, in the order `apply` returned them.
+
+## 14. Control entries and banners
+
+### 14.1 What each accepted item does
+
+Membership effects run when the entry's membership is committed (§12.3 step 9), so they land on a crash-halted device too (§16.2). Board effects run when the board applies the entry.
+
+| Item | Membership effects on this device | Board effects |
+|---|---|---|
+| `Genesis` | none (bootstrap, §19.8) | none |
+| `DeviceAdded` | banner `DeviceAdded` | none |
+| `DeviceRevoked` | banner; if the target is this device: §24.4 | none |
+| `DeviceReinstated` | banner; if the target is this device: §24.4 | none |
+| `EpochRotated` | `WriteIdentity` when this device learned the root (D4); the epoch gate of §24.2; banner `KeysRotated` when the entry has no revoke or reinstate item; with `purge_before`: banner `HistoryPurged` and §28.2 | with `purge_before`: §28.2's local purge |
+| `RecoveryKeyChange` | banners per mode (§26.1); the pinned recovery fingerprint prompt (`device.md`, SEAL-BKP-006) on a `direct` or `confirm` | none |
+| `Fence` | banner `Moved`; §28.3 | none |
+| `ResetTo` | banner `Reset` | §28.1 |
+| `Skip` | banner `Skipped`; if a target is this device's crash-halt entry: §16.2 | §17.3 |
+| `RulesUpgrade` | banner `RulesUpgraded` when it activates, `RulesVote` for a first override vote | when it activates `v`: `SM::upgrade(v)` before the next entry (ENG-SM-002) |
+
+An own control entry that is refused by the sealer finishes its operation's stage as failed (§28.8); a refused own rotation also calls `Sealer::discard_pending` (SEAL-MEM-016).
+
+- **ENG-CTL-001** (engine) The engine MUST run the membership effects of §14.1 for every accepted control entry when its membership is committed, including while the board is crash-halted.
+- **ENG-CTL-002** (engine) When an own control entry carrying `EpochRotated` is refused, the engine MUST call `Sealer::discard_pending` with its `entry_id` and persist the identity before it seals any further frame.
+
+### 14.2 Banners
+
+```rust
+pub struct Banner {
+    pub id: (u64, u8),            // (seq, item index)
+    pub kind: BannerKind, pub seq: u64, pub at_ms: i64,
+    pub author: Dev, pub author_name: String, pub author_fp: String,   // "recovery key" and its fingerprint for dev_R
+    pub subject: Option<Dev>, pub subject_name: Option<String>, pub subject_fp: Option<String>,
+    pub detail: BannerDetail, pub acked: bool,
+}
+pub enum BannerKind { DeviceAdded, DeviceRevoked, DeviceReinstated, KeysRotated, HistoryPurged,
+                      RecoveryProposed, RecoveryConfirmed, RecoveryChanged, RecoveryCancelled,
+                      Moved, Reset, Skipped, RulesUpgraded, RulesVote }
+pub enum BannerDetail { None, Purge { before_seq: u64 }, Recovery { key_fp: String, confirm_after_ms: Option<i64> },
+                        Moved { host: String, home_gen: u32 }, Reset { target: u64 },
+                        Skipped { target: u64, target_author: Dev }, Rules { version: u32 } }
+```
+
+A banner is created on every device except the entry's author device, with one exception: `RecoveryProposed` is created on every device, the proposer's included. A banner stays until the user acknowledges it on that device (`UserAction::AckBanner`), except `RecoveryProposed`, which cannot be acknowledged while its proposal is pending and is marked acknowledged when the proposal is confirmed or cancelled (SYNC.md §5.3 step 6, §5.5; V1-2). Banners are persisted in `Meta` (at most 256; when full, the oldest acknowledged ones go first, then the oldest).
+
+- **ENG-BANNER-001** (engine) The engine MUST create a banner for every accepted control item of §14.1 that names one, on every device but the author's, with the author's name and key fingerprint.
+- **ENG-BANNER-002** (engine) The engine MUST keep each banner until the user acknowledges it on that device, and MUST NOT let a `RecoveryProposed` banner be acknowledged while its proposal is pending.
+
+## 15. Poison pills
+
+A page is applied to the board under one marker and `catch_unwind` (SYNC.md §4.5, V2-14). A marker that survives a hard abort makes the next attempt apply that page entry by entry, each under its own marker. An entry halts the device only when it fails in two consecutive attempts.
+
+### 15.1 Attempts
+
+`meta.attempt` is raised by one, and persisted (D5), at every `Start` and at every rebuild after a caught panic (§15.3). Every marker carries the attempt that wrote it.
+
+### 15.2 At `Start`
+
+1. Raise `attempt`.
+2. If a marker `m` exists with `m.last > B` (the checkpoint's seq):
+   - if `m.first = m.last = x`, the previous attempt died while applying `x` alone: if `meta.last_failed = (x, m.attempt − 1)`, halt on `x` (§16.2, `engine/crash_halt`); otherwise set `last_failed = (x, m.attempt)` and persist it (D6);
+   - apply the entries `B + 1` to `m.first − 1` page-wise; then the entries `m.first` to `m.last` one at a time, each after a `SetMarker { s, s, attempt }` is durable;
+   - continue page-wise after `m.last`.
+3. Without such a marker, apply page-wise.
+
+### 15.3 A caught panic
+
+When `apply` panics on the entry `x` in attempt `a`:
+
+1. If `meta.last_failed = (x, a − 1)`: halt on `x`.
+2. Otherwise set `last_failed = (x, a)` and persist it (D6); start attempt `a + 1` (D5); rebuild the confirmed state at `x − 1` from the checkpoint and the log (`ReadLog`), page-wise; then apply `x` alone under `SetMarker { x, x, a + 1 }`.
+
+A deterministic panic therefore halts within one run, after its second attempt; an OS kill in the middle of a page never halts by itself (V2-14). An entry that applies cleanly in single mode clears `last_failed` when it names that entry.
+
+- **ENG-POISON-001** (engine) The engine MUST make a marker over the entries it is about to apply durable before it applies them to the board, one marker per page in page mode and one per entry in single mode.
+- **ENG-POISON-002** (engine) After a `Start` that finds a marker above the checkpoint, the engine MUST apply the entries of that marker one at a time, each under its own durable marker.
+- **ENG-POISON-003** (engine) The engine MUST halt on an entry only when that entry failed (a caught panic, or a single-entry marker left by a hard abort) in two consecutive attempts.
+- **ENG-POISON-004** (engine) After a caught panic, the engine MUST rebuild the confirmed state from its checkpoint and log before applying any further entry, and MUST NOT use the state the panic left.
+
+## 16. Halts
+
+### 16.1 The three halts
+
+A device halts in exactly three cases (SYNC.md §4.2):
+
+| Halt | Raised when | Board | Classification | Cleared |
+|---|---|---|---|---|
+| `Crash { seq, author, frame_hash }` | §15: an entry failed in two consecutive attempts | stays at `seq − 1` | continues (read-ahead, §16.2) | a Skip of `seq` is accepted; or a `Start` with another `build_id` |
+| `Rules { seq, version }` | the sealer returns `UnknownRules(v)` with an accepted entry, or `SM::upgrade` fails with `core/unknown_rules` (`seal.md` §14.5) | stays at `seq − 1` | stops after `seq` | a `Start` whose build supports `version` |
+| `Commitment { seq, author }` | the sealer returns `Commitment` with an accepted rotation (`seal.md` §14.5) | applies up to `seq` | stops after `seq` | never: the device re-pairs and resubmits (§24.5) |
+
+`HaltRecord { kind, seq, author, since_ms, code }` is persisted in `Meta` (D6) with `since_ms = wall_ms` when it was raised.
+
+- **ENG-HALT-001** (engine) The engine MUST halt only in the three cases of §16.1, and MUST NOT halt on a refusal, an alarm or any relay answer.
+- **ENG-HALT-002** (engine) A halt MUST be persisted before any later effect, and MUST be restored at `Start` unless its clearing condition holds.
+
+### 16.2 The crash halt and read-ahead
+
+Under a crash halt on `x`, the board stays at `x − 1`, but the engine keeps reading, persisting and classifying, and commits every membership state, so revocations, rotations and Skips still land (V1-11, V2-6). When the membership commit of a Skip names `x`, the halt clears: the board applies `x` as skipped (§12.4 step 1) and then every classified entry after it, up to `K`.
+
+- **ENG-HALT-003** (engine) Under a crash halt, the engine MUST keep reading, classifying and committing membership states, and MUST NOT apply any entry at or above the halting seq to the board until the halt clears.
+- **ENG-HALT-004** (engine) When a Skip of the halting entry is accepted, the engine MUST clear the crash halt and apply the following entries in order.
+
+### 16.3 The rules and commitment halts
+
+These halts stop classification after the halting entry, because the device can no longer classify what follows (it lacks the rules version, or the epoch root). The engine keeps its session to show the relay's state and its devices' last seen, reads nothing further, and holds all records.
+
+- **ENG-HALT-005** (engine) Under a rules or commitment halt, the engine MUST NOT classify any entry above the halting seq.
+
+### 16.4 What a halted device does
+
+A halted device (SYNC.md §4.5, V2-6):
+
+- shows its confirmed state plus its own unapplied records as "frozen since" (§8.5);
+- holds new edits: it queues them (§9.1) and sends none;
+- sends only the records of a Skip it composes (§17.1), under the crash halt;
+- takes no duty: no beat, snapshot, verdict, compaction, restore tail, upgrade proposal or purge continuation (§29.1), and never pairs a new device (`seal.md` §17).
+
+- **ENG-HALT-006** (engine) A halted device MUST NOT seal any record other than one of a Skip operation it started under a crash halt.
+- **ENG-HALT-007** (engine) A halted device MUST NOT take any duty of §29 and MUST refuse `PairRegister` with `engine/halted`.
+
+## 17. Skip
+
+### 17.1 Composing a Skip
+
+`Operation::Skip { seq: t }` (SYNC.md §4.6, V1-11). The engine checks, from its log and `M_K`, in order (`engine/skip_target` on failure):
+
+1. it holds the frame at `t` in its log;
+2. `t` is not in `M_K.ctl_seqs` and not already skipped;
+3. the frame's author is not this device (`seal.md` §13.6: a device may not skip its own entry; the recovery tool can);
+4. `t ≥ max(M_K.purge_seq, L + 1 − 16,384)`: the Skip floor of §17.4.
+
+It then enqueues a `ctl` record with `CtlIntent::Skip { targets: [(t, H(frame))] }`. A crash-halted device may compose it (§16.4); the halt screen offers it, naming the entry's author (§30.2).
+
+### 17.2 Frames a Skip needs
+
+When `classify` returns `NeedFrames`, for each `(t, hash)`: the engine reads the frame at `t` from its log when `t ≥ log_floor` (`ReadLog`), otherwise from the relay (`Read { after: t − 1, limit: 1 }`, whose entry must have seq `t`); it checks `H(frame) = hash` and classifies the entry again with the frame supplied. A frame that is held nowhere (below this device's log and the relay's floor) stops the engine with the local fault `engine/skip_unreachable` and shows it as an integrity problem without evidence (`seal.md` §27 item 12).
+
+- **ENG-SKIP-001** (engine) The engine MUST obtain every frame a `NeedFrames` names, from its own log or from the relay, check its hash, and classify the entry again before it processes any later entry.
+
+### 17.3 Applying a Skip
+
+At the board apply of the accepted Skip at seq `s`, for each target `t` (`t < s ≤ B + 1`, so `t` was already applied, refused or skipped):
+
+1. If `t` is the crash-halt entry, or the engine treated `t` as skipped when it applied it (the Skip's membership was committed before `t` reached the board, as when both arrive in one page), nothing more is needed. The engine keeps, for its current confirmed state, the set of seqs it treated as skipped.
+2. If `t` is a `beat` or `snap` entry, its reports and verdicts are removed from the registry; the board is unchanged.
+3. Otherwise (`t` is a `cmd` entry it applied) the engine **replays**: it reads the newest base with `board_seq < t` (`ReadBase`); loads its board and membership; re-classifies and re-applies the log from that base's seq + 1 to `s`, treating every target in `M_s.skips` as skipped; rewrites the hash records of every aligned seq from `t` to `s` (`AppendHashes`, the newer record winning, §7.5); writes a checkpoint; and rebases.
+4. When no base below `t` exists, the device cannot replay: §19.9.
+
+An own entry that is skipped gets a refusal record with `engine/skipped`. Reports in the registry for seqs `S ≥ t` that arrived in entries below `s` are dropped, since they describe the state before the Skip.
+
+- **ENG-SKIP-002** (engine) After accepting a Skip of an entry it had applied, the engine MUST rebuild its confirmed state by replay from a base below the target, with every skipped target excluded, so that its state equals that of a device that never applied the target.
+- **ENG-SKIP-003** (engine) After a Skip replay, the engine MUST replace its state hashes for every aligned seq from the target to the Skip's seq and MUST stop comparing earlier reports for those seqs.
+
+### 17.4 The Skip floor (ruling S15)
+
+A Skip at seq `s` may target only `t ≥ F(s) = max(M_{s−1}.purge_seq, s − 16,384)`. Every device computes `F(s)` from the log alone, so the verdict does not depend on whether it holds the frame. The engine keeps every frame at or above `F` fetchable: its compaction never deletes an entry at or above `head − 16,384` (§20.2), so for any Skip sequenced later than the compaction, every permitted target is still on the relay. This rule is a requirement on `seal.md` §13.6 (§36).
+
+- **ENG-SKIP-004** (engine) The engine MUST NOT compose a Skip whose target is below `max(M_K.purge_seq, L + 1 − 16,384)`.
 
 <!-- CONTINUE -->

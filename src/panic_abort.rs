@@ -105,10 +105,8 @@ mod tests {
         assert_main_installs_hook("src/main.rs", include_str!("main.rs"));
         assert_main_installs_hook("src/server_main.rs", include_str!("server_main.rs"));
 
-        let (status, out, err) = run_child("hook");
-        assert!(aborted(status), "with the hook: {status}\nstdout:\n{out}\nstderr:\n{err}");
-        let printed = err.matches(MESSAGE).count();
-        assert_eq!(printed, 1, "with the hook, the panic message was printed {printed} times:\n{err}");
+        let (status, out, hook_err) = run_child("hook");
+        assert!(aborted(status), "with the hook: {status}\nstdout:\n{out}\nstderr:\n{hook_err}");
         assert!(!out.contains(OUTLIVED), "with the hook, the child outlived the panic:\n{out}");
 
         let (status, out, err) = run_child("none");
@@ -116,5 +114,14 @@ mod tests {
         let printed = err.matches(MESSAGE).count();
         assert_eq!(printed, 1, "without the hook, the panic message was printed {printed} times:\n{err}");
         assert!(out.contains(OUTLIVED), "without the hook, the child did not outlive the panic:\n{out}");
+
+        // The hook must print the panic exactly as the default hook does. The
+        // line names the thread by its id, which differs between the two runs.
+        let digitless = |s: &str| s.replace(|c: char| c.is_ascii_digit(), "");
+        assert_eq!(
+            digitless(&hook_err),
+            digitless(&err),
+            "with the hook, stderr differs from the default hook's:\n{hook_err}\nwithout:\n{err}"
+        );
     }
 }
