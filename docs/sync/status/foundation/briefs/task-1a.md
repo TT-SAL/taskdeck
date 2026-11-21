@@ -129,3 +129,16 @@ After the panic hook lands the gate's test count is 265 passed, 1 ignored (it wa
 - [low] check-build-date.sh passes when build.rs trims trailing whitespace from SOURCE_DATE_EPOCH
 - [medium] check-build-date.sh never tries a SOURCE_DATE_EPOCH outside a 64-bit integer
 - [low] The hook test only runs in debug builds (ruled out of scope: ruling 7)
+
+## Raised in the fourth loop (second session, 2026-11-21), handled; do not re-report
+
+- [low] check-build-date.sh passes a build.rs that strips a trailing carriage return or a tab from SOURCE_DATE_EPOCH (fixed: the check now tries space, tab, LF and CR before and after the value)
+
+## Further lead ruling (2026-11-21, second session)
+
+8. **"Whitespace before or after" in ruling 6 means these four characters: space, tab, line feed and
+   carriage return, at either end.** The check tries all eight combinations now. Any other character that
+   some definition calls whitespace (vertical tab, form feed, a no-break space or other Unicode space) is
+   out of scope, for the reason ruling 6 gives: build.rs accepts only an optional minus sign followed by
+   ASCII digits, and a reviewer of build.rs can see that. Do not report further characters and do not add
+   cases for them.
