@@ -157,20 +157,25 @@ else
 fi
 
 # build.rs lists the inputs that run it again; if `src` dropped out of that
-# list, an edit to the app's sources would keep a stale BUILD_DATE. Touching a
-# source file must run the script again (cargo -v prints the run on stderr).
+# list, or was narrowed to some of its files, an edit to the app's sources
+# would keep a stale BUILD_DATE. A new file under src/, which only the
+# directory entry covers, must run the script again (cargo -v prints the run
+# on stderr). The file is not a module, so the build ignores it otherwise.
 echo "check-build-date: a change under src/ must run build.rs again"
-touch src/lib.rs
+probe=src/check-build-date.probe
+trap 'rm -f "$probe"' EXIT
+: >"$probe"
 if log="$(unset SOURCE_DATE_EPOCH; check -v 2>&1 >/dev/null)"; then
     if grep -qE 'Running `[^`]*task_deck-[0-9a-f]+[/\\]build-script-build(\.exe)?`' <<<"$log"; then
         echo "check-build-date:   build.rs ran again"
     else
-        fail "build.rs did not run again after src/lib.rs changed (is src in its rerun-if-changed list?)"
+        fail "build.rs did not run again after a new file appeared in src/ (is the directory src in its rerun-if-changed list?)"
     fi
 else
     printf '%s\n' "$log" | tail -n 20 >&2
-    fail "the build after touching src/lib.rs failed"
+    fail "the build after adding $probe failed"
 fi
+rm -f "$probe"
 
 if [ "$failures" -ne 0 ]; then
     echo "check-build-date: $failures check(s) failed" >&2

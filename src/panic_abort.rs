@@ -90,17 +90,32 @@ mod tests {
         );
     }
 
-    /// The hook is named once in each binary's source and nowhere else in src/,
-    /// so no second, unguarded install hides behind the guarded one.
+    /// The hook is named once in each binary's source and nowhere else in the
+    /// files the crate compiles (its three roots and the `mod name;` files they
+    /// declare), so no second, unguarded install hides behind the guarded one.
+    /// Other files in src/ (an editor's lock file, a stray copy) are not built.
     fn assert_hook_installed_nowhere_else() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        for entry in std::fs::read_dir(&src).unwrap() {
-            let path = entry.unwrap().path();
-            let file = path.file_name().unwrap().to_string_lossy().into_owned();
-            if !file.ends_with(".rs") || file == "panic_abort.rs" {
-                continue;
+        let read = |file: &str| {
+            std::fs::read_to_string(src.join(file)).unwrap_or_else(|e| panic!("src/{file}: {e}"))
+        };
+        let roots = ["lib.rs", "main.rs", "server_main.rs"];
+        let mut files: Vec<String> = roots.map(String::from).to_vec();
+        for root in roots {
+            for line in read(root).lines() {
+                let words: Vec<&str> = line.split_whitespace().collect();
+                if let [vis @ .., "mod", name] = &words[..] {
+                    if let Some(name) = name.strip_suffix(';') {
+                        if vis.iter().all(|w| w.starts_with("pub")) {
+                            files.push(format!("{name}.rs"));
+                        }
+                    }
+                }
             }
-            let count = std::fs::read_to_string(&path).unwrap().matches("abort_on_panic").count();
+        }
+        assert!(files.iter().any(|f| f == "panic_abort.rs"), "found no `mod panic_abort;` in {files:?}");
+        for file in files.iter().filter(|f| *f != "panic_abort.rs") {
+            let count = read(file).matches("abort_on_panic").count();
             let expected = usize::from(file == "main.rs" || file == "server_main.rs");
             assert_eq!(count, expected, "src/{file} names abort_on_panic {count} times");
         }
