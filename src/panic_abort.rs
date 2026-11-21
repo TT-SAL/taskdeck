@@ -39,6 +39,9 @@ mod tests {
             .args([name, "--exact", "--nocapture", "--test-threads=1"])
             .env(CHILD, mode)
             .env("RUST_BACKTRACE", "0")
+            // The hook child aborts, which may dump core into its working
+            // directory: keep that out of the checkout.
+            .current_dir(std::env::temp_dir())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -74,6 +77,19 @@ mod tests {
         !matches!(status.code(), Some(0) | Some(101))
     }
 
+    /// Each binary's `main` must install the hook first, in release builds only.
+    fn assert_main_installs_hook(file: &str, source: &str) {
+        let mut mains = source.split("fn main() {");
+        let body = mains.nth(1).unwrap_or_else(|| panic!("{file}: no `fn main() {{`"));
+        assert!(mains.next().is_none(), "{file}: more than one `fn main() {{`");
+        let first: Vec<&str> = body.split_whitespace().take(2).collect();
+        assert_eq!(
+            first,
+            ["#[cfg(not(debug_assertions))]", "task_deck::panic_abort::abort_on_panic();"],
+            "{file}: main() must start by installing the hook, in release builds only"
+        );
+    }
+
     #[test]
     fn a_panic_on_any_thread_ends_the_process() {
         if let Ok(mode) = std::env::var(CHILD) {
@@ -86,14 +102,19 @@ mod tests {
             return;
         }
 
+        assert_main_installs_hook("src/main.rs", include_str!("main.rs"));
+        assert_main_installs_hook("src/server_main.rs", include_str!("server_main.rs"));
+
         let (status, out, err) = run_child("hook");
         assert!(aborted(status), "with the hook: {status}\nstdout:\n{out}\nstderr:\n{err}");
-        assert!(err.contains(MESSAGE), "with the hook, the panic message was not printed:\n{err}");
+        let printed = err.matches(MESSAGE).count();
+        assert_eq!(printed, 1, "with the hook, the panic message was printed {printed} times:\n{err}");
         assert!(!out.contains(OUTLIVED), "with the hook, the child outlived the panic:\n{out}");
 
         let (status, out, err) = run_child("none");
         assert!(status.success(), "without the hook: {status}\nstdout:\n{out}\nstderr:\n{err}");
-        assert!(err.contains(MESSAGE), "without the hook, the panic message was not printed:\n{err}");
+        let printed = err.matches(MESSAGE).count();
+        assert_eq!(printed, 1, "without the hook, the panic message was printed {printed} times:\n{err}");
         assert!(out.contains(OUTLIVED), "without the hook, the child did not outlive the panic:\n{out}");
     }
 }

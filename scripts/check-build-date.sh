@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Proves build.rs takes BUILD_DATE from SOURCE_DATE_EPOCH when it is set
 # (https://reproducible-builds.org/specs/source-date-epoch/), refuses a set
-# but unusable value, and uses today's UTC date when it is unset.
+# but unusable value, uses today's UTC date when it is unset, and runs again
+# when a file under src/ changes (so that date does not go stale).
 #
 # Uses `cargo check` on the headless library, the cheapest build that runs the
 # build script. The date is read from cargo's JSON messages (the
@@ -153,6 +154,22 @@ if out="$(unset SOURCE_DATE_EPOCH; check)"; then
     fi
 else
     fail "the build with SOURCE_DATE_EPOCH unset failed"
+fi
+
+# build.rs lists the inputs that run it again; if `src` dropped out of that
+# list, an edit to the app's sources would keep a stale BUILD_DATE. Touching a
+# source file must run the script again (cargo -v prints the run on stderr).
+echo "check-build-date: a change under src/ must run build.rs again"
+touch src/lib.rs
+if log="$(unset SOURCE_DATE_EPOCH; check -v 2>&1 >/dev/null)"; then
+    if grep -qE 'Running `[^`]*task_deck-[0-9a-f]+[/\\]build-script-build(\.exe)?`' <<<"$log"; then
+        echo "check-build-date:   build.rs ran again"
+    else
+        fail "build.rs did not run again after src/lib.rs changed (is src in its rerun-if-changed list?)"
+    fi
+else
+    printf '%s\n' "$log" | tail -n 20 >&2
+    fail "the build after touching src/lib.rs failed"
 fi
 
 if [ "$failures" -ne 0 ]; then
