@@ -20,12 +20,12 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 | # | Task (SYNC_PLAN.md §6.1) | State | Evidence |
 |---|---|---|---|
 | 0 | Status file, draft pull request | done | this file; draft pull request TT-SAL/taskdeck#1 |
-| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented; attack rounds running | commit `a743020` and the fix after it; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh` |
+| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented; three attack rounds done (6, 3 and 1 findings, all fixed), round 4 running | commits `a743020` to `5439f8d`; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`; full CI matrix green on `4c56792` |
 | 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | todo | |
 | 1c | CI: path filters at job level, aggregate `gate` job | todo | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
-| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); then core, relay, engine, device, bridge | `docs/sync/spec/seal.md` |
+| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay in progress; then engine, device, bridge | `docs/sync/spec/seal.md`, `core.md` |
 | 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
@@ -133,6 +133,25 @@ Rulings on what the seal draft raised (2026-11-21):
   a Skip target is refused everywhere, keep every frame above that floor fetchable from the relay
   (compaction respects it), and have a device that lacks the frame fetch it. Open until the
   seal–engine review settles the exact rule.
+
+Rulings on what the core draft raised (2026-11-21):
+
+- **S16. Stamps are per field group.** Five per item (name, time, levels, estimate, repeat) and one
+  per block, instead of SYNC.md's one per item, so unrelated concurrent edits raise no false
+  "changed since you last synced" notice.
+- **S17. The notes base is a revision counter** (`notes_rev`), not a hash. It refuses a stale edit
+  just the same, works for two queued edits from one device, and keeps hashing out of the core.
+- **S18. Rules version 1 has caps SYNC.md does not name:** 10,000 live items, 50,000 live blocks,
+  1,000 blocks per item, 200,000 archive rows, 60 MiB of board bytes, so a snapshot always fits its
+  64 MiB limit. The import check reports a board that exceeds one. Told to the owner at exit.
+- **S19. Reminder lead times are parameters of `reminders()`.** The defaults the spec names (events
+  10 minutes before, blocks and due times on time, routines off) are what `android` starts with and
+  may expose as a device setting. SYNC.md's open question 11 stays with the owner, without blocking.
+- **S20. The legacy import stops on an unreadable primary file** (items, notes or subscriptions)
+  instead of importing a partial board; unreadable archive lines are carried as opaque bytes.
+- The snapshot JSON keeps today's names and shape. `core.md` §14.3 lists every difference: the
+  inputs that were process globals, deterministic tie-breaks, block ids in place of indexes,
+  canonical UTC text, and one new field, `notes_base`.
 
 ## Deviations from the plan
 
