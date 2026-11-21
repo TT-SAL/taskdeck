@@ -93,23 +93,39 @@ expect_refused() {
 echo "check-build-date: build_date finds the root package's date"
 self_test
 
+# Cargo names the build-script unit by the package's path inside the
+# workspace and judges freshness by mtime, so in a target dir shared with
+# another checkout it may reuse that checkout's compiled build.rs. Removing
+# this package's own units (dependencies stay) makes every case below test
+# this tree's build.rs.
+cargo clean --locked -p task_deck --target "$host"
+
 expect_refused "abc"
 expect_refused ""
 expect_refused "99999999999999999"   # fits in i64, far past chrono's last year
 expect_refused "253402300800"        # 10000-01-01, not a four-digit year
 expect_refused "-62167219201"        # -0001-12-31, not a four-digit year
 
-echo "check-build-date: SOURCE_DATE_EPOCH=1700000000 must give 2023-11-14"
-if out="$(SOURCE_DATE_EPOCH=1700000000 check)"; then
-    got="$(printf '%s\n' "$out" | build_date)"
-    if [ "$got" = "2023-11-14" ]; then
-        echo "check-build-date:   BUILD_DATE=$got"
+# expect_date VALUE DATE: the build must succeed with BUILD_DATE=DATE.
+expect_date() {
+    local value="$1" want="$2" out got
+    echo "check-build-date: SOURCE_DATE_EPOCH=$value must give $want"
+    if out="$(SOURCE_DATE_EPOCH="$value" check)"; then
+        got="$(printf '%s\n' "$out" | build_date)"
+        if [ "$got" = "$want" ]; then
+            echo "check-build-date:   BUILD_DATE=$got"
+        else
+            fail "SOURCE_DATE_EPOCH=$value gave BUILD_DATE=\"$got\", expected $want"
+        fi
     else
-        fail "SOURCE_DATE_EPOCH=1700000000 gave BUILD_DATE=\"$got\", expected 2023-11-14"
+        fail "the build with SOURCE_DATE_EPOCH=$value failed"
     fi
-else
-    fail "the build with SOURCE_DATE_EPOCH=1700000000 failed"
-fi
+}
+
+expect_date 1700000000 2023-11-14
+expect_date 4102444800 2100-01-01     # past 2038: does not fit in an i32
+expect_date 253402300799 9999-12-31   # the last second accepted
+expect_date -1 1969-12-31             # before 1970
 
 echo "check-build-date: SOURCE_DATE_EPOCH unset must give today's UTC date"
 # Pick the zone whose date differs from UTC's at this hour: UTC-12 before
