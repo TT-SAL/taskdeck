@@ -1,0 +1,14 @@
+# One toolchain for every machine and every CI job (SYNC_PLAN.md §6.1).
+# The targets are the ones later stages build for: the relay's wasm32, the
+# phone's three Android ABIs, and Apple silicon for the macOS desktop.
+[toolchain]
+channel = "1.97.0"
+profile = "minimal"
+components = ["clippy"]
+targets = [
+    "wasm32-unknown-unknown",
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "x86_64-linux-android",
+    "aarch64-apple-darwin",
+]
