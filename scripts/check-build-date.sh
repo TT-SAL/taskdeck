@@ -34,8 +34,17 @@ fail() {
     failures=$((failures + 1))
 }
 
+# For the host, as the build script always runs there: a CARGO_BUILD_TARGET
+# or build.target the libraries cannot build for would fail every case for a
+# reason unrelated to the date. TZ is a far-from-UTC POSIX zone (no tzdata
+# needed), so a build.rs that used local time instead of UTC gives a wrong
+# date here even on a UTC machine. chrono ignores TZ on Windows; the Linux
+# and macOS runs catch it.
+host="$(rustc -vV | sed -n 's/^host: //p')"
+[ -n "$host" ] || { echo "check-build-date: could not read the host from rustc -vV" >&2; exit 1; }
 check() {
-    cargo check --locked --no-default-features --lib --message-format=json "$@"
+    TZ=XXX-14 cargo check --locked --no-default-features --lib --target "$host" \
+        --message-format=json "$@"
 }
 
 # Prints the BUILD_DATE the root package's build script emitted, or nothing.
@@ -86,6 +95,8 @@ self_test
 expect_refused "abc"
 expect_refused ""
 expect_refused "99999999999999999"   # fits in i64, far past chrono's last year
+expect_refused "253402300800"        # 10000-01-01, not a four-digit year
+expect_refused "-62167219201"        # -0001-12-31, not a four-digit year
 
 echo "check-build-date: SOURCE_DATE_EPOCH=1700000000 must give 2023-11-14"
 if out="$(SOURCE_DATE_EPOCH=1700000000 check)"; then

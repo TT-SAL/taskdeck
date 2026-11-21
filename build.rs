@@ -1,5 +1,5 @@
 use embed_resource;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use std::env;
 
 fn main() {
@@ -28,6 +28,7 @@ fn main() {
 
 /// Parses SOURCE_DATE_EPOCH: an integer count of seconds since the Unix
 /// epoch, written like `date +%s` writes it (digits, an optional leading `-`).
+/// Only years 0 to 9999 are accepted, so BUILD_DATE is always YYYY-MM-DD.
 fn source_date(raw: Option<&str>) -> Result<DateTime<Utc>, String> {
     let text = raw.ok_or("the value is not valid UTF-8")?;
     let digits = text.strip_prefix('-').unwrap_or(text);
@@ -40,7 +41,8 @@ fn source_date(raw: Option<&str>) -> Result<DateTime<Utc>, String> {
         .parse()
         .map_err(|_| format!("{text:?} does not fit in a 64-bit integer"))?;
     DateTime::from_timestamp(secs, 0)
-        .ok_or_else(|| format!("{text:?} is outside the dates chrono can represent"))
+        .filter(|date| (0..=9999).contains(&date.year()))
+        .ok_or_else(|| format!("{text:?} is outside the years 0 to 9999"))
 }
 
 /// Tells cargo when to run this script again.
