@@ -25,7 +25,7 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 | 1c | CI: path filters at job level, aggregate `gate` job | todo | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
-| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge in progress | `docs/sync/spec/seal.md`, `core.md`, `relay.md`, `engine.md`, `device.md` |
+| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge drafted (1,655 lines, 110 clauses). All six are first drafts: 11,636 lines, 862 clauses | `docs/sync/spec/*.md` |
 | 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
@@ -230,6 +230,21 @@ Rulings on what the device draft raised (2026-11-21):
   seconds, about 2,880 requests a day, inside its budget.
 - Three review pairs are added to the plan's six, because the device draft asks for changes in all
   three: core–device, seal–device and relay–device.
+
+Rulings on what the bridge draft raised (2026-11-21):
+
+- **S29. The phone keeps its own picture.** SYNC.md §3 gives the phone "its own Look". The
+  device–bridge review adds the two facade calls and the per-device file kind it needs.
+- **S30. Every call on the phone that needs device authentication needs API 30 or later.**
+  BIOMETRIC_STRONG without a PIN fallback is available through the framework only from API 30, and
+  `androidx.biometric` is not a pre-approved dependency. Below API 30 the phone shows and the desktop
+  acts, which is what SYNC_PLAN.md §2 already says for adding, revoking and replacing devices.
+- **S31. The app declares `ACCESS_NETWORK_STATE`** besides the permissions of SYNC.md §2.1: a job with
+  a network constraint cannot be scheduled without it. It is a normal permission with no prompt.
+  Calendar access is gone with the export. Told to the owner at exit.
+- The page's caches go in `android`, as SYNC_PLAN.md §6.10 says, so the first frame waits for one
+  bridge round trip; the cold-start budget checks that. The minimum WebView version (120) and bundled
+  roots on API 26 to 33 are the spec's defaults for `android-shell` to confirm (§6.6 task 7).
 
 ## Deviations from the plan
 
