@@ -34,6 +34,33 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 | 6 | Tooling: `scripts/gate.sh`, `scripts/spec-coverage.sh`, `scripts/dev-setup.sh` | todo | |
 | 7 | Stage exit review, exit pull request, merge | todo | |
 
+## Next steps (as of 2026-11-21 19:10 UTC)
+
+In this order; a fresh session picks up at the first one not done.
+
+1. **Interface reviews of the six spec drafts**: nine pairs (the plan's six plus core–device,
+   seal–device, relay–device), each reviewer also checking that the rulings S1 to S31 are reflected;
+   then one resolver writes the exact change per spec; then one fixer per spec applies it. Repeat
+   until a round brings nothing of substance.
+2. **Task 1a's attack loop** again from round 1, with the closed mutation list of D14, until two
+   dry rounds. The task's brief and the lead's seven rulings are summarised in D11, D12 and D14.
+3. **Task 1b** (deny.toml, cargo-deny, cargo-audit, the cooldown script, `scripts/dev-setup.sh`,
+   `scripts/supply-chain.sh`), then the lead decides on any advisory left in the lockfile, then its
+   attack loop.
+4. **Task 1c** (CI by path, per-stage jobs with hooks, the `gate` job named `gate` only on
+   pull-request runs), pushed early so real CI runs can be read; then its attack loop.
+5. **Merge the baseline pull request** (TT-SAL/taskdeck#1) once 1a to 1c have converged and CI is
+   green; open the next one for specs, workspace, fixtures and tooling.
+6. **Task 2** (workspace crates and pinned dependencies), **task 5** (fixtures), **task 6**
+   (tooling), each with its attack loop.
+7. **Two-readers test** on the reviewed specs (six scenarios, two rounds without a difference or four
+   rounds), then the **requirement map** in `spec/README.md`, then **task 4** (skeleton crates from
+   the specs' Public API sections, toy state machine, fake sealer).
+8. **Stage exit review**, status `final`, exit pull request, merge; tell the owner to start wave 1.
+
+Usage: the account's five-hour window allows about 60 agent runs. Each workflow is sized to about
+20 runs, and no workflow is started once a window is about four-fifths used (D13).
+
 ## Decisions (with reasons)
 
 - **D1. Agent model.** `model: 'opus'` (Opus 5.5), as the owner's start prompt says.
