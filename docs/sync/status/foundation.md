@@ -19,13 +19,13 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 
 | # | Task (SYNC_PLAN.md §6.1) | State | Evidence |
 |---|---|---|---|
-| 0 | Status file, draft pull request | in progress | this file |
-| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | todo | |
+| 0 | Status file, draft pull request | done | this file; draft pull request TT-SAL/taskdeck#1 |
+| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented; attack rounds running | commit `a743020` and the fix after it; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh` |
 | 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | todo | |
 | 1c | CI: path filters at job level, aggregate `gate` job | todo | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
-| 3a | Spec conventions (`docs/sync/spec/README.md`) | todo | |
-| 3b | Spec drafts: core, seal, relay, engine, device, bridge | todo | |
+| 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
+| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal in progress; order: seal, core, relay, engine, device, bridge | |
 | 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
@@ -47,6 +47,22 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
   start without a download; today's code is tested on it here.
 - **D5. Fixed-width integers in every wire and file layout are big-endian.** SYNC.md gives layouts
   without a byte order; HPKE (RFC 9180) and the relay's `DataView` default agree on network order.
+- **D7. tokio moves forward, to 1.53.3.** RUSTSEC-2026-0386 is patched in 1.51.6 (an older line) and
+  from 1.53.3. A refresh does not downgrade, so the lowest patched release above today's 1.52.3 is
+  taken. Cargo also re-pointed the `windows-sys` edge of six crates whose own versions did not move;
+  those entries were put back, so the lockfile diff is the four crates and nothing else.
+- **D8. `build.rs` names its inputs.** Printing `rerun-if-env-changed=SOURCE_DATE_EPOCH` switches
+  off cargo's default (rerun when any package file changes). Instead of scanning the directory to
+  imitate it, the script lists `build.rs`, `resources.rc`, `icon.ico`, `Cargo.toml`, `Cargo.lock`
+  and `src`. `BUILD_DATE` is refreshed when the app's own inputs change, no longer when an unrelated
+  file does. Short enough to review before signing a tag (SYNC.md §8), and later directories such
+  as `fixtures/` and `android/` do not trigger rebuilds of the app.
+- **D9. The release-panic test is a probe binary.** `cargo test --release` always unwinds, so it
+  proves nothing about the profile. `crates/panic-probe` is built with `cargo build --release` and
+  must catch a panic; `scripts/check-release-panic.sh` runs it. Proven to fail under `abort`.
+- **D10. The fingerprint word list is BIP-39 English** (2,048 words), kept as
+  `docs/sync/spec/wordlist.txt`. The lead fetched the official file and compared SHA-256
+  `2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`.
 - **D6. Generic traits live in the engine crate.** `taskdeck-sync` defines the state-machine and
   sealer traits plus the toy implementations; `taskdeck-device` adapts the real core and seal to
   them (§6.7 task 2). The engine then depends on neither and compiles for wasm32 on its own.
@@ -116,6 +132,14 @@ None so far.
   `zeroize` 1.9.2 (2026-11-17, inside the cooldown until 2026-11-24). `Cargo.lock` has 1.9.0 today.
 - `origin/main` (the older build, commit `03554d6`) is fetchable: `git fetch origin main`.
 - `Cargo.lock` today: rustls 0.23.43, rustls-webpki 0.103.14, webpki-roots 1.0.9, tokio 1.52.3.
+
+- Under `panic = "abort"` a panic on any background thread killed the app at once. With `unwind`
+  only that thread dies (weather, calendars, the phone workers, the sync sender or listener) and
+  the process carries on without it; a panic on the main thread exits with 101 after running
+  destructors. `src/` has no `catch_unwind`, no panic hook and no `lock().unwrap()` outside tests.
+  Debug builds always behaved this way. `desktop` should decide whether the app wants a panic hook.
+- CI accepts `rust-toolchain.toml` as it is: the Linux job passed on the pinned toolchain with the
+  old toolchain step still in place (run of commit `a743020`).
 
 ## Open questions for the owner
 

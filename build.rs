@@ -1,8 +1,6 @@
 use embed_resource;
 use chrono::{DateTime, Utc};
 use std::env;
-use std::fs;
-use std::path::Path;
 
 fn main() {
     // Compile resources
@@ -47,45 +45,22 @@ fn source_date(raw: Option<&str>) -> Result<DateTime<Utc>, String> {
 
 /// Tells cargo when to run this script again.
 ///
-/// embed-resource prints no `rerun-if-changed` lines, so until now cargo used
-/// its default: rerun when any file of the package changes, which also kept
-/// BUILD_DATE fresh. Printing `rerun-if-env-changed` switches that default
-/// off, so the package's top-level entries are listed here instead (cargo
-/// scans a listed directory recursively). Left out, as cargo's default leaves
-/// them out: the target directory, version-control metadata, the workspace's
-/// member crates under `crates/`, and the top-level names `.gitignore` lists.
+/// Without these lines cargo reran the script, and so refreshed BUILD_DATE,
+/// whenever any file in the package changed. Printing any rerun line switches
+/// that default off, so the inputs are listed here instead. BUILD_DATE is now
+/// refreshed when the app's own sources, manifest, lockfile or resources change
+/// (or SOURCE_DATE_EPOCH does), no longer when an unrelated file in the
+/// repository changes. `src` is a directory; cargo scans it recursively.
 fn rerun_directives() {
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
-
-    let root = env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
-    let root = Path::new(&root);
-    let ignored = top_level_ignores(&root.join(".gitignore"));
-    let entries = fs::read_dir(root).expect("the package directory is readable");
-    let mut names: Vec<String> = entries
-        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-        .filter(|name| {
-            !name.starts_with('.') || name == ".gitignore" || name == ".github"
-        })
-        .filter(|name| !matches!(name.as_str(), "target" | "crates" | ".git"))
-        .filter(|name| !name.ends_with(".pdb") && !name.ends_with(".rs.bk"))
-        .filter(|name| !ignored.iter().any(|ignored| ignored == name))
-        .collect();
-    names.sort();
-    for name in names {
-        println!("cargo:rerun-if-changed={name}");
+    for path in [
+        "build.rs",
+        "resources.rc",
+        "icon.ico",
+        "Cargo.toml",
+        "Cargo.lock",
+        "src",
+    ] {
+        println!("cargo:rerun-if-changed={path}");
     }
-}
-
-/// The anchored top-level names in `.gitignore` (`/name` or `/name/`).
-fn top_level_ignores(path: &Path) -> Vec<String> {
-    let Ok(text) = fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    text.lines()
-        .map(str::trim)
-        .filter_map(|line| line.strip_prefix('/'))
-        .map(|name| name.trim_end_matches('/'))
-        .filter(|name| !name.is_empty() && !name.contains(['/', '*', '?', '[']))
-        .map(str::to_owned)
-        .collect()
 }

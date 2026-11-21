@@ -34,12 +34,14 @@ build_date() {
 }
 
 # expect_refused VALUE: the build must fail, and say why.
+# The log is searched through a here-string, not a pipe: with `pipefail`, a
+# `printf | grep -q` fails by SIGPIPE when grep stops reading a long log early.
 expect_refused() {
     local value="$1" log
     echo "check-build-date: SOURCE_DATE_EPOCH=\"$value\" must fail the build"
     if log="$(SOURCE_DATE_EPOCH="$value" check 2>&1)"; then
         fail "SOURCE_DATE_EPOCH=\"$value\" built; it must be refused"
-    elif ! printf '%s\n' "$log" | grep -q 'SOURCE_DATE_EPOCH is set but unusable'; then
+    elif ! grep -q 'SOURCE_DATE_EPOCH is set but unusable' <<<"$log"; then
         printf '%s\n' "$log" | tail -n 20 >&2
         fail "SOURCE_DATE_EPOCH=\"$value\" failed, but not with build.rs's message"
     else
