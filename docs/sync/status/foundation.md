@@ -25,7 +25,7 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 | 1c | CI: path filters at job level, aggregate `gate` job | todo | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
-| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal in progress; order: seal, core, relay, engine, device, bridge | |
+| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); then core, relay, engine, device, bridge | `docs/sync/spec/seal.md` |
 | 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
@@ -115,6 +115,24 @@ may still overturn one, and then the change is recorded here and in `spec/CHANGE
   standby answers plain HTTPS and clients poll `read`. Routes and bodies are otherwise the same.
 - **S10. Each spec ends with a Public API section**, and the skeleton crates are written from
   those. `engine.md` owns the state-machine and sealer traits (D6).
+
+Rulings on what the seal draft raised (2026-11-21):
+
+- **S11. The pairing bundle does not repeat the device set and the recovery public keys.** They
+  travel in the fresh snapshot's canonical membership bytes, which the bundle authenticates by the
+  snapshot's hash. Slot D stays under 16 KB.
+- **S12. Every control payload carries an inner signature over its items.** A backup reader can then
+  verify the membership history back to the board id from signatures alone, after a purge has
+  deleted old epoch roots. It costs 64 bytes per control entry and one context string (`ctl`).
+- **S13. A purge is signalled by `purge_before` on `EpochRotated`.** `engine.md` and `relay.md` adopt it.
+- **S14. Revoking the last current device is refused, from the recovery identity too.** A board with
+  no device cannot be read by anyone but the recovery key; a total compromise is answered by
+  restoring to a new board and fencing the old one.
+- **S15. Skip must classify the same on every device.** Whether a device still holds the target
+  frame must not change the verdict. The specs must define a floor computed from the log below which
+  a Skip target is refused everywhere, keep every frame above that floor fetchable from the relay
+  (compaction respects it), and have a device that lacks the frame fetch it. Open until the
+  seal–engine review settles the exact rule.
 
 ## Deviations from the plan
 
