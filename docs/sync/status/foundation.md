@@ -20,12 +20,12 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 | # | Task (SYNC_PLAN.md §6.1) | State | Evidence |
 |---|---|---|---|
 | 0 | Status file, draft pull request | done | this file; draft pull request TT-SAL/taskdeck#1 |
-| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented; three attack rounds done (6, 3 and 1 findings, all fixed), round 4 running | commits `a743020` to `5439f8d`; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`; full CI matrix green on `4c56792` |
+| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented; five attack rounds done (6, 3, 1, 2 and 2 findings; all fixed except the panic hook of D11, now being implemented); the loop did not reach two dry rounds, so it is being run again from the start | commits `a743020` to `eef1ba0`; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`; full CI matrix green on `eef1ba0` |
 | 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | todo | |
 | 1c | CI: path filters at job level, aggregate `gate` job | todo | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
-| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay in progress; then engine, device, bridge | `docs/sync/spec/seal.md`, `core.md` |
+| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted (1,804 lines, 162 clauses; its drafter was cut off in its final checks, a finishing pass is running); engine in progress; then device, bridge | `docs/sync/spec/seal.md`, `core.md`, `relay.md` |
 | 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
@@ -63,6 +63,23 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 - **D10. The fingerprint word list is BIP-39 English** (2,048 words), kept as
   `docs/sync/spec/wordlist.txt`. The lead fetched the official file and compared SHA-256
   `2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`.
+- **D11. Today's binaries get a panic hook that aborts, in release builds.** Attack round 5 showed
+  what `panic = "unwind"` costs today's app: a panic on a background thread no longer ends the
+  process, so the server's systemd unit (`Restart=always`) no longer recovers it. The plan requires
+  the unwinding profile and also "every merge keeps today's app working", so `main.rs` and
+  `server_main.rs` install a hook that prints as before and then aborts, only in builds without
+  debug assertions (debug builds unwound before too). `desktop` removes or narrows it when the new
+  runtime's `catch_unwind` guards need unwinding inside the app. See "Deviations".
+- **D12. Findings against the two check scripts count only if CI or the documented local use would
+  be misled.** Rounds 2 to 5 kept finding exotic local setups (a target directory shared between
+  checkouts, hostile environment variables); the scripts grew with each. The property they guard is
+  what matters.
+- **D13. Usage-aware workflows.** The account's five-hour limit cut one long workflow in the
+  middle (15:15 UTC, 2026-11-21): 18 agents had finished and were committed, 109 calls failed. Since
+  then: workflows of about 15 to 20 agent runs, routine agents (attackers, fixers, implementers) at
+  effort `high`, spec drafters at the session's effort, an attack loop that stops at once if an
+  agent fails (so a failed agent never counts as a clean result), and no more than about 80% of a
+  window's budget planned.
 - **D6. Generic traits live in the engine crate.** `taskdeck-sync` defines the state-machine and
   sealer traits plus the toy implementations; `taskdeck-device` adapts the real core and seal to
   them (§6.7 task 2). The engine then depends on neither and compiles for wasm32 on its own.
@@ -155,7 +172,11 @@ Rulings on what the core draft raised (2026-11-21):
 
 ## Deviations from the plan
 
-None so far.
+- **`foundation` edits three files under `src/`**, which SYNC_PLAN.md §4 gives to `desktop`:
+  `src/main.rs`, `src/server_main.rs` and a small new module for the panic hook (D11). Without it
+  the plan's own `panic = "unwind"` would break "every merge keeps today's app working" for the
+  server. Nothing else in `src/` is touched. `desktop` should note it in its status file when it
+  starts.
 
 ## Measurements
 
