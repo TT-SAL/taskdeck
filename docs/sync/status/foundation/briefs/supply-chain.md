@@ -11,3 +11,57 @@ Paths you may create or change: deny.toml, .cargo/audit.toml, scripts/dev-setup.
 5. scripts/supply-chain.sh: runs, in order, cargo deny check (advisories, bans, sources), cargo audit, and the cooldown against its default base, each clearly labelled; exits non-zero if any failed, after running all three; says what to install (scripts/dev-setup.sh foundation) when a tool is missing.
 6. Tests under scripts/tests/ (plain bash, runnable as "bash scripts/tests/run.sh", no test framework to install): for the cooldown script, using --index-dir and --now with small made-up lockfiles and index files: a new crate younger than 7 days fails; exactly 7 days old passes; an unchanged old crate is not looked up; a yanked version fails; a missing version fails; a valid exemption passes; an expired or malformed exemption fails; a git or path dependency in the lockfile is ignored by the cooldown (cargo-deny's sources check owns that). For dev-setup.sh: "--check" reports correctly, and a wrong checksum is refused (test this without downloading twice if you can).
 Run everything for real in this container: install the tools with your script, run scripts/supply-chain.sh, and report the full output. Expect findings: R4 section 4.2 lists advisories on crates other than the four that were refreshed (crossbeam-epoch, quick-xml, quinn-proto, quinn-udp, and chrono's unmaintained notice). For each remaining advisory or warning give: the id, the crate and version in the lockfile, what it is, the lowest fixed version at least 7 days old, whether the crate is actually compiled into any of today's binaries on any platform ("cargo tree -i <crate> -e features" with and without default features, and --target all), and your recommendation (a targeted "cargo update -p" the lead could approve, or a reviewed ignore with its reason). Do not apply either. Also run the cooldown with --all and report anything younger than 7 days in today's lockfile.
+
+## State after the implementation (2026-11-21, second session)
+
+Implemented and committed: `deny.toml`, `.cargo/audit.toml`, `scripts/dev-setup.sh`, `scripts/supply-chain.sh`,
+`scripts/cooldown.sh`, `scripts/cooldown.py`, `scripts/cooldown-exemptions.txt`, `scripts/tests/` (`run.sh`,
+`lib.sh`, `test-cooldown.sh`, `test-dev-setup.sh`). cargo-deny is pinned at 0.20.2 and cargo-audit at 0.23.0.
+`bash scripts/tests/run.sh` passes. `bash scripts/supply-chain.sh` failed on the lockfile as it stood: the
+rulings below settle every finding.
+
+# Lead rulings for task baseline-1b (2026-11-21)
+
+SYNC_PLAN.md §6.1 names four crates for the lockfile refresh and forbids a blanket update, because the
+desktop's look depends on the pinned egui, wgpu and winit. It also requires cargo-deny and cargo-audit, which
+cannot pass on today's lockfile. The lead's decision: a crate with an advisory and a fixed release moves by a
+targeted `cargo update -p <crate> --precise <version>` to the lowest fixed release that is at least seven days
+old, one crate at a time; a crate with no fixed release gets a reviewed ignore. egui, wgpu, winit and every
+other entry stay where they are.
+
+1. **Targeted updates** (this ruling overrides "do not change Cargo.lock" for exactly these moves):
+   - `crossbeam-epoch` 0.9.18 to 0.9.20 (RUSTSEC-2026-0204; compiled into both binaries);
+   - `rustix` 1.1.4 to 1.1.6 (RUSTSEC-2026-0486; `cargo update -p rustix@1.1.4 --precise 1.1.6`; any other
+     rustix version in the lockfile stays);
+   - `webbrowser` 1.2.1 to 1.2.2 (RUSTSEC-2026-0257; desktop binary). If the resolver also drops a duplicate
+     `core-foundation` that only the old webbrowser used, that removal is accepted: report it;
+   - `clipboard-win` 5.4.1 to 5.4.2 (the locked version is yanked; Windows desktop);
+   - `wayland-scanner` 0.31.10 to 0.31.11, which brings `quick-xml` 0.39.4 to 0.41.0 (RUSTSEC-2026-0194 and
+     -0195; a build-time code generator on the Linux desktop only). If the Linux desktop job fails in CI
+     because of it, the lead falls back to a reviewed ignore;
+   - `quinn-proto` 0.11.16 to 0.11.19, `quinn-udp` 0.5.15 to 0.5.16, `chacha20` 0.10.1 to 0.10.2 (seven
+     advisories, one more, and a yanked version; lockfile entries that no target compiles).
+   After each update, read the lockfile diff: exactly the named entries may differ. Put back anything else the
+   resolver moved (the first refresh had to restore `windows-sys` edges, decision D7), and list the final diff
+   entry by entry in the report.
+2. **Reviewed ignores**, in `deny.toml` (with the reason) and in `.cargo/audit.toml` (the id, the reason in a
+   comment), beside the chrono one. None has a fixed release:
+   - RUSTSEC-2024-0436, `paste`: a build-time macro under `rav1e`, which the `image` crate's `avif` feature
+     pulls in; no runtime code. Stage `desktop` removes the AVIF encoder with the phone server (SYNC.md §2.1);
+   - RUSTSEC-2024-0370, `proc-macro-error`, and RUSTSEC-2022-0104, `structopt`: the command-line helper that
+     `kmeans_colors` enables by default; the app never calls it. Stage `desktop` turns that default feature off
+     when it reworks the root package's dependencies. Not done here: SYNC_PLAN.md §2 keeps of the old hygiene
+     phase only the lockfile refresh, and the root package's dependency list is today's app;
+   - RUSTSEC-2026-0192, `ttf-parser`: Wayland title-bar fonts on the Linux desktop only, read from local font
+     files, under the pinned winit.
+3. **Duplicate versions outside the cryptographic list are allowed, not warned.** The pinned egui, wgpu and
+   winit tree carries 41; their warnings are 2,650 of the gate's 3,500 output lines and bury the errors. Set
+   `multiple-versions = "allow"`; the per-crate `deny-multiple-versions` entries stay and still fail.
+4. **cargo-audit fails on unmaintained, unsound and yanked, as the brief says, not on `notice`.** The two tools
+   then agree; a notice is printed and does not fail the run.
+5. **The shell scripts this task added are executable** (mode 755), like the two older check scripts.
+6. **Done means:** `bash scripts/tests/run.sh` passes; `bash scripts/supply-chain.sh` exits 0;
+   `bash scripts/cooldown.sh --all` reports no violation; the server builds and the library tests report
+   265 passed, 1 ignored (`cargo build --locked --no-default-features --bin taskdeck-server`,
+   `cargo test --locked --no-default-features --lib`); and `cargo check --locked --lib` with default features
+   passes on this Linux machine, or the report says exactly why it cannot run here.

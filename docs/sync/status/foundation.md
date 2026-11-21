@@ -76,7 +76,7 @@ These are working papers of the stage, not contracts. The exit pull request may 
 |---|---|---|---|
 | 0 | Status file, first pull request | done | this file; TT-SAL/taskdeck#1, merged |
 | 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented, with the panic hook of D11. Three loops so far: 5 rounds (14 findings), 5 rounds (9), 3 rounds (5); every finding fixed or ruled on. No finding against the product changes themselves since the hook landed; all recent ones are about which hypothetical edits the checks detect, now a closed list (D14). Not yet two dry rounds: the loop must run again from round 1 (`briefs/task-1a.md`) | commits `a743020` onwards; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`, `src/panic_abort.rs`; full CI matrix green on the merged head |
-| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | todo; brief ready (`briefs/supply-chain.md`) | |
+| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | implemented and committed; the lead read every file and ran the tests (39 and 43 cases pass). The gate `scripts/supply-chain.sh` fails on today's lockfile, as expected: the lead's rulings on each advisory are in the brief (D19) and are applied next; then the attack loop | commit `42f8d8b`; `briefs/supply-chain.md` |
 | 1c | CI: path filters at job level, aggregate `gate` job | todo; design and brief ready (`briefs/ci.md`) | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo; brief ready (`briefs/workspace.md`). Today the workspace has the root package and `crates/panic-probe` | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
@@ -204,6 +204,27 @@ exist, unverified, in the working copy `target/work/c`.
   them from the hook would have defeated it. So the code track and the spec track each write in a
   clone under `target/work/`, and only what the lead has read and verified enters the main
   checkout. It also keeps the two tracks, and the lead's own gate runs, out of each other's way.
+- **D19. The lockfile advisories outside the four refreshed crates** (the written reasons that step 3
+  of "Next steps" asked for; SYNC_PLAN.md §6.1 names four crates and forbids a blanket update, and
+  also requires cargo-deny and cargo-audit, which cannot pass on today's lockfile). A crate with a
+  fixed release moves by one targeted `cargo update -p … --precise` to the lowest fixed release at
+  least seven days old; a crate with none gets a reviewed ignore; egui, wgpu and winit do not move.
+  - Moves: `crossbeam-epoch` to 0.9.20 (RUSTSEC-2026-0204, an invalid pointer dereference, in both
+    binaries); `rustix` 1.1.4 to 1.1.6 (RUSTSEC-2026-0486, unsound); `webbrowser` to 1.2.2
+    (RUSTSEC-2026-0257, argument injection, desktop binary); `clipboard-win` to 5.4.2 (the locked
+    version is yanked); `wayland-scanner` to 0.31.11 with `quick-xml` 0.41.0 (RUSTSEC-2026-0194 and
+    -0195; a build-time generator on the Linux desktop, so it cannot change the look on Windows or
+    macOS; a reviewed ignore is the fall-back if the Linux desktop job fails); `quinn-proto` to
+    0.11.19, `quinn-udp` to 0.5.16 and `chacha20` to 0.10.2 (eight advisories and a yanked version in
+    entries that no target compiles, so the moves change no built code).
+  - Ignores, none with a fixed release: `paste` (RUSTSEC-2024-0436, a build-time macro under the AVIF
+    encoder, which `desktop` removes); `proc-macro-error` and `structopt` (RUSTSEC-2024-0370,
+    RUSTSEC-2022-0104: the command-line helper `kmeans_colors` enables by default and the app never
+    calls; turning that feature off is a change to today's app, left to `desktop`); `ttf-parser`
+    (RUSTSEC-2026-0192, Wayland title-bar fonts on the Linux desktop).
+  - Also: duplicate versions outside the cryptographic list are allowed without a warning (41 of
+    them, from the pinned window toolkit, were 2,650 of the gate's 3,500 output lines); cargo-audit
+    fails on unmaintained, unsound and yanked, not on notices, so the two tools agree.
 
 ## Rulings for the specs
 
@@ -430,6 +451,10 @@ Decisions the lead took that the owner may want to overrule:
 - A backup's file name carries a writer tag (S28).
 - `zeroize` stays at the lockfile's 1.9.0 until 1.9.2 (named by SYNC.md §5.1, published 2026-11-17)
   is seven days old, on 2026-11-24; then one `cargo update -p zeroize --precise 1.9.2`.
+- Eight more crates moved in the lockfile than the four the plan names, each for an advisory or a
+  yanked version, and `deny.toml` carries four more reviewed ignores than SYNC.md's one (D19).
+- cargo-deny is pinned at 0.20.2: the two newer releases were inside the seven-day rule on
+  2026-11-21. cargo-audit's release publishes no checksum, so its pinned hash is the download's.
 
 ## What the next stages need to know
 
