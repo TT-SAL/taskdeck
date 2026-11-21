@@ -101,7 +101,7 @@ The sync thread is "the sync engine on one blocking thread" of SYNC.md §2.1. It
 
 - **DEV-THREAD-001** (device) The engine, the local-only board and every file of the data folder's `sync/` directory and of the plain files MUST be accessed only from the sync thread, except the backup thread's writes into destinations and the facade's read of published views (§4.4).
 - **DEV-THREAD-002** (device) The sync thread MUST NOT perform network I/O, decode an image or wait for another thread's result, other than receiving from its input channel.
-- **DEV-THREAD-003** (device) Every thread the crate starts MUST be named as the table of §4.2 states, and every one of them MUST be joined by `shutdown` (§17.4) before it returns.
+- **DEV-THREAD-003** (device) Every thread the crate starts MUST be named as the table of §4.2 states, and every one of them MUST be joined by `shutdown` (§17.2) before it returns.
 
 ### 4.3 The loop of the sync thread
 
@@ -157,9 +157,9 @@ At `open` the device creates the data folder if it is missing, opens `taskdeck_d
 The lock file is never written and stays empty. The facade holds the file, and so the lock, until `shutdown` returns.
 
 - **DEV-LOCK-001** (device) `open` MUST take the exclusive lock of §5.2 on `taskdeck_data/.lock` before it reads or writes any other file of the data folder, and MUST hold it until `shutdown` returns.
-- **DEV-LOCK-002** (device) `open` in synced mode, `create_board` and `join` MUST refuse with `device/folder_locked` when the lock is contended and with `device/folder_unlockable` when it cannot be taken, and MUST NOT then read or write any file of `sync/` (SYNC.md §4.3 rule 6).
+- **DEV-LOCK-002** (device) `open` in synced mode, `begin_create` and `join` MUST refuse with `device/folder_locked` when the lock is contended and with `device/folder_unlockable` when it cannot be taken, and MUST NOT then read or write any file of `sync/` (SYNC.md §4.3 rule 6).
 - **DEV-LOCK-003** (device) `open` in local-only mode MUST proceed when the lock is contended or unsupported, and MUST report the matching warning.
-- **DEV-LOCK-004** (device) `import_check` and `create_board` from a folder MUST refuse with `device/folder_locked` a source folder whose `.lock` another process holds (SYNC.md §9 step 4), testing it with `try_lock` and releasing it at once when it was free.
+- **DEV-LOCK-004** (device) `import_check` and `begin_create` from a folder MUST refuse with `device/folder_locked` a source folder whose `.lock` another process holds (SYNC.md §9 step 4), testing it with `try_lock` and releasing it at once when it was free.
 
 ### 5.3 Cloud-synced folders
 
@@ -171,26 +171,26 @@ A data folder inside a folder that a cloud service synchronises would let the se
 
 On Android the check is skipped: the folder is app-private storage.
 
-- **DEV-OPEN-001** (device) `open` in synced mode, `create_board` and `join` MUST refuse with `device/cloud_folder` a data folder for which any rule of §5.3 holds, and MUST NOT then read or write any file of `sync/`.
+- **DEV-OPEN-001** (device) `open` in synced mode, `begin_create` and `join` MUST refuse with `device/cloud_folder` a data folder for which any rule of §5.3 holds, and MUST NOT then read or write any file of `sync/`.
 
 ### 5.4 Modes
 
 `open` decides the mode, in order:
 
 1. Take the lock (§5.2).
-2. Read `sync/active.tds` (§6.2). Absent: the mode is **`LocalOnly`** (§9): an empty data folder is an empty local board, and no file is written before the first change.
+2. Read `sync/active.tds` (§6.2). Absent: the mode is **`LocalOnly`** (§9): an empty data folder is an empty local board, and no file is written before the first change. When `sync/pending.tds` exists, the open report carries `PendingCreate` (§18.1).
 3. Present: the lock must be `Held` and the cloud check must pass (§5.2, §5.3); read `store.tds` of the named identity directory and check that it names the same `board_id` and `dev`; else `device/store_descriptor`.
-4. Load `L_d` from the key store named by `store.tds` (§12): `Unavailable` (the store is locked, or the bridge is not ready): `open` fails with `device/keystore_unavailable` and changes nothing; `NotFound` or `CannotUnwrap`: the mode is **`KeyLost`** (§12.6).
+4. Load `L_d` from the key store named by `store.tds` (§12); the key store in `OpenOptions` must have that `kind` (else `device/store_descriptor`): `Unavailable` (the store is locked, or the bridge is not ready): `open` fails with `device/keystore_unavailable` and changes nothing; `NotFound` or `CannotUnwrap`: the mode is **`KeyLost`** (§12.6).
 5. Read every file of the identity directory (§7.4), build `Loaded` (`engine.md` §7.10), and send `Start`. The mode is **`Synced`**.
 
 | Mode | What the facade offers | Files written |
 |---|---|---|
 | `LocalOnly` | every board intent and read query, the fetchers, import check, create board (from this folder or empty), join (pair as a new device), export legacy | the plain files (§9) |
 | `Synced` | everything of §17 | the identity directory; never the plain files, except "Export legacy" into another folder |
-| `KeyLost` | the reason, the old identity's `board_id`, `dev` and relay address; `join`; `create_board`; `forget_identity` | nothing until the user acts |
+| `KeyLost` | the reason, the old identity's `board_id`, `dev` and relay address; `join`; `begin_create`; `forget_identity` | nothing until the user acts |
 
 - **DEV-OPEN-002** (device) `open` MUST decide the mode by the five steps of §5.4 in order.
-- **DEV-OPEN-003** (device) In local-only mode the device MUST NOT open any network connection other than the fetchers' (§13), and MUST NOT create the `sync/` directory except as `create_board` or `join` does.
+- **DEV-OPEN-003** (device) In local-only mode the device MUST NOT open any network connection other than the fetchers' (§13), and MUST NOT create the `sync/` directory except as `begin_create` or `join` does.
 - **DEV-OPEN-004** (device) A data folder with no plain files and no `sync/active.tds` MUST open as an empty local-only board, and `open` MUST NOT write any file for it other than `.lock`.
 
 ## 6. The store: layout and encodings
@@ -202,6 +202,7 @@ taskdeck_data/
   .lock                               the lock (§5.2)
   read_at_startup.json, archived.jsonl, notepad_text.json, subscriptions.json,
   subscribed_cache.json, feeds/       local-only mode only (§9)
+  device.json                         local-only per-device settings (§16)
   userconfig.toml, colorschemes.json  desktop settings (stage desktop), as today
   pre-sync-<YYYYMMDD-HHMMSS>/         plain files moved aside by "create board from this folder" (§18.2)
   local-<YYYYMMDD-HHMMSS>/            plain files set aside by a join (§18.4)
@@ -248,7 +249,7 @@ taskdeck_data/
 | 10 | `marker.tdk` | one | `SetMarker`; `ClearMarker` removes the file | §6.4.6 |
 | 11 | `history.tdk` | appended, one per control entry | the store (§8.3) | §6.4.8 |
 | 12 | `device.tdk` | one | the store (§16) | §16 |
-| 13 | `picture.tdk` | one | the store (§14.3) | §6.4.11 |
+| 13 | `picture.tdk` | one | the store (§14.2) | §6.4.11 |
 | 14 | `weather.tdk` | one | the store (§13.2) | §6.4.12 |
 | 15 | `draft.tdk` | one | the store (§17.6) | §6.4.13 |
 | 16 | `feed-<id>.tdk` | one | the store (§13.1) | §6.4.10 |
@@ -436,7 +437,7 @@ The crash tests use `CrashFiles`, which counts write boundaries and aborts the p
 | **append** | kinds 1, 4, 5, 8, 11 | if the file does not exist: `write_new(<name>.tmp, header)`, `sync(<name>.tmp)`, `rename(<name>.tmp, <name>)`, `sync_dir`; then `append(<name>, sealed records)`, `sync(<name>)` |
 | **replace** | kinds 2, 6, 7, 9, 10, 12 to 18, `active.tds`, `pending.tds`, `store.tds`, `ld.wrap`, and the rewrites of kinds 5 and 8 | `write_new(<name>.tmp, header ‖ sealed records)` with a fresh `file_id`, `sync(<name>.tmp)`, `rename(<name>.tmp, <name>)`, `sync_dir` |
 | **create** | kind 3, and a new log segment | as replace, with the new file's name; a log segment's header and first page are written in the one `write_new` |
-| **remove** | `ClearMarker`, `DeleteBases`, segments below the floor, `draft.tdk` after a save, `bootstrap.tdk` after the first checkpoint | `remove(<name>)`, `sync_dir` |
+| **remove** | `ClearMarker`, `DeleteBases`, segments below the floor, `draft.tdk` after a save, `bootstrap.tdk` after the first checkpoint, `unsent.tdk` after its resubmit report, `pending.tds` after an activation | `remove(<name>)`, `sync_dir` |
 
 The store keeps, for each open append file, its header and the number of records in it, and seals the next record with that index (`seal.md` §19.3, SEAL-FILE-002).
 
@@ -487,14 +488,14 @@ A torn or bad tail on an append file is the write of a crash that did not reach 
 
 | File | On a corrupt file |
 |---|---|
-| `store.tds`, `identity.tdk`, `device.tdk`, `checkpoint.tdk` (or `bootstrap.tdk` when there is no checkpoint), a log segment above the checkpoint's seq, `outbox.tdo`, `meta.tdk`, `history.tdk` | `open` fails with `device/store_corrupt` naming the kind; nothing is written; the facade offers `join` as a new device (§18.4), keeping the old directory |
+| `store.tds`, `identity.tdk`, `device.tdk`, `checkpoint.tdk` (or `bootstrap.tdk` when there is no checkpoint), a log segment above the checkpoint's seq, `outbox.tdo`, `meta.tdk`, `history.tdk`, `unsent.tdk` | `open` fails with `device/store_corrupt` naming the kind; nothing is written; the facade offers `join` as a new device (§18.4), keeping the old directory |
 | a base, or a log segment wholly at or below the checkpoint's seq | the file is renamed to `<name>.corrupt-<YYYYMMDD-HHMMSS>` and left out of `Loaded`; reported as `quarantined { kind }` |
 | `hashes.tdk`, `notices.tdk`, `marker.tdk` | renamed as above and treated as empty; reported |
 | `overlay.tdk`, `feed-*.tdk`, `picture.tdk`, `weather.tdk`, `draft.tdk` | removed and treated as absent; reported |
 
 `checkpoint.tdk` and `meta.tdk` may be absent only while `bootstrap.tdk` exists or before the first checkpoint of a new identity; otherwise their absence is `device/store_corrupt`. The log records below `log_floor` of `device.tdk` are dropped from `Loaded`, and segments wholly below it are removed (the end of an interrupted `TruncateLogBelow`).
 
-`Loaded` (`engine.md` §7.10) is filled from these files exactly: `checkpoint` from kind 2; `bases` from kind 3; `chains` and `tail` from kind 1 (`tail` = the records above `checkpoint.board_seq`); `hashes` from kind 4; `outbox` from kind 5 in file order; `notices` from kind 8 in file order; `meta` from kind 9; `marker` from kind 10; `build_id` from the caller (§17.1); `session` 16 fresh bytes (§10.4); `bootstrap` from kind 17.
+`Loaded` (`engine.md` §7.10) is filled from these files exactly: `checkpoint` from kind 2; `bases` from kind 3; `chains` and `tail` from kind 1 (`tail` = the records above `checkpoint.board_seq`); `hashes` from kind 4; `outbox` from kind 5 in file order; `notices` from kind 8 in file order; `meta` from kind 9; `marker` from kind 10; `build_id` from the caller (`OpenOptions`, §17.2); `session` 16 fresh bytes (§10.4); `bootstrap` from kind 17.
 
 The confirmed `BoardData` is loaded from the checkpoint's board bytes with `BoardData::from_canonical_bytes`, exactly as stored: no id assignment, plan migration, detab or default substitution (V2-19, `core.md` §6.14).
 
@@ -514,7 +515,7 @@ The engine decides what to delete (`engine.md` §7.13); the store deletes only o
 The rule that a file layer that kills the process at every write boundary must not break:
 
 1. **Open.** After a kill at any write boundary, the next `open` succeeds and reaches the same mode.
-2. **Durable means durable.** Every record whose `Persisted` was delivered before the kill is in `Loaded` (ENG-PERSIST-004); in particular every edit whose `submit` returned (§17.5) is in the outbox or already applied.
+2. **Durable means durable.** Every record whose `Persisted` was delivered before the kill is in `Loaded` (ENG-PERSIST-004); in particular every edit whose `submit` returned (§17.4) is in the outbox or already applied.
 3. **Nothing half-made.** No file is read with a record that did not open; every replace leaves either the old or the new file.
 4. **Same end.** Once the restarted device reconnects and the relay is honest, its state hash at the relay head equals that of a run without the kill, and no command is applied twice (`engine.md` §31.7 invariants 2 and 3).
 
@@ -532,7 +533,7 @@ The runtime builds every `Input` (`engine.md` §4.2) with `wall_ms` = the device
 | Event | Delivered when |
 |---|---|
 | `Start` | once, after §7.4, before any other input |
-| `Shutdown` | at `shutdown` (§17.4) |
+| `Shutdown` | at `shutdown` (§17.2) |
 | `Tick` | when the sync thread's wait reaches the deadline of the latest `ScheduleTick`, and once after every facade request that changed the foreground state |
 | `Persisted`, `PersistFailed` | §7.3 |
 | `LocalRead` | after the store answered a `ReadLog` or `ReadBase`, on the local queue |
@@ -578,7 +579,7 @@ The runtime turns each `Notify` (`engine.md` §30.3) into a facade effect:
 
 | Notification | Runtime |
 |---|---|
-| `Enqueued`, `EnqueueRefused` | answers the waiting `submit` (§17.5) |
+| `Enqueued`, `EnqueueRefused` | answers the waiting `submit` (§17.4) |
 | `ViewChanged`, `StatusChanged`, `NoticesAdded`, `BannersChanged`, `AlarmRaised` | raise the matching change counters (§17.3) |
 | `OpProgress`, `OpDone` | update the operation's state and answer a waiting `wait_op` (§17.8) |
 | `PairRegistered`, `PairFailed` | feeds the existing-device pairing machine (§18.3) |
@@ -589,13 +590,13 @@ The runtime turns each `Notify` (`engine.md` §30.3) into a facade effect:
 | `PurgeBackups { before_ms }` | records the offer; `delete_backups_before` acts on it (§15.6) |
 | `ReuploadPicture { epoch }` | a desktop that holds the clean picture re-uploads it (§14.1) |
 | `RecoveryKeyChanged { key_fp }` | sets `backup.pin_needed = key_fp` (§15.5) |
-| `ReadyToExit` | ends `shutdown` (§17.4) |
+| `ReadyToExit` | ends `shutdown` (§17.2) |
 
 ## 9. Local-only mode
 
 ### 9.1 What it is
 
-Local-only mode is the core over today's plain files with no relay (SYNC_PLAN.md §6.7 item 1). With no sync configured the desktop's wall calendar behaves as today: the same files, in the same formats, written in the same order, so that today's build and the older `main` build can still open the folder (SYNC_PLAN.md §3.2: "every merge keeps today's app working"), and "Create board from this folder" (§18.2) and "Export legacy" (§18.5) read and write one format.
+Local-only mode is the core over today's plain files with no relay (SYNC_PLAN.md §6.7 item 1). With no sync configured the desktop's wall calendar behaves as today: the same files, in the same formats, written in the same order, so that today's build and the older `main` build can still open the folder (SYNC_PLAN.md §3.2: "every merge keeps today's app working"), and "Create board from this folder" (§18.2) and "Export legacy" (§18.7) read and write one format.
 
 The sync thread holds the board as a `BoardData` and a local counter `local_seq`, starting at 1 at each `open`. There is no engine, no outbox, no notice list and no sealed file.
 
@@ -610,7 +611,7 @@ At `open`, in order:
    - `subscriptions_unreadable`: leave the file in place (as today, board.rs:597-610), report it, import again without it, and mark subscriptions **frozen**: the subscription intents are refused with `device/subscriptions_frozen` and `subscriptions.json` is never written, until the next `open`;
    - any other failure: `open` fails with `device/legacy_unreadable` and the report's failure kind, and writes nothing.
 3. Read `subscribed_cache.json` as today (`read_overlay`, subscriptions.rs:511-518): unreadable means an empty overlay.
-4. The import's renumberings, warnings and quarantines go into the open report (§17.1); the report holds kinds, ids and counts only (CORE-IMP-003).
+4. The import's renumberings, warnings and quarantines go into the open report (§17.2); the report holds kinds, ids and counts only (CORE-IMP-003).
 
 Ids minted in local-only mode use `device_no` 1: the compile step runs with `CompileCtx.device_no = 1` and an `IdMinter` for 1, and `apply` with `Ctx { seq: local_seq + 1, device_no: 1, at: now, based_on: local_seq }`, after which `local_seq` is raised by one. These ids are `2^40 + n`, below 2^53, which today's files hold as plain integers; the import keeps them on the next `open` and at "Create board from this folder" (`core.md` change required, §24). Stamps, `notes_rev` and marks are not stored in today's files and are rebuilt at each `open` by the import; block ids are renumbered by it (`core.md` §15.3 step 10), which no caller observes across an `open`.
 
@@ -761,7 +762,7 @@ The relay's own budgets (3,000 appends per device, 5,000 deletions per board) re
 |---|---|---|
 | desktop app running | one socket; reads and appends over it | HTTPS; the engine sends `Hello` every 30,000 ms while `Live` (`engine.md` §11.1) |
 | Android, activity visible | one socket | HTTPS polling as above |
-| Android, not visible, no job | disconnected: the facade sends `Disconnect` to the engine's session by delivering `Disconnected { unreachable: false }` and holds `Connect` until a job or the foreground | the same |
+| Android, not visible, no job | the transport closes the socket, delivers `Disconnected { unreachable: false }`, and holds every `Connect` until a background run or the foreground | the same |
 | Android background run | HTTPS only, for at most its budget | HTTPS only |
 
 `set_foreground(bool)` (§17.9) tells the device the state. On `true` it calls `notify_resume` and lets the next `Connect` through; on `false` on Android it closes the socket. A **background run** is `background_sync(budget_ms)` (§17.9), called by the Android job every 30 minutes and by the expedited job when the app leaves the foreground with queued edits (API 31 and later): it lets one `Connect` through over HTTPS, and returns when the engine's status is `Live` with nothing queued and no request outstanding, or when `budget_ms` (at most 600,000) has passed, whichever is first; then it holds `Connect` again. Doze and standby buckets only delay jobs; they show as "last seen" on the other devices (`engine.md` §30.2).
@@ -794,7 +795,7 @@ A timeout is a failure of §10.6's first row.
 1. relay targets and ICS URLs with the scheme `http` whose host is `127.0.0.1`, `[::1]` or `localhost`, for the standby relay and the fetcher test server on loopback (`relay.md` §15.2);
 2. `TrustRoots::Extra(pem)`: one additional trust anchor, a test certificate, added to the platform verifier's roots;
 3. the address guard's exception for loopback addresses when the URL's host is one of the three loopback names of item 1 (§13.1.4);
-4. the test key stores `FileKeyStore` and `MemoryKeyStore` (§12.5);
+4. the test key stores `FileKeyStore` and `MemoryKeyStore` (§12.6);
 5. `CrashFiles` (§7.6) and an injectable clock (`OpenOptions.clock`);
 6. the binary `taskdeck-devicectl` (§19), whose target has `required-features = ["test-trust"]`;
 7. the constant `TEST_TRUST_MARKER = "taskdeck-test-trust-enabled-6f1c2a"`, which `open` passes to `std::hint::black_box` so that every build with the feature contains the string;
@@ -846,7 +847,7 @@ pub enum KeyStoreError { NotFound, CannotUnwrap, Unavailable, Failed }
 | Windows | `DpapiKeyStore` (§12.3) | 1 |
 | macOS | `KeychainKeyStore` (§12.4) | 2 |
 | Android | `AndroidKeyStore` through the bridge (§12.5) | 3 |
-| Linux, release builds | none: `create_board` and `join` answer `device/no_keystore`; local-only mode works as today | |
+| Linux, release builds | none: `begin_create` and `join` answer `device/no_keystore`; local-only mode works as today | |
 | tests (`test-trust`) | `FileKeyStore`, `MemoryKeyStore` (§12.6) | 4, 5 |
 
 ### 12.3 Windows: DPAPI
@@ -1243,7 +1244,7 @@ pub struct Submitted { pub reply: Reply, pub entry_id: Option<[u8; 16]>, pub pro
 | `release_hold()` | D, A | `()` | — | — | short | all |
 | `submit_json(text: &str)` | A | as `submit`, after `parse_intent` (`core.md` §12.2); the bridge renders the page's reply | `core/intent_json` and as `submit` | — | short | all |
 
-A `submit` in synced mode runs on the sync thread, with no other engine input in between (`engine.md` §9.1): `parse` (for `submit_json`), `compile` against `Engine::view()` with the device zone, `now` = the device clock in whole milliseconds, `device_no` from the engine, the overlay and the minter; on `Ok(Compiled { command: None, .. })` it returns the reply at once; otherwise it sends `Enqueue { ticket, command, at_ms: now, origin_state, hold }` and returns when `Notify(Enqueued)` arrives, which the engine emits only after the record is durable (ENG-ENQ-004, SYNC.md §4.1: "fsynced before `apply` returns"). In local-only mode it runs §9.3.
+A `submit` in synced mode runs on the sync thread, with no other engine input in between (`engine.md` §9.1): `parse` (for `submit_json`), `compile` against `Engine::view()` with the device zone, `now` = the device clock in whole milliseconds, `device_no` from the engine, the overlay and the minter; before the device has a `device_no` (`Engine::device_no()` is `None`) it returns `engine/not_joined` without compiling; on `Ok(Compiled { command: None, .. })` it returns the reply at once; otherwise it sends `Enqueue { ticket, command, at_ms: now, origin_state, hold }` and returns when `Notify(Enqueued)` arrives, which the engine emits only after the record is durable (ENG-ENQ-004, SYNC.md §4.1: "fsynced before `apply` returns"). In local-only mode it runs §9.3.
 
 - **DEV-FACADE-001** (device) `submit` MUST compile against the engine's pending view and send the `Enqueue` in the same loop turn, with `at_ms` equal to the compile step's `now` and `origin_state` the minter after compiling.
 - **DEV-FACADE-002** (device) `submit` MUST return success only after the engine's `Enqueued` for its ticket (synced) or after the plain-file writes of §9.3 (local-only), and MUST return the engine's or the compile step's code otherwise.
@@ -1601,4 +1602,484 @@ Besides these: pairing both ways (desktop as E, phone as N; and the phone as E a
 
 - **DEV-E2E-003** (device) Catch-up of 4,200 entries MUST complete within 3,000 ms as §20.4 measures it.
 
-<!-- CONTINUE -->
+## 21. Error catalogue
+
+Codes the device returns from facade calls, puts in the open report, in statuses and in overlay statuses. Codes of `core.md` §16, `seal.md` §22, `relay.md` §19 and `engine.md` §33 pass through unchanged where §17 says so.
+
+| Code | Meaning | Raised when | What the caller does |
+|---|---|---|---|
+| `device/closed` | the facade was shut down | any call after `shutdown` | open again |
+| `device/wrong_mode` | the call is not offered in this mode | §5.4, §17 | hide the control |
+| `device/reopen_needed` | a base could not be read; the runtime stopped | §8.2 | reopen the facade |
+| `device/shutdown_timeout` | threads did not end within 10 s | §17.2 | exit the process |
+| `device/folder_in_use` | another `Device` in this process holds the folder | DEV-THREAD-009 | use the open one |
+| `device/folder_locked` | another process holds the folder's lock | §5.2, DEV-LOCK-002, DEV-LOCK-004 | show today's warning; close the other copy |
+| `device/folder_unlockable` | the file system cannot lock | §5.2 | move the data folder to a local disk |
+| `device/cloud_folder` | the data folder is cloud-synchronised | §5.3 | move the data folder |
+| `device/store_descriptor` | `active.tds`, `pending.tds` or `store.tds` is invalid | §6.2 | report; offer `join` as a new device |
+| `device/store_corrupt` | a required sealed file does not open | §7.4 | report; offer `join` as a new device |
+| `device/record_format` | a record plaintext has the wrong layout | §6.3, §6.5 | as the file's row in §7.4 |
+| `device/record_range` | an engine record holds an integer the encoding cannot carry | §6.5 | a local fault: report the bug |
+| `device/keystore_unavailable` | the key store cannot answer now | §12.1 | retry later (unlock the keychain; wait for the shell) |
+| `device/keystore_failed` | the key store failed otherwise | §12.1 | report |
+| `device/no_keystore` | this platform has no key store in release builds | §12.2 | local-only mode only |
+| `device/legacy_unreadable` | the plain files cannot be imported | §9.2, §18.1 | show the import report |
+| `device/subscriptions_frozen` | `subscriptions.json` was unreadable at open | §9.2 | fix or remove the file, reopen |
+| `device/needs_sync` | the call needs a synced board | §9.3, §17.12 | create or join a board |
+| `device/write_failed` | a plain-file write failed | §9.3, §18.7 | show it; the change was not made |
+| `device/identity_active` | `forget_identity` named the active identity | §17.2 | choose another identity |
+| `device/insecure_url` | a URL is not `https` | DEV-NET-001, §13.1 | ask for an `https` address |
+| `device/bad_answer` | a relay answer failed strict parsing | §10.5 | the engine's `RelayProtocol` alarm |
+| `device/ics_address` | a feed's host or address is refused | §13.1.4 | shown as the feed's status |
+| `device/ics_dns` | a feed's host does not resolve | §13.1.2 | shown as the feed's status |
+| `device/ics_connect` | a feed's host cannot be reached | §13.1.2 | shown; retried next round |
+| `device/ics_tls` | a feed's certificate was refused | §13.1.2 | shown |
+| `device/ics_timeout` | a feed took more than 20 s | §13.1.2 | shown; retried |
+| `device/ics_redirects` | a fourth redirect | §13.1.2 | shown |
+| `device/ics_status` | a feed answered a status other than 200 or 304 | §13.1.2 | shown with the number |
+| `device/ics_too_large` | a feed is above 8 MiB | §13.1.2 | shown |
+| `device/ics_panic` | a feed's parse panicked; quarantined | §13.1.3 | shown until the URL changes |
+| `device/picture_too_large` | an uploaded picture is above 6 MiB | §14.1 | choose a smaller file |
+| `device/picture_format` | not a JPEG (or PNG for an upload) | §14.1, §14.2 | choose another file; for a synced one, shown as the picture status |
+| `device/picture_decode` | the picture does not decode within the limits | §14.1, §14.2 | as above |
+| `device/picture_blob` | the picture's blob is missing, incomplete or does not open | §14.2 | retried after an hour |
+| `device/backup_not_desktop` | backups are written by desktops only | §15.1 | none |
+| `device/backup_stopped` | the device is halted, stopped or not current | §15.1 | resolve the stop |
+| `device/backup_history_incomplete` | the device lacks the control history from seq 1 | §15.1, §15.7 | another desktop writes backups |
+| `device/backup_unpinned` | the recovery fingerprint is not pinned, or changed | §15.1, §15.5 | confirm the fingerprint from the sheet |
+| `device/backup_no_destination` | no destination configured | §15.1 | add one |
+| `device/backup_no_token` | no backup-read token yet | §15.1, §15.4 | connect once |
+| `device/backup_failed` | the latest write to a destination failed | §15.6 | check the destination |
+| `device/backup_stale` | no good nightly file for 48 hours | §15.6 | check the destinations |
+| `device/destination_invalid` | a destination path is not usable | §15.6 | choose another |
+| `device/fingerprint_mismatch` | the typed fingerprint is not the membership's recovery key | §15.5 | compare with the sheet again |
+| `device/recovery_chain` | a top-up found a chain break | §15.8 | restore the backup as it is |
+| `device/not_on_this_platform` | the call is not offered on this platform | DEV-FACADE-007 | hide the control |
+| `device/needs_api30` | Android below API 30 | DEV-FACADE-007 | use a desktop |
+| `device/restore_target` | the seq is not an offered restore target | §17.8 | choose from `restore_targets` |
+| `device/recovery_window` | the 72 hours have not passed, or this device proposed | §17.10 | wait, or confirm on another device |
+| `device/sheet_mismatch` | the retyped sheet is not the seed | §18.1 | retype |
+| `device/sheet_test_failed` | the test backup did not open | §18.1 | report the bug; do not finish |
+| `device/create_failed` | the relay refused `create` | §18.1 | show the relay code |
+| `device/pair_state` | a pairing call out of order | §17.10 | follow the screen |
+| `device/set_aside_failed` | moving the plain files failed | §18.2, §18.4 | show it; for a join, nothing was activated |
+| `device/close_failed` | the old board's `CloseBoard` failed | §18.6 | retry; the new board stays pending |
+| `device/export_target` | the export folder is not empty, not absolute, or inside the data folder | §18.7 | choose another |
+| `device/ctl_request` | a devicectl request line is invalid | §19.2 | a test bug |
+| `device/torn_tail` | warning: a torn tail was truncated | §7.4 | none |
+| `device/bad_tail` | warning: a last record did not open and was truncated | §7.4 | none; possibly disk damage |
+| `device/quarantined` | warning: a damaged optional file was set aside | §7.4 | none |
+
+## 22. Limits
+
+| Name | Value | Unit | Enforced by |
+|---|---|---|---|
+| descriptors `active.tds`, `pending.tds`, `store.tds` | 45, 45, 54 | bytes exactly | DEV-STORE-004 |
+| entries per log page record | 1 to 256 | entries | DEV-STORE-005 |
+| log segment | 16,384 entries or 67,108,864 bytes | | DEV-STORE-003 |
+| checkpoint `board`, `membership`, `registry` | 62,914,560; 2,097,152; 1,048,576 | bytes | DEV-STORE-005 |
+| hash and notice ops per record | 1,024 | ops | DEV-STORE-005 |
+| outbox ops per record; one `OutboxRecord` JSON | 1,024; 1,048,576 | ops; bytes | DEV-STORE-005 |
+| notice or refusal record | 4,096 | bytes | DEV-STORE-005 |
+| `meta.tdk` JSON | 4,194,304 | bytes | DEV-STORE-005 |
+| record JSON nesting | 32 | levels | DEV-STORE-007 |
+| identity roots; pending roots | 65,535; 16 | entries | DEV-STORE-005 |
+| `overlay.tdk` | 16,777,216 | bytes | DEV-STORE-005 |
+| feed body; ETag and `Last-Modified` | 8,388,608; 1,024 | bytes | DEV-ICS-004, DEV-STORE-005 |
+| picture `clean` and `look` | 4,194,304 each | bytes | DEV-STORE-005 |
+| weather report | 1,048,576 | bytes | DEV-STORE-005 |
+| notes draft | 1,048,576 | bytes | DEV-STORE-005 |
+| `device.tdk` / `device.json` | 1,048,576 | bytes | DEV-SET-001 |
+| quarantined file age before removal | 2,592,000,000 | ms | DEV-FILE-011 |
+| Tick lateness while idle | 50 | ms | DEV-RUN-002 |
+| backoff | 1,000 to `min(60,000, 1,000 × 2^(k − 1))` | ms | DEV-BACKOFF-001 |
+| healthy session | 60,000 | ms after the welcome | DEV-BACKOFF-002 |
+| client requests | 5,000 | per UTC day | DEV-BUDGET-001 |
+| hello while over the budget | 1 per 900,000 | ms | DEV-BUDGET-001 |
+| restart margin of the request count | 100 | requests | DEV-BUDGET-002 |
+| TLS handshake | 10,000 | ms | DEV-NET-015 |
+| HTTPS headers | 20,000 | ms | DEV-NET-015 |
+| HTTPS body | 20,000 + ceil(bytes × 1,000 / 65,536) | ms | DEV-NET-015 |
+| socket welcome | 20,000 | ms | DEV-NET-015 |
+| socket ping; silence | 30,000; 75,000 | ms | DEV-NET-016, DEV-NET-015 |
+| background run | 600,000 | ms at most | DEV-NET-014 |
+| pairing slot poll | 2,000 | ms | DEV-PAIR-002 |
+| ICS redirects | 3 | redirects | DEV-ICS-001 |
+| ICS fetch | 20,000 | ms | DEV-ICS-004 |
+| ICS cadence; Android background | 600,000; 21,600,000 | ms | §13.1.1 |
+| subscription title adopted | 200 | scalars | DEV-ICS-008 |
+| weather request; body | 10,000; 1,048,576 | ms; bytes | DEV-WX-001 |
+| uploaded picture | 6,291,456 | bytes | DEV-PIC-003 |
+| upload decode | 20,000 × 20,000 pixels, 160,000,000 bytes | | DEV-PIC-003 |
+| synced picture | 4,194,304 bytes; 4,096 × 4,096 pixels; 67,108,864 bytes allocated | | DEV-PIC-001 |
+| shared picture size | 720 × 1,560 | pixels | DEV-PIC-002 |
+| picture retry | 3,600,000 | ms | §14.2 |
+| backup destinations | 4 | destinations | DEV-BKP-008 |
+| nightly kept; monthly kept; segments kept | 30; 12; 13 | files | DEV-BKP-008 |
+| segment file | 209,715,200 | bytes | DEV-BKP-002 |
+| backup stale | 172,800,000 | ms | DEV-BKP-010 |
+| backup schedule | 300,000 after open, then every 600,000 | ms | DEV-BKP-002 |
+| backup `meta` | 1,048,576 | bytes | DEV-BKP-004 |
+| recovery read-token mints | 32 | tries | DEV-BKP-011 |
+| notes save | 1 per 30,000 | ms while typing | DEV-FACADE-005 |
+| `wait_for_change`, `wait_op` | 60,000 | ms at most | DEV-NOTIFY-003 |
+| shutdown | 10,000 | ms | §17.2 |
+| devicectl line | 16,777,216 | bytes | DEV-CTL-001 |
+| catch-up of 4,200 entries | 3,000 | ms | DEV-E2E-003 |
+
+## 23. Test vectors
+
+Stage `device` publishes these families under `crates/taskdeck-device/tests/vectors/`, one JSON file each, in the format of README §7. Sealed-file bytes use `seal`'s published primitives with the entropy given as an input, as `seal.md` §24 does, so the bytes are deterministic.
+
+| File | Spec | Inputs | Expected outputs |
+|---|---|---|---|
+| `device-descriptors.json` | §6.2 | board, dev, key-store byte, `created_ms` | `active.tds`, `pending.tds` and `store.tds` bytes; invalid ones and their code |
+| `device-files.json` | §6.4, §7.2, §7.4 | `L_d`, board, dev, kind, `file_id`, record plaintexts, entropy | the file bytes for every kind 1 to 18; reads of each with a torn tail, a bad tail and a corrupt record, and the open outcome of §7.4 |
+| `device-records.json` | §6.4, §6.5 | engine records as values (`LogRecord`, `Checkpoint`, `Registry`, `OutboxRecord`, `Meta`, `Marker`, `NoticeOp`, `HashRecord`), the identity export, a history record | plaintext bytes; malformed inputs and `device/record_format` |
+| `device-loaded.json` | §7.4 | a directory listing with file contents (as hex), including leftover `.tmp` files and a `log_floor` | the `Loaded` value and the open report |
+| `device-crash.json` | §7.6 | the crash workload, `k` | the write-boundary trace up to `k` and the recovered `Loaded` |
+| `device-legacy-files.json` | §9.3, §18.7 | `BoardData` values, a zone | today's file bytes (`read_at_startup.json`, `archived.jsonl`, `notepad_text.json`, `subscriptions.json`, `colorschemes.json`, `userconfig.toml`) and the board that `legacy::import` gives back |
+| `device-backoff.json` | §10.7 | `k`, seeded jitter draws | the wait in ms |
+| `device-classify.json` | §10.6 | relay answers (status, `X-TD-Relay`, body), socket closes | the engine event |
+| `device-addrguard.json` | §13.1.4 | hosts, resolved addresses (both families, mapped, compatible, NAT64, 6to4, Teredo) | allowed or refused, and the pinned address |
+| `device-ics.json` | §13.1.2 | scripted server exchanges (redirect chains, `304`, sizes, statuses) | the requests sent (headers listed) and the outcome with its `why` |
+| `device-weather.json` | §13.2 | home places | the request URL |
+| `device-backup-names.json` | §15.3, §15.6 | writer tags, dates, seqs, a destination's file listing | file names; the files kept and deleted |
+| `device-state.json` | §16 | device settings as values | `device.tdk` / `device.json` JSON bytes; invalid ones |
+| `device-ctl.json` | §19.2 | request lines | answer lines, for the commands that need no relay |
+
+## 24. Interfaces
+
+**`seal.md`.**
+- Requires: `seal.md` §19.2 gains file kinds 9 (`meta.tdk`), 10 (`marker.tdk`), 11 (`history.tdk`), 12 (`device.tdk`), 13 (`picture.tdk`), 14 (`weather.tdk`), 15 (`draft.tdk`), 16 (`feed-<id>.tdk`), 17 (`bootstrap.tdk`), 18 (`unsent.tdk`), and `FileKind` (`seal.md` §26) gains the matching variants. Kinds 9 and 10 are `engine.md` §36's request; the others are this spec's. Kind 1's name changes from `log.tdl` to the segments `log-<first seq>.tdl` (§6.1).
+- Requires: a public `verify_backup_file(bytes, writer_sign_pk) -> Result<BackupHeader, SealError>` in `taskdeck-seal` that runs `seal.md` §21.6 steps 1, 2 and 5 only (size, header, writer signature) and returns the header fields, so a writer can check what it wrote without the recovery key (§15.3.2).
+- Requires: the pairing bundle (`seal.md` §17.8) gains an optional field `history` `{"blob": hex16, "sha256": hex32, "size": integer, "parts": integer, "epoch": integer}` naming a kind-2 blob that holds `history.tdk`'s records concatenated (each `vb32`), which N checks against the projection of `seal.md` §21.6 and against its own `ctl_seqs` up to `h` before it keeps them (§15.7). Until then a device that joined by pairing writes no backups.
+- Requires: the sealer adapter of `taskdeck-device` composes the identity export of §6.4.7 from `DeviceKeys::to_identity_bytes`, the roots and the anchor; `seal.md` §19.2's description of kind 7 ("its private keys and the epoch roots it holds") is that layout.
+- Assumes: `StorageKey::from_bytes` and `open_file`'s `FileTail { Torn, Bad }` with `valid_bytes` are what §7.4 uses; `sign_login` takes the origin from the caller (SEAL-SIG-002); `seal_frame` and `ctl_payload` with `Signer::Recovery` compose the recovery-authored `Fence` of §15.8; `open_blob` takes the writer as an argument (§14.2 step 3).
+- Assumes: SEAL-GEN-005's "a build without `test-entropy`" is checked by `release` together with `test-trust` (DEV-TRUST-003), with a marker string `seal` defines.
+- Provides: the contents, write and fsync order of every sealed file, torn and bad tails (§7), the key stores that wrap `L_d` with `ctx("local-key") ‖ board_id ‖ dev` (§12), history records kept for life (§8.3, DEV-FILE-011), backup scheduling, destinations, names and `meta` (§15), the pinned recovery fingerprint (§15.5), release builds without `test-entropy` (§11.2).
+
+**`engine.md`.**
+- Requires: the engine treats `RelayRefused { status: 507, code: "relay/storage_refused", until }` as an append pause until `until`, as it treats `429 relay/budget` (§10.6); `engine.md` §11.9's table has no row for it.
+- Requires: every type that §6.5 maps (`Registry`, `OutboxRecord`, `Meta` and what they contain, among them `AlarmRecord`, `Evidence`, `Banner`, `BannerDetail`, `StopRecord`, `HaltRecord`, `DutyState`, `OpRecord`, `Operation`, `Body`, `CtlIntent`, `BeatInfo`, `SnapInfo`, `Via`, `Head`) has its fields fixed by the `engine` stage's skeleton, so that the record JSON is decidable; `engine.md` §37 leaves `Evidence` without fields.
+- Requires: `AdminOk.token` is a boolean, so the transport keeps the `register` answer's token string for the pairing machine (§18.3); the engine never sees it (`engine.md` §11.7).
+- Requires: no single `AppendLog` op carries more than 256 records except as §6.4.1 splits them; `Loaded.session` is per process (§10.4).
+- Assumes: `Engine::view()` and `Engine::confirmed()` are cheap enough to read once per published view (§4.4); `Engine::membership_bytes()` is `M_B`; `taskdeck_sync::state_hash` is the one composition.
+- Provides: the runtime of `engine.md` §4 and §36: serial persists with `Persisted` in order (DEV-FILE-004), other effects in order (DEV-RUN-001), `Start` with every record (§7.4), a session id per process, the backoff, login and tokens, polling while visible, ticks (DEV-RUN-002), the compile step against the pending view with `at_ms` the compile clock and the minter in `origin_state` (DEV-FACADE-001, DEV-RUN-004), the minter raised from marks (§8.3), the history records (DEV-RUN-003), the pinned-fingerprint prompt after `RecoveryKeyChanged`, the purge's backup offer and the picture's re-upload (§8.4), the platform gates (DEV-FACADE-007), and the files kinds 9 and 10.
+
+**`core.md`.**
+- Requires: `legacy::import` (§15.3 step 9) keeps an id or sid whose high part is from 1 to 8191 (below 2^53) as it is, instead of failing with `id_range`, and step 14 sets the mark of every high part present to the largest low part it holds. Local-only mode mints with `device_no` 1 (§9.2), "Export legacy" writes device-minted ids (§18.7), and the recovery tool writes a restored board in today's format (§15.8); all three read back through the import.
+- Requires: `Overlay` and `weather::Report` keep `serde` derives so the store can write them (§6.4.10, §6.4.12), and the overlay's `FetchStatus.at` is an instant the device can produce from its clock.
+- Assumes: `compile` with `CompileCtx.device_no = 1` and an `IdMinter` for 1 works on a board whose marks hold only the legacy space (§9.2); `Applied.changes` is complete (CORE-APPLY-003), so the local Store writes exactly what changed.
+- Provides: the zone (`ChronoZone(chrono::Local)` on desktops, a `TableZone` on Android, §16), the overlay to compile and read calls, the minter persisted with the outbox record (§8.3), the local-only `Store` over today's files (§9.3), checkpoints and bases loaded with `from_canonical_bytes` (DEV-FILE-010), notice and refusal records one per op in kind 8 (§6.4.5), and the `.lock` refusal for the import (DEV-LOCK-004).
+
+**`relay.md`.**
+- Requires: the routes, bodies and errors of `relay.md` §9 to §14 as written; the device sends exactly the requests of §10.5.
+- Provides: the constant User-Agent, protocol pings every 30 s, a session id per process, uploads at 64 KiB/s or more (§10.10), polling on a relay without push, opaque tokens only in headers (DEV-NET-005), relay-address parsing before any request (DEV-PAIR-003), the client budget (DEV-BUDGET-001), the classification of §14.5 (DEV-NET-011), nothing deleted on an answer (DEV-NET-012), no socket to the standby (DEV-NET-008), the relay address stored with the token (§16).
+
+**`bridge.md`.**
+- Requires: the bridge calls facade writes from worker threads (DEV-THREAD-008); learns of changes with `wait_for_change` (§17.3); answers the page's verbs with `submit_json` and renders the reply; answers `/api/state` with `answer_snapshot`; serves the picture's `look` bytes as `/bg-<id>.jpg`; implements the Keystore wrap and unwrap of §12.5 for `AndroidKeyStore`; calls `set_zone` at start and on every zone change, `set_foreground` on `onStart` and `onStop`, `notify_resume` on a network change, and `background_sync` from its jobs; initialises the platform verifier and passes `TrustRoots` (§10.1).
+- Provides: nothing else to the facade.
+
+**Stage `recovery`.** Requires: `RecoveryLink` (§15.8, §25) for the online steps; the local-only writer (§9.3) to write a restored folder; `history.tdk`, the log segments and checkpoints in the layouts of §6.4 when the tool reads a device's own folder (DEV-STORE-005 names `recovery` as an owner). Provides: the backup writer and reader through `seal`; the offline replay of a top-up; the sheet's printed page.
+
+**Stage `desktop`.** Requires: authentication before "auth" calls (DEV-FACADE-003); capture exclusion of the main window while a code or a seed is shown (DEV-PAIR-001); the waker (§17.3); `TaskDeck --import-check <folder>` printing `import_check`'s report and hash; printing the sheet from memory through the OS dialog; deleting the phone token after "Create board from this folder"; calling long calls off the UI thread.
+
+**Stage `android`.** Requires: BIOMETRIC_STRONG before "auth" calls; the jobs that call `background_sync`; the native screens over `status()`; reminders from `Published::reminders`.
+
+**Stage `release`.** Requires: DEV-TRUST-003 in the release workflow.
+
+## 25. Public API
+
+The `taskdeck-device` crate. `#![deny(unsafe_code)]` with the one exception of DEV-GEN-001. Signatures are Rust; the skeleton must compile with exactly these names. Types of other crates are named by their paths.
+
+```rust
+// ---------- opening (§5, §17.2)
+pub struct Device { /* Arc<Inner>; Clone + Send + Sync */ }
+pub enum Platform { Windows, MacOs, Linux, Android { api: u32 } }
+pub enum ZoneSource { System, Table(taskdeck_core::time::TableZone) }
+pub enum TrustRoots { Platform, Bundled, #[cfg(feature = "test-trust")] Extra(Vec<u8>) }
+pub struct OpenOptions {
+    pub data_dir: std::path::PathBuf, pub platform: Platform, pub key_store: std::sync::Arc<dyn KeyStore>,
+    pub zone: ZoneSource, pub trust: TrustRoots, pub build_id: String, pub default_device_name: String,
+    #[cfg(feature = "test-trust")] pub clock: Option<std::sync::Arc<dyn TestClock>>,
+    #[cfg(feature = "test-trust")] pub files: Option<std::sync::Arc<dyn FileLayer>>,
+}
+pub enum Mode { LocalOnly, Synced, KeyLost }
+pub struct IdentityInfo { pub board_id: [u8; 16], pub dev: [u8; 16], pub device_name: String,
+                          pub relay_address: Option<String>, pub key_fp: Option<String> }
+pub enum OpenWarning { FolderLocked, FolderUnlockable, TornTail { kind: u8 }, BadTail { kind: u8 },
+                       Quarantined { kind: u8, file: String }, SetAside { folder: String }, PendingCreate }
+pub struct OpenReport { pub mode: Mode, pub warnings: Vec<OpenWarning>,
+                        pub import: Option<taskdeck_core::legacy::ImportReport>, pub identity: Option<IdentityInfo> }
+pub struct DeviceError { pub code: &'static str, pub status: Option<u16>, pub message: Option<String> }
+impl Device {
+    pub fn open(options: OpenOptions) -> Result<(Device, OpenReport), DeviceError>;
+    pub fn mode(&self) -> Mode;
+    pub fn shutdown(&self) -> Result<(), DeviceError>;
+    pub fn forget_identity(&self, board: [u8; 16], dev: [u8; 16]) -> Result<(), DeviceError>;
+
+    // ---------- change notification (§17.3)
+    pub fn set_waker(&self, waker: std::sync::Arc<dyn Fn() + Send + Sync>);
+    pub fn changes(&self) -> Changes;
+    pub fn wait_for_change(&self, since_any: u64, timeout_ms: u32) -> Changes;
+
+    // ---------- intents (§17.4)
+    pub fn submit(&self, intent: taskdeck_core::intent::Intent) -> Result<Submitted, DeviceError>;
+    pub fn submit_named(&self, intent: taskdeck_core::intent::Intent) -> Result<Submitted, DeviceError>;
+    pub fn release_hold(&self) -> Result<(), DeviceError>;
+    pub fn submit_json(&self, text: &str) -> Result<Submitted, DeviceError>;
+
+    // ---------- reads (§17.5)
+    pub fn view(&self) -> std::sync::Arc<Published>;
+    pub fn status(&self) -> DeviceStatus;
+
+    // ---------- notes (§17.6)
+    pub fn notes_draft(&self) -> Option<Draft>;
+    pub fn set_notes_draft(&self, text: String) -> Result<(), DeviceError>;
+    pub fn flush_notes_draft(&self) -> Result<Option<Submitted>, DeviceError>;
+    pub fn notes_merge(&self) -> Option<NotesMerge>;
+    pub fn resolve_notes(&self, text: String) -> Result<Submitted, DeviceError>;
+    pub fn discard_notes_draft(&self) -> Result<(), DeviceError>;
+
+    // ---------- notices, banners, alarms, halted view (§17.7)
+    pub fn dismiss_notice(&self, seq: u64, index: u32) -> Result<(), DeviceError>;
+    pub fn ack_banner(&self, id: (u64, u8)) -> Result<(), DeviceError>;
+    pub fn dismiss_alarm(&self, id: u64) -> Result<(), DeviceError>;
+    pub fn confirm_clock(&self) -> Result<(), DeviceError>;
+    pub fn confirm_rejoin(&self) -> Result<(), DeviceError>;
+    pub fn use_this_copy(&self) -> Result<(), DeviceError>;
+    pub fn adopt(&self, dev: [u8; 16], typed_fp: &str) -> Result<(), DeviceError>;
+    pub fn skip(&self, seq: u64) -> Result<u64, DeviceError>;                       // ticket
+
+    // ---------- devices and operations (§17.8)
+    pub fn revoke(&self, dev: [u8; 16], replace: bool) -> Result<u64, DeviceError>;
+    pub fn restore_targets(&self) -> Vec<(u64, i64)>;
+    pub fn restore_to(&self, seq: u64) -> Result<u64, DeviceError>;
+    pub fn purge_preview(&self) -> Result<PurgePreview, DeviceError>;
+    pub fn purge(&self) -> Result<u64, DeviceError>;
+    pub fn rules_override(&self, version: u32) -> Result<u64, DeviceError>;
+    pub fn move_board(&self, host: &str, create_secret: zeroize::Zeroizing<String>) -> Result<u64, DeviceError>;
+    pub fn move_status(&self) -> MoveStatus;
+    pub fn enter_move_code(&self, text: &str) -> Result<(), DeviceError>;
+    pub fn follow_address(&self, address: &str, code: &str) -> Result<u64, DeviceError>;
+    pub fn wait_op(&self, ticket: u64, timeout_ms: u32) -> Option<Result<(), &'static str>>;
+    pub fn ops(&self) -> Vec<OpView>;
+
+    // ---------- platform (§17.9)
+    pub fn set_foreground(&self, visible: bool) -> Result<(), DeviceError>;
+    pub fn notify_resume(&self) -> Result<(), DeviceError>;
+    pub fn background_sync(&self, budget_ms: u32) -> Result<BackgroundOutcome, DeviceError>;
+    pub fn set_zone(&self, zone: taskdeck_core::time::TableZone) -> Result<(), DeviceError>;
+
+    // ---------- flows (§17.10, §18)
+    pub fn begin_create(&self, request: CreateRequest) -> Result<CreateFlow, DeviceError>;
+    pub fn resume_create(&self, create_secret: zeroize::Zeroizing<String>) -> Result<CreatedBoard, DeviceError>;
+    pub fn abandon_create(&self) -> Result<(), DeviceError>;
+    pub fn reset_trust(&self, request: CreateRequest) -> Result<CreateFlow, DeviceError>;
+    pub fn pair_start(&self) -> Result<PairSheet, DeviceError>;
+    pub fn pair_confirm(&self) -> Result<(), DeviceError>;
+    pub fn pair_cancel(&self) -> Result<(), DeviceError>;
+    pub fn join(&self, address: &str, code: zeroize::Zeroizing<String>, device_name: &str) -> Result<(), DeviceError>;
+    pub fn join_sas(&self, digits: &str) -> Result<(), DeviceError>;
+    pub fn re_pair(&self, address: &str, code: zeroize::Zeroizing<String>, device_name: &str) -> Result<(), DeviceError>;
+    pub fn begin_recovery_change(&self) -> Result<RecoveryChangeFlow, DeviceError>;
+    pub fn confirm_recovery_key(&self) -> Result<u64, DeviceError>;
+    pub fn cancel_recovery_key(&self) -> Result<u64, DeviceError>;
+
+    // ---------- backups (§17.11)
+    pub fn backup_destinations(&self) -> Vec<Destination>;
+    pub fn set_backup_destinations(&self, list: Vec<Destination>) -> Result<(), DeviceError>;
+    pub fn backup_status(&self) -> BackupStatus;
+    pub fn backup_now(&self) -> Result<(), DeviceError>;
+    pub fn pin_recovery_fingerprint(&self, typed: &str) -> Result<(), DeviceError>;
+    pub fn delete_backups_before(&self, before_ms: i64) -> Result<u32, DeviceError>;
+
+    // ---------- picture, settings, export (§17.12)
+    pub fn set_shared_picture(&self, bytes: Vec<u8>) -> Result<Submitted, DeviceError>;
+    pub fn clear_shared_picture(&self) -> Result<Submitted, DeviceError>;
+    pub fn set_look_dials(&self, blur: u8, light: u8) -> Result<(), DeviceError>;
+    pub fn set_weather_place(&self, source: WeatherSource, own_place: Option<taskdeck_core::board::Home>) -> Result<(), DeviceError>;
+    pub fn set_reminder_leads(&self, leads: taskdeck_core::reminders::ReminderDefaults) -> Result<(), DeviceError>;
+    pub fn export_legacy(&self, target: &std::path::Path) -> Result<(), DeviceError>;
+}
+pub fn import_check(folder: &std::path::Path) -> Result<ImportCheck, DeviceError>;
+pub struct ImportCheck { pub report: taskdeck_core::legacy::ImportReport, pub genesis_sha256: String }
+
+// ---------- change counters, results, views (§17.3 to §17.8)
+pub struct Changes { pub any: u64, pub view: u64, pub status: u64, pub notices: u64, pub banners: u64,
+                     pub overlay: u64, pub weather: u64, pub picture: u64, pub backup: u64,
+                     pub pairing: u64, pub ops: u64 }
+pub struct Submitted { pub reply: taskdeck_core::compile::Reply, pub entry_id: Option<[u8; 16]>,
+                       pub provisional_seq: Option<u64>, pub view_version: u64 }
+pub struct Published { /* §4.4 */ }
+impl Published {
+    pub fn board(&self) -> &taskdeck_core::board::BoardData;
+    pub fn version(&self) -> u64;
+    pub fn zone(&self) -> &dyn taskdeck_core::time::Zone;
+    pub fn ranked_ids(&self, now: taskdeck_core::time::Instant) -> Vec<u64>;
+    pub fn shuffle_seed(&self, now: taskdeck_core::time::Instant) -> u64;
+    pub fn behind_minutes(&self, day: chrono::NaiveDate, now: taskdeck_core::time::Instant) -> i32;
+    pub fn next_free_start(&self, day: chrono::NaiveDate) -> i32;
+    pub fn reflow_inputs(&self, day: chrono::NaiveDate)
+        -> (Vec<taskdeck_core::planner::Flowable<(u64, u64)>>, Vec<(i32, i32)>);
+    pub fn placements_for(&self, day: chrono::NaiveDate) -> Vec<taskdeck_core::planner::DayPlacement>;
+    pub fn archive_newest_first(&self) -> Vec<&taskdeck_core::board::ArchiveRow>;
+    pub fn archive_by_day(&self, from: chrono::NaiveDate, days: u32)
+        -> Vec<Vec<(&taskdeck_core::board::ArchiveRow, &taskdeck_core::board::RowBlock)>>;
+    pub fn snapshot(&self, from: chrono::NaiveDate, days: u32, now: taskdeck_core::time::Instant,
+                    ranked: Option<Vec<u64>>) -> taskdeck_core::snapshot::Snapshot;
+    pub fn answer_snapshot(&self, from: chrono::NaiveDate, days: u32, now: taskdeck_core::time::Instant)
+        -> serde_json::Value;
+    pub fn reminders(&self, from: taskdeck_core::time::Instant, until: taskdeck_core::time::Instant)
+        -> Vec<taskdeck_core::reminders::Reminder>;
+    pub fn overlay(&self) -> &taskdeck_core::overlay::Overlay;
+    pub fn weather(&self) -> Option<(&taskdeck_core::weather::Report, i64)>;      // (report, fetched_ms)
+    pub fn picture(&self) -> Option<PictureView>;
+    pub fn pending_marks(&self) -> &[taskdeck_sync::PendingMark];
+    pub fn notices(&self) -> &[NoticeView];
+}
+pub struct PictureView { pub id: String, pub jpeg: std::sync::Arc<Vec<u8>>, pub top: [u8; 3], pub aspect_milli: u32 }
+pub enum NoticeView { Notice(taskdeck_core::apply::Notice), Refusal(taskdeck_core::apply::RefusalRecord) }
+pub struct DeviceStatus { pub engine: Option<taskdeck_sync::Status>, pub mode: Mode, pub relay_address: Option<String>,
+                          pub socket_open: bool, pub requests_today: u32, pub weather_age_ms: Option<i64>,
+                          pub picture: PictureStatus, pub backup: BackupStatus, pub pairing: PairState,
+                          pub device_name: String }
+pub enum PictureStatus { None, Ready, Failed { code: &'static str } }
+pub struct Draft { pub text: String, pub base_rev: u64, pub edited_ms: i64 }
+pub struct NotesMerge { pub mine: String, pub theirs: String, pub base_rev: u64, pub current_rev: u64 }
+pub struct PurgePreview { pub reach_seq: u64, pub reach_ms: i64 }
+pub struct MoveStatus { pub code: Option<String>, pub carried_through: Option<u64>, pub old_relay_answered: Option<bool> }
+pub struct OpView { pub ticket: u64, pub kind: &'static str, pub stage: u8, pub started_ms: i64 }
+pub struct BackgroundOutcome { pub synced: bool, pub queued: u32, pub head: u64 }
+pub enum WeatherSource { Home, Own }
+
+// ---------- flows (§18)
+pub enum CreateSource { Empty, ThisFolder, Folder(std::path::PathBuf), CurrentBoard }
+pub struct CreateRequest { pub relay_host: String, pub create_secret: zeroize::Zeroizing<String>,
+                           pub source: CreateSource, pub device_name: String }
+pub struct CreateFlow { /* holds the seed, keys and genesis; ZeroizeOnDrop */ }
+impl CreateFlow {
+    pub fn sheet(&self) -> SheetData;
+    pub fn import_report(&self) -> Option<&taskdeck_core::legacy::ImportReport>;
+    pub fn confirm_sheet(&mut self, typed: &str) -> Result<(), DeviceError>;
+    pub fn finish(self) -> Result<CreatedBoard, DeviceError>;
+}
+pub struct SheetData { pub seed_groups: zeroize::Zeroizing<String>, pub relay_address: String,
+                       pub recovery_fp: String, pub release_fp: String, pub date: chrono::NaiveDate }
+pub struct CreatedBoard { pub address: String }
+pub struct RecoveryChangeFlow { /* ZeroizeOnDrop */ }
+impl RecoveryChangeFlow {
+    pub fn sheet(&self) -> SheetData;
+    pub fn confirm_sheet(&mut self, typed: &str) -> Result<(), DeviceError>;
+    pub fn finish(self) -> Result<u64, DeviceError>;                                 // ticket of the proposal
+}
+pub struct PairSheet { pub address_display: String, pub code_display: zeroize::Zeroizing<String> }
+pub enum PairState { Idle, ShowingCode, ShowSas { digits: String }, Registering, AskSas, Accepted,
+                     Joining, Done, Aborted { code: &'static str } }
+
+// ---------- backups (§15)
+pub enum DestinationKind { Folder, Offline }
+pub struct Destination { pub path: std::path::PathBuf, pub kind: DestinationKind, pub label: String }
+pub struct DestinationStatus { pub path: std::path::PathBuf, pub last_good_ms: Option<i64>, pub last_attempt_ms: Option<i64>,
+                               pub last_error: Option<&'static str>, pub files: u32, pub bytes: u64 }
+pub struct BackupStatus { pub off_reason: Option<&'static str>, pub destinations: Vec<DestinationStatus>,
+                          pub last_nightly_day: Option<chrono::NaiveDate>, pub last_segment: Option<(String, u64)>,
+                          pub alarms: Vec<&'static str>, pub pin_needed: Option<String> }
+
+// ---------- key stores (§12)
+pub trait KeyStore: Send + Sync {
+    fn kind(&self) -> u8;
+    fn create(&self, board: &[u8; 16], dev: &[u8; 16], key: &zeroize::Zeroizing<[u8; 32]>) -> Result<(), KeyStoreError>;
+    fn load(&self, board: &[u8; 16], dev: &[u8; 16]) -> Result<zeroize::Zeroizing<[u8; 32]>, KeyStoreError>;
+    fn delete(&self, board: &[u8; 16], dev: &[u8; 16]) -> Result<(), KeyStoreError>;
+}
+pub enum KeyStoreError { NotFound, CannotUnwrap, Unavailable, Failed }
+#[cfg(windows)] pub struct DpapiKeyStore;
+#[cfg(target_os = "macos")] pub struct KeychainKeyStore;
+#[cfg(feature = "test-trust")] pub struct FileKeyStore { pub dir: std::path::PathBuf }
+#[cfg(feature = "test-trust")] pub struct MemoryKeyStore { /* map */ }
+// AndroidKeyStore lives in taskdeck-android (§12.5).
+
+// ---------- the store and its file layer (§6, §7)
+pub trait FileLayer: Send + Sync {
+    fn create_dir(&self, path: &std::path::Path) -> std::io::Result<()>;
+    fn write_new(&self, path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>;
+    fn append(&self, path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>;
+    fn sync(&self, path: &std::path::Path) -> std::io::Result<()>;
+    fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()>;
+    fn remove(&self, path: &std::path::Path) -> std::io::Result<()>;
+    fn truncate(&self, path: &std::path::Path, len: u64) -> std::io::Result<()>;
+    fn sync_dir(&self, dir: &std::path::Path) -> std::io::Result<()>;
+    fn read(&self, path: &std::path::Path) -> std::io::Result<Vec<u8>>;
+    fn list(&self, dir: &std::path::Path) -> std::io::Result<Vec<std::ffi::OsString>>;
+    fn exists(&self, path: &std::path::Path) -> bool;
+}
+pub struct OsFiles;
+#[cfg(feature = "test-trust")] pub struct CrashFiles { pub inner: OsFiles, pub crash_at: u64 }
+pub mod store {
+    pub const KIND_META: u8 = 9;  pub const KIND_MARKER: u8 = 10; pub const KIND_HISTORY: u8 = 11;
+    pub const KIND_DEVICE: u8 = 12; pub const KIND_PICTURE: u8 = 13; pub const KIND_WEATHER: u8 = 14;
+    pub const KIND_DRAFT: u8 = 15; pub const KIND_FEED: u8 = 16; pub const KIND_BOOTSTRAP: u8 = 17;
+    pub const KIND_UNSENT: u8 = 18;
+    pub fn encode_log_page(records: &[taskdeck_sync::LogRecord]) -> Vec<u8>;              // §6.4.1
+    pub fn decode_log_page(bytes: &[u8]) -> Result<Vec<taskdeck_sync::LogRecord>, super::DeviceError>;
+    pub fn encode_checkpoint(c: &taskdeck_sync::Checkpoint) -> Result<Vec<u8>, super::DeviceError>;   // §6.4.2
+    pub fn decode_checkpoint(bytes: &[u8]) -> Result<taskdeck_sync::Checkpoint, super::DeviceError>;
+    pub fn record_json<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, super::DeviceError>;        // §6.5
+    pub fn from_record_json<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, super::DeviceError>;
+    pub fn read_identity_dir(dir: &std::path::Path, l_d: &zeroize::Zeroizing<[u8; 32]>)
+        -> Result<(taskdeck_sync::Loaded, Vec<Vec<u8>>), super::DeviceError>;              // Loaded, history records
+    pub fn write_legacy_files(dir: &std::path::Path, board: &taskdeck_core::board::BoardData,
+                              zone: &dyn taskdeck_core::time::Zone) -> Result<(), super::DeviceError>;   // §9.3, §18.7
+}
+
+// ---------- adapters (decision D6, §4.1)
+pub struct CoreMachine { /* implements taskdeck_sync::StateMachine over taskdeck-core */ }
+pub struct SealSealer { /* implements taskdeck_sync::Sealer over taskdeck-seal */ }
+
+// ---------- recovery tool online steps (§15.8)
+pub mod recovery_online {
+    pub struct RecoveryLink { /* transport to one relay, door credential */ }
+    impl RecoveryLink {
+        pub fn new(address: &str, recovery: &taskdeck_seal::RecoveryKeys, trust: super::TrustRoots)
+            -> Result<Self, super::DeviceError>;
+        pub fn read_token(&mut self, backup_token: Option<&str>, epoch: u32) -> Result<(), super::DeviceError>;
+        pub fn read_after(&mut self, after: u64) -> Result<taskdeck_sync::Page, super::DeviceError>;
+        pub fn fence(&mut self, frame: Vec<u8>, host: &str, door: [u8; 5], home_gen: u32)
+            -> Result<(u64, [u8; 32]), super::DeviceError>;                               // (seq, chain)
+    }
+}
+
+// ---------- test-only (§11)
+#[cfg(feature = "test-trust")] pub const TEST_TRUST_MARKER: &str = "taskdeck-test-trust-enabled-6f1c2a";
+#[cfg(feature = "test-trust")] pub trait TestClock: Send + Sync { fn wall_ms(&self) -> i64; fn mono_ms(&self) -> u64; }
+```
+
+## 26. Open questions
+
+Non-normative. Each states the default this spec takes.
+
+1. **`unsafe` on Windows.** SYNC_PLAN.md §3.4 says "no `unsafe`", but DPAPI and the write-through rename exist only as `unsafe` functions of the `windows` crate, which is already in `Cargo.lock`. Decided here: one module, four functions, each block commented (DEV-GEN-001). The alternative, no directory durability on Windows and no DPAPI, contradicts SYNC.md §5.6.
+2. **Local-only mode writes today's files** and mints with `device_no` 1 (§9). Decided here, so that today's build keeps opening the folder and "Create board from this folder" reads one format; it needs the import change of §24 (`core.md`). If `core` declines it, local-only mode would have to mint in the legacy space with a `device_no` of 0, which `core.md` CORE-CTX-001 refuses.
+3. **The log is split into segments** of 16,384 entries (§6.1). Decided here; SYNC.md §4.1 names one `log.tdl`, which a 400-day truncation would have to rewrite whole.
+4. **Backup file names carry a writer tag** (§15.3). Decided here: two desktops writing to one OneDrive folder would otherwise overwrite each other's files of the same date and seq.
+5. **Segments end at bases** (§15.2), so a segment's membership and chain come from a base file without replay. Decided here (SYNC.md: "that month's frames").
+6. **A device that joined by pairing lacks the control history** below its bootstrap and cannot write backups until `seal.md` adds the bundle's history blob (§15.7, §24). Default: such a device writes none, with the reason shown. This means a Mac paired after the Windows desktop is not a second backup writer until the change lands (SYNC.md §6.6 expects it to be one).
+7. **The recovery tool's read-token epoch.** A recovery identity cannot learn the current epoch before it can read, and `mint_read_token` refuses a lower one. Decided here: try the backup's epoch, then raise it by doubling steps, at most 32 tries (§15.8); the old board is abandoned, so overshooting harms no one.
+8. **A crash on E while registering a pairing** leaves a `DeviceAdded` for a device that never joins; it appears with no last beat and the user revokes it (§18.3). Decided here (SYNC.md is silent); persisting the pairing machine would keep its secrets on disk.
+9. **The `507 relay/storage_refused` pause** is passed to the engine as a `RelayRefused` with `until` (§10.6), which `engine.md` §11.9 does not list yet (§24). Default until it does: the engine alarms `RelayProtocol` and does not repeat the request until the next welcome.
+10. **Polling while visible on a relay without push** is the engine's 30-second `hello`, also on a desktop that runs all day: about 2,880 requests, inside the 5,000 budget. Decided here (ruling S9 leaves the rate to the device).
+11. **The client's request count is written every 100 requests** and restarts with a margin of 100 (§10.8), rather than on every request. Decided here.
+12. **User-Agent strings** are `TaskDeck-Sync/1`, `TaskDeck-Calendar/1` and `TaskDeck-Weather/1`, with no version (§10.2). Decided here (SYNC.md: "constant, descriptive"); today's ICS agent `TaskDeck/<version>` is dropped because it told publishers which build each device ran.
+13. **ICS userinfo** is sent as Basic credentials to the URL's own origin only (§13.1.2). Decided here, keeping today's behaviour for such feeds while closing the cross-origin leak.
+14. **The address guard refuses the whole fetch** when any resolved address is private, rather than filtering (§13.1.4). Decided here, against DNS answers that mix addresses.
+15. **The shared picture's clean copy is 720 × 1560 JPEG at quality 85**, and each device applies its own look (§14). Decided here; today's phone made one look on the desk.
+16. **Linux has no key store** in release builds, so a Linux desktop runs local-only (§12.2). Decided here: SYNC.md names no Linux client; CI's Linux desktop build keeps working.
+17. **The phone fetches feeds and weather in background runs only when stale** (6 hours, 1 hour, §13). Decided here, to keep jobs short.
+18. **Reminder leads are a device setting** with the defaults of ruling S19 (§16). Decided here; their screen is `android`'s.
+19. **The notes draft survives a restart** in `draft.tdk` (§17.6). Decided here (SYNC.md: "saves coalesce to one per 30 s").
+20. **Weather in local-only mode is not stored**, as today. Decided here.
+21. **The time zone is never stored** (§16): desktops read the operating system's at each call, the phone's shell hands a `TableZone` over. Decided here (`core.md` open question 20 leaves the choice to this spec).
+22. **devicectl's platform `linux` passes every desktop gate** (§19.1), so the whole desktop surface can be driven in a container. Decided here; the gates themselves are unit-tested with each platform value.
+

@@ -25,7 +25,7 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 | 1c | CI: path filters at job level, aggregate `gate` job | todo | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
-| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); then device, bridge | `docs/sync/spec/seal.md`, `core.md`, `relay.md`, `engine.md` |
+| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge in progress | `docs/sync/spec/seal.md`, `core.md`, `relay.md`, `engine.md`, `device.md` |
 | 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
@@ -208,6 +208,28 @@ Rulings on what the engine draft raised (2026-11-21):
   its local log.
 - `taskdeck-sync` needs `sha2` and `zeroize` at run time (state hash, identity export); the
   workspace task declares them.
+
+Rulings on what the device draft raised (2026-11-21):
+
+- **S26. `unsafe` is allowed in platform FFI, and only there.** SYNC_PLAN.md §3.4 says "no `unsafe`"
+  in its cryptography rule. DPAPI and a write-through rename on Windows exist only as `unsafe`
+  functions of the pre-approved `windows` crate, and the JNI entry points need it too. So: none in
+  core, seal, sync, backup or recover (`#![forbid(unsafe_code)]`); in `taskdeck-device` one module
+  per operating system, in `taskdeck-android` the JNI entry points, each block with its safety
+  argument written beside it. Told to the owner at exit.
+- **S27. Any desktop can write backups, however it joined.** A paired device lacks the control
+  entries below its bootstrap seq, so by the draft it could not write a verifiable backup, and a
+  later-paired Mac would not be the second writer SYNC.md §6.6 expects. The snapshot a new device
+  bootstraps from therefore carries the control history back to Genesis (it is small). The
+  seal–engine and device reviews apply it.
+- **S28. A backup's file name carries a writer tag** (`TaskDeck-<date>-<seq>-<tag>.tdbk`), so two
+  desktops writing into one synced folder never overwrite each other. A small change to SYNC.md §6.6.
+- The recovery tool learns the current read epoch from the relay's answer instead of guessing it;
+  the relay–device review applies it. Local-only mode mints ids with device number 1, and the import
+  accepts them; the core–device review applies it. A desktop on a polling relay asks every 30
+  seconds, about 2,880 requests a day, inside its budget.
+- Three review pairs are added to the plan's six, because the device draft asks for changes in all
+  three: core–device, seal–device and relay–device.
 
 ## Deviations from the plan
 
