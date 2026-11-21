@@ -106,6 +106,9 @@ expect_refused ""
 expect_refused "99999999999999999"   # fits in i64, far past chrono's last year
 expect_refused "253402300800"        # 10000-01-01, not a four-digit year
 expect_refused "-62167219201"        # -0001-12-31, not a four-digit year
+expect_refused "+1700000000"         # digits and an optional '-' only
+expect_refused " 1700000000"         # not trimmed
+expect_refused "1700000000.5"        # not a float
 # Not UTF-8: must be refused, not taken as unset. Windows keeps the
 # environment as UTF-16, so the byte may not survive there.
 case "$(uname -s)" in
@@ -156,25 +159,37 @@ else
     fail "the build with SOURCE_DATE_EPOCH unset failed"
 fi
 
-# build.rs lists the inputs that run it again; if `src` dropped out of that
-# list, or was narrowed to some of its files, an edit to the app's sources
-# would keep a stale BUILD_DATE. A new file under src/, which only the
-# directory entry covers, must run the script again (cargo -v prints the run
-# on stderr). The file is not a module, so the build ignores it otherwise.
-echo "check-build-date: a change under src/ must run build.rs again"
+# build.rs lists the inputs that run it again; if one dropped out of that
+# list, or `src` was narrowed to some of its files, a change to it would keep
+# a stale BUILD_DATE. Each listed file is touched in turn, then a new file is
+# made under src/ (only the directory entry covers it), and each change must
+# run the script again (cargo -v prints the run on stderr). The new file is
+# not a module, so the build ignores it otherwise. It comes last: removing it
+# changes src/, which would run the script again for any later change.
+# expect_rerun WHAT: the next build must run build.rs again.
+expect_rerun() {
+    local what="$1" log
+    echo "check-build-date: $what must run build.rs again"
+    if log="$(unset SOURCE_DATE_EPOCH; check -v 2>&1 >/dev/null)"; then
+        if grep -qE 'Running `[^`]*task_deck-[0-9a-f]+[/\\]build-script-build(\.exe)?`' <<<"$log"; then
+            echo "check-build-date:   build.rs ran again"
+        else
+            fail "build.rs did not run again after: $what (is it in its rerun-if-changed list?)"
+        fi
+    else
+        printf '%s\n' "$log" | tail -n 20 >&2
+        fail "the build after this change failed: $what"
+    fi
+}
+
+for input in resources.rc icon.ico Cargo.toml Cargo.lock; do
+    touch "$input"
+    expect_rerun "a change to $input"
+done
 probe=src/check-build-date.probe
 trap 'rm -f "$probe"' EXIT
 : >"$probe"
-if log="$(unset SOURCE_DATE_EPOCH; check -v 2>&1 >/dev/null)"; then
-    if grep -qE 'Running `[^`]*task_deck-[0-9a-f]+[/\\]build-script-build(\.exe)?`' <<<"$log"; then
-        echo "check-build-date:   build.rs ran again"
-    else
-        fail "build.rs did not run again after a new file appeared in src/ (is the directory src in its rerun-if-changed list?)"
-    fi
-else
-    printf '%s\n' "$log" | tail -n 20 >&2
-    fail "the build after adding $probe failed"
-fi
+expect_rerun "a new file under src/"
 rm -f "$probe"
 
 if [ "$failures" -ne 0 ]; then
