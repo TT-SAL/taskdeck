@@ -1,23 +1,42 @@
+#[cfg(feature = "desk")]
 use egui::Context;
+#[cfg(feature = "desk")]
 use egui_wgpu::wgpu::{StoreOp};
+#[cfg(feature = "desk")]
 use egui_wgpu::{wgpu, Renderer, RendererOptions, ScreenDescriptor};
+#[cfg(feature = "desk")]
 use egui_winit::{ActionRequested, State};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "desk")]
 use crate::ui::TaskApp;
+#[cfg(feature = "desk")]
 use wgpu::{Color, ExperimentalFeatures, LoadOp};
-use winit::event::WindowEvent;
+#[cfg(feature = "desk")]
+use winit::event::{StartCause, WindowEvent};
+#[cfg(feature = "desk")]
+use winit::event_loop::ControlFlow;
 // The taskbar-icon extension trait only exists on Windows; see `window_attributes`.
 #[cfg(windows)]
+#[cfg(feature = "desk")]
 use winit::platform::windows::WindowAttributesExtWindows;
+#[cfg(feature = "desk")]
 use winit::window::{Window, WindowId};
+#[cfg(feature = "desk")]
 use egui_wgpu::wgpu::CurrentSurfaceTexture;
 use std::collections::HashMap;
-use std::{fs, time};
+use std::fs;
+#[cfg(feature = "desk")]
+use std::time;
 use std::path::Path;
+#[cfg(feature = "desk")]
 use std::sync::Arc;
+#[cfg(feature = "desk")]
 use std::time::Instant;
+#[cfg(feature = "desk")]
 use winit::application::ApplicationHandler;
+#[cfg(feature = "desk")]
 use winit::dpi::{LogicalSize, PhysicalPosition};
+#[cfg(feature = "desk")]
 use winit::event_loop::ActiveEventLoop;
 use toml::Value;
 
@@ -34,6 +53,11 @@ fn read_config(path: &Path) -> HashMap<String, String> {
             " ".to_string()
         },
     };
+    parse_config_text(&contents)
+}
+
+/// The settings file's text as key → value, whether or not it is valid TOML.
+fn parse_config_text(contents: &str) -> HashMap<String, String> {
     let mut config = HashMap::new();
 
     // Try parsing with the TOML crate first
@@ -88,10 +112,14 @@ fn read_config(path: &Path) -> HashMap<String, String> {
                         value[1..value.len() - 1].to_string()
                     } else if value.starts_with('[') && value.ends_with(']') {
                         value.to_string() // crude fallback: keep array as-is
-                    } else if
-                        (value.starts_with('"') && value.ends_with('"')) ||
-                        (value.starts_with('\'') && value.ends_with('\''))
+                    } else if value.len() > 1
+                        && ((value.starts_with('"') && value.ends_with('"'))
+                            || (value.starts_with('\'') && value.ends_with('\'')))
                     {
+                        // A lone quote — the unclosed string that broke the
+                        // TOML and brought the file here — is one character
+                        // that both starts and ends the value; it is skipped
+                        // below rather than sliced as `1..0`.
                         value[1..value.len() - 1].to_string()
                     } else {
                         continue; // skip invalid
@@ -130,6 +158,10 @@ pub const DESIGN_WIDTH_POINTS: f32 = 1920.0;
 /// `ui_scale_percent = 0` means "fit the layout to the window automatically".
 /// Any other value is an explicit scale the user picked.
 pub const UI_SCALE_AUTO: u32 = 0;
+/// Default blur: a fraction of the picture's width, gentle.
+pub const BACKGROUND_BLUR_DEFAULT: u32 = 11;
+/// Default lightness ceiling for the phone, where text sits on the picture.
+pub const BACKGROUND_LIGHT_DEFAULT: u32 = 39;
 /// Bounds for an explicit `ui_scale_percent`, and for the automatic fit. The
 /// lower bound keeps text legible in a small window; the upper bound is 100%
 /// because the layout is tuned at that size and nothing is gained by magnifying
@@ -146,10 +178,70 @@ pub fn clamp_ui_scale_percent(percent: u32) -> u32 {
     }
 }
 
+/// A bind address from the file: an IP address as written (trimmed), or
+/// `phone::DEFAULT_BIND` for anything that is not one — the setting narrows
+/// where the phone view listens; it never turns the view off.
+pub fn clean_bind_address(text: &str) -> String {
+    match text.trim().parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.to_string(),
+        Err(_) => crate::phone::DEFAULT_BIND.to_string(),
+    }
+}
+
+/// The address to hand out, from the file: an `http://` or `https://` origin
+/// with the trailing slash taken off, or empty for anything else.
+///
+/// Empty is the ordinary case and means "use this machine's own addresses".
+/// Anything that is not a URL is treated as empty rather than refused: the
+/// consequence of a typo here should be the links this app already knew how to
+/// build, not no links at all.
+pub fn clean_public_url(text: &str) -> String {
+    let text = text.trim().trim_end_matches('/');
+    let looks_right = (text.starts_with("https://") || text.starts_with("http://"))
+        && text.split("://").nth(1).is_some_and(|rest| {
+            let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+            !host.is_empty() && host.contains('.')
+        });
+    if looks_right { text.to_string() } else { String::new() }
+}
+
+/// `frame_cap_fps = 0` means uncapped — the render loop of `DOCUMENTATION.md`
+/// §14.1, which is the default and the intended way to run on a desktop.
+pub const FRAME_CAP_UNCAPPED: u32 = 0;
+/// Bounds for a cap that is set. The floor is where the row animations stop
+/// reading as motion; the ceiling is past any display this runs on.
+pub const FRAME_CAP_MIN: u32 = 15;
+pub const FRAME_CAP_MAX: u32 = 360;
+/// What the settings slider offers when the cap is first switched on.
+pub const FRAME_CAP_DEFAULT: u32 = 60;
+
+/// Clamp a configured frame cap, preserving the `0` = uncapped sentinel.
+pub fn clamp_frame_cap(fps: u32) -> u32 {
+    if fps == FRAME_CAP_UNCAPPED {
+        FRAME_CAP_UNCAPPED
+    } else {
+        fps.clamp(FRAME_CAP_MIN, FRAME_CAP_MAX)
+    }
+}
+
 pub fn get_check_and_set_config(config_path: &Path) -> Config {
     let extracted = read_config(config_path);
+    let config = config_from(&extracted);
+    write_normalized_config(config_path, &config);
+    config
+}
 
-    let config = Config {
+/// The settings as they are in `config_path`, creating, normalising and
+/// writing nothing — for a look at a setup that is not ours to touch
+/// (`taskdeck-server --print-link`, which may run as another user).
+pub fn read_config_only(config_path: &Path) -> Config {
+    let extracted = fs::read_to_string(config_path).map(|text| parse_config_text(&text)).unwrap_or_default();
+    config_from(&extracted)
+}
+
+/// Every setting, checked and defaulted, from the file's raw key → value.
+fn config_from(extracted: &HashMap<String, String>) -> Config {
+    Config {
         window_size_startup: extracted
             .get("window_size_startup")
             .and_then(|v| {
@@ -165,7 +257,10 @@ pub fn get_check_and_set_config(config_path: &Path) -> Config {
                         }
                     })
             })
-            .filter(|v| !v.iter().any(|x| x < &200.0))
+            // `nan` is a float to TOML and to `parse`, and compares false
+            // with everything — so the check is for what a size must be, not
+            // for what it must not.
+            .filter(|v| v.iter().all(|x| x.is_finite() && *x >= 200.0))
             .unwrap_or([1280.0, 720.0]),
         start_in_fullscreen: extracted
             .get("start_in_fullscreen")
@@ -197,6 +292,7 @@ pub fn get_check_and_set_config(config_path: &Path) -> Config {
                         }
                     })
             })
+            .filter(|v| v.iter().all(|x| x.is_finite()))
             .unwrap_or([0.0, 0.0]),
         calendar_weeks_to_show: extracted
             .get("calendar_weeks_to_show")
@@ -218,11 +314,85 @@ pub fn get_check_and_set_config(config_path: &Path) -> Config {
             .get("selected_colorscheme_id")
             .and_then(|n| n.parse::<u32>().ok().and_then(|x| Some(x.clamp(0, 200000))))
             .unwrap_or(0),
-    };
+        phone_server_enabled: extracted
+            .get("phone_server_enabled")
+            .map(|s| parse_config_bool(s))
+            .unwrap_or(false),
+        phone_server_port: extracted
+            .get("phone_server_port")
+            .and_then(|n| n.parse::<u16>().ok())
+            .filter(|port| *port >= crate::phone::PORT_MIN)
+            .unwrap_or(crate::phone::DEFAULT_PORT),
+        phone_token: extracted
+            .get("phone_token")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+        background_blur_percent: extracted
+            .get("background_blur_percent")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(BACKGROUND_BLUR_DEFAULT)
+            .min(100),
+        background_light_percent: extracted
+            .get("background_light_percent")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(BACKGROUND_LIGHT_DEFAULT)
+            .min(100),
+        phone_bind_address: extracted
+            .get("phone_bind_address")
+            .map(|s| clean_bind_address(s))
+            .unwrap_or_else(|| crate::phone::DEFAULT_BIND.to_string()),
+        phone_public_url: extracted
+            .get("phone_public_url")
+            .map(|s| clean_public_url(s))
+            .unwrap_or_default(),
+        frame_cap_fps: extracted
+            .get("frame_cap_fps")
+            .and_then(|n| n.parse::<u32>().ok())
+            .map(clamp_frame_cap)
+            .unwrap_or(FRAME_CAP_UNCAPPED),
+        server_url: extracted
+            .get("server_url")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+        server_token: extracted
+            .get("server_token")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+    }
+}
 
-    write_normalized_config(config_path, &config);
+/// Write the settings file the way every other file here is written: whole,
+/// through a temporary file renamed into place. A power cut mid-write used to
+/// leave an empty file — and an empty file means a fresh token at the next
+/// start, which locks every phone and client out.
+fn write_atomically(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(dir)?;
+    temp.write_all(text.as_bytes())?;
+    temp.as_file_mut().sync_all()?;
+    temp.persist(path).map_err(|e| e.error)?;
+    // And the directory entry, so the rename survives a power cut too (§4.1).
+    crate::tasks::sync_directory(dir);
+    Ok(())
+}
 
-    config
+/// Write one key into the settings file, leaving everything else in it —
+/// comments, key order, keys we don't own — exactly as it was.
+///
+/// Public because startup needs it too: `main` can have to correct a setting
+/// (a selected colour scheme that had to move id) before there is any `TaskApp`
+/// to route it through, and one writer means the two paths cannot disagree
+/// about how a value is spelled in TOML.
+pub fn write_config_value(
+    path: &Path,
+    key: &str,
+    value: impl Into<toml_edit::Value>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut doc = fs::read_to_string(path)?.parse::<toml_edit::DocumentMut>()?;
+    doc[key] = toml_edit::value(value);
+    write_atomically(path, &doc.to_string())?;
+    Ok(())
 }
 
 /// Persist the normalized/clamped config back to disk using `toml_edit`, so the
@@ -249,10 +419,20 @@ fn write_normalized_config(path: &Path, config: &Config) {
     doc["selected_monitor_name"] = value(config.selected_monitor_name.clone());
     doc["selected_colorscheme_id"] = value(config.selected_colorscheme_id as i64);
     doc["three_day_weather"] = value(config.three_day_weather);
+    doc["background_blur_percent"] = value(config.background_blur_percent as i64);
+    doc["background_light_percent"] = value(config.background_light_percent as i64);
     doc["background_image_tint_percent"] = value(config.background_image_tint_percent as i64);
     doc["ui_scale_percent"] = value(config.ui_scale_percent as i64);
+    doc["phone_server_enabled"] = value(config.phone_server_enabled);
+    doc["phone_server_port"] = value(config.phone_server_port as i64);
+    doc["phone_token"] = value(config.phone_token.clone());
+    doc["phone_bind_address"] = value(config.phone_bind_address.clone());
+    doc["phone_public_url"] = value(config.phone_public_url.clone());
+    doc["frame_cap_fps"] = value(config.frame_cap_fps as i64);
+    doc["server_url"] = value(config.server_url.clone());
+    doc["server_token"] = value(config.server_token.clone());
 
-    let _ = fs::write(path, doc.to_string());
+    let _ = write_atomically(path, &doc.to_string());
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -267,11 +447,54 @@ pub struct Config {
     pub selected_colorscheme_id: u32,
     pub three_day_weather: bool,
     pub background_image_tint_percent: u32,
+    /// How blurred the background is, on a 0–100 dial, on both surfaces.
+    ///
+    /// Not a pixel radius: a radius that reads well on a 720-pixel phone crop
+    /// is invisible on a 3000-pixel desktop picture. This is a fraction of the
+    /// picture's own width, so one number means the same *look* at any size.
+    pub background_blur_percent: u32,
+    /// How bright the phone is allowed to let the picture get, on a 0–100 dial.
+    ///
+    /// The phone solves its darkening against a ceiling on relative luminance,
+    /// because text sits directly on the picture there; this is that ceiling.
+    /// The desktop's own `background_image_tint_percent` is a different control
+    /// for a different problem — a wall calendar's type is a heading.
+    pub background_light_percent: u32,
     /// Percentage the whole UI is scaled by, or `UI_SCALE_AUTO` (0) to fit the
     /// layout to the window automatically.
     pub ui_scale_percent: u32,
+    /// Whether the phone view (`phone.rs`) is served while the app runs.
+    pub phone_server_enabled: bool,
+    /// Port it listens on. `phone::PORT_MIN` or above.
+    pub phone_server_port: u16,
+    /// The secret in the phone's link. Empty until `main` mints one, which
+    /// happens once and is then kept, so the link on the phone keeps working.
+    pub phone_token: String,
+    /// The address the phone view listens on: `phone::DEFAULT_BIND` (this
+    /// machine only) unless the file names another, which then serves alone.
+    /// Not on the settings sheet — a posture decided once, in the file.
+    pub phone_bind_address: String,
+    /// The address to *hand out*, when it is not the one to listen on.
+    ///
+    /// Empty by default, and then the links are built from this machine's own
+    /// addresses. Set it when something in front of the server owns the name a
+    /// phone should use — `tailscale serve`, a reverse proxy, a real domain —
+    /// and the printed links and the QR code use it verbatim. Without it, a
+    /// Tailscale setup hands out a bare `http://100.x.y.z:7373`, which works
+    /// but arrives with a browser warning and no offline shell, because it is
+    /// not a secure context.
+    pub phone_public_url: String,
+    /// Frames per second the render loop is held to while awake, or
+    /// `FRAME_CAP_UNCAPPED` (0) for the flat-out loop of §14.1. For laptops on
+    /// battery; see `App::schedule_next_frame`.
+    pub frame_cap_fps: u32,
+    /// A `taskdeck-server` to keep the board on — `http://host:port` — and
+    /// its key. Empty means the board lives here. See `sync.rs`, `SERVER.md`.
+    pub server_url: String,
+    pub server_token: String,
 }
 
+#[cfg(feature = "desk")]
 pub struct AppState<'a> {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -284,6 +507,7 @@ pub struct AppState<'a> {
     _instance: wgpu::Instance,
 }
 
+#[cfg(feature = "desk")]
 impl AppState<'_> {
     async fn new(
         instance: wgpu::Instance,
@@ -419,6 +643,7 @@ impl AppState<'_> {
     }
 }
 
+#[cfg(feature = "desk")]
 pub struct App<'a> {
     cursor_inside_window: bool,
     window_is_focused: bool,
@@ -429,10 +654,14 @@ pub struct App<'a> {
     repaint_debugger_count: u32,
     last_active: Option<Instant>,
     in_sleep: bool,
+    /// When the next frame is due under a frame cap, if one is set and the
+    /// loop is waiting for it. See `schedule_next_frame`.
+    redraw_at: Option<Instant>,
     window_size_startup: [f32; 2],
     selected_monitor_name: String,
 }
 
+#[cfg(feature = "desk")]
 impl<'a> App<'a> {
     pub fn new(task_app: TaskApp, window_size_startup: [f32; 2], selected_monitor_name: String) -> Self {
         Self {
@@ -445,8 +674,40 @@ impl<'a> App<'a> {
             repaint_debugger_count: 0,
             last_active: Some(std::time::Instant::now()),
             in_sleep: false,
+            redraw_at: None,
             window_size_startup,
             selected_monitor_name,
+        }
+    }
+
+    /// Ask for the frame after the one that began at `frame_start`.
+    ///
+    /// Uncapped — the default, and §14.1's deliberate choice — that is at
+    /// once, and the loop renders as fast as the GPU allows while awake. With a
+    /// cap set, the request is deferred until the frame's share of a second has
+    /// passed: the event loop is told to wake at that instant
+    /// (`ControlFlow::WaitUntil`) and `new_events` asks for the redraw when it
+    /// does. Frames still arrive continuously, only slower, so the hand-rolled
+    /// animations — which advance by measured `dt`, not by frame count — are
+    /// untouched; what changes is that a laptop on battery is not asked to draw
+    /// a calendar two hundred times a second.
+    ///
+    /// Input still draws immediately: the `CursorMoved` and friends arms call
+    /// `handle_redraw` themselves, which the cap does not gate. It only paces
+    /// the loop that would otherwise chase its own tail.
+    fn schedule_next_frame(&mut self, event_loop: &ActiveEventLoop, frame_start: Instant) {
+        let Some(window) = self.window.as_ref() else { return };
+        let cap = self.task_app.frame_cap_fps();
+        if cap == FRAME_CAP_UNCAPPED {
+            window.request_redraw();
+            return;
+        }
+        let due = frame_start + time::Duration::from_secs_f64(1.0 / cap as f64);
+        if Instant::now() >= due {
+            window.request_redraw();
+        } else {
+            self.redraw_at = Some(due);
+            event_loop.set_control_flow(ControlFlow::WaitUntil(due));
         }
     }
 
@@ -752,6 +1013,7 @@ impl<'a> App<'a> {
 /// Decode the embedded PNG into a winit icon. A failure here is cosmetic — the
 /// window just gets the platform default — so it must not abort startup the way
 /// the old `unwrap()` pair did.
+#[cfg(feature = "desk")]
 fn window_icon() -> Option<winit::window::Icon> {
     let image = image::load_from_memory_with_format(
         include_bytes!("../icon.png"),
@@ -763,6 +1025,7 @@ fn window_icon() -> Option<winit::window::Icon> {
     winit::window::Icon::from_rgba(image.into_raw(), width, height).ok()
 }
 
+#[cfg(feature = "desk")]
 impl ApplicationHandler for App<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attributes = self.window_attributes(event_loop);
@@ -821,10 +1084,11 @@ impl ApplicationHandler for App<'_> {
                 self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::RedrawRequested => {
+                let frame_start = Instant::now();
                 self.handle_redraw(event_loop);
 
                 if !self.in_sleep {
-                    self.window.as_ref().unwrap().request_redraw();
+                    self.schedule_next_frame(event_loop, frame_start);
                 }
             }
             WindowEvent::CursorEntered { .. } => {
@@ -852,8 +1116,31 @@ impl ApplicationHandler for App<'_> {
         }
     }
 
-    //This function is implemented so that the weather thread can make the UI refresh
+    // A frame cap's timer going off: the frame it deferred is due. Back to
+    // plain waiting first, so a wake that turns out to be the last one (the
+    // app fell asleep meanwhile) does not leave a stale deadline armed.
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        if !matches!(cause, StartCause::ResumeTimeReached { .. }) {
+            return;
+        }
+        if self.redraw_at.take().is_some() {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            if !self.in_sleep {
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+        }
+    }
+
+    // The weather thread and the phone view's thread both wake the UI this way.
+    // Phone commands are served *here* rather than only inside the frame, so a
+    // phone edit lands while the window is minimized or asleep — `handle_redraw`
+    // returns before running the frame in both of those states. Nothing the
+    // commands do needs egui: they go through the same setters a gesture uses,
+    // which end in a calendar rebuild and a save.
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ()) {
+        self.task_app.serve_phone_requests();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
             window.request_redraw();
@@ -865,6 +1152,7 @@ impl ApplicationHandler for App<'_> {
     // not lost. Note: this does not run on a hard kill or on panic (panic = abort).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.task_app.flush_pending_saves();
+        self.task_app.shutdown_sync();
     }
 }
 
@@ -884,8 +1172,77 @@ mod tests {
             selected_colorscheme_id: 3,
             three_day_weather: true,
             background_image_tint_percent: 30,
+            background_blur_percent: BACKGROUND_BLUR_DEFAULT,
+            background_light_percent: BACKGROUND_LIGHT_DEFAULT,
             ui_scale_percent: UI_SCALE_AUTO,
+            phone_server_enabled: false,
+            phone_server_port: crate::phone::DEFAULT_PORT,
+            phone_token: "abc".to_string(),
+            phone_bind_address: crate::phone::DEFAULT_BIND.to_string(),
+            phone_public_url: String::new(),
+            frame_cap_fps: FRAME_CAP_UNCAPPED,
+            server_url: String::new(),
+            server_token: String::new(),
         }
+    }
+
+    #[test]
+    fn frame_cap_keeps_the_uncapped_sentinel_and_clamps_the_rest() {
+        assert_eq!(clamp_frame_cap(0), FRAME_CAP_UNCAPPED);
+        assert_eq!(clamp_frame_cap(1), FRAME_CAP_MIN);
+        assert_eq!(clamp_frame_cap(60), 60);
+        assert_eq!(clamp_frame_cap(10_000), FRAME_CAP_MAX);
+    }
+
+    #[test]
+    fn a_bind_address_is_kept_when_it_is_one_and_every_interface_otherwise() {
+        assert_eq!(clean_bind_address(" 127.0.0.1 "), "127.0.0.1");
+        assert_eq!(clean_bind_address("100.64.0.7"), "100.64.0.7");
+        assert_eq!(clean_bind_address("::1"), "::1");
+        // Not an address: the phone view still comes up, on this machine,
+        // rather than not at all. The default is loopback now — `tailscale
+        // serve` reaches it there, so the ordinary setup needs nothing wider,
+        // and a fresh install is not on every network it ever joins.
+        for bad in ["", "kitchen", "192.168.1", "0.0.0.0:7373"] {
+            assert_eq!(clean_bind_address(bad), crate::phone::DEFAULT_BIND, "{bad:?}");
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("userconfig.toml");
+        fs::write(&path, "phone_bind_address = \" 100.64.0.7 \"\n").unwrap();
+        assert_eq!(get_check_and_set_config(&path).phone_bind_address, "100.64.0.7");
+        fs::write(&path, "phone_bind_address = \"kitchen\"\n").unwrap();
+        assert_eq!(get_check_and_set_config(&path).phone_bind_address, crate::phone::DEFAULT_BIND);
+        fs::write(&path, "phone_server_port = 7373\n").unwrap();
+        assert_eq!(get_check_and_set_config(&path).phone_bind_address, crate::phone::DEFAULT_BIND);
+        // And the normalised file carries the key from then on.
+        assert!(fs::read_to_string(&path).unwrap().contains("phone_bind_address = \"127.0.0.1\""));
+    }
+
+    #[test]
+    fn an_address_to_hand_out_is_taken_as_given_or_left_empty() {
+        // What goes on the QR when something in front of the server owns the
+        // name — `tailscale serve`, a proxy, a domain. Taken verbatim: the
+        // thing in front chose the scheme, host and port, and guessing at any
+        // of them is how a link that looks right stops working.
+        assert_eq!(clean_public_url(" https://a-laptop.tailnet.ts.net/ "), "https://a-laptop.tailnet.ts.net");
+        assert_eq!(clean_public_url("https://cal.example.com:8443"), "https://cal.example.com:8443");
+        // http is allowed here, unlike a calendar subscription: this one is
+        // the user's own server on their own network, and they may not have a
+        // certificate yet.
+        assert_eq!(clean_public_url("http://box.local.example.com"), "http://box.local.example.com");
+        // Anything that is not a URL falls back to the links the app already
+        // knew how to build, rather than to no links at all.
+        for bad in ["", "  ", "a-laptop.tailnet.ts.net", "https://", "ftp://x.example.com", "https://nodots"] {
+            assert_eq!(clean_public_url(bad), "", "{bad:?}");
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("userconfig.toml");
+        fs::write(&path, "phone_public_url = \"https://a-laptop.tailnet.ts.net/\"\n").unwrap();
+        assert_eq!(get_check_and_set_config(&path).phone_public_url, "https://a-laptop.tailnet.ts.net");
+        // And it is written back, so the key is discoverable in the file.
+        assert!(fs::read_to_string(&path).unwrap().contains("phone_public_url"));
     }
 
     #[test]
@@ -897,6 +1254,30 @@ mod tests {
         for f in ["false", "east", "set", "", "0", "no", "off"] {
             assert!(!parse_config_bool(f), "{f:?} should parse false");
         }
+    }
+
+    #[test]
+    fn a_broken_file_with_a_lone_quote_is_read_not_a_crash() {
+        // An unclosed string is the typo that breaks the TOML and sends the
+        // file down the line-by-line fallback — where a value that is one
+        // quote character used to be sliced as `1..0`. The rest of the file
+        // is still read; the broken line is skipped.
+        let broken = "phone_token = \"\nselected_colorscheme_id = 4\nbackground = '\n";
+        let config = config_from(&parse_config_text(broken));
+        assert_eq!(config.selected_colorscheme_id, 4);
+        assert_eq!(config.phone_token, "");
+        assert_eq!(config.background, "");
+    }
+
+    #[test]
+    fn a_float_pair_that_is_not_a_number_falls_back() {
+        // `nan` and `inf` are floats to TOML and to `parse::<f32>`, and a
+        // window of no size or a place at no latitude is nothing to start
+        // from.
+        let text = "window_size_startup = [nan, 720.0]\ncoordinates = [inf, 24.94]\n";
+        let config = config_from(&parse_config_text(text));
+        assert_eq!(config.window_size_startup, [1280.0, 720.0]);
+        assert_eq!(config.coordinates, [0.0, 0.0]);
     }
 
     #[test]

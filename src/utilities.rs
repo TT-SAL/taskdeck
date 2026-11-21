@@ -1,8 +1,12 @@
-use std::{collections::HashMap, error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::Path};
+use std::{error::Error, fs::{self, File}, io::{BufReader, BufWriter, Write}, path::Path};
+#[cfg(feature = "desk")]
+use std::collections::HashMap;
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone};
+#[cfg(feature = "desk")]
 use egui::Color32;
 use tempfile::NamedTempFile;
 
+#[cfg(feature = "desk")]
 use crate::color::ColorScheme;
 
 /// Build a TOML array `[a, b]` of two floats for the config file. Used for the
@@ -83,6 +87,10 @@ pub fn days_in_month(year: i32, month: u32) -> u32 {
     }
 }
 
+// The only thing in here that speaks in a toolkit type, and `ui.rs` is its
+// only caller. The scheme itself (`color::ColorScheme`) is plain bytes and
+// stays available to the server.
+#[cfg(feature = "desk")]
 pub fn resolve_colorscheme(
     schemes: &HashMap<u32, ColorScheme>,
     selected_id: u32,
@@ -117,8 +125,26 @@ pub fn save_notepad_text(payload: String, data_dir: &Path) -> Result<(), Box<dyn
 
     // Atomically replace the original file
     temp_file.persist(&final_path)?;
+    // And flush the directory entry, so the rename outlives a power cut (§4.1).
+    crate::tasks::sync_directory(data_dir);
 
     Ok(())
+}
+
+/// What one tab becomes in the notepad.
+pub const NOTEPAD_TAB: &str = "    ";
+
+/// Replace tabs with spaces.
+///
+/// The app is set in Fixedsys, which has no tab glyph, and epaint asks the font
+/// for one rather than handling `\t` itself — so every tab in the notepad was
+/// painted as a missing-glyph box. A notepad that had only ever been tabbed
+/// into (which is what pressing Tab in the old code-editor-styled field did)
+/// showed as a row of little squares and nothing else.
+///
+/// Run on load and on every edit, so pasted text is covered too.
+pub fn detab(text: &str) -> String {
+    text.replace('\t', NOTEPAD_TAB)
 }
 
 pub fn read_notepad_text(data_dir: &Path) -> Result<String, Box<dyn Error>> {

@@ -3,6 +3,218 @@ use emath;
 use epaint::TextShape;
 use egui::{FontId, Ui, Pos2, FontFamily, vec2, Sense};
 
+/* ─────────────────────── Fitting a name onto a card ───────────────────────
+ *
+ * Every card here has the same problem: a name of any length, a box about
+ * thirteen characters wide, and a shape that is not a rectangle — the day
+ * number is punched out of one corner, so the first row is narrower than the
+ * ones under it.
+ *
+ * Each of the four card widgets used to solve it separately, and all four were
+ * wrong in the same way and some in more:
+ *
+ *   - Only the **first** row was measured. Everything left over was poured into
+ *     the second with no width check at all, so a long name ran off the side of
+ *     the card and was clipped mid-glyph.
+ *   - Anything past two rows was dropped in silence — no ellipsis, no sign that
+ *     the name had ever continued.
+ *   - A word wider than a row (`Supercalifragilisticexpialidocious`) never fit
+ *     the first row, so the first row was left *empty* and the whole word went
+ *     to the second, where it overflowed.
+ *   - Two of the four had no "stop filling the first row" flag, so once one
+ *     word failed to fit, later *shorter* words were still appended to row one
+ *     — printing the name with its words **out of order**.
+ *   - One of those two appended to row two with `push_str(word)` and no
+ *     separator, so it printed them **run together**: "overdueprojectretro".
+ *
+ * One implementation now, taking the width of each row it is allowed to use.
+ */
+
+/// What stands in for the part of a name that did not fit.
+const ELLIPSIS: char = '…';
+
+/// The face every card's text is set in.
+const CARD_TEXT_SIZE: f32 = 11.0;
+
+/// Row pitch for it. Space Mono at 11 points is about 13 tall; this is the step
+/// from one row of a card to the next.
+const CARD_LINE_HEIGHT: f32 = 13.0;
+
+fn card_text_font() -> FontId {
+    FontId::new(CARD_TEXT_SIZE, FontFamily::Name("space".into()))
+}
+
+/// Lay `text` out into rows of the given widths: breaking at spaces where it
+/// can, inside a word where it must, and ending in `…` when something was left
+/// over.
+///
+/// `widths` has one entry per row the card has room for, **in order** — which
+/// is what lets a card whose first row is shortened by the day number use its
+/// full width further down.
+pub fn fit_text_rows(ui: &Ui, text: &str, font: &FontId, widths: &[f32]) -> Vec<String> {
+    // The font lock is taken once for the whole layout rather than per glyph.
+    ui.fonts_mut(|fonts| {
+        let mut advance = |ch: char| fonts.glyph_width(font, ch);
+        fit_rows_by(text, &mut advance, widths)
+    })
+}
+
+/// The layout itself, over a per-character advance rather than a font, so the
+/// rules can be tested against a known-width character instead of against
+/// whatever the font happens to measure.
+///
+/// Summing advances is how egui's own layouter measures a row, so this agrees
+/// with what is actually painted; it ignores kerning, which egui's basic path
+/// ignores too.
+fn fit_rows_by(
+    text: &str,
+    advance: &mut impl FnMut(char) -> f32,
+    widths: &[f32],
+) -> Vec<String> {
+    let mut pending: std::collections::VecDeque<&str> = text.split_whitespace().collect();
+    let mut rows = Vec::with_capacity(widths.len());
+
+    for (index, &width) in widths.iter().enumerate() {
+        if pending.is_empty() {
+            break;
+        }
+        let last = index + 1 == widths.len();
+        rows.push(take_row(&mut pending, advance, width, last));
+    }
+    rows
+}
+
+/// Fill one row from the front of `pending`.
+fn take_row(
+    pending: &mut std::collections::VecDeque<&str>,
+    advance: &mut impl FnMut(char) -> f32,
+    width: f32,
+    last: bool,
+) -> String {
+    let space = advance(' ');
+    let mut row = String::new();
+    let mut used = 0.0;
+
+    // Whole words, while they fit. Each is measured once, so a card costs a
+    // pass over its own name however many rows it takes.
+    while let Some(&word) = pending.front() {
+        let word_width = measure(word, advance);
+        let gap = if row.is_empty() { 0.0 } else { space };
+        if used + gap + word_width > width {
+            break;
+        }
+        if !row.is_empty() {
+            row.push(' ');
+        }
+        row.push_str(word);
+        used += gap + word_width;
+        pending.pop_front();
+    }
+
+    if row.is_empty() {
+        // Nothing fits, so the next word is wider than a whole row and has to
+        // be broken inside. A name with no space in it has to be cut somewhere,
+        // and cutting it here — rather than leaving the row empty and hoping
+        // the next one is wider — is what keeps it on the card.
+        let word = pending.pop_front().unwrap_or_default();
+        let budget = if last { width - measure_char(ELLIPSIS, advance) } else { width };
+        // At least one character, always: a row that takes nothing makes no
+        // progress, and the loop above would ask for the same word forever.
+        let head_len = prefix_that_fits(word, advance, budget).max(first_char_len(word));
+        let (head, tail) = word.split_at(head_len.min(word.len()));
+        row.push_str(head);
+        used = measure(head, advance);
+        if !tail.is_empty() {
+            pending.push_front(tail);
+        }
+    }
+
+    if last && !pending.is_empty() {
+        pending.clear();
+        return with_ellipsis(row, used, advance, width);
+    }
+    row
+}
+
+fn measure(text: &str, advance: &mut impl FnMut(char) -> f32) -> f32 {
+    text.chars().map(|ch| advance(ch)).sum()
+}
+
+fn measure_char(ch: char, advance: &mut impl FnMut(char) -> f32) -> f32 {
+    advance(ch)
+}
+
+/// Byte length of the longest prefix of `text` that fits `budget`.
+fn prefix_that_fits(text: &str, advance: &mut impl FnMut(char) -> f32, budget: f32) -> usize {
+    let mut used = 0.0;
+    let mut fitted = 0;
+    for (index, ch) in text.char_indices() {
+        let width = advance(ch);
+        if used + width > budget {
+            break;
+        }
+        used += width;
+        fitted = index + ch.len_utf8();
+    }
+    fitted
+}
+
+fn first_char_len(text: &str) -> usize {
+    text.chars().next().map_or(0, char::len_utf8)
+}
+
+/// Trim the row back until the ellipsis fits beside it, then add it.
+fn with_ellipsis(
+    mut row: String,
+    mut used: f32,
+    advance: &mut impl FnMut(char) -> f32,
+    width: f32,
+) -> String {
+    let mark = measure_char(ELLIPSIS, advance);
+    while used + mark > width {
+        match row.pop() {
+            Some(ch) => used -= advance(ch),
+            None => break,
+        }
+    }
+    // "half a name …" reads as a typo; the ellipsis belongs against the text.
+    while row.ends_with(' ') {
+        row.pop();
+    }
+    row.push(ELLIPSIS);
+    row
+}
+
+/// How many rows of text fit between `top` and `bottom`.
+///
+/// Measured rather than assumed. The number of rows a card has room for depends
+/// on the height of the day number's galley, which depends on the font and on
+/// the UI scale — guess it and the last row straddles the bottom edge of the
+/// card and is painted in half, which is exactly what a first attempt at this
+/// did.
+fn rows_between(top: f32, bottom: f32) -> usize {
+    (((bottom - top) / CARD_LINE_HEIGHT).floor()).max(0.0) as usize
+}
+
+/// Paint rows produced by `fit_text_rows` down a card, one `CARD_LINE_HEIGHT`
+/// apart, starting at `first`. `lefts` gives each row its own left edge, so a
+/// row indented past the day number and the full-width rows below it line up
+/// with the widths they were fitted to.
+fn paint_rows(
+    painter: &egui::Painter,
+    rows: &[String],
+    lefts: &[f32],
+    first: Pos2,
+    font: &FontId,
+    color: Color32,
+) {
+    for (index, row) in rows.iter().enumerate() {
+        let left = lefts.get(index).copied().unwrap_or(first.x);
+        let pos = Pos2::new(left, first.y + index as f32 * CARD_LINE_HEIGHT);
+        painter.text(pos, Align2::LEFT_TOP, row, font.clone(), color);
+    }
+}
+
 pub struct DayNumber<'a> {
     pub number: &'a str,
     pub is_strong: bool,
@@ -67,7 +279,7 @@ impl<'a> egui::Widget for DayHeader<'a> {
 
         let painter = ui.painter_at(rect);
 
-        let text_font = FontId::new(11.0, FontFamily::Name("space".into()));
+        let text_font = card_text_font();
 
         let margin = 5.0;
         let number_pos = Pos2::new(rect.left() + margin, rect.top() + margin);
@@ -133,60 +345,44 @@ impl<'a> egui::Widget for DayHeader<'a> {
         // Paint the number
         painter.galley(number_pos, number_galley, Color32::WHITE);
 
-        // Layout the text in two lines manually
-        let available_text_width = rect.right() - (number_pos.x + number_size.x + margin - 4.0);
-        let full_text = self.text;
-
-        // Split text into two lines based on available width
-        let (first_line, second_line) = {
-            let words = full_text.split_whitespace();
-            let mut line1 = String::new();
-            let mut line2 = String::new();
-            let mut fitting = true;
-
-            for word in words {
-                let test_line = if line1.is_empty() {
-                    word.to_string()
-                } else {
-                    format!("{} {}", line1, word)
-                };
-
-                let test_width = ui
-                    .fonts_mut(|f| f.layout_no_wrap(test_line.clone(), text_font.clone(), ui.visuals().text_color()))
-                    .size()
-                    .x;
-
-                if test_width <= available_text_width && fitting {
-                    line1 = test_line;
-                } else {
-                    fitting = false;
-                    if line2.is_empty() {
-                        line2.push_str(word);
-                    } else {
-                        line2.push_str(&format!(" {}", word));
-                    }
-                }
-            }
-
-            (line1, line2)
-        };
-
+        // The name, in a shape that is not a rectangle: the first row starts
+        // after the day number, the rows under it get the whole card. Both are
+        // measured, which is the difference between this and what was here
+        // before — the second row was never measured at all, so a long name ran
+        // off the side and was clipped mid-glyph.
         let color = Color32::from_gray(150);
 
-        let text_offset_x = 2.0; // Push text more to the right
-        let text_offset_y = 7.5; // Push text a bit lower
+        let indented_left = number_pos.x + number_size.x + margin * 2.0 + 2.0;
+        let full_left = rect.left() + margin + 2.0;
+        let right = rect.right() - margin;
 
-        let line1_pos = Pos2::new(
-            number_pos.x + number_size.x + margin * 2.0 + text_offset_x,
-            number_pos.y + text_offset_y + 1.0,
-        );
-        let line2_pos = Pos2::new(
-            rect.left() + margin + text_offset_x,
-            number_pos.y + number_size.y + margin + text_offset_y - 6.0,
-        );
+        let first_row = Pos2::new(indented_left, number_pos.y + 5.0);
+        // Below the number, which is what frees the full width — and however
+        // many of those the card actually has room for. The galley of a
+        // 16-point Anton numeral is a few points taller than its glyphs, so
+        // starting flush under it wastes the row that space would have paid
+        // for; `- 4` is that leading given back, and the count is measured
+        // rather than assumed so it stays right at any UI scale.
+        let lower_rows_top = number_pos.y + number_size.y - 4.0;
+        let lower_rows = rows_between(lower_rows_top, rect.bottom() - 2.0);
 
-        painter.text(line1_pos, Align2::LEFT_TOP, first_line, text_font.clone(), color);
-        painter.text(line2_pos, Align2::LEFT_TOP, second_line, text_font.clone(), color);
+        let mut widths = vec![right - indented_left];
+        widths.extend(std::iter::repeat_n(right - full_left, lower_rows));
+        let rows = fit_text_rows(ui, self.text, &text_font, &widths);
+
+        if let Some(first) = rows.first() {
+            painter.text(first_row, Align2::LEFT_TOP, first, text_font.clone(), color);
+        }
+        if rows.len() > 1 {
+            paint_rows(
+                &painter,
+                &rows[1..],
+                &vec![full_left; lower_rows],
+                Pos2::new(full_left, lower_rows_top),
+                &text_font,
+                color,
+            );
+        }
 
         // Dynamic hour string (optional, can be from a field)
         // 1. Compute your external position
@@ -249,50 +445,21 @@ impl<'a> egui::Widget for MiddleHeader<'a> {
         let rounding = CornerRadius::same(6);
         painter.rect(rect, rounding, bg_color, stroke, StrokeKind::Inside);
 
-        let text_font = FontId::new(11.0, FontFamily::Name("space".into()));
+        let text_font = card_text_font();
         let color = Color32::from_gray(150);
 
+        // A plain rectangle, so every row is the same width — and three of them
+        // fit inside the card's 60 points. The old pair sat 18 points apart,
+        // which is a line and a half for an 11-point face: it looked airy and
+        // it cost a third of the card's text for nothing.
         let margin = 12.0;
-        let available_text_width = rect.width() - margin * 2.0;
+        let left = rect.left() + margin;
+        let text_width = rect.width() - margin * 2.0;
 
-        // Word-wrapping into two lines
-        let (line1, line2) = {
-            let words = self.text.split_whitespace();
-            let mut line1 = String::new();
-            let mut line2 = String::new();
-            let mut fitting = true;
-
-            for word in words {
-                let test = if line1.is_empty() {
-                    word.to_string()
-                } else {
-                    format!("{} {}", line1, word)
-                };
-
-                let width = ui.fonts_mut(|f| {
-                    f.layout_no_wrap(test.clone(), text_font.clone(), color).size().x
-                });
-
-                if width <= available_text_width && fitting {
-                    line1 = test;
-                } else {
-                    fitting = false;
-                    if !line2.is_empty() {
-                        line2.push(' ');
-                    }
-                    line2.push_str(word);
-                }
-            }
-
-            (line1, line2)
-        };
-
-        let line_height = 18.0; // Approximate line height
-        let line1_pos = Pos2::new(rect.left() + margin, rect.top() + margin);
-        let line2_pos = Pos2::new(rect.left() + margin, rect.top() + margin + line_height);
-
-        painter.text(line1_pos, Align2::LEFT_TOP, line1, text_font.clone(), color);
-        painter.text(line2_pos, Align2::LEFT_TOP, line2, text_font, color);
+        let top = rect.top() + 10.0;
+        let count = rows_between(top, rect.bottom() - 8.0);
+        let rows = fit_text_rows(ui, self.text, &text_font, &vec![text_width; count]);
+        paint_rows(&painter, &rows, &vec![left; count], Pos2::new(left, top), &text_font, color);
 
         if let Some(hour) = self.hour {
             // 1. Compute your external position
@@ -413,7 +580,7 @@ impl<'a> egui::Widget for BottomHeaderRotated<'a> {
 
         let painter = ui.painter_at(rect);
 
-        let text_font = FontId::new(11.0, FontFamily::Name("space".into()));
+        let text_font = card_text_font();
 
         // Margin and positioning
         let margin = 7.0;
@@ -498,54 +665,35 @@ impl<'a> egui::Widget for BottomHeaderRotated<'a> {
             
         });
 
-        //available widths for first and second rows
-        let first_row_width = rect.width() - margin * 3f32;
-        // let second_row_width = number_center.x - rotated_size.x / 2.0 - rect.left() - margin * 2.0;
-
-        let full_text = self.text;
-
-        // Split text into two lines based on available width
-        let (first_line, second_line) = {
-            let words = full_text.split_whitespace();
-            let mut line1 = String::new();
-            let mut line2 = String::new();
-
-            for word in words {
-                let test_line = if line1.is_empty() {
-                    word.to_string()
-                } else {
-                    format!("{} {}", line1, word)
-                };
-
-                let test_width = ui
-                    .fonts_mut(|f| f.layout_no_wrap(test_line.clone(), text_font.clone(), ui.visuals().text_color()))
-                    .size()
-                    .x;
-
-                if test_width < first_row_width {
-                    line1 = test_line;
-                } else {
-                    line2.push_str(word);
-                }
-            }
-
-            (line1, line2)
-        };
-
+        // The name runs down from the top-left; the rotated day number sits in
+        // the bottom-right, so the third row has to stop short of it. That is
+        // the whole reason `fit_text_rows` takes a width per row.
+        //
+        // What was here had no "the first row is full" flag at all: once a word
+        // failed to fit, later *shorter* words were still appended to row one,
+        // so the name printed with its words out of order — and row two was
+        // built with `push_str(word)` and no separator, so the rest of it
+        // printed run together as one string.
         let color = Color32::from_gray(150);
 
-        // Position text on top-left, with some margin
-        let text_offset_x = margin + 7.0;
-        let text_offset_y = margin + 1.0;
+        let left = rect.left() + margin + 7.0;
+        let right = rect.right() - margin;
+        let number_left = number_center.x - rotated_size.x / 2.0 - margin;
 
-        let line1_pos = Pos2::new(rect.left() + text_offset_x, rect.top() + text_offset_y);
-        let line2_pos = Pos2::new(
-            rect.left() + text_offset_x,
-            rect.top() + text_offset_y + text_font.size + 2.0,
-        );
+        let top = rect.top() + margin + 1.0;
+        let count = rows_between(top, rect.bottom() - margin);
+        // A row that reaches down into the number's band stops short of it;
+        // the ones above it get the whole card.
+        let number_top = number_center.y - rotated_size.y / 2.0 - 2.0;
+        let widths: Vec<f32> = (0..count)
+            .map(|index| {
+                let row_bottom = top + (index as f32 + 1.0) * CARD_LINE_HEIGHT;
+                if row_bottom > number_top { (number_left - left).max(0.0) } else { right - left }
+            })
+            .collect();
 
-        painter.text(line1_pos, Align2::LEFT_TOP, first_line, text_font.clone(), color);
-        painter.text(line2_pos, Align2::LEFT_TOP, second_line, text_font, color);
+        let rows = fit_text_rows(ui, self.text, &text_font, &widths);
+        paint_rows(&painter, &rows, &vec![left; count], Pos2::new(left, top), &text_font, color);
 
 
 
@@ -639,7 +787,7 @@ impl<'a> egui::Widget for ButtonHeaderRotated<'a> {
 
         let painter = ui.painter_at(rect);
 
-        let text_font = FontId::new(11.0, FontFamily::Name("space".into()));
+        let text_font = card_text_font();
 
         let margin = 7.0;
 
@@ -725,54 +873,35 @@ impl<'a> egui::Widget for ButtonHeaderRotated<'a> {
             
         });
 
-        //available widths for first and second rows
-        let first_row_width = rect.width() - margin * 3f32;
-        // let second_row_width = number_center.x - rotated_size.x / 2.0 - rect.left() - margin * 2.0;
-
-        let full_text = self.text;
-
-        // Split text into two lines based on available width
-        let (first_line, second_line) = {
-            let words = full_text.split_whitespace();
-            let mut line1 = String::new();
-            let mut line2 = String::new();
-
-            for word in words {
-                let test_line = if line1.is_empty() {
-                    word.to_string()
-                } else {
-                    format!("{} {}", line1, word)
-                };
-
-                let test_width = ui
-                    .fonts_mut(|f| f.layout_no_wrap(test_line.clone(), text_font.clone(), ui.visuals().text_color()))
-                    .size()
-                    .x;
-
-                if test_width < first_row_width {
-                    line1 = test_line;
-                } else {
-                    line2.push_str(word);
-                }
-            }
-
-            (line1, line2)
-        };
-
+        // The name runs down from the top-left; the rotated day number sits in
+        // the bottom-right, so the third row has to stop short of it. That is
+        // the whole reason `fit_text_rows` takes a width per row.
+        //
+        // What was here had no "the first row is full" flag at all: once a word
+        // failed to fit, later *shorter* words were still appended to row one,
+        // so the name printed with its words out of order — and row two was
+        // built with `push_str(word)` and no separator, so the rest of it
+        // printed run together as one string.
         let color = Color32::from_gray(150);
 
-        // Position text on top-left, with some margin
-        let text_offset_x = margin + 7.0;
-        let text_offset_y = margin + 1.0;
+        let left = rect.left() + margin + 7.0;
+        let right = rect.right() - margin;
+        let number_left = number_center.x - rotated_size.x / 2.0 - margin;
 
-        let line1_pos = Pos2::new(rect.left() + text_offset_x, rect.top() + text_offset_y);
-        let line2_pos = Pos2::new(
-            rect.left() + text_offset_x,
-            rect.top() + text_offset_y + text_font.size + 2.0,
-        );
+        let top = rect.top() + margin + 1.0;
+        let count = rows_between(top, rect.bottom() - margin);
+        // A row that reaches down into the number's band stops short of it;
+        // the ones above it get the whole card.
+        let number_top = number_center.y - rotated_size.y / 2.0 - 2.0;
+        let widths: Vec<f32> = (0..count)
+            .map(|index| {
+                let row_bottom = top + (index as f32 + 1.0) * CARD_LINE_HEIGHT;
+                if row_bottom > number_top { (number_left - left).max(0.0) } else { right - left }
+            })
+            .collect();
 
-        painter.text(line1_pos, Align2::LEFT_TOP, first_line, text_font.clone(), color);
-        painter.text(line2_pos, Align2::LEFT_TOP, second_line, text_font, color);
+        let rows = fit_text_rows(ui, self.text, &text_font, &widths);
+        paint_rows(&painter, &rows, &vec![left; count], Pos2::new(left, top), &text_font, color);
 
 
         let button_size = vec2(30.0, 18.0);
@@ -864,5 +993,105 @@ impl<'a> egui::Widget for ButtonHeaderRotated<'a> {
 
 
         response
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Ten units a character, so a width of 100 is exactly ten characters and
+    /// the expectations below can be read off by counting.
+    fn fit(text: &str, widths: &[f32]) -> Vec<String> {
+        fit_rows_by(text, &mut |_| 10.0, widths)
+    }
+
+    #[test]
+    fn words_wrap_and_stay_in_order() {
+        // The bug two of the four copies had: with no "row one is full" flag,
+        // a word that didn't fit was skipped and later shorter words were still
+        // appended to row one, so the name printed out of order.
+        assert_eq!(
+            fit("alpha bravo charlie x", &[100.0, 100.0, 100.0]),
+            vec!["alpha", "bravo", "charlie x"]
+        );
+    }
+
+    #[test]
+    fn every_row_is_measured_not_just_the_first() {
+        // The bug all four shared: the remainder was poured into row two
+        // without measuring it, so it ran off the side of the card.
+        let rows = fit("one two three four five six", &[100.0, 100.0, 100.0]);
+        for row in &rows {
+            assert!(row.chars().count() <= 10, "{row:?} overflows its row");
+        }
+    }
+
+    #[test]
+    fn a_row_that_is_narrower_is_given_less() {
+        // The day number shortens the first row; the rows below get the whole
+        // card. Passing a width per row is the whole point of the helper.
+        assert_eq!(fit("aaa bbbb cccc", &[30.0, 90.0]), vec!["aaa", "bbbb cccc"]);
+    }
+
+    #[test]
+    fn a_word_too_long_for_any_row_is_broken_not_dropped() {
+        // "Supercalifragilisticexpialidocious" has nowhere to break. The old
+        // code left row one empty and pushed the whole thing into row two,
+        // where it was never measured and overflowed the card.
+        let rows = fit("Supercalifragilisticexpialidocious", &[100.0, 100.0]);
+        assert_eq!(rows[0], "Supercalif", "a full row of it");
+        // The last row is nine characters and the mark, not ten and an
+        // overhang: the ellipsis is paid for out of the row's own width.
+        assert_eq!(rows[1], "ragilisti…");
+        assert!(rows[1].chars().count() <= 10, "{:?} overflows", rows[1]);
+    }
+
+    #[test]
+    fn what_did_not_fit_is_marked_with_an_ellipsis() {
+        // Silently dropping the tail is what made a cut-off name look like the
+        // whole name.
+        let rows = fit("alpha bravo charlie delta echo", &[100.0, 100.0]);
+        assert_eq!(rows.len(), 2);
+        assert!(rows[1].ends_with(ELLIPSIS), "{:?}", rows[1]);
+        // ...and the ellipsis is paid for out of the row, not added past its end.
+        assert!(rows[1].chars().count() <= 10, "{:?} overflows", rows[1]);
+    }
+
+    #[test]
+    fn a_name_that_fits_is_left_exactly_alone() {
+        assert_eq!(fit("Dentist", &[100.0, 100.0]), vec!["Dentist"]);
+        // Filling a row to the last character is not "left over".
+        let exact = fit("abcde fghi", &[100.0, 100.0]);
+        assert_eq!(exact, vec!["abcde fghi"]);
+    }
+
+    #[test]
+    fn the_ellipsis_never_hangs_off_a_space() {
+        // Trimming back to make room can leave a trailing space; "half a …"
+        // reads as a typo rather than as a truncation.
+        let rows = fit("aaaa bb cccccccccc", &[100.0, 60.0]);
+        let last = rows.last().unwrap();
+        assert!(!last.contains(" \u{2026}"), "{last:?}");
+    }
+
+    #[test]
+    fn degenerate_inputs_terminate() {
+        // A row too narrow for even one character must still make progress
+        // rather than asking for the same word forever.
+        let rows = fit("wide", &[1.0, 1.0, 1.0]);
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|row| !row.is_empty()));
+
+        assert!(fit("", &[100.0]).is_empty());
+        assert!(fit("   ", &[100.0]).is_empty());
+        assert!(fit("anything", &[]).is_empty());
+    }
+
+    #[test]
+    fn multibyte_names_are_cut_on_character_boundaries() {
+        // Byte-slicing a broken word would panic in the middle of a codepoint.
+        let rows = fit("日本語のとても長い名前です", &[50.0, 50.0]);
+        assert_eq!(rows[0].chars().count(), 5);
+        assert!(rows[1].ends_with(ELLIPSIS));
     }
 }
