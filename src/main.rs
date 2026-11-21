@@ -10,6 +10,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
+    #[cfg(not(debug_assertions))]
+    task_deck::panic_abort::abort_on_panic();
     #[cfg(not(target_arch = "wasm32"))]
     {
         pollster::block_on(run());

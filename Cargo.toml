@@ -107,6 +107,10 @@ strip = "symbols"      # Removes debug symbols (smaller binary)
 panic = "unwind"       # The sync design's catch_unwind guards (SYNC.md 4.5, poison
                        # pills; the JNI entry points) need unwinding, and in a
                        # workspace this profile is global to every crate.
+                       # Today's two binaries restore "any panic ends the
+                       # process" with an aborting hook (src/panic_abort.rs);
+                       # stage `desktop` removes or narrows that hook when the
+                       # new runtime's catch_unwind guards need unwinding there.
 incremental = false    # Disable incremental builds (forces full optimization)
 debug = false          # No debug info in final binary
 
