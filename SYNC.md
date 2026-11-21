@@ -2,6 +2,8 @@
 
 *2026-11-20. The final output of a design workflow: research reports R1–R4, designs D1–D4, critiques C1–C3 and verifiers V1 (security), V2 (sync integrity) and V3 (requirements and feasibility). Nothing here is built yet. **[V]** verified (file:line in the `day-planner` worktree, command output, or a page fetched today); **[A]** assumed; **[U]** uncertain. "DOC §n" is DOCUMENTATION.md on `day-planner`; "V2-3" is verifier 2's issue 3, listed under Verification outcomes.*
 
+> **Building it:** [`SYNC_PLAN.md`](SYNC_PLAN.md) is the plan of record. It goes straight to the end state: there is no M1 hub milestone, no device is assumed to be always on, the `.ics` feed is out of scope, and the effort figures below, counted in unassisted hours, no longer apply. Where the two documents differ, the plan wins; its §2 lists every difference. The full research and verifier reports are in [`docs/sync/research/`](docs/sync/research/).
+
 ## Executive summary
 
 **What you get.** Every device keeps the whole board and works fully offline. Windows and the MacBook run today's app; Android gets a small native app around today's phone page, which now applies edits at once, even offline. Devices sync through a free Cloudflare relay that stores only encrypted, signed entries. It can delay sync, but it cannot read your data, alter it unnoticed, or send code to any device. No Tailscale, no server of your own.
