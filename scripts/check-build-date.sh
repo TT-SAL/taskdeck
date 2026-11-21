@@ -116,11 +116,12 @@ for ws in ' ' $'\t' $'\n' $'\r'; do
     expect_refused "1700000000${ws}"
 done
 expect_refused "1700000000.5"        # not a float
-# Not UTF-8: must be refused, not taken as unset. Windows keeps the
+# Not UTF-8: must be refused, not taken as unset nor read with the bad byte
+# dropped (digits around it, so either mistake builds). Windows keeps the
 # environment as UTF-16, so the byte may not survive there.
 case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*) ;;
-    *) expect_refused $'\xff' ;;
+    *) expect_refused $'1700000000\xff' ;;
 esac
 
 # expect_date VALUE DATE: the build must succeed with BUILD_DATE=DATE.

@@ -142,3 +142,21 @@ After the panic hook lands the gate's test count is 265 passed, 1 ignored (it wa
    out of scope, for the reason ruling 6 gives: build.rs accepts only an optional minus sign followed by
    ASCII digits, and a reviewer of build.rs can see that. Do not report further characters and do not add
    cases for them.
+
+## Raised in the fourth loop, round 4, handled; do not re-report
+
+- [low] check-build-date.sh's only non-UTF-8 value was a lone 0xFF byte, so a build.rs that drops the bad byte and parses the rest passed (fixed: the value is now digits followed by 0xFF, which catches both "taken as unset" and "bad byte dropped")
+
+## Further lead ruling (2026-11-21, second session, after round 4)
+
+9. **The values the date check tries are now the closed list; hunting for one more value is over.** Rounds
+   2 and 4 of this loop each found one more spelling inside a kind of invalid value that ruling 6 already
+   lists (a tab, a carriage return, a bad byte after digits). Each was fixed, and each fix was one line.
+   That is the pattern rulings 2 to 8 were written to stop. From now on the property is exactly this:
+   **`build.rs` in the working copy refuses every value that `scripts/check-build-date.sh` passes to
+   `expect_refused` today, and accepts every value it passes to `expect_date`.** A finding against the date
+   check counts only if (a) today's `build.rs` accepts a value that is invalid under ruling 6, shown by
+   running it, or (b) the script, run as CI runs it, reports OK although `build.rs` accepts one of the
+   values the script itself lists. "A differently broken `build.rs` would get past the listed values" is
+   out of scope, whatever the mutation: do not report it and do not add values. The same holds for the
+   other checks of this task: their closed lists are rulings 3, 4, 5 and 7.
