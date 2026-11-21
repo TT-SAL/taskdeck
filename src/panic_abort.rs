@@ -90,6 +90,22 @@ mod tests {
         );
     }
 
+    /// The hook is named once in each binary's source and nowhere else in src/,
+    /// so no second, unguarded install hides behind the guarded one.
+    fn assert_hook_installed_nowhere_else() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let path = entry.unwrap().path();
+            let file = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !file.ends_with(".rs") || file == "panic_abort.rs" {
+                continue;
+            }
+            let count = std::fs::read_to_string(&path).unwrap().matches("abort_on_panic").count();
+            let expected = usize::from(file == "main.rs" || file == "server_main.rs");
+            assert_eq!(count, expected, "src/{file} names abort_on_panic {count} times");
+        }
+    }
+
     #[test]
     fn a_panic_on_any_thread_ends_the_process() {
         if let Ok(mode) = std::env::var(CHILD) {
@@ -104,6 +120,7 @@ mod tests {
 
         assert_main_installs_hook("src/main.rs", include_str!("main.rs"));
         assert_main_installs_hook("src/server_main.rs", include_str!("server_main.rs"));
+        assert_hook_installed_nowhere_else();
 
         let (status, out, hook_err) = run_child("hook");
         assert!(aborted(status), "with the hook: {status}\nstdout:\n{out}\nstderr:\n{hook_err}");
