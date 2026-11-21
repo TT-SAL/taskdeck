@@ -20,12 +20,12 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 | # | Task (SYNC_PLAN.md §6.1) | State | Evidence |
 |---|---|---|---|
 | 0 | Status file, draft pull request | done | this file; draft pull request TT-SAL/taskdeck#1 |
-| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented; five attack rounds done (6, 3, 1, 2 and 2 findings; all fixed except the panic hook of D11, now being implemented); the loop did not reach two dry rounds, so it is being run again from the start | commits `a743020` to `eef1ba0`; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`; full CI matrix green on `eef1ba0` |
+| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented, with the panic hook of D11. Three loops so far: 5 rounds (14 findings), 5 rounds (9), 3 rounds (5); every finding fixed or ruled on. No finding against the product changes themselves since the hook landed; all recent ones are about which hypothetical edits the checks detect, now a closed list (D14). Not yet two dry rounds: the loop continues after the usage window resets | commits `a743020` onwards; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`; full CI matrix green on `eef1ba0` |
 | 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | todo | |
 | 1c | CI: path filters at job level, aggregate `gate` job | todo | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
-| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge drafted (1,655 lines, 110 clauses). All six are first drafts: 11,636 lines, 862 clauses | `docs/sync/spec/*.md` |
+| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge drafted (1,655 lines, 110 clauses). All six are first drafts: 11,635 lines, 852 clauses | `docs/sync/spec/*.md` |
 | 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
@@ -80,6 +80,15 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
   effort `high`, spec drafters at the session's effort, an attack loop that stops at once if an
   agent fails (so a failed agent never counts as a clean result), and no more than about 80% of a
   window's budget planned.
+- **D14. The checks of task 1a guard a closed list of mutations.** After the hook landed, eleven attack
+  rounds found nothing wrong with the product changes, and one small gap after another in how many
+  hypothetical edits the two check scripts and the hook's test would notice; three fixes of the hook's
+  test in a row each opened a new gap. The lead fixed the list: the profile's panic setting; the probe
+  panicking; `build.rs` using local time, accepting one of eight named kinds of invalid
+  `SOURCE_DATE_EPOCH`, or dropping or narrowing a listed rerun input; a `main()` not starting with the
+  guarded hook call or naming the hook twice; the hook not printing as the default hook does, or not
+  aborting. The hook's test reads the two main files only and runs in the debug profile. Anything else
+  is left to review.
 - **D6. Generic traits live in the engine crate.** `taskdeck-sync` defines the state-machine and
   sealer traits plus the toy implementations; `taskdeck-device` adapts the real core and seal to
   them (§6.7 task 2). The engine then depends on neither and compiles for wasm32 on its own.

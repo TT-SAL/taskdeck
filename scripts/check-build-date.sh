@@ -104,6 +104,9 @@ cargo clean --locked -p task_deck --target "$host"
 expect_refused "abc"
 expect_refused ""
 expect_refused "99999999999999999"   # fits in i64, far past chrono's last year
+# Outside i64, either side; parsed wider and cast, each wraps to 1700000000.
+expect_refused "18446744075409551616"    # 2^64 + 1700000000
+expect_refused "-18446744072009551616"   # -2^64 + 1700000000
 expect_refused "253402300800"        # 10000-01-01, not a four-digit year
 expect_refused "-62167219201"        # -0001-12-31, not a four-digit year
 expect_refused "+1700000000"         # digits and an optional '-' only
