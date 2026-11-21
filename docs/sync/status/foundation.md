@@ -25,7 +25,7 @@ read SYNC_PLAN.md, then this file, then continue at the first task below that is
 | 1c | CI: path filters at job level, aggregate `gate` job | todo | |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
-| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine in progress; then device, bridge | `docs/sync/spec/seal.md`, `core.md`, `relay.md` |
+| 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); then device, bridge | `docs/sync/spec/seal.md`, `core.md`, `relay.md`, `engine.md` |
 | 3c | Pairwise interface reviews (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) | todo | |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
@@ -145,7 +145,7 @@ Rulings on what the seal draft raised (2026-11-21):
 - **S14. Revoking the last current device is refused, from the recovery identity too.** A board with
   no device cannot be read by anyone but the recovery key; a total compromise is answered by
   restoring to a new board and fencing the old one.
-- **S15. Skip must classify the same on every device.** Whether a device still holds the target
+- **S15 (see the settled form below). Skip must classify the same on every device.** Whether a device still holds the target
   frame must not change the verdict. The specs must define a floor computed from the log below which
   a Skip target is refused everywhere, keep every frame above that floor fetchable from the relay
   (compaction respects it), and have a device that lacks the frame fetch it. Open until the
@@ -185,6 +185,29 @@ Rulings on what the relay draft raised (2026-11-21):
 - For the seal–relay review to settle: narrow the relay's share of the Genesis checks to what it can
   verify without keys; cap a host at 255 bytes so it fits its one-byte length; record that an
   identical repeat of a pairing slot post is answered again rather than refused.
+
+Rulings on what the engine draft raised (2026-11-21):
+
+- **S15, settled. The Skip floor is `F(s) = max(purge_seq, s − 16,384)`.** A Skip at seq `s` may
+  target only an entry at or above that floor, on every device alike, and compaction keeps the newest
+  16,384 seqs, so the target frame is always fetchable. `seal.md` §13.6 takes the precondition.
+- **S24. A reinstating entry carries the roots the reinstated device missed.** The recovery identity
+  holds a wrap of every epoch root, so when it reinstates a device it wraps to that device every root
+  from the revocation to the reinstating entry. The device can then read and apply what was sealed
+  while it was out, and need not pair again (SYNC.md §5.5: the recovery key overrules a hostile
+  revocation).
+- **S25. Snapshots keep SYNC.md §4.7's two triggers:** the newest acknowledged snapshot is a week old
+  by the log clock, or 1,000 entries behind the head. To keep an import from producing a burst, a
+  device writes at most one snapshot per 24 hours of log clock. (The draft had dropped the entry
+  trigger.)
+- A determinism mismatch is a "divergence stop" for the minority and for both sides of a tie: stop
+  sending, keep applying, show both fingerprints. It is not a fourth halt (SYNC.md §4.2 names three).
+- "Purge history before now" reaches as far as the most lagging current device's last reported head,
+  so no device is stranded; `desktop` shows the seq it will reach before the owner confirms.
+- A device away more than 365 days rejoins only after the user confirms, because rejoining replaces
+  its local log.
+- `taskdeck-sync` needs `sha2` and `zeroize` at run time (state hash, identity export); the
+  workspace task declares them.
 
 ## Deviations from the plan
 
