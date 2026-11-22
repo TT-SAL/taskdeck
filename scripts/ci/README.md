@@ -54,10 +54,12 @@ read is a path dependency in any `Cargo.toml`, written with `path` or inherited
 with `workspace = true` from the root's `[workspace.dependencies]` (the crate's
 `src/lib.rs` must mark every area the reader's `src/lib.rs` marks), a target's
 source (`path` of `[lib]`, `[[bin]]`, `[[test]]`, `[[example]]`, `[[bench]]`;
-`build` of `[package]`), a path in `include!`,
-`include_bytes!`, `include_str!`, `include_image!` or `#[path = ...]` in a `.rs`
-file (an argument that is not a string literal, or `concat!` starting with one,
-cannot be checked and fails), and a symlink's target. In particular, **when the
+`build` of `[package]`; a manifest value it cannot read as one plain string on
+one line fails), a path in `include!`, `include_bytes!`, `include_str!`,
+`include_image!` (any delimiter) or `#[path = ...]` (also inside
+`#[cfg_attr(...)]`) in a `.rs` file (an argument that is not a string literal,
+or `concat!` starting with one, cannot be checked and fails), and a symlink's
+target. In particular, **when the
 root package gains a path dependency on a workspace crate, that crate's area
 must mark `root`** (for the device runtime: a `device` → `root` rule in
 `changes.sh`, which core, seal, the engine and recovery then reach through
@@ -109,7 +111,9 @@ already installed when it runs.
   `concurrency` group that cancels superseded pull-request runs, never push
   runs (a push run tests only what changed since `before`, so the changes of a
   cancelled push would reach no run; a pull-request run tests the whole pull
-  request);
+  request). Each push run has a group of its own (its `run_id` in the group
+  name): GitHub cancels a *pending* run when a newer one joins its group, even
+  with `cancel-in-progress` false;
 - every `run:` that calls bash sets `shell: bash` (Windows runners); no
   `${{ }}` inside shell text: event data reaches scripts through `env:`;
 - the toolchain step before anything that runs cargo;

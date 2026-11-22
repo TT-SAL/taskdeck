@@ -43,9 +43,13 @@ try:
 except ValueError:
     check("permissions: contents: read only", False, "no top-level permissions")
 # Only pull-request runs: a push run tests only what changed since `before`,
-# so a cancelled push's changes would reach no run (scripts/ci/README.md).
+# so a cancelled push's changes would reach no run (scripts/ci/README.md). A
+# pending run is cancelled by a newer one in its group even without
+# cancel-in-progress, so each push run needs a group of its own.
 check("concurrency cancels superseded pull-request runs, never push runs",
-      re.search(r"^concurrency:\n  group: .+\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$",
+      re.search(r"^concurrency:\n  group: ci-\$\{\{ github\.event_name \}\}-\$\{\{ github\.ref \}\}"
+                r"\$\{\{ github\.event_name == 'push' && format\('-\{0\}', github\.run_id\) \|\| '' \}\}\n"
+                r"  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$",
                 text, re.M) is not None, "missing")
 
 # Jobs: id -> its lines.

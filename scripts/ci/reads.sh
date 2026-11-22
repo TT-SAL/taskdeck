@@ -15,8 +15,9 @@
 #   - a target's source in a Cargo.toml (`path` in [lib], [[bin]], [[test]],
 #     [[example]], [[bench]]; `build` in [package]) must mark every area
 #     <manifest's directory>/src/lib.rs marks.
-#   - the path in include!, include_bytes!, include_str!, include_image! or
-#     #[path = ...] in a .rs file, from the file's directory, must mark every
+#   - the path in include!, include_bytes!, include_str!, include_image! (with
+#     any delimiter) or #[path = ...] (also inside #[cfg_attr(...)]) in a .rs
+#     file, from the file's directory, must mark every
 #     area the file marks. For concat!("dir/", ...) it is a file in "dir/". Any
 #     other argument (env!, a variable) cannot be checked and fails.
 #   - a symlink's target must mark every area the link's own path marks.
@@ -55,25 +56,36 @@ check() {   # check <what> <reader path> <read path>
 }
 
 # A manifest's reads, one per line: D <dep path>, W <name inherited from the
-# workspace>, T <target source>, P <name> <path> for [workspace.dependencies].
+# workspace>, T <target source>, P <name> <path> for [workspace.dependencies],
+# X <line> for a `path`, `build` or `workspace` value it cannot read. Strings
+# are TOML basic ("...") or literal ('...'); an inline table spanning lines
+# keeps the key that opened it.
 manifest_reads() {
-    awk 'function str(k,   s) {
-            if (!match($0, k "[[:space:]]*=[[:space:]]*\"[^\"]*\"")) return ""
-            s = substr($0, RSTART, RLENGTH); sub(/^[^"]*"/, "", s); sub(/"$/, "", s); return s }
+    awk -v q="'" 'function str(k,   s) {
+            if (!match($0, "(^|[^A-Za-z0-9_-])" k "[[:space:]]*=[[:space:]]*(\"[^\"]*\"|" q "[^" q "]*" q ")")) return ""
+            s = substr($0, RSTART, RLENGTH); sub(/^[^=]*=[[:space:]]*/, "", s); return substr(s, 2, length(s) - 2) }
+        function has(k) { return $0 ~ ("(^|[^A-Za-z0-9_-])" k "[[:space:]]*=") }
+        function bad() { print "X\t" $0 }
         /^[[:space:]]*\[/ {
-            h = $0; sub(/#.*/, "", h); gsub(/[[:space:]"]/, "", h); gsub(/^\[+|\]+$/, "", h)
+            h = $0; sub(/#.*/, "", h); gsub("[[:space:]\"" q "]", "", h); gsub(/^\[+|\]+$/, "", h)
             ws = h ~ /^workspace\.dependencies/; on = !ws && (h ~ /dependencies/ || h ~ /^patch/)
             tgt = h ~ /^(lib|bin|test|example|bench)$/; pkg = h == "package"
             sub_name = h; if (!sub(/.*dependencies\./, "", sub_name)) sub_name = ""
-            next }
+            depth = 0; next }
         /^[[:space:]]*#/ { next }
-        { key = ""; if (match($0, /^[[:space:]]*"?[A-Za-z0-9_-]+/)) { key = substr($0, RSTART, RLENGTH); gsub(/[[:space:]"]/, "", key) }
+        { key = ""; if (match($0, "^[[:space:]]*[\"" q "]?[A-Za-z0-9_-]+")) { key = substr($0, RSTART, RLENGTH); gsub("[[:space:]\"" q "]", "", key) }
+          if (depth > 0) key = okey
+          c = $0; gsub(/"[^"]*"/, "", c); gsub(q "[^" q "]*" q, "", c); sub(/#.*/, "", c)
+          o = gsub(/\{/, "", c); o -= gsub(/\}/, "", c)
+          if (depth == 0 && o > 0) okey = key
+          depth += o; if (depth < 0) depth = 0
           name = (key == "path" || key == "workspace") && sub_name != "" ? sub_name : key; p = str("path") }
+        (on || ws || tgt) && has("path") && p == "" { bad(); next }
         on && p != "" { print "D\t" p }
-        on && /workspace[[:space:]]*=[[:space:]]*true/ { print "W\t" name }
-        ws && p != "" { print "P\t" name "\t" p }
+        on && has("workspace") { if ($0 !~ /workspace[[:space:]]*=[[:space:]]*true/ || name == "") bad(); else print "W\t" name }
+        ws && p != "" { if (name == "") bad(); else print "P\t" name "\t" p }
         tgt && key == "path" && p != "" { print "T\t" p }
-        pkg && key == "build" && str("build") != "" { print "T\t" str("build") }' "$1"
+        pkg && has("build") { if (str("build") != "") print "T\t" str("build"); else if ($0 !~ /build[[:space:]]*=[[:space:]]*(true|false)/) bad() }' "$1"
 }
 
 declare -A WS=()
@@ -93,11 +105,13 @@ while IFS= read -r -d '' m; do
                    check "$m depends on ${WS[$a]} (workspace)" "${dir}src/lib.rs" "$(realpath -m --relative-to="$TREE" "$TREE/${WS[$a]}")/src/lib.rs"
                fi ;;
             T) check "$m builds $a" "${dir}src/lib.rs" "$(as_file "$dir$a")" ;;
+            X) report "$m: a value this check cannot read (write it on one line, as a plain string): $a"; BAD=1 ;;
         esac
     done < <(manifest_reads "$TREE/$m")
 done < <(git -C "$TREE" ls-files -z -- Cargo.toml '*/Cargo.toml')
 
-lead='(include(_bytes|_str|_image)?!|#\[path) *[(=] *(concat! *\( *)?'
+# The file with its whitespace squeezed to single spaces, so a read can span lines.
+lead='(include(_bytes|_str|_image)? *! *[[({]|# *\[ *path *=|cfg_attr *\([^]]*[(,] *path *=) *(concat *! *[[({] *)?'
 while IFS= read -r -d '' f; do
     if [[ -L "$TREE/$f" || ! -f "$TREE/$f" ]]; then continue; fi   # a symlink is checked below
     while IFS= read -r arg; do
@@ -107,7 +121,7 @@ while IFS= read -r -d '' f; do
             report "$f: a read whose path is not a string literal cannot be checked: $arg"
             BAD=1
         fi
-    done < <(grep -oE "$lead[^] ,)]*" "$TREE/$f" | sed -E "s/^$lead//")
+    done < <(tr -s '[:space:]' ' ' <"$TREE/$f" | grep -oE "$lead[^] ,)}]*" | sed -E "s/^$lead//")
 done < <(git -C "$TREE" ls-files -z -- '*.rs')
 
 while IFS= read -r -d '' entry; do

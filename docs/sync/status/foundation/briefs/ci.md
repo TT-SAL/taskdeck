@@ -169,3 +169,15 @@ Implemented and committed: `.github/workflows/ci.yml`, `scripts/ci/` (`changes.s
     one more: from here on a finding against this check counts only if one of the listed forms, written the
     way cargo or rustc accepts it in this repository's files, gets past it. Reads that code makes at run time
     (opening a file by name, a build script reading the tree) and forms not on the list are left to review.
+- [medium] Push runs still lost changes: GitHub cancels a pending run of a concurrency group when a newer one is queued, whatever `cancel-in-progress` says (fixed: each push run has a group of its own)
+- [medium, medium, low] `scripts/ci/reads.sh` missed a single-quoted path, an include written with `[]` or `{}` or a `#[path]` inside `cfg_attr`, and `workspace = true` after a multi-line array (fixed, each with a test)
+
+11. **`scripts/ci/reads.sh` reads manifests with a real TOML parser (lead ruling, 2026-11-22).** Three rounds
+    in a row found one more spelling that the script's own awk reader of `Cargo.toml` did not understand.
+    That reader goes: the manifest part uses python3's `tomllib` (as `scripts/ci/gate.sh` and
+    `scripts/cooldown.py` already do; the `changes` job runs on Ubuntu, which has python3 3.11 or later), so
+    every spelling TOML allows is read the same way, and a manifest that does not parse fails the check. The
+    Rust-source part stays a search over the whitespace-squeezed text for the listed macros and attributes
+    with any of the three delimiters; ruling 10's closed list stands for it. After this change a finding of
+    the form "another TOML spelling" cannot arise, and "another Rust spelling of a listed form" counts only
+    for `include!`, `include_bytes!`, `include_str!`, `include_image!`, `concat!` and `path =` in an attribute.
