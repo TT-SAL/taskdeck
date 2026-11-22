@@ -28,7 +28,9 @@ log_is() {
         FAILS=$((FAILS + 1)); echo "FAIL  $1"; sed 's/^/        got: /' "$LOG"; sed 's/^/        wanted: /' <<<"$2"
     fi
 }
-ALL3="cargo-deny --workspace --locked --all-features check -D index-failure -D index-cache-load-failure advisories bans sources
+# -W notice: a notice advisory is printed but does not fail cargo-deny, as with
+# cargo-audit (ruling 4); without it cargo-deny 0.20.2 fails on a notice.
+ALL3="cargo-deny --workspace --locked --all-features check -D index-failure -D index-cache-load-failure -W notice advisories bans sources
 cargo-audit audit --color never"
 
 echo "-- the cooldown's base"

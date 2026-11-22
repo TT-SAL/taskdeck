@@ -40,8 +40,8 @@ informational_warnings = ["unmaintained", "unsound", "notice"]
 
 [output]
 # Vulnerabilities fail the run, and so do unmaintained, unsound and yanked
-# crates; a notice does not (the lead's rulings for task baseline-1b, ruling 4),
-# so cargo-audit and cargo-deny agree.
+# crates; a notice does not (the lead's rulings for task baseline-1b, ruling 4).
+# cargo-deny agrees only because scripts/supply-chain.sh passes it -W notice.
 deny = ["unmaintained", "unsound", "yanked"]
 quiet = false
 show_tree = true

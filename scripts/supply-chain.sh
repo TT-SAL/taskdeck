@@ -53,9 +53,11 @@ banner "1/3 cargo deny check advisories bans sources"
 if tool_ok cargo-deny; then
     # A crate whose index entry cannot be fetched or read is only a warning to
     # cargo-deny (its yanked check is then skipped): -D makes it an error, so
-    # an index failure fails closed.
+    # an index failure fails closed. cargo-deny makes a notice advisory an
+    # error and has no config key for it: -W notice prints it without failing,
+    # as cargo-audit does (the lead's rulings for task baseline-1b, ruling 4).
     if "$TOOLS_DIR/cargo-deny" --workspace --locked --all-features \
-        check -D index-failure -D index-cache-load-failure \
+        check -D index-failure -D index-cache-load-failure -W notice \
         advisories bans sources; then
         echo "supply-chain: cargo deny: passed"
     else

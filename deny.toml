@@ -20,6 +20,9 @@ yanked = "deny"
 # A crate whose index entry cannot be fetched or read skips the yanked check
 # with only a warning; scripts/supply-chain.sh passes -D index-failure and
 # -D index-cache-load-failure, so there it is an error.
+# A notice advisory is an error to cargo-deny, with no key here to change it;
+# scripts/supply-chain.sh passes -W notice, so there it is printed and does not
+# fail, as in cargo-audit (the lead's rulings for task baseline-1b, ruling 4).
 # An ignore that no longer matches is reported, so a stale one gets removed.
 unused-ignored-advisory = "deny"
 ignore = [
