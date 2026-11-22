@@ -181,3 +181,24 @@ Implemented and committed: `.github/workflows/ci.yml`, `scripts/ci/` (`changes.s
     with any of the three delimiters; ruling 10's closed list stands for it. After this change a finding of
     the form "another TOML spelling" cannot arise, and "another Rust spelling of a listed form" counts only
     for `include!`, `include_bytes!`, `include_str!`, `include_image!`, `concat!` and `path =` in an attribute.
+
+12. **The Rust-source part of `scripts/ci/reads.sh` fails closed, and that ends the list of spellings (lead
+    ruling, 2026-11-22 08:25 UTC).** The second loop's rounds 1, 2 and 4 each found one more way to write a
+    read that the search did not follow (an escape in a literal, a second literal of `concat!`, a module in
+    a file not named `*.rs`, a `#[path]` inside an inline module). The check guards against honest mistakes:
+    a file this repository's code embeds or compiles, kept where the path rules say no CI is needed. It is
+    not a defence against a contributor who hides a read on purpose, and no search of sources can be one
+    (a build script, a procedural macro or a test may read any file); such a change runs CI and is reviewed
+    when it is made. So:
+    - a read (`include!`, `include_bytes!`, `include_str!`, `include_image!`, `#[path]`) that the check
+      cannot work out as written fails the check and is named ("cannot be checked: write a plain literal");
+    - a read whose path does not name a tracked file of the repository fails the check; a path that leaves
+      the tree, or that no rule knows, never passes by "marking every area";
+    - a `#[path]` or `include!` that names a file the check does not scan fails the check, or that file is
+      scanned too; a `#[path]` inside an inline module fails the check;
+    - the fixers build this in the simplest way and delete special cases it makes unnecessary.
+
+    From here on a finding against `reads.sh` counts only in two cases: a read written the ordinary way
+    (one string literal, or `concat!` of string literals, in a tracked `*.rs` file) names a tracked file
+    that marks fewer areas than its reader, and the check passes; or the check passes a read it could not
+    resolve to a tracked file. Any other spelling is either refused by the rule above or left to review.

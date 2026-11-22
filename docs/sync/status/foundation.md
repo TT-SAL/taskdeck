@@ -85,7 +85,7 @@ These are working papers of the stage, not contracts. The exit pull request may 
 | 3c | Pairwise interface reviews: the plan's six pairs (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) plus core–device, seal–device, relay–device | **done.** Nine reviews brought 152 findings (26 high, 75 medium, 51 low); nine resolvers turned them into 232 exact changes; the lead ruled on the open points (L1 to L23); one more resolver wrote the rulings as exact text; fixers applied everything spec by spec and a second agent checked each spec against its diff (seal 102 of 102 items exact, core 15 of 15, relay 78 of 79 and the last fixed, engine 179 of 179, device 225 of 226 with the one a placement the lead confirmed, bridge 34 of 34; nothing unrequested). The six specs now hold 899 clauses (7 withdrawn) in 12,237 lines, and the lead's format check finds no problem. Five small follow-ups for the next spec pass are in `resolutions/r1-followups.md` | commits `220f07a` to this one; `resolutions/` |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | **round 1 done.** One fixed world and six scenarios (`briefs/two-readers.md`); two readers per group worked from the specs alone. They agreed on every byte layout, counter, seq and chain value both gave; 40 differences needed a spec change, all about behaviour the specs left open (edit 10, join 17, trust 13). Changes applied in all six specs (930 clauses now, format check clean). The lead ruled on ten open points (`two-readers/r1/lead.md`). Rounds 2 to 4 use two readers for all six scenarios (D22); scenario 6 is restated because its first world could not arise | `two-readers/r1/` |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
-| 4 | Skeleton crates: public types and traits, toy state machine, fake sealer | todo | |
+| 4 | Skeleton crates: public types and traits, toy state machine, fake sealer | todo; brief ready (`briefs/skeletons.md`). Comes after the two-readers rounds have settled the specs' "Public API" sections, with a last check of the surface after round 4 | |
 | 5 | Fixtures as data: boards, legacy `main` formats, snapshot JSON, transcripts | todo; brief ready (`briefs/fixtures.md`) | |
 | 6 | Tooling: `scripts/gate.sh`, `scripts/spec-coverage.sh`, `scripts/dev-setup.sh` | todo; brief ready (`briefs/tooling.md`) | |
 | 7 | Stage exit review, exit pull request, merge | todo | |
@@ -435,6 +435,13 @@ Rulings on what the bridge draft raised (2026-11-21):
 - The page's caches go in `android`, as SYNC_PLAN.md §6.10 says, so the first frame waits for one
   bridge round trip; the cold-start budget checks that. The minimum WebView version (120) and bundled
   roots on API 26 to 33 are the spec's defaults for `android-shell` to confirm (§6.6 task 7).
+- **S32. `taskdeck-android` has a default backend** (2026-11-22, found while writing the skeleton brief).
+  bridge.md §11 makes a build with neither `backend-echo` nor `backend-device` a `compile_error!`. Then
+  no workspace-wide cargo command works without feature arguments, and the CI contract of
+  `scripts/ci/stage.sh` (`cargo test -p <package>`) fails for that crate. Ruling: the crate declares
+  `default = ["backend-device"]`; both or neither stays a `compile_error!`; the echo flavour builds
+  with `--no-default-features --features backend-echo`. A build that forgets its flags gets the real
+  backend, never the echo one. bridge.md is changed to match in the next spec pass (follow-up 9).
 
 ## Deviations from the plan
 

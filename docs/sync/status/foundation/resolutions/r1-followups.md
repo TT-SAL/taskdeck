@@ -28,3 +28,7 @@ round, or a small fix pass before it) writes them.
 8. **`RestoredCopy` and `BasedOnUnchecked`** are shown "until acknowledged" like the continuity warning, but
    have no action, stored flag, facade call or bridge call (lead ruling T4 gave those to the continuity
    warning only).
+9. **bridge.md §11 and §21: a default backend** (lead ruling S32): `taskdeck-android` declares
+   `default = ["backend-device"]`; building with both backends or with neither stays a `compile_error!`;
+   the `echo` flavour builds with `--no-default-features --features backend-echo` and the `full` flavour
+   with the default features. Every place that describes how a flavour passes its feature must say so.
