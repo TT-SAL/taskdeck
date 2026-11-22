@@ -196,6 +196,11 @@ Implemented and committed: `.github/workflows/ci.yml`, `scripts/ci/` (`changes.s
       the tree, or that no rule knows, never passes by "marking every area";
     - a `#[path]` or `include!` that names a file the check does not scan fails the check, or that file is
       scanned too; a `#[path]` inside an inline module fails the check;
+    - one form cannot be resolved to a single file and still passes, because today's `src/weather.rs` uses
+      it and `src/` is not this stage's to change: `concat!` whose leading string literals are followed by
+      something that is not a literal (a macro variable). Its joined leading literals must name a tracked
+      directory (or a prefix inside one), and every tracked file under that directory must mark at least
+      the reader's areas; otherwise the check fails;
     - the fixers build this in the simplest way and delete special cases it makes unnecessary.
 
     From here on a finding against `reads.sh` counts only in two cases: a read written the ordinary way
