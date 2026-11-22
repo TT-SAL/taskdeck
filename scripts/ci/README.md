@@ -9,7 +9,7 @@ a container (`bash scripts/tests/run.sh`, the `test-ci-*.sh` files).
 | `changes.sh` | `changes` | Decides from the event and the changed paths which areas need CI; writes `root`, `supply`, `foundation`, `core`, `seal`, `engine`, `device`, `recovery`, `relay`, `android` (`true`/`false`), `wide` and `oses` |
 | `toolchain.sh` | every job that runs cargo | Installs exactly the toolchain `rust-toolchain.toml` pins (profile, components, targets) by name, never `rustup default` or `rustup update`; fails unless `rustc --version` reports the pinned channel |
 | `stage.sh <stage>` | `core`, `seal`, `engine`, `device`, `recovery`, `relay`, `android` | Tests and lints the stage's crates and runs the stage's own `ci.sh` hooks (below) |
-| `supply-chain.sh` | `supply-chain` | Runs `scripts/supply-chain.sh` once: with `--base` set to the pull request's base or the push's `before` when that commit is in the clone, without it (the cooldown's default base) otherwise |
+| `supply-chain.sh` | `supply-chain` | Installs the pinned cargo-deny and cargo-audit (`scripts/dev-setup.sh supply-chain`), then runs `scripts/supply-chain.sh` once: with `--base` set to the pull request's base or the push's `before` when that commit is in the clone, without it (the cooldown's default base) otherwise |
 | `reads.sh` | `changes` | Fails unless a change to whatever the code reads from elsewhere in the tree marks at least the reader's areas (below) |
 | `gate.sh` | `gate` | Prints every job's result; fails if `changes` did not succeed or any job failed or was cancelled; skipped passes |
 
@@ -38,7 +38,7 @@ is true.
 | `relay` | `relay/**`, `docs/sync/vectors/**` (the relay's suite takes seal's published vectors) |
 | `device` | `crates/taskdeck-device/**`, `tests/e2e/**`; and whenever `core`, `seal`, `engine`, `relay` or `recovery` is true (it links the backup crate, and its end-to-end tests run against the relay) |
 | `recovery` | `crates/taskdeck-backup/**`, `crates/taskdeck-recover/**`, `crates/taskdeck-device/**`, `crates/taskdeck-sync/**` (the tool's online steps link the device runtime, which links the engine); and whenever `core` or `seal` is true |
-| `android` | `android/**`, `crates/taskdeck-android/**`; and whenever `device` is true |
+| `android` | `android/**`, `crates/taskdeck-android/**`, `scripts/check-android-targets.sh` (the job's hook runs it); and whenever `device` is true |
 | none | `docs/sync/status/**`, `docs/sync/research/**`, `docs/sync/runbooks/**`, `deploy/**` (today's server's install script and unit file), `*.md`, `*.png` and `LICENSE` at the root, `.gitignore` (unless a rule above matched first: `icon.png` is `root`). The area rules ignore case, because a case variant (`ICON.png`) is the same file on Windows and macOS; the no-CI list does not, so `Deploy/x` means every area |
 
 The `root` list is what the root package compiles or embeds (`include_bytes!`,

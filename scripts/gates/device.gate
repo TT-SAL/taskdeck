@@ -1,0 +1,14 @@
+# Gate of stage device (SYNC_PLAN.md §6.7). Format: scripts/gates/README.md.
+# The test targets belong to the taskdeck-device package, whichever directory
+# holds them (crates/taskdeck-device/tests or tests/e2e through a [[test]] path).
+run | e2e              | "the end-to-end ... suites": several device processes against the standby relay, each of V2's fifteen scenarios (§6.7 gate, item 10) | cargo test --locked -p taskdeck-device --test e2e
+run | hostile-relay    | "the ... hostile-relay suites": drop, reorder, replay, fork, roll back and truncate always produce an alarm (§6.7 gate, item 10) | cargo test --locked -p taskdeck-device --test hostile_relay
+run | crash            | "crash-consistency tests": a file layer that kills the process at every write boundary (§6.7 gate, item 3) | cargo test --locked -p taskdeck-device --test crash
+run | fetchers         | "fetcher tests against a local server for redirects, private addresses and oversized bodies" (§6.7 gate) | cargo test --locked -p taskdeck-device --test fetchers
+ci  | key-stores       | "key-store tests on the Windows and macOS runners" (§6.7 gate) | device (windows-latest, macos-latest)
+ci  | worker-e2e       | the end-to-end suite against the Worker under wrangler dev, in CI (§6.7 item 10) | device (ubuntu-latest)
+ci  | budget           | "budget: catch-up of 4,200 entries within 3 s", median of five (§6.7 gate, §3.3) | a dedicated budget job of the device stage (device's ci.sh hook; median of five runs)
+ci  | ci-jobs          | the stage's CI jobs green (§6) | device (ubuntu-latest, windows-latest, macos-latest)
+run | spec-coverage    | every clause device owns is cited by a device test (§3.3) | bash scripts/spec-coverage.sh device
+run | no-unimplemented | no unimplemented!() or todo!() left in device's paths, the engine and recovery crates included once they pass to device (§3.3, §4) | bash scripts/gate-lib.sh no-unimplemented device
+run | no-skipped-tests | no skipped or ignored test in device's paths (§3.3, §4) | bash scripts/gate-lib.sh no-skipped-tests device

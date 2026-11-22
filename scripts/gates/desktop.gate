@@ -1,0 +1,9 @@
+# Gate of stage desktop (SYNC_PLAN.md §6.9). Format: scripts/gates/README.md.
+run | lib-tests        | "every remaining UI test green": the root package's library tests with the window, here on Linux (§6.9 gate) | cargo test --locked --lib
+run | headless-flows   | "a headless test drives create, pair, edit, revoke and recover through the same code paths the settings screens call" (§6.9 gate) | cargo test --locked -p task_deck --test headless_flows
+run | import-check     | "the import check passes on every legacy fixture and its report contains no board text" (§6.9 gate) | cargo test --locked -p task_deck --test import_check
+run | removed-modules  | "no reference to the removed modules remains": taskdeck-server, phone.rs, phone.html, phone_sw.js, sync.rs, tiny_http, qrcode, the fixture generator (§6.9 gate, item 5) | bash scripts/gate-lib.sh removed-modules
+ci  | ui-three-os      | "every remaining UI test green on Windows, macOS and Linux" (§6.9 gate) | desktop (windows-latest, macos-latest, ubuntu-latest)
+run | spec-coverage    | every clause desktop owns is cited by a desktop test (§3.3) | bash scripts/spec-coverage.sh desktop
+run | no-unimplemented | no unimplemented!() or todo!() left in desktop's paths, tests included (§3.3) | bash scripts/gate-lib.sh no-unimplemented desktop
+run | no-skipped-tests | no skipped or ignored test in desktop's paths; the codec_bake_off measurement goes with phone.rs (§3.3) | bash scripts/gate-lib.sh no-skipped-tests desktop

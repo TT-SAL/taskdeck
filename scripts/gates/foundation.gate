@@ -1,0 +1,21 @@
+# Gate of stage foundation (SYNC_PLAN.md §6.1). Format: scripts/gates/README.md.
+# "Gate: every CI job green, including the desktop matrix; skeletons compile on
+# Windows, macOS, Linux and for the Android targets; a table in spec/README.md
+# maps every requirement in SYNC.md §3–§9 to a clause id, a stage in this plan,
+# or a row of §2 above." The items below also re-run what items 1–6 built.
+run | metadata         | the workspace resolves from the committed lockfile and has the root package and every crate of §4 (§6.1 item 2) | bash scripts/gate-lib.sh workspace-sanity
+run | check-workspace  | "skeletons compile on ... Linux": every crate and target but the windowed root package (§6.1 gate, item 4) | cargo check --locked --workspace --exclude task_deck --all-targets
+run | wasm32           | the core and the engine compile for wasm32-unknown-unknown, as their gates will ask (§6.2, §6.5) | cargo check --locked -p taskdeck-core -p taskdeck-sync --target wasm32-unknown-unknown
+run | android-targets  | "skeletons compile ... for the Android targets": plain cargo check for crates without C code, cargo ndk for the rest; no NDK is a FAIL (§6.1 gate) | bash scripts/check-android-targets.sh
+run | spec-lint        | the specs follow README §4 and §6, and "a table in spec/README.md maps every requirement in SYNC.md §3–§9": the map must be filled (§6.1 gate, item 3) | bash scripts/spec-lint.sh
+run | fixtures         | fixtures/ is exactly what the generator writes (§6.1 item 5) | bash scripts/check-fixtures.sh
+run | script-tests     | the scripts' own tests (§6.1 item 6) | bash scripts/tests/run.sh
+run | release-panic    | release builds unwind and the panic is caught (§6.1 item 1, "panic = unwind ... with a test") | bash scripts/check-release-panic.sh
+run | build-date       | build.rs takes its date from SOURCE_DATE_EPOCH (§6.1 item 1) | bash scripts/check-build-date.sh
+run | supply-chain     | cargo-deny, cargo-audit and the seven-day cooldown (§6.1 item 1, §3.4) | bash scripts/supply-chain.sh
+run | lib-tests        | today's code stays green: the library tests without the window (§5 "Today's code is green", §6.1 gate) | cargo test --locked --no-default-features --lib
+run | server-build     | today's server still builds until desktop removes it (§5, §6.1 gate) | cargo build --locked --no-default-features --bin taskdeck-server
+ci  | ci-green         | "every CI job green, including the desktop matrix" (§6.1 gate) | gate (the pull_request run: every job, desktop on windows-latest, macos-latest, ubuntu-latest)
+ci  | skeletons-win-mac | "skeletons compile on Windows, macOS", read as all seven crates of §4: the stage jobs build and test six of them on all three systems; no job compiles taskdeck-android on Windows or macOS yet, a gap the CI workflow must close (§6.1 gate) | core, seal, engine, device, recovery on windows-latest and macos-latest (wide runs); none yet for taskdeck-android
+run | spec-coverage    | every clause the stage owns is cited by a test (§3.3); foundation owns none | bash scripts/spec-coverage.sh foundation
+run | no-skipped-tests | no skipped or ignored test in foundation's paths (§3.3, §4) | bash scripts/gate-lib.sh no-skipped-tests foundation

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The `supply-chain` job (.github/workflows/ci.yml; scripts/ci/README.md):
-# works out the cooldown's base from the event and runs scripts/supply-chain.sh
-# once.
+# installs the pinned cargo-deny and cargo-audit (`bash scripts/dev-setup.sh
+# supply-chain`, nothing else), works out the cooldown's base from the event and
+# runs scripts/supply-chain.sh once.
 #
 #   bash scripts/ci/supply-chain.sh
 #
@@ -17,13 +18,17 @@
 # a commit id) gives no usable base: the script then runs
 # `scripts/supply-chain.sh` without it, and the cooldown uses its default base,
 # the merge base of HEAD and origin/day-planner (the job checks out with full
-# history so that ref exists). Exits with scripts/supply-chain.sh's status.
+# history so that ref exists). Exits 1 if the tools do not install, else with
+# scripts/supply-chain.sh's status.
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 cd "$root" || exit 2
 
 say() { echo "ci/supply-chain: $*"; }
+
+bash "$root/scripts/dev-setup.sh" supply-chain \
+    || { say "FAILED: bash scripts/dev-setup.sh supply-chain did not install the pinned tools"; exit 1; }
 
 base=""
 case "${CI_EVENT:-}" in

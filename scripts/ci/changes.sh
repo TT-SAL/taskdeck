@@ -136,7 +136,8 @@ classify() {
     case "$p" in
         crates/taskdeck-backup/* | crates/taskdeck-recover/* | crates/taskdeck-device/* | crates/taskdeck-sync/*) mark recovery ;;
     esac
-    case "$p" in android/* | crates/taskdeck-android/*) mark android ;; esac
+    # The android job's hook runs scripts/check-android-targets.sh.
+    case "$p" in android/* | crates/taskdeck-android/* | scripts/check-android-targets.sh) mark android ;; esac
     shopt -u nocasematch
 
     if [[ $HIT -eq 0 ]]; then

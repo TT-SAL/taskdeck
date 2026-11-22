@@ -1,0 +1,15 @@
+# Gate of stage core (SYNC_PLAN.md §6.2). Format: scripts/gates/README.md.
+run | purity-wasm32    | "purity: the crate compiles for wasm32-unknown-unknown" (§6.2 gate) | cargo check --locked -p taskdeck-core --target wasm32-unknown-unknown
+run | purity-clippy    | "clippy forbids clocks, chrono::Local, file, network and thread APIs": clippy clean with warnings as errors (§6.2 gate) | cargo clippy --locked -p taskdeck-core --all-targets -- -D warnings
+run | purity-clippy-toml | the clippy.toml still disallows every clock, chrono::Local, file, network, thread and environment entry foundation put there, and the crate turns none of those lints off with allow or expect, its lints table or a .cargo config, and no .clippy.toml or CLIPPY_CONF_DIR makes clippy read another config (§6.2 gate; stricter: all of them, environment included, and a lint the crate allows off forbids nothing) | bash scripts/gate-lib.sh clippy-config crates/taskdeck-core/clippy.toml scripts/gates/core-clippy-required.txt
+run | determinism-helsinki | "determinism property test ... run under two TZ values, identical canonical bytes": the first TZ (§6.2 gate) | TZ=Europe/Helsinki cargo test --locked -p taskdeck-core --test determinism
+run | determinism-new-york | the same property test under the second TZ (§6.2 gate) | TZ=America/New_York cargo test --locked -p taskdeck-core --test determinism
+run | rebase           | "rebase property test: pending edits replayed over confirmed ones" (§6.2 gate) | cargo test --locked -p taskdeck-core --test rebase
+run | transcripts      | "replaying fixtures/' recorded sequences gives the recorded states" (§6.2 gate) | cargo test --locked -p taskdeck-core --test transcripts
+run | snapshot-fixtures | "snapshot JSON equal to the fixtures'" (§6.2 gate) | cargo test --locked -p taskdeck-core --test snapshot_fixtures
+run | golden           | "golden logs and hashes" (§6.2 gate) | cargo test --locked -p taskdeck-core --test golden
+ci  | budgets          | "budgets (§3.3) with the 10,000-row fixture: 31-day snapshot within 40 ms, 5,000 entries applied within 1 s, checkpoint loaded within 150 ms", median of five (§6.2 gate, §3.3) | a dedicated budget job of the core stage (core's ci.sh hook; median of five runs)
+ci  | ci-jobs          | the stage's CI jobs green for what a container cannot run (§6) | core (ubuntu-latest, windows-latest, macos-latest)
+run | spec-coverage    | every clause core owns is cited by a core test (§3.3) | bash scripts/spec-coverage.sh core
+run | no-unimplemented | no unimplemented!() or todo!() left in core's paths, tests included (§3.3, §6.1 item 4) | bash scripts/gate-lib.sh no-unimplemented core
+run | no-skipped-tests | no skipped or ignored test in core's paths (§3.3) | bash scripts/gate-lib.sh no-skipped-tests core

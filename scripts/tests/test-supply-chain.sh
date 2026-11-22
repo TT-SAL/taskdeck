@@ -17,7 +17,8 @@ LOG="$TMP/log"
 export FAKE_LOG="$LOG"
 mkdir -p "$R/scripts" "$TMP/tools"
 cp "$SCRIPTS_DIR/supply-chain.sh" "$R/scripts/supply-chain.sh"
-printf '[ -z "${DEVSETUP_OUT:-}" ] || { printf "%%s\\n" "$DEVSETUP_OUT"; exit 1; }\necho "ok       cargo-deny 0.20.2"\necho "ok       cargo-audit 0.23.0"\n' >"$R/scripts/dev-setup.sh"
+# It checks the supply-chain row only: the job installs nothing else.
+printf '[ "$*" = "--check supply-chain" ] || { echo "fake dev-setup: called with $*"; exit 1; }\n[ -z "${DEVSETUP_OUT:-}" ] || { printf "%%s\\n" "$DEVSETUP_OUT"; exit 1; }\necho "ok       cargo-deny 0.20.2"\necho "ok       cargo-audit 0.23.0"\n' >"$R/scripts/dev-setup.sh"
 printf 'echo "cooldown${*:+ $*}" >>"$FAKE_LOG"\nexit "${CD_EXIT:-0}"\n' >"$R/scripts/cooldown.sh"
 printf '#!/bin/sh\necho "cargo-deny $*" >>"$FAKE_LOG"\nexit "${DENY_EXIT:-0}"\n' >"$TMP/tools/cargo-deny"
 printf '#!/bin/sh\necho "cargo-audit $*" >>"$FAKE_LOG"\n[ -z "${AUDIT_ERR:-}" ] || echo "$AUDIT_ERR" >&2\nexit "${AUDIT_EXIT:-0}"\n' >"$TMP/tools/cargo-audit"
@@ -138,8 +139,8 @@ output_lacks "it does not say not installed" "not installed"
 log_is "the cooldown still ran" "cooldown"
 expect "a missing tool fails" 1 run DEVSETUP_OUT="ok       cargo-deny 0.20.2
 missing  cargo-audit 0.23.0
-dev-setup: run: bash scripts/dev-setup.sh foundation"
-output_has "what to install is printed" "supply-chain:   dev-setup: run: bash scripts/dev-setup.sh foundation"
+dev-setup: run: bash scripts/dev-setup.sh supply-chain"
+output_has "what to install is printed" "supply-chain:   dev-setup: run: bash scripts/dev-setup.sh supply-chain"
 output_has "only the missing tool fails" "FAILED: cargo audit (pinned tool not usable)"
 
 finish

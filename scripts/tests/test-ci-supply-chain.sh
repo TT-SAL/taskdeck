@@ -17,6 +17,7 @@ mkdir -p "$R/scripts/ci"
 cp "$SCRIPTS_DIR/ci/supply-chain.sh" "$R/scripts/ci/supply-chain.sh"
 printf 'echo "supply-chain${*:+ $*}" >>"$FAKE_LOG"\nexit "${SC_EXIT:-0}"\n' >"$R/scripts/supply-chain.sh"
 printf 'echo "cooldown $*" >>"$FAKE_LOG"\nexit 0\n' >"$R/scripts/cooldown.sh"
+printf 'echo "dev-setup $*" >>"$FAKE_LOG"\nexit "${DS_EXIT:-0}"\n' >"$R/scripts/dev-setup.sh"
 g() { git -C "$R" -c user.name=test -c user.email= -c commit.gpgsign=false "$@"; }
 git init -q -b day-planner "$R"
 g add -A && g commit -qm one
@@ -27,7 +28,10 @@ B="$(g rev-parse HEAD)"
 g update-ref refs/remotes/origin/day-planner "$B"
 
 run() { : >"$LOG"; (cd "$R" && env "$@" bash scripts/ci/supply-chain.sh); }
+# log_is <case> <calls after dev-setup's>: the job installs the supply-chain
+# row first, every time.
 log_is() {
+    set -- "$1" "dev-setup supply-chain${2:+$'\n'$2}"
     if [[ "$(cat "$LOG")" == "$2" ]]; then
         PASSES=$((PASSES + 1)); echo "ok    $1"
     else
@@ -61,5 +65,10 @@ expect "supply-chain.sh failing fails the job" 1 run CI_EVENT=push CI_BEFORE="$A
 log_is "and it ran once" "supply-chain --base $A"
 expect "supply-chain.sh failing without a base fails the job" 1 run CI_EVENT=push CI_BEFORE= SC_EXIT=1
 log_is "and it ran once, without --base" "supply-chain"
+
+echo "-- the pinned tools: the supply-chain row only"
+expect "a failed install fails the job" 1 run CI_EVENT=push CI_BEFORE="$A" DS_EXIT=1
+log_is "and nothing else runs" ""
+output_has "it says so" "FAILED: bash scripts/dev-setup.sh supply-chain did not install"
 
 finish

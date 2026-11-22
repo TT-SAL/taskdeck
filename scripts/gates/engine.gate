@@ -1,0 +1,13 @@
+# Gate of stage engine (SYNC_PLAN.md §6.5). Format: scripts/gates/README.md.
+# "Gate: 1,000 seeds per CI run with these invariants; every failing seed
+# becomes a regression test." The six invariants (convergence, no lost or
+# twice-applied entry, queued edits survive crashes, tampering alarms without
+# a state change, no relay answer deletes data or keys, settling) are what the
+# simulator asserts on every seed.
+run | simulator        | the simulator at 1,000 seeds with the six invariants of §6.5 (§6.5 gate) | SIM_SEEDS=1000 cargo test --locked -p taskdeck-sync --test simulator
+run | regressions      | "every failing seed becomes a regression test" (§6.5 gate) | cargo test --locked -p taskdeck-sync --test regressions
+run | wasm32           | "The crate compiles for wasm32-unknown-unknown as proof it does no I/O" (§6.5) | cargo check --locked -p taskdeck-sync --target wasm32-unknown-unknown
+ci  | ci-seeds         | "1,000 seeds per CI run" (§6.5 gate) | engine (ubuntu-latest, windows-latest, macos-latest)
+run | spec-coverage    | every clause engine owns is cited by an engine test (§3.3) | bash scripts/spec-coverage.sh engine
+run | no-unimplemented | no unimplemented!() or todo!() left in engine's paths, tests included (§3.3) | bash scripts/gate-lib.sh no-unimplemented engine
+run | no-skipped-tests | no skipped or ignored test in engine's paths (§3.3) | bash scripts/gate-lib.sh no-skipped-tests engine

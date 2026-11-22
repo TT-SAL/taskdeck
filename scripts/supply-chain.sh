@@ -43,7 +43,7 @@ failed=()
 banner() { printf '\n==== supply-chain: %s ====\n' "$1"; }
 
 # Which pinned tools are installed, by hash (dev-setup.sh --check).
-check_out="$(bash "$here/dev-setup.sh" --check foundation 2>&1)"
+check_out="$(bash "$here/dev-setup.sh" --check supply-chain 2>&1)"
 tool_ok() { grep -q "^ok  *$1 " <<<"$check_out"; }
 # All of dev-setup's report: it names what is missing and how to install it,
 # or why it cannot check (an unsupported platform, say).

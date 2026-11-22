@@ -1,0 +1,10 @@
+{
+  "name": "taskdeck-wrangler",
+  "version": "0.0.0",
+  "private": true,
+  "description": "wrangler at the version SYNC_PLAN.md §5 checked, for scripts/dev-setup.sh only",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "wrangler": "4.166.0"
+  }
+}

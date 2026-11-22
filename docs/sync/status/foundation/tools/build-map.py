@@ -51,7 +51,13 @@ for s in sorted(sections):
         problems.append(f'no row for SYNC.md §{".".join(map(str, s))}')
 with open(out, 'w', encoding='utf-8') as o:
     o.write('| SYNC.md ref | Requirement | Maps to |\n|---|---|---|\n')
-    for _, _, c in rows: o.write('| ' + ' | '.join(c) + ' |\n')
+    for sec, _, c in rows:
+        # scripts/spec-lint.sh wants the first cell to be the section reference alone: the words that
+        # say where in the section the requirement stands go in front of the requirement.
+        ref = '§' + '.'.join(map(str, sec))
+        place = REF.sub('', c[0], count=1).strip(' ,:')
+        req = f'{place}: {c[1]}' if place else c[1]
+        o.write(f'| {ref} | {req} | {c[2]} |\n')
 kinds = {'clause': 0, 'stage': 0, 'plan §2': 0, 'backlog': 0}
 for _, _, c in rows:
     if re.search(r'[A-Z]+-[A-Z0-9]+-\d{3}', c[2]): kinds['clause'] += 1

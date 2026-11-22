@@ -1,0 +1,16 @@
+# Gate of stage relay (SYNC_PLAN.md §6.4). Format: scripts/gates/README.md.
+# "Gate: the suite green on all three targets; a test asserts rows written per
+# operation and that a typical day (SYNC.md §6.2) stays under 2% of every
+# free-plan limit; unauthenticated, oversized and slow requests are refused
+# before the Durable Object runs; replays are refused by the object without a
+# write; relay/package.json has no runtime dependencies." The middle three are
+# cases of the conformance suite (relay.md §21), so each suite item below must
+# run them; spec-coverage proves they are cited.
+run | suite-core       | the conformance suite on the core in process, with the rows-per-operation and 2% day test, the refusals before the object and replays without a write (§6.4 gate) | bash relay/test/run.sh core
+run | suite-standby    | the same suite against the standby over HTTP (§6.4 gate, "all three targets") | bash relay/test/run.sh standby
+run | suite-worker     | the same suite against the Worker under wrangler dev, which runs in a container (§5, §6.4 gate) | bash relay/test/run.sh worker
+run | no-runtime-deps  | "relay/package.json has no runtime dependencies" (§6.4 gate, §3.4) | bash scripts/gate-lib.sh npm-no-deps relay/package.json
+ci  | ci-jobs          | the stage's CI job green, the Worker target included (§6) | relay
+run | spec-coverage    | every clause relay owns is cited by a relay test (§3.3) | bash scripts/spec-coverage.sh relay
+run | no-unimplemented | no unimplemented!() or todo!() left in relay's paths (§3.3) | bash scripts/gate-lib.sh no-unimplemented relay
+run | no-skipped-tests | no it.skip, test.skip, describe.skip or xit( in relay's paths (§3.3) | bash scripts/gate-lib.sh no-skipped-tests relay

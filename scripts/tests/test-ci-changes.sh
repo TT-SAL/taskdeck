@@ -98,6 +98,7 @@ paths "recovery: recover, and the device" "foundation device recovery android" c
 paths "relay, and the device whose e2e tests use it" "device relay android" relay/relay-core.js
 paths "android" "android" android/app/build.gradle
 paths "android: the JNI crate" "foundation android" crates/taskdeck-android/src/lib.rs
+paths "android: the check its hook runs" "foundation android" scripts/check-android-targets.sh
 paths "android: the forked page" "android" android/page/index.html
 
 echo "-- paths that need no CI"

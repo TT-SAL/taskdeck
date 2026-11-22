@@ -1,0 +1,14 @@
+# Gate of stage seal (SYNC_PLAN.md §6.3). Format: scripts/gates/README.md.
+run | kat              | "known answers: RFC 8032, RFC 9180 for the chosen suite, RFC 5869, the XChaCha20-Poly1305 draft vectors, Wycheproof for Ed25519 and the AEAD" (§6.3 gate) | cargo test --locked -p taskdeck-seal --test kat
+run | tamper           | "tamper matrix: flipping any byte of any frame, wrap, bundle or file is rejected" (§6.3 gate) | cargo test --locked -p taskdeck-seal --test tamper
+run | contexts         | "context confusion: no signature or ciphertext made for one use verifies for another" (§6.3 gate) | cargo test --locked -p taskdeck-seal --test contexts
+run | pairing-mitm     | "a relay-in-the-middle pairing test that succeeds only by guessing the six digits" (§6.3 gate) | cargo test --locked -p taskdeck-seal --test pairing_mitm
+run | parsers          | "parsers never panic under property tests" (§6.3 gate) | cargo test --locked -p taskdeck-seal --test parsers
+run | forbid-unsafe    | "#![forbid(unsafe_code)]" in the crate root (§6.3 gate) | grep -qxF '#![forbid(unsafe_code)]' crates/taskdeck-seal/src/lib.rs
+run | android-targets  | "compiles for the Android targets" (§6.3 gate) | cargo check --locked -p taskdeck-seal --target aarch64-linux-android --target armv7-linux-androideabi --target x86_64-linux-android
+run | vectors          | "Publish vectors under docs/sync/vectors/": present and well formed per spec README §7 (§6.3) | bash scripts/gate-lib.sh vectors docs/sync/vectors
+ci  | budget           | "budget: 256 entries verified and opened within 100 ms", median of five (§6.3 gate, §3.3) | a dedicated budget job of the seal stage (seal's ci.sh hook; median of five runs)
+ci  | ci-jobs          | the stage's CI jobs green for what a container cannot run (§6) | seal (ubuntu-latest, windows-latest, macos-latest)
+run | spec-coverage    | every clause seal owns is cited by a seal test (§3.3) | bash scripts/spec-coverage.sh seal
+run | no-unimplemented | no unimplemented!() or todo!() left in seal's paths, tests included (§3.3) | bash scripts/gate-lib.sh no-unimplemented seal
+run | no-skipped-tests | no skipped or ignored test in seal's paths (§3.3) | bash scripts/gate-lib.sh no-skipped-tests seal
