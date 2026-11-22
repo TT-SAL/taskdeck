@@ -111,6 +111,10 @@ expect "failing clippy fails the stage" 1 env RUNNER_OS=Linux CARGO_FAIL=clippy 
 rm -rf "$R/crates/taskdeck-sync" && mkdir -p "$R/crates/taskdeck-sync/src"
 expect "a crate directory without Cargo.toml is an error" 1 env RUNNER_OS=Linux bash "$R/scripts/ci/stage.sh" engine
 output_has "says so" "crates/taskdeck-sync exists but has no Cargo.toml"
+printf "[package]\nname = 'td-sync'\n" >"$R/crates/taskdeck-sync/Cargo.toml"
+: >"$LOG"; RUNNER_OS=Linux bash "$R/scripts/ci/stage.sh" engine >/dev/null
+log_is "a single-quoted (literal) package name is read" "cargo test --locked -p td-sync
+cargo clippy --locked -p td-sync --all-targets -- -D warnings"
 printf '[lib]\nname = "nope"\n' >"$R/crates/taskdeck-sync/Cargo.toml"
 expect "a Cargo.toml without a [package] name is an error" 1 env RUNNER_OS=Linux bash "$R/scripts/ci/stage.sh" engine
 mkdir -p "$R/relay"

@@ -1,6 +1,6 @@
 export const meta = {
   name: 'foundation-c4-workspace-loop-fixtures-tooling',
-  description: 'Foundation, code track, in a working copy: attack the workspace (task 2) until two dry rounds, implement and attack the fixtures (task 5), implement and attack the tooling (task 6); one agent at a time, one fresh attacker per round',
+  description: 'Foundation, code track, in a working copy: attack the CI restructure (task 1c) again and the workspace (task 2) until two dry rounds each, implement and attack the fixtures (task 5), implement and attack the tooling (task 6); one agent at a time, one fresh attacker per round',
   phases: [
     { title: 'Implement', detail: 'fixtures (task 5), tooling (task 6)', model: 'opus' },
     { title: 'Attack', detail: 'one fresh attacker per round, covering the three lenses and the lead inbox', model: 'opus' },
@@ -8,7 +8,7 @@ export const meta = {
   ],
 }
 
-// args: { scratch: '<session scratchpad>', steps: ['workspace-loop', 'fixtures', 'fixtures-loop', 'tooling', 'tooling-loop'] }
+// args: { scratch: '<session scratchpad>', steps: ['1c-loop', 'workspace-loop', 'fixtures', 'fixtures-loop', 'tooling', 'tooling-loop'] }
 // A launch runs the steps it names, in this order; a later launch with more steps and resumeFromRunId replays the
 // finished agents from the cache, so the lead can look at the usage window between steps (decision D23).
 // Writers and attackers work on WORK, a clone of the repository under target/ (ignored by git in the main
@@ -98,6 +98,17 @@ const T6 = {
   ],
 }
 
+const T1C = {
+  id: 'baseline-1c', brief: `${BRIEFS}/ci.md`,
+  gate: 'bash scripts/tests/run.sh',
+  others: 'Files of other tasks (deny.toml, .cargo/, scripts/dev-setup.sh, scripts/supply-chain.sh, scripts/cooldown*, the two check scripts, Cargo.lock, src/) are not part of this task: do not attack them, only how CI calls them',
+  lenses: [
+    { key: 'plan-conformance', text: `spec conformance, clause by clause: SYNC_PLAN.md section 6.1 item 1 last bullet (jobs filtered by path at job level; an aggregate job named gate that always runs, fails if any job failed or was cancelled, and treats skipped jobs as passed), section 3.2 (pushes to a pull request run the full matrix; other pushes only the Linux job unless the commit message contains "[ci full]"), section 1.4 (a branch protection that requires the check "gate"), SYNC.md section 8 "CI" (no secrets, contents: read, actions pinned by commit, no caches) and V1-4, and the brief's design point by point. Real evidence from GitHub is in ${S}/ci-evidence/1c.md if that file exists (the lead writes down what the real runs did): read it and check the design against what really happened. Report every place where the workflow or its scripts do something else than the plan and the brief say` },
+    { key: 'hostile-events', text: 'adversarial inputs: event data an outsider controls reaches the scripts (a commit message, a branch name, file names in a pull request from a fork, the base and head commits). Try injection and confusion through scripts/ci/changes.sh in its test mode and by reading the YAML: a commit message with quotes, newlines, "$(...)", or "[ci full]" in odd places; changed paths with spaces, newlines, leading dashes, non-ASCII bytes, or names built to match a "needs no CI" rule while holding code (for example a file under docs/sync/status/ that a build reads, or a renamed file); a pull request that changes only the workflow or scripts/ci itself; a push with an all-zero or unknown "before" commit; a merge commit with one parent. The filter must fail safe: when in doubt, everything runs. Also: can a job be made to pass or be skipped so that gate reports success although something was not checked' },
+    { key: 'later-stages-and-runners', text: 'what an older or newer version of the app, a later stage, or another runner would do: the per-stage jobs and scripts/ci/stage.sh when the crates arrive (a crate directory with and without ci.sh, a package name that differs from its directory, a stage with two directories, Windows and macOS runners with their bash and path forms), the toolchain step on runners whose rustup is older or newer or already has a different default, the concurrency group cancelling a superseded run and what gate then reports, re-runs of single jobs, the required-check name on pull requests against the push run of the same commit, and whether the path lists stay truthful when a later stage adds a file kind nobody listed' },
+  ],
+}
+
 const COMPILE_IMPL = `You are the only implementer or fixer compiling right now: in the working copy use its default target directory (${WORK}/target; do not set CARGO_TARGET_DIR). It holds a warm debug build.`
 const rulingsNote = (t) => `The lead's standing rulings for this task are at the end of the brief and, if the file exists, in ${INBOX}/${t.id}.rulings.md : read them and never contradict them.`
 const safe = async (thunk) => { try { return await thunk() } catch (e) { return null } }
@@ -160,6 +171,7 @@ ${extra}
 When you are done, run the task's gate in the working copy (${t.gate}) and every proof the brief lists, and report each command and its result, what the brief asks you to report, and what you could not do here. In files_changed list every path you created or changed, relative to the working copy (a directory with many generated files may be given as one entry ending in "/**").`,
   { label: `impl:${t.id}`, phase: 'Implement', model: 'opus', effort: 'high', schema: REPORT }))
 
+if (STEPS.includes('1c-loop')) { phase('Attack'); out.loop1c = await attackLoop(T1C); if (out.loop1c.stopped) return out }
 if (STEPS.includes('workspace-loop')) { phase('Attack'); out.loop2 = await attackLoop(T2); if (out.loop2.stopped) return out }
 if (STEPS.includes('fixtures')) {
   phase('Implement')

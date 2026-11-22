@@ -41,7 +41,8 @@ paths() {
 echo "-- shared files set every area"
 for p in Cargo.lock Cargo.toml rust-toolchain.toml .github/workflows/ci.yml \
     .github/workflows/release.yml scripts/ci/changes.sh scripts/ci/README.md \
-    .cargo/config.toml .cargo/config .cargo/other/x.toml; do
+    .cargo/config.toml .cargo/config .cargo/other/x.toml \
+    scripts/dev-setup.sh; do
     paths "shared: $p" "$ALL" "$p"
 done
 
@@ -61,7 +62,6 @@ paths "supply: deny.toml" "supply" deny.toml
 paths "supply: .cargo/audit.toml" "supply" .cargo/audit.toml
 paths "supply: a member's Cargo.toml" "supply foundation core device recovery android" crates/taskdeck-core/Cargo.toml
 paths "supply: a Cargo.toml outside crates/" "supply device relay android" relay/Cargo.toml
-paths "supply: scripts/dev-setup.sh" "supply foundation" scripts/dev-setup.sh
 paths "supply: scripts/supply-chain.sh" "supply foundation" scripts/supply-chain.sh
 paths "supply: scripts/cooldown.sh" "supply foundation" scripts/cooldown.sh
 paths "supply: scripts/cooldown.py" "supply foundation" scripts/cooldown.py
@@ -73,6 +73,10 @@ paths "foundation: fixtures also mean core" "foundation core device recovery and
 paths "foundation: a script" "foundation" scripts/check-build-date.sh
 paths "foundation: a script test" "foundation" scripts/tests/run.sh
 paths "foundation: any crate" "foundation" crates/other/src/main.rs
+# Clippy and rustfmt read their config from every parent of a crate's manifest.
+paths "shared: crates/clippy.toml (every crate below reads it)" "$ALL" crates/clippy.toml
+paths "shared: crates/.clippy.toml" "$ALL" crates/.clippy.toml
+paths "shared: any file directly under crates/" "$ALL" crates/rustfmt.toml
 
 echo "-- one path per stage area, with what builds on it"
 paths "core" "foundation core device recovery android" crates/taskdeck-core/src/lib.rs
@@ -110,6 +114,15 @@ paths "docs plus one unknown path" "$ALL" README.md docs/sync/status/x.md deploy
 paths "mixed areas add up" "root device relay android" README.md src/ui.rs relay/x.js
 paths "a CRLF line still matches" "root" $'src/ui.rs\r'
 
+echo "-- case variants: one file on Windows and macOS file systems"
+for p in 1920px-blue_marble_2002.png 1920px-blue_Marble_2002.png ICON.png Noback.PNG Fonts/x.ttf SRC/main.rs; do
+    paths "root: the case variant $p" "root" "$p"
+done
+paths "shared: the case variant SCRIPTS/DEV-SETUP.SH" "$ALL" SCRIPTS/DEV-SETUP.SH
+for p in Deploy/install.sh docs/sync/Status/x.md README.MD license; do
+    paths "the no-CI list keeps case: $p" "$ALL" "$p"
+done
+
 echo "-- wide, oses and [ci full]"
 EV=push paths "push: narrow" "root" src/ui.rs
 verdict "push: wide=false" "$(value_of wide "$LAST")" "false"
@@ -122,7 +135,9 @@ EV=push MSG=$'fix the planner\n\n[ci full]' paths "[ci full]: everything" "$ALL"
 verdict "[ci full]: wide" "$(value_of wide "$LAST")" "true"
 verdict "[ci full]: three systems" "$(value_of oses "$LAST")" '["ubuntu-latest","windows-latest","macos-latest"]'
 EV=push MSG='[ci full] first' paths "[ci full] at the start" "$ALL" README.md
-EV=push MSG='[CI FULL]' paths "[CI FULL] is not [ci full]" "none" README.md
+EV=push MSG='[CI FULL]' paths "[CI FULL] is [ci full] (any case, as GitHub's contains())" "$ALL" README.md
+EV=push MSG='Fix the planner [CI full]' paths "[CI full] is [ci full]" "$ALL" src/ui.rs
+verdict "[CI full]: wide" "$(value_of wide "$LAST")" "true"
 EV=push MSG='ci full' paths "ci full without brackets is not [ci full]" "none" README.md
 EV=push MSG='$(touch '"$TMP"'/pwned) `touch '"$TMP"'/pwned2`' paths "a hostile message is data" "none" README.md
 verdict "the hostile message ran nothing" "$(ls "$TMP" | grep -c pwned)" "0"

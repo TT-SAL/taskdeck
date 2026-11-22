@@ -54,6 +54,15 @@ expect "a channel with odd characters is an error" 1 bash -c 'source "$1"; parse
 printf '[toolchain]\nchannel = "1.93.0"\ntargets = ["a",\n' >"$TMP/open.toml"
 expect "an unclosed array is an error" 1 bash -c 'source "$1"; parse_toolchain_file "$2"' _ "$TOOLCHAIN" "$TMP/open.toml"
 expect "a missing file is an error" 1 bash -c 'source "$1"; parse_toolchain_file "$2"' _ "$TOOLCHAIN" "$TMP/none.toml"
+printf "[toolchain]\nchannel = \"1.93.0\"\ncomponents = ['clippy']\n" >"$TMP/lit1.toml"
+expect "a 'literal' component is an error, not skipped" 1 bash -c 'source "$1"; parse_toolchain_file "$2"' _ "$TOOLCHAIN" "$TMP/lit1.toml"
+printf "[toolchain]\nchannel = \"1.93.0\"\ntargets = [\"a-b\",\n  'c-d',\n]\n" >"$TMP/lit2.toml"
+expect "a 'literal' target after a quoted one is an error" 1 bash -c 'source "$1"; parse_toolchain_file "$2"' _ "$TOOLCHAIN" "$TMP/lit2.toml"
+printf '[toolchain]\nchannel = "1.93.0"\nprofile = minimal\n' >"$TMP/bare.toml"
+expect "a bare word is an error" 1 bash -c 'source "$1"; parse_toolchain_file "$2"' _ "$TOOLCHAIN" "$TMP/bare.toml"
+printf '[toolchain]\nchannel = "1.93.0"\ncomponents = []\n' >"$TMP/empty.toml"
+parse_toolchain_file "$TMP/empty.toml"
+verdict "an empty array is read" "$(parsed)" "1.93.0|||"
 
 echo "-- the rustup command"
 parse_toolchain_file "$TMP/a.toml"
@@ -66,6 +75,24 @@ output_lacks "never rustup update" "rustup update"
 expect "an unknown option is an error" 2 bash "$TOOLCHAIN" --frobnicate
 verdict "the script never runs rustup default or update" \
     "$(grep -v '^ *#' "$TOOLCHAIN" | grep -cE 'rustup +(default|update)\b')" "0"
+
+echo "-- a failed rustup step fails the script (fake rustup, rustc and cargo)"
+mkdir -p "$TMP/fake"
+cat >"$TMP/fake/rustup" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1 $2" == "$FAKE_FAIL" ]] && { echo "fake rustup: $1 $2 failed" >&2; exit 1; }
+exit 0
+EOF
+printf '#!/bin/sh\necho "rustc %s (fake)"\n' "$(sed -n 's/^channel *= *"\(.*\)".*/\1/p' "$REPO_DIR/rust-toolchain.toml")" >"$TMP/fake/rustc"
+printf '#!/bin/sh\necho "cargo 0.0.0 (fake)"\n' >"$TMP/fake/cargo"
+chmod +x "$TMP/fake/rustup" "$TMP/fake/rustc" "$TMP/fake/cargo"
+expect "every rustup step passes: ok" 0 env FAKE_FAIL=none PATH="$TMP/fake:$PATH" bash "$TOOLCHAIN"
+output_has "the success line" "toolchain: ok, rustc matches channel"
+for step in "toolchain install" "component add" "target add"; do
+    expect "a failed '$step' fails" 1 env FAKE_FAIL="$step" PATH="$TMP/fake:$PATH" bash "$TOOLCHAIN"
+    output_has "a failed '$step' is named" "rustup could not install toolchain"
+    output_lacks "a failed '$step' never reports ok" "toolchain: ok"
+done
 
 echo "-- rustc must report the pinned channel"
 m() { if rustc_matches_channel "$1" "$2"; then echo yes; else echo no; fi; }

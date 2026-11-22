@@ -29,7 +29,7 @@
 #                 commit id in the clone, or the diff fails for any reason,
 #                 "everything".
 #   other events  "everything".
-# A head commit message containing "[ci full]" means "everything" too.
+# A head commit message containing "[ci full]", in any case, means "everything" too.
 # "Everything" sets every area true. So does a changed path that no rule below
 # knows, or that holds a control character such as a newline (fail safe).
 # In test mode git is not used at all.
@@ -60,17 +60,24 @@ mark() { ON[$1]=true; HIT=1; }
 
 # Paths that set every area true, because every job reads them. Under .cargo/,
 # only audit.toml is the supply area's alone: any other file there (a
-# .cargo/config.toml) changes every build.
+# .cargo/config.toml) changes every build. scripts/dev-setup.sh installs the
+# tools of the supply-chain job and of every stage's ci.sh hook (stage.sh).
+# A file directly under crates/ (crates/clippy.toml) is read by tools from
+# every crate below it, whatever the crate's area.
 is_shared() {
     case "$1" in
-        .cargo/audit.toml) return 1 ;;
-        Cargo.lock | Cargo.toml | rust-toolchain.toml | .github/workflows/* | scripts/ci/* | .cargo/*) return 0 ;;
+        .cargo/audit.toml | crates/*/*) return 1 ;;
+        crates/*) return 0 ;;
+        Cargo.lock | Cargo.toml | rust-toolchain.toml | .github/workflows/* | scripts/ci/* | .cargo/* \
+            | scripts/dev-setup.sh) return 0 ;;
     esac
     return 1
 }
 
-# Paths that need no CI at all, when no area rule matched them first.
+# Paths that need no CI at all, when no area rule matched them first. Matched
+# case-sensitively, unlike the area rules.
 is_no_ci() {
+    shopt -u nocasematch
     case "$1" in
         docs/sync/status/* | docs/sync/research/* | docs/sync/runbooks/*) return 0 ;;
         deploy/*) return 0 ;;     # today's server's install script and unit file; no job reads them
@@ -88,7 +95,11 @@ classify() {
         everything "a path holds a control character: $p"
         return
     fi
+    # The area rules ignore case: on Windows and macOS file systems a case
+    # variant (ICON.png) is the same file as the path a rule names (icon.png).
+    shopt -s nocasematch
     if is_shared "$p"; then
+        shopt -u nocasematch
         everything "shared file $p"
         return
     fi
@@ -104,7 +115,7 @@ classify() {
     esac
     case "$p" in
         Cargo.lock | Cargo.toml | */Cargo.toml | deny.toml | .cargo/audit.toml \
-            | scripts/dev-setup.sh | scripts/supply-chain.sh | scripts/cooldown*) mark supply ;;
+            | scripts/supply-chain.sh | scripts/cooldown*) mark supply ;;
     esac
     case "$p" in
         # build.rs too: the foundation job's check-build-date.sh checks it.
@@ -118,6 +129,7 @@ classify() {
     case "$p" in crates/taskdeck-device/* | tests/e2e/*) mark device ;; esac
     case "$p" in crates/taskdeck-backup/* | crates/taskdeck-recover/*) mark recovery ;; esac
     case "$p" in android/* | crates/taskdeck-android/*) mark android ;; esac
+    shopt -u nocasematch
 
     if [[ $HIT -eq 0 ]]; then
         if is_no_ci "$p"; then
@@ -215,7 +227,9 @@ main() {
     if [[ "${CI_EVENT:-}" == pull_request ]]; then
         wide=true
     fi
-    if [[ "${CI_HEAD_MESSAGE:-}" == *"[ci full]"* ]]; then
+    # In any case, as GitHub's contains() matched it before: [CI full] too.
+    local msg="${CI_HEAD_MESSAGE:-}"
+    if [[ "${msg,,}" == *"[ci full]"* ]]; then
         wide=true
         everything "the head commit message asks for [ci full]"
     fi

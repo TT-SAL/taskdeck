@@ -69,7 +69,8 @@ ci_os() {
 
 # package_name <Cargo.toml>: the name in its [package] table, or nothing.
 package_name() {
-    local line in_pkg=0 re='^[[:space:]]*name[[:space:]]*=[[:space:]]*"([^"]+)"'
+    # A basic ("x") or a literal ('x') TOML string.
+    local line in_pkg=0 re='^[[:space:]]*name[[:space:]]*=[[:space:]]*("([^"]+)"|'"'"'([^'"'"']+)'"'"')'
     while IFS= read -r line || [[ -n "$line" ]]; do
         line="${line%$'\r'}"
         if [[ "$line" =~ ^[[:space:]]*\[ ]]; then
@@ -77,7 +78,7 @@ package_name() {
             continue
         fi
         if [[ $in_pkg -eq 1 && "$line" =~ $re ]]; then
-            echo "${BASH_REMATCH[1]}"
+            echo "${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
             return 0
         fi
     done <"$1"

@@ -16,7 +16,7 @@ a container (`bash scripts/tests/run.sh`, the `test-ci-*.sh` files).
 ## When jobs run
 
 Pushes run only Linux jobs. Pull requests, and pushes whose head commit message
-contains `[ci full]`, are *wide*: the desktop matrix and the emulator run, and
+contains `[ci full]` (in any case: `[CI full]` too, as the old workflow's `contains()` matched it), are *wide*: the desktop matrix and the emulator run, and
 the stage jobs `core`, `seal`, `engine`, `device` and `recovery` run on Ubuntu,
 Windows and macOS (`oses`). Within that, a job runs only when its area is true.
 
@@ -28,9 +28,9 @@ is true.
 
 | Area | Paths |
 |---|---|
-| every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, `.cargo/**` except `.cargo/audit.toml` (a `.cargo/config.toml` changes every build), any path no rule here knows, and any path that holds a control character such as a newline (its name could otherwise inject a workflow command into the log) |
+| every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, `.cargo/**` except `.cargo/audit.toml` (a `.cargo/config.toml` changes every build), `scripts/dev-setup.sh` (it installs the tools of the supply-chain job and of every stage's `ci.sh` hook), a file directly under `crates/` (such as `crates/clippy.toml`: clippy and rustfmt read their config from every parent of a crate), any path no rule here knows, and any path that holds a control character such as a newline (its name could otherwise inject a workflow command into the log) |
 | `root` | `src/**`, `build.rs`, `resources.rc`, `icon.ico`, `icon.png`, `noback.png`, `1920px-Blue_Marble_2002.png`, `fonts/**`, `images/**`, `weather_svgs_2/**`; `scripts/check-release-panic.sh` and `crates/panic-probe/**` (the desktop job runs that check on every OS) |
-| `supply` | `Cargo.lock`, any `Cargo.toml`, `deny.toml`, `.cargo/audit.toml`, `scripts/dev-setup.sh`, `scripts/supply-chain.sh`, `scripts/cooldown*` |
+| `supply` | `Cargo.lock`, any `Cargo.toml`, `deny.toml`, `.cargo/audit.toml`, `scripts/supply-chain.sh`, `scripts/cooldown*` |
 | `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**`, `build.rs` (checked by `scripts/check-build-date.sh`) |
 | `core` | `crates/taskdeck-core/**`, `fixtures/**` |
 | `seal` | `crates/taskdeck-seal/**`, `docs/sync/vectors/**` |
@@ -39,7 +39,7 @@ is true.
 | `device` | `crates/taskdeck-device/**`, `tests/e2e/**`; and whenever `core`, `seal`, `engine`, `relay` or `recovery` is true (it links the backup crate, and its end-to-end tests run against the relay) |
 | `recovery` | `crates/taskdeck-backup/**`, `crates/taskdeck-recover/**`; and whenever `core` or `seal` is true |
 | `android` | `android/**`, `crates/taskdeck-android/**`; and whenever `device` is true |
-| none | `docs/sync/status/**`, `docs/sync/research/**`, `docs/sync/runbooks/**`, `deploy/**` (today's server's install script and unit file), `*.md`, `*.png` and `LICENSE` at the root, `.gitignore` (unless a rule above matched first: `icon.png` is `root`) |
+| none | `docs/sync/status/**`, `docs/sync/research/**`, `docs/sync/runbooks/**`, `deploy/**` (today's server's install script and unit file), `*.md`, `*.png` and `LICENSE` at the root, `.gitignore` (unless a rule above matched first: `icon.png` is `root`). The area rules ignore case, because a case variant (`ICON.png`) is the same file on Windows and macOS; the no-CI list does not, so `Deploy/x` means every area |
 
 The `root` list is what the root package compiles or embeds (`include_bytes!`,
 `include_str!`, `egui::include_image!`, `resources.rc`), plus `images/`, which
@@ -50,16 +50,26 @@ root package embeds must be added to `changes.sh` and to this table.
 
 `reads.sh`, a step of the `changes` job, so it runs on every change, fails the
 run when the code reads a file whose change would not run that code's jobs. A
-read is a path dependency in any `Cargo.toml`, written with `path` or inherited
-with `workspace = true` from the root's `[workspace.dependencies]` (the crate's
-`src/lib.rs` must mark every area the reader's `src/lib.rs` marks), a target's
+read is a path dependency in any dependencies table of a `Cargo.toml` (also
+under `[target.<cfg>]`, and `[patch]`), written with `path` or inherited with
+`workspace = true` from the root's `[workspace.dependencies]` (every tracked
+file of the crate must mark every area the reader's `src/lib.rs` marks), a target's
 source (`path` of `[lib]`, `[[bin]]`, `[[test]]`, `[[example]]`, `[[bench]]`;
-`build` of `[package]`; a manifest value it cannot read as one plain string on
-one line fails), a path in `include!`, `include_bytes!`, `include_str!`,
+`build` of `[package]`; manifests are parsed with python3's `tomllib`, and one
+that is not valid TOML, or a path that is not a string, fails), a path in `include!`, `include_bytes!`, `include_str!`,
 `include_image!` (any delimiter) or `#[path = ...]` (also inside
-`#[cfg_attr(...)]`) in a `.rs` file (an argument that is not a string literal,
-or `concat!` starting with one, cannot be checked and fails), and a symlink's
-target. In particular, **when the
+`#[cfg_attr(...)]`) in a `.rs` file or in a file a `#[path]` or `include!` pulls
+in (`concat!` counts as its literals joined, or, when something else such as a
+macro's `$stem` follows them, as those literals; an argument that is not a
+string literal, a literal holding a backslash, an escape or a Windows separator,
+a `#[path]` in a file with an inline `mod x { ... }`, and a path outside the
+tree cannot be checked and fail), and a symlink's
+target (one hop). Paths are taken as written, `..` resolved without following
+symlinks: a read through a tracked symlink is checked against the link, and the
+link against its target. A read must name a file git tracks (for `concat!` with
+a `$stem`, a directory, and every tracked file under it is checked), so a read
+through a symlinked directory, or of a file that is not there, fails; so does a
+read of a path no rule knows (a shared file passes). In particular, **when the
 root package gains a path dependency on a workspace crate, that crate's area
 must mark `root`** (for the device runtime: a `device` → `root` rule in
 `changes.sh`, which core, seal, the engine and recovery then reach through

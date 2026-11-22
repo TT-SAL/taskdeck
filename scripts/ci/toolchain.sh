@@ -16,7 +16,8 @@
 # The file is read with a small parser of our own (no python or toml tool is
 # assumed on every runner). It understands what rust-toolchain.toml uses: a
 # [toolchain] table with `key = "string"` and `key = ["array", ...]` values,
-# arrays over several lines, and # comments.
+# arrays over several lines, and # comments. Any other spelling of a value
+# (a 'literal' string, say) is an error, never skipped.
 set -euo pipefail
 # Plain bash 3.2 too (macOS): empty arrays are expanded as ${a[@]+"${a[@]}"}.
 
@@ -66,12 +67,15 @@ parse_toolchain_file() {
 
 # _tc_set <key> <raw value>
 _tc_set() {
-    local key="$1" raw="$2" item re='"([^"]*)"'
+    local key="$1" raw="$2" item
+    local re='^[][[:space:],]*"([^"]*)"(.*)$' rest='^[][[:space:],]*$'
     local -a items=()
     while [[ "$raw" =~ $re ]]; do
         items+=("${BASH_REMATCH[1]}")
-        raw="${raw#*"${BASH_REMATCH[0]}"}"
+        raw="${BASH_REMATCH[2]}"
     done
+    # Anything else ('literal' strings, bare words) is refused, never skipped.
+    [[ "$raw" =~ $rest ]] || die "cannot read $key: write \"value\" or [\"value\", ...] with double quotes"
     for item in ${items[@]+"${items[@]}"}; do
         [[ "$item" =~ ^[A-Za-z0-9._-]+$ ]] || die "unexpected value '$item' for $key"
     done
@@ -155,15 +159,16 @@ main() {
     # Outside the repository, so no rustup version consults (or trips over)
     # the override while the toolchain it names is not yet installed.
     (
-        cd "${HOME:-/}" 2>/dev/null || cd /
-        rustup "${args[@]}"
+        # set -e does not apply inside a subshell tested by ||: each step exits itself.
+        cd "${HOME:-/}" 2>/dev/null || cd / || exit 1
+        rustup "${args[@]}" || exit 1
         # An older rustup may leave an already installed toolchain without a
         # requested component or target; asking again is a no-op otherwise.
         if [[ ${#TC_COMPONENTS[@]} -gt 0 ]]; then
-            rustup component add --toolchain "$TC_CHANNEL" ${TC_COMPONENTS[@]+"${TC_COMPONENTS[@]}"}
+            rustup component add --toolchain "$TC_CHANNEL" ${TC_COMPONENTS[@]+"${TC_COMPONENTS[@]}"} || exit 1
         fi
         if [[ ${#TC_TARGETS[@]} -gt 0 ]]; then
-            rustup target add --toolchain "$TC_CHANNEL" ${TC_TARGETS[@]+"${TC_TARGETS[@]}"}
+            rustup target add --toolchain "$TC_CHANNEL" ${TC_TARGETS[@]+"${TC_TARGETS[@]}"} || exit 1
         fi
     ) || die "rustup could not install toolchain $TC_CHANNEL"
 
