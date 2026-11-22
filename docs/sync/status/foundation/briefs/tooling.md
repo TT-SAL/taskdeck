@@ -183,3 +183,24 @@ in the implementer's run; spec-lint fails on two real defects of core.md and on 
    tools" step goes, the foundation job runs `spec-lint`, and the android job gets the three-system matrix
    on wide runs so that `taskdeck-android` compiles on Windows and macOS too. Until then these are not
    findings.
+
+9. **spec-coverage checks that a clause is cited, not that the citing test runs (lead ruling, 2026-11-22
+   20:20 UTC).** The plan's words are that the script "fails if a clause owned by the stage appears in no
+   test". The second loop's rounds 2 to 6 each found one more way in which a citation can stand next to a
+   test that does not run (commented out, inside a block comment, beside a call that only looks like a test),
+   and each fix made the next finding. From here the rule is the plan's and no more: **a clause is covered
+   when its id occurs, as a whole token, in a file under the stage's test paths.** The script does not try to
+   tell whether a test is live or which test a marker belongs to: a skipped test is `no-skipped-tests`'
+   business, a commented-out one is review's. The fixer removes the code that decides liveness or
+   attachment (comment tracking, test-declaration matching) and the tests that pin it. What stays: whole-id
+   matching (an id that is a prefix of another does not match it); a token shaped like a clause id that
+   names no live clause is an error; the per-stage test paths; the tools' own fixtures do not count; `rc`
+   runs every stage's check. A finding against spec-coverage counts only if a clause whose id stands in a
+   file under the stage's test paths is reported uncovered, or a clause whose id stands in none is reported
+   covered.
+10. **The android-shell gate leaves stage `android`'s part of the crate out.** For this one change the
+    tooling task may edit `crates/taskdeck-android/src/**`: every item compiled only with the feature
+    `backend-device` moves into one module file (`src/device_backend.rs`), re-exported so that each public
+    path stays exactly as bridge.md's "Public API" section writes it; `android-shell`'s owned paths in
+    `scripts/gate-lib.sh` leave that file out and `android`'s include it; the gates README says so.
+11. **`spec-coverage.sh rc` runs every stage's check** (the stricter reading the second loop took): kept.
