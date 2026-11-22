@@ -87,3 +87,37 @@ pass. `scripts/tests/test-supply-chain.sh` (the `--base` option) joined the test
 - [medium] The cooldown skipped a crates.io package whose lockfile `source` was written in another form cargo still accepts (a trailing slash, `.git`, other letter case), so a too-young crate passed (fixed: only path and `git+` packages are skipped; any other source that is not one of cargo's two exact crates.io strings is a violation; tests cover five forms)
 - [medium] Source replacement (a `[source]` table in a cargo configuration file, or `CARGO_SOURCE_…` in the environment) built other code while the lockfile still said crates.io (fixed in two parts: the cooldown compares each checked package's lockfile checksum with the crates.io index, and the gate fails when a cargo configuration file cargo would read, or the environment, sets `source`, `patch` or `paths`)
 - [low] On an unsupported platform the gate said the pinned tools were not installed and dropped the real reason (fixed: it prints the installer's own report)
+- [medium] A cargo configuration `include` key got source replacement past the configuration check (fixed: a top-level `include` fails like `source`, `patch` and `paths`, and so does a `CARGO_INCLUDE…` variable)
+- [low] With a python3 older than 3.11, or none, the gate blamed a crates.io replacement (fixed: it says python3 3.11 or later is needed and lists the configuration as not checked)
+
+# Lead ruling 8 for task baseline-1b (2026-11-22, after the first loop of six rounds)
+
+The first loop found a real gap in every round, each in a different place, and each fix was right. Rounds 5
+and 6, though, were both about one mechanism (which cargo configuration can make cargo build other code), and
+a list of forbidden keys can always be met with one more key. So the properties the gate guards are now a
+closed list, with the mechanism for each. **A finding counts only if it shows one of these mechanisms failing
+at what it says it does**, as CI or a developer following the scripts' headers would run it:
+
+1. **Age, yanking, existence.** Every package version that is new in the lockfile against the base is on
+   crates.io, at least seven days old and not yanked (`scripts/cooldown.sh`; `--all` for every package). An
+   exemption needs all four fields and is not past its expiry. A lookup that cannot be made fails the check.
+2. **Only crates.io.** Three mechanisms: cargo-deny's sources check; the cooldown's rule that a lockfile
+   package is a path package, a `git+` package (which cargo-deny refuses) or carries one of cargo's two exact
+   crates.io source strings, with a checksum equal to the crates.io index's; and the configuration check: no
+   top-level `source`, `patch`, `paths` or `include` key in a cargo configuration file cargo reads for this
+   checkout (the repository, each parent directory, the cargo home), and no `CARGO_SOURCE…`, `CARGO_PATCH…`,
+   `CARGO_PATHS…` or `CARGO_INCLUDE…` variable.
+3. **Advisories.** A vulnerability, an unmaintained or unsound notice, or a yanked crate fails unless it has
+   one of the reviewed ignores; a `notice` is printed and does not fail; both tools agree; an index that
+   cannot be read fails the check.
+4. **One version of each cryptographic crate** (the `deny-multiple-versions` list in `deny.toml`).
+5. **Pinned tools.** `scripts/dev-setup.sh` installs cargo-deny and cargo-audit only from the official release
+   URLs and only when the archive and the binary have the SHA-256 written in the script; the gate uses those
+   binaries.
+
+Left to review, and not findings: another way of making cargo build other code that passes through none of
+these mechanisms (a cargo feature or configuration key not listed in item 2; a `[patch]` table in a manifest,
+which shows in the manifest's diff and in the lockfile as a package without a source); a hostile machine
+(a replaced `cargo`, `python3`, `curl` or `PATH`, a hostile home directory): CI runs the gate on a fresh
+runner. Such an observation goes to the lead as a note under `checked_and_fine`, not as a finding, and no code
+is added for it.

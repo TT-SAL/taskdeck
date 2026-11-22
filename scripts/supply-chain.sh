@@ -58,7 +58,8 @@ banner "1/3 cargo deny check advisories bans sources"
 # ([patch], paths), and cargo-deny and cargo-audit read only the lockfile. So
 # any of those keys in a configuration file cargo reads here (.cargo/config and
 # .cargo/config.toml in this directory, every parent and CARGO_HOME), or the
-# environment variables that set them, fails this step.
+# environment variables that set them, fails this step; so does an `include`,
+# which makes cargo read further files this check does not follow.
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
 configs=("$cargo_home/config" "$cargo_home/config.toml")
 d="$root"
@@ -78,14 +79,19 @@ for p in sys.argv[1:]:
     except Exception as e:
         print(f"{p}: cannot read: {e}")
         continue
-    for k in ("source", "patch", "paths"):
+    for k in ("source", "patch", "paths", "include"):
         if k in config:
             print(f"{p}: sets {k}")
 for k in sorted(os.environ):
-    if re.match(r"CARGO_(SOURCE|PATCH|PATHS)(_|$)", k):
+    if re.match(r"CARGO_(SOURCE|PATCH|PATHS|INCLUDE)(_|$)", k):
         print(f"the environment sets {k}")
-' "${configs[@]}" 2>&1)"
-if [[ -n "$replaced" ]]; then
+' "${configs[@]}")"
+# Only python's own output is a finding; if python3 itself fails (missing, or
+# older than 3.11 and without tomllib), the configuration was not checked.
+if [[ $? -ne 0 ]]; then
+    echo "supply-chain: cannot check the cargo configuration: python3 3.11 or later is needed (for tomllib)"
+    failed+=("cargo configuration (not checked)")
+elif [[ -n "$replaced" ]]; then
     sed 's/^/supply-chain: crates.io replaced or overridden: /' <<<"$replaced"
     echo "supply-chain: cargo configuration: FAILED (only crates.io code may be built)"
     failed+=("cargo configuration (crates.io replaced)")

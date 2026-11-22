@@ -5,8 +5,9 @@
 # base, any other argument is refused before anything runs, and all three
 # checks run even when one fails, and an "error:" or an index-failure warning
 # from cargo-audit fails the run even when it exits 0. A cargo configuration
-# that replaces or overrides crates.io fails the run, and a tool that is not
-# usable is reported with dev-setup's own words.
+# that replaces or overrides crates.io, or includes another file, fails the run;
+# a python3 that cannot run the check fails it for that reason; and a tool that
+# is not usable is reported with dev-setup's own words.
 set -uo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -108,8 +109,24 @@ replaces "a [patch] in CARGO_HOME" "$HOME_C/config.toml" '[patch.crates-io]
 itoa = { path = "x" }'
 replaces "a paths override" "$R/.cargo/config.toml" 'paths = ["x"]'
 replaces "a configuration that is not TOML" "$R/.cargo/config.toml" '[source'
+# cargo (1.97, stable) reads the files an `include` names: one that sets
+# [source] would otherwise pass unseen, so any include fails.
+printf '[source.crates-io]\nreplace-with = "m"\n' >"$R/.cargo/mirror.toml"
+replaces "an include of a file that sets source" "$R/.cargo/config.toml" 'include = ["mirror.toml"]'
+replaces "an include in CARGO_HOME" "$HOME_C/config.toml" 'include = [{ path = "mirror.toml" }]'
+rm -f "$R/.cargo/mirror.toml"
 expect "the environment variable fails" 1 run CARGO_SOURCE_CRATES_IO_REPLACE_WITH=m
 output_has "the environment variable is named" "the environment sets CARGO_SOURCE_CRATES_IO_REPLACE_WITH"
+
+echo "-- without python3 3.11 the configuration check fails for that reason"
+mkdir -p "$TMP/oldpy"
+printf '#!/bin/sh\necho "ModuleNotFoundError: No module named tomllib" >&2\nexit 1\n' >"$TMP/oldpy/python3"
+chmod +x "$TMP/oldpy/python3"
+expect "an old python3 fails" 1 run PATH="$TMP/oldpy:$PATH"
+output_has "the reason is python3" "supply-chain: cannot check the cargo configuration: python3 3.11 or later is needed"
+output_lacks "it does not blame a replacement" "crates.io replaced"
+log_is "an old python3: all three still ran" "$ALL3
+cooldown"
 printf '[build]\njobs = 2\n[registries.crates-io]\nprotocol = "sparse"\n' >"$R/.cargo/config.toml"
 expect "a configuration that leaves crates.io alone passes" 0 run
 rm -f "$R/.cargo/config.toml"
