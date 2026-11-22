@@ -23,3 +23,8 @@ round, or a small fix pass before it) writes them.
 
 6. **engine.md §28.2 step 2** sets `log_floor = p` even for a device whose `log_floor` is already above `p`
    (lead ruling L27): it must take the larger of the two and keep `floor_chain` in that case.
+7. **seal.md §24** needs the test-vector family that the new "ephemeral key" paragraph of §7 refers to: the
+   32 bytes drawn for each wrap (TR1-TRUST-2's SEAL-WRAP-004).
+8. **`RestoredCopy` and `BasedOnUnchecked`** are shown "until acknowledged" like the continuity warning, but
+   have no action, stored flag, facade call or bridge call (lead ruling T4 gave those to the continuity
+   warning only).

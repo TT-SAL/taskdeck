@@ -369,6 +369,9 @@ An item id, a subscription id and a non-zero archive-row id each have the form `
 
 The origin mints with an `IdMinter`: the next item number is `max(minter.next_item, mark(view, device_no).item + 1)`, and after minting `minter.next_item` becomes that number plus one; blocks likewise with `next_block`. The device persists the minter with its outbox (`device.md`), so a number is never minted twice locally even when the entry that carried it is later refused.
 
+`IdMinter::new(device_no)` (§20) is `{ device_no, next_item: 1, next_block: 1 }`: the minter a device starts
+with when it creates a board or joins one, so its first numbers are `mark + 1` of the view.
+
 ### 7.3 Block ids
 
 A block id (sid) has the same form, `h × 2^40 + n`, with its own marks (`block`). sids are minted by the origin for `add_block` and `create_task`, and by the import for legacy sessions (`h = 0`). A sid is unique among the live blocks of the whole board, not only within its item. It is carried in the phone page's existing `session` field and in `SessionDetail.index` (§14.3); the page only compares and echoes it (phone.html:4260, 4365, 4909-4931, 4939, 5066-5083), so its meaning changes from an index to an id without any change to the page's code. An archived row keeps its blocks' sids, and Restore brings them back unchanged.
@@ -381,6 +384,7 @@ A `restore` carries the row key and a `fallback` id minted by the origin. `apply
 - **CORE-ID-002** (core) `apply` MUST refuse with `core/bad_id` a command that mints an item, subscription or block id whose high part differs from `Ctx.device_no` or whose low part is not above the author's mark for that kind.
 - **CORE-ID-003** (core) `apply` MUST raise the author's mark to the low part of every id it accepts as newly minted, including a `restore`'s `fallback` whether or not the restore used it.
 - **CORE-ID-004** (core) The compile step MUST mint each number as `max(minter.next, mark + 1)` of §7.2 and MUST advance the minter past it, so that one minter never yields the same number twice.
+- **CORE-ID-007** (core) `IdMinter::new(device_no)` MUST return a minter with that `device_no`, `next_item = 1` and `next_block = 1`.
 - **CORE-ID-005** (core) `apply` MUST restore a row under its own id when that id is not 0 and not held by a live item, and under the command's `fallback` otherwise, without applying the range check to the row's own id.
 
 ### 7.5 Rebinding

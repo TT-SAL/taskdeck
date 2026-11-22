@@ -6,9 +6,11 @@ offline edit replayed, pairing, revocation with rotation, relay rollback, snapsh
 an ambiguity to fix. Stop after two rounds with no difference, or after four rounds, recording what remains in
 `CHANGES.md`."
 
-How it is run here: the six scenarios are three groups of two. In each round two readers per group, A and B,
-work alone; a comparer per group lists every difference and writes the exact spec change for each; one fixer
-per spec applies the changes. Readers of a later round are new agents.
+How it is run here: the six scenarios are three groups of two. In round 1 two readers per group, A and B,
+worked alone. From round 2 on there are two readers in all, as the plan words it, each writing all six
+scenarios (a reader reads nearly all of the specs whatever its scenarios, so six readers cost three times as
+much as two; decision D22). A comparer per group lists every difference and writes the exact spec change for
+each; one fixer per spec applies the changes. Readers of a later round are new agents.
 
 | Group | Scenarios |
 |---|---|
@@ -22,7 +24,7 @@ You are given only the specs: the files under `docs/sync/spec/` (`README.md`, `s
 `engine.md`, `device.md`, `bridge.md`, `wordlist.txt`). Open no other file of the repository: not SYNC.md, not
 the plan, not the status files, not source code. You do not see the other reader's work.
 
-For each of your two scenarios, write what happens, step by step, as an implementer who has nothing but the
+For each of your scenarios, write what happens, step by step, as an implementer who has nothing but the
 specs would build it. Start from the world below and the scenario's own facts. Where the specs leave you a
 choice or say nothing, do NOT pick silently: write the step with the reading you find most natural and add a
 line `AMBIGUOUS: <what the spec leaves open, with the section or clause>`.
@@ -129,11 +131,13 @@ stop rule.
    missing entries get back onto the relay (who does it, each request and each relay check); Mac's session;
    the state at the end.
 
-6. **Snapshot bootstrap.** A different history: Mac was last connected 400 days before `T0`, when the head
-   was seq 100, and it has one edit queued from that time (renaming an existing task). Since then the relay
-   has compacted the log: it no longer holds entries below seq 129; the snapshot at seq 192 (by Desk,
-   acknowledged by Phone) is the newest. Membership has not changed in between. At `T0` the user opens the app
-   on Mac. Write: Mac's session start; how Mac learns it cannot catch up from 101; what the user is asked;
-   how Mac finds and fetches the snapshot, request by request; every check on it, in order; what Mac makes
-   durable and in which order; how it gets the entries after the snapshot; what happens to the queued edit;
-   what Mac tells the user about continuity.
+6. **Snapshot bootstrap.** A different history from the world above: the log has reached seq 20,000 (chain
+   value `C20000`). Of its frames Desk wrote 14,000, Phone 5,939, Mac 60 and the recovery identity 1.
+   Membership has not changed since the board was created: the same three devices, epoch 1. The relay has
+   compacted the log and no longer holds entries below seq 3,000. The newest snapshot is at seq 19,968,
+   written by Desk (blob id `SNAP19968`) and acknowledged by Phone. Mac was last connected 400 days before
+   `T0`, when the head was seq 100, and it has one edit queued from that time (renaming an existing task).
+   At `T0` the user opens the app on Mac. Write: Mac's session start; how Mac learns it cannot catch up from
+   101; what the user is asked; how Mac finds and fetches the snapshot, request by request; every check on
+   it, in order; what Mac makes durable and in which order; how it gets the entries after the snapshot; what
+   happens to the queued edit; what Mac tells the user about continuity.

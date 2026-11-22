@@ -370,6 +370,8 @@ Rows 8 to 12 do not exist in the `echo` flavour; row 13 exists only in it. The p
 
 `session` in requests and replies is a sid (`core.md` §12.3, CORE-SNAP-002); the page treats it as an opaque number it read from the snapshot or a reply, so no change follows.
 
+**Wire times the page sends.** The page sends `at` of `complete` and `delete` as the instant of the tap in UTC, RFC 3339 with whole seconds and `Z` (today's `stamp()`, `new Date().toISOString()` with its fraction removed, phone.html:4825), for example `"2026-11-22T08:00:00Z"`, which `core.md` §12.2 step 4 reads as `WireTime::Exact`. It sends `deadline` of `quick_add` as `null` when the user gave no due date (phone.html:5300), and otherwise as the value of its date-time field, `YYYY-MM-DDTHH:MM` local (`WireTime::Naive`). The members of every body are in the order the table lists them, and the request key travels in the `X-TaskDeck-Request` header (`headers.request_key`, §5.2), not in the body.
+
 **The request key.** The bridge keeps, per process, the replies of the last 1,024 verbs that carried a `request_key`, in insertion order. A verb whose key is held is answered with the held reply and is not submitted again; a key is held only after a 2xx reply (errors are not held, as today, digest §3.6). Two verbs with the same key never run at once, because `bridge-io` runs one request at a time. A reply is held as its status and body.
 
 - **BRIDGE-VERB-001** (android-shell) The bridge MUST answer `POST /api/command` whose `op` is not one of the 17 of §6.3 with `403 bridge/verb_refused` and the body `{"error":"That is not something this phone can do."}`, without calling the facade.
@@ -1000,6 +1002,7 @@ The administration and platform surface. Only the shell calls it, from native sc
 | `dismiss_alarm` | `{"id": int}` | `null` | `dismiss_alarm` | — | android |
 | `confirm_clock` | `{}` | `null` | `confirm_clock` | — | android |
 | `confirm_rejoin` | `{}` | `null` | `confirm_rejoin` | — | android |
+| `ack_continuity` | `{}` | `null` | `ack_continuity` | — | android |
 | `use_this_copy` | `{}` | `null` | `use_this_copy` | auth, API 30 | android |
 | `adopt` | `{"dev": hex32, "typed_fp": string}` | ticket | `adopt` | auth, API 30 | android |
 | `skip` | `{"seq": int}` | ticket (int) | `skip` | auth, API 30 | android |
@@ -1182,6 +1185,7 @@ The native screens are plain framework views (no AppCompat, no Compose, §12.4) 
 | Devices: banners | each unacknowledged banner with its author's name and key fingerprint | Acknowledge (`ack_banner`) | all |
 | Devices: alarms | each alarm with its evidence, as text | Dismiss (`dismiss_alarm`) for one that does not stop the engine; the stop's action: `ConfirmRejoin` (`confirm_rejoin`), `RePair` (opens Pair in re-pair mode), `Adopt` (type the fingerprint, `adopt`), `UseThisCopy` (`use_this_copy`); `RestoreTail`, `ReHome`, `ReplaceDevice` show "Do this from a desktop."; `Restart` shows "Close TaskDeck and open it again."; `Wait` shows the stop's kind | `Adopt`, `UseThisCopy`: API 30 and auth |
 | Devices: the clock | the skew when `clock.warning` | Confirm the clock (`confirm_clock`) | all |
+| Devices: continuity | `ContinuityUnchecked { from }` of `status().warnings`, with its seq | Acknowledge (`ack_continuity`) | all |
 | Devices: the halted view | the halt's kind, since when, the entry's author and key fingerprint, the Skip offer | Skip (`skip`) when `skip_offer.here` | API 30 and auth |
 | Devices: add a device | — | Add a device (`pair_start`, then the address and code shown, then the SAS shown, then `pair_confirm`; `pair_cancel`) | API 30 and auth |
 | Devices: per device | — | Remove (`revoke` with `replace: false`), Replace (`revoke` with `replace: true`) | API 30 and auth |

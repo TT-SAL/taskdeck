@@ -428,9 +428,9 @@ pub trait Sealer {
 | `supported_envelopes` | the (`ver`, `suite`) pairs this build opens, ascending; `[(1, 1)]` in this build |
 | `chain_zero`, `chain_step`, `frame_hash` | `seal.md` §15.1 and §8.2 |
 | `frame_author` | the header's `dev` and `ctr` after `seal.md` §14.2 step 1, for the 409 and own-dev paths; an error when step 1 fails |
-| `classify` | `seal.md` §14 over the inputs of §14.1, with `M_{s−1} = input.membership`, the sealer's own roots, its own X25519 key, its build's supported rules and, for `seq = 1`, its genesis anchor; returns `seal.md` §14.4's outcome; while it holds a missed wrap of epoch `n` (`take_missed_wraps`), an accepted `EpochRotated{n}` that does not wrap to this device has that wrap opened against the rotation's `commit` (`seal.md` §7) as SEAL-RCPT-007 opens an own wrap, returning the commitment halt when it does not open or does not match; `keys_changed` is true when it learned a root; it never panics (SEAL-GEN-011) |
+| `classify` | `seal.md` §14 over the inputs of §14.1, with `M_{s−1} = input.membership`, the sealer's own roots, its own X25519 key, its build's supported rules and, for `seq = 1`, its genesis anchor; returns `seal.md` §14.4's outcome; while it holds a missed wrap of epoch `n` (`take_missed_wraps`), an accepted `EpochRotated{n}` that does not wrap to this device has that wrap opened against the rotation's `commit` (`seal.md` §7) as SEAL-RCPT-007 opens an own wrap, returning the commitment halt when it does not open or does not match; when it accepts an `EpochRotated{n}` in an entry of this device whose `entry_id` holds a pending root, it opens its own wrap as every recipient does (SEAL-RCPT-007), keeps the opened root as the root of epoch `n`, and removes that pending root in the same call; `keys_changed` is true when it learned a root or removed a pending one; it never panics (SEAL-GEN-011) |
 | `new_entry_id` | 16 fresh random bytes (SEAL-PLAIN-002) |
-| `seal` | builds the plaintext of `seal.md` §10.1 with the entry's id, kind, `at_ms`, `based_on` and the body's payload; for `Body::Ctl` it composes the items from the intent and `m` at this moment (wraps to the current devices of `m` and its current recovery key, a fresh root for a rotation, kept as pending under the entry id, the inner signature); seals under `m`'s current epoch (SEAL-ENV-003) with counter `ctr`; returns the frame, its hash, the epoch and whether its secrets changed |
+| `seal` | builds the plaintext of `seal.md` §10.1 with the entry's id, kind, `at_ms`, `based_on` and the body's payload; for `Body::Ctl` it composes the items from the intent and `m` at this moment; for a rotation it draws a fresh root, kept as pending under the entry id, computes its commitment, and wraps the root to each current device and to the current recovery identity of the working copy `W` of `seal.md` §13.6, that is `m` as the entry's earlier items leave it (a device the entry revokes gets no wrap, one it reinstates gets one, and after a `RecoveryKeyChange` the new recovery key gets it), once each, ascending by recipient id; then the inner signature; seals under `m`'s current epoch (SEAL-ENV-003) with counter `ctr`; draws its random values in this order: the root (`EpochRoot::generate`), then the wraps in ascending recipient-id order (`wrap_root`, 32 bytes each, `seal.md` SEAL-WRAP-004), then the frame's nonce (`seal_frame`, SEAL-GEN-012); returns the frame, its hash, the epoch and whether its secrets changed |
 | `open_own` | opens a frame this device signed, under any root it holds, and returns its `entry_id`; an error for any other frame |
 | `discard_pending` | forgets the pending root of an own rotation that was refused (SEAL-MEM-016); true when a secret changed |
 | `forget_roots_below` | deletes every epoch root below `epoch` (purge, §28.2); true when a secret changed |
@@ -444,6 +444,10 @@ pub trait Sealer {
 - **ENG-SEALER-003** (engine) The engine MUST supply to `skip_targets` only frames whose hash it has checked equals the `frame_hash` the Skip item names (§17.2).
 - **ENG-SEALER-004** (engine) The engine MUST persist `export_identity()` (§7.11 `WriteIdentity`) after every sealer call that reports a changed secret, before the effects §7.12 makes depend on it.
 - **ENG-SEALER-005** (engine) The engine MUST NOT ask the sealer to seal an entry with counter `c` twice: once a frame for `c` exists in a record, the engine MUST reuse its bytes for every retry (SEAL-FRAME-005, SYNC.md §4.3 rule 2).
+- **ENG-SEALER-006** (engine) When it classifies the entry at seq `s`, the engine MUST supply a `chain_at` that returns `C_b` for every `b` from `retained_from` to `s − 1`, including the values computed earlier in the same dry run (§12.3 step 6), and `None` for every other `b`.
+- **ENG-SEALER-007** (device) When it composes an `EpochRotated`, the sealer adapter MUST wrap the new root to exactly the current devices and the current recovery identity of the working copy `W` of `seal.md` §13.6, as the entry's earlier items leave it, once each, ascending by recipient id.
+- **ENG-SEALER-008** (device) Within one `seal` call, the sealer adapter MUST draw its random values in the order of §6.1 `seal`: the epoch root, then one wrap per recipient in ascending recipient-id order, then the frame's nonce.
+- **ENG-SEALER-009** (device) When it accepts a rotation of this device's own, the sealer adapter MUST remove that entry's pending root in the same `classify` call and keep as the epoch's root the one its own wrap gave, so that the next `export_identity` holds it among the roots and not among the pending roots.
 
 ### 6.2 The membership view
 
@@ -642,10 +646,11 @@ Every entry this device authors goes through the outbox, in the order it was enq
 | `prev_session` | `Option<[16]>` | the session id of the previous process (§11.6) |
 | `conflicts` | u32 | consecutive unmatched 409 conflicts (§11.4) |
 | `clock` | `Option<(i64, i64)>` | the user's last clock confirmation: `(wall_ms, skew_ms)` (§27.2) |
-| `last_beat_ms` | i64 | `wall_ms` of the last beat this device composed |
+| `last_beat_ms` | i64 | `wall_ms` of the last beat this device composed; 0 in the first `Meta` of a new replica (genesis or join, §19.8), so its first beat is due as soon as it is eligible (§23.1) |
 | `duties` | `DutyState` | §29.3 |
 | `ops` | list of `OpRecord`, at most 16 | operations in progress (§28) |
 | `move_tries` | `(u32, i64)` | wrong move codes in a row, and the `wall_ms` until which entry is locked (§28.3) |
+| `continuity_unchecked` | `Option<u64>` | the `S` of the last rejoin, until the user acknowledges it (§19.7 step 7) |
 
 ### 7.9 Bases
 
@@ -701,7 +706,7 @@ A checkpoint, or a base read later (`ReadBase`), whose board `SM::load` refuses 
 
 A single `Persist` may carry several ops; the runtime writes them in order and reports one `Persisted`.
 
-- **ENG-PERSIST-005** (engine) The engine MUST emit `TruncateLogBelow`, `DeleteBases` and `RewriteOutbox` only in the cases §7.13, §19.7 (after the user's confirmation) and §28.2 name, and never because of a relay answer (SYNC.md §4.3 rule 6, V2-21).
+- **ENG-PERSIST-005** (engine) The engine MUST emit `TruncateLogBelow`, `DeleteBases` and `RewriteOutbox` only in the cases §7.13, §19.7 (after the user's confirmation), §19.8 (a join, whose log is empty) and §28.2 name, and never because of a relay answer (SYNC.md §4.3 rule 6, V2-21).
 
 ### 7.12 What must be durable first
 
@@ -714,7 +719,7 @@ A single `Persist` may carry several ops; the runtime writes them in order and r
 | D5 | `WriteMeta` with a new `attempt` | applying any entry in that attempt (§15) |
 | D6 | `WriteMeta` with `last_failed` or `halt` set | applying the failed entry again |
 | D7 | `WriteBase` at a purge rotation's seq | that purge's `TruncateLogBelow`, `DeleteBases` and `forget_roots_below` (§28.2) |
-| D8 | `WriteCheckpoint` with `board_seq ≥ x` | `TruncateLogBelow(y)` for any `y > x` |
+| D8 | `WriteCheckpoint` with `board_seq ≥ x` | `TruncateLogBelow(y, floor_chain)` for any `y > x`, whatever its `floor_chain` |
 | D9 | `Outbox(Put)` clearing a record's frame for a re-seal | sealing that record again |
 | D10 | `WriteMeta` with an operation's new stage | the relay call of that stage (§28) |
 
@@ -798,7 +803,7 @@ A halted device (§16) shows its confirmed state frozen at `B` plus every unappl
 
 ### 9.2 Entries the engine composes
 
-Control entries, beats and `snap` entries are enqueued by operations (§28) and duties (§29) with `at_ms = wall_ms`, `based_on = (B, C_B)` and no trial apply (they do not change the board). A control entry's items are composed when it is sealed (§10.2), from the membership of that moment.
+Control entries, beats and `snap` entries are enqueued by operations (§28) and duties (§29) with a fresh `entry_id` drawn at enqueue (`Sealer::new_entry_id`, ENG-ENQ-003), `at_ms = wall_ms`, `based_on = (B, C_B)` and no trial apply (they do not change the board). A control entry's items are composed when it is sealed (§10.2), from the membership of that moment.
 
 ### 9.3 The naming hold
 
@@ -849,7 +854,7 @@ Run at step 6 of §4.5:
 
 ### 10.3 Counters
 
-`next_ctr = 1 + max(a, h, w)`, where `a` is this device's `last_ctr` in `M_K`, `h` the largest `ctr` of a record that has a frame, and `w` the relay's `last_ctr` for this device once a reconcile has verified it (§11.3). The first frame of a device has counter 1.
+`next_ctr = 1 + max(a, h, w)`. `a` is this device's `last_ctr` in `M_K`, and 0 while `M_K` holds no record of this device (a device that joined holds none until it has classified its `DeviceAdded`, §19.8). `h` is the larger of `a` and the largest `ctr` of a record that has a frame, and `h = a` when no record has a frame. `w` is the relay's `last_ctr` for this device once a reconcile has verified it (§11.3). The first frame of a device has counter 1.
 
 - **ENG-SEND-006** (engine) The engine MUST seal each new frame with `next_ctr` as §10.3 defines it.
 
@@ -859,7 +864,7 @@ For each result, in frame order (`relay.md` §9.5, §9.6):
 
 | Result | Action |
 |---|---|
-| `new`, `dup` `(seq, chain)` | `ack = (seq, chain)`; `Put` the record in the next `Persist` (no effect waits for it); if `seq ≤ L`, run the echo check now (§11.5) |
+| `new`, `dup` `(seq, chain)` | `ack = (seq, chain)`; `Put` the record in the next `Persist` the engine emits, in one `Outbox` op holding the acknowledged records in frame order, placed after every other op of that `Persist` (no effect waits for it); if `seq ≤ L`, run the echo check now (§11.5) |
 | `conflict` | §11.4 |
 | `gap (last_ctr, last_seq)` | §11.4 |
 | refused `429 relay/budget` | pause appends until the next 00:00 UTC of `wall_ms`; `status.paused_until`; the frame stays sealed |
@@ -891,7 +896,8 @@ pub struct Welcome { pub head: Head, pub last_ctr: Option<u64>, pub last_seq: Op
 |---|---|---|---|---|
 | `Offline` | any | a relay target is set, the device is not stopped by `identity_clone` or `Closed` (§11.9), and, while it is revoked (§24.4) or after its last `Connect` ended in a refused login (§11.9), no `Connect` was emitted in the last 3,600,000 ms of `mono_ms` | `Connect { relay }` | `Connecting` |
 | `Connecting` | `Connected { push }` | | `Hello` when `push` is false (over a socket the welcome follows by itself) | `Connecting` |
-| `Connecting` | `Welcome` | the checks of §11.2 pass | the reconcile of §11.3; `Read` when the head is above `L` | `Reconciling` |
+| `Connecting` | `Welcome` | the checks of §11.2 pass | the reconcile of §11.3; `Read` when the head is above `L` | `Reconciling` when the head is above `L`; `Live` when `head.seq = L` (the reconcile then completes at once: `q ≤ head.seq = L`, so §11.3 steps 2 and 3 have nothing left to read) |
+| `Connecting` | the evidence stop ends (§21.3 step 5) | | `Hello` | `Connecting` |
 | `Reconciling` | `Page` | §12 | as §12 | `Reconciling`, or `Live` when `L` reaches the latest known relay head and the reconcile is complete |
 | `Live` | `Page` (push or read) | §12 | as §12 | `Live` |
 | `Live` | `Tick` | `push` is false and 30,000 ms of `mono_ms` have passed since the last `Hello` | `Hello` | `Live` |
@@ -903,6 +909,8 @@ The runtime applies its own backoff before acting on a `Connect` (`device.md`, f
 The runtime decides how long a background job keeps the engine running (`device.md`); while it runs, the engine polls as the table says.
 
 - **ENG-SESS-001** (engine) The engine MUST follow the session table of §11.1, and MUST NOT seal or send a frame of its outbox in any state but `Live`; the restore-tail, seed and fence calls of §21.3 and §28.3, which carry frames already in its log, are exempt.
+- **ENG-SESS-009** (engine) On a welcome whose checks pass and whose head equals `L`, the engine MUST enter `Live` without a read.
+- **ENG-SESS-010** (engine) When an evidence stop ends while its session is `Connecting`, the engine MUST emit `Hello` at once and continue from its welcome as §11.1 states.
 
 ### 11.2 Checks on a welcome
 
@@ -912,13 +920,16 @@ In order:
 2. If `head.seq < L`: evidence `relay_behind` (the relay holds less than this device's log, V2-9). If `head.seq ≤ L` and the chain this device holds at `head.seq` differs from `head.chain`: evidence `fork`.
 3. If any record has `ack.seq > head.seq`: evidence `relay_behind`.
 4. If `fenced`: §28.3.
-5. The reconcile of §11.3 with `last_ctr` and `last_seq`.
+5. The reconcile of §11.3 with `last_ctr` and `last_seq`; when step 2 or step 3 found evidence, only its step 1.
+
+**One alarm per kind.** Every step runs, and a welcome raises at most one alarm of each kind. When step 2, step 3 or §11.3 step 1 finds `relay_behind`, the welcome raises one `RelayBehind` alarm with the evidence `relay_head` = the welcome's head, `relay_last_ctr` = its `last_ctr`, `local_head = (L, C_L)`, and `ack` = the acknowledgement with the largest seq above `head.seq` (absent when none is). A welcome raises no alarm of a kind for which `Meta` holds an unresolved one, so the `Hello` that §12.2 sends every 900,000 ms under a stop adds none. When any step found evidence, §11.3 runs only its step 1: the engine reads nothing, sets no `registry.restored` and takes no `w` from that welcome.
 
 - **ENG-SESS-002** (engine) The engine MUST raise the evidence of §11.2 step 2 or step 3 when a welcome's head is below the log head or below an acknowledged seq, or names a chain value at a seq the device holds that differs from its own.
+- **ENG-SESS-008** (engine) A welcome MUST raise at most one alarm of each kind, with the evidence §11.2 "One alarm per kind" gives a `RelayBehind`, and none of a kind for which an unresolved alarm is held; when it found evidence, the engine MUST run of §11.3 only its step 1.
 
 ### 11.3 Reconcile on hello
 
-SYNC.md §4.3 rule 3, V1-16, V2-3. Let `a` be this device's `last_ctr` in `M_K`, `h` the largest counter of a record with a frame, `r = last_ctr` and `q = last_seq` from the welcome.
+SYNC.md §4.3 rule 3, V1-16, V2-3. Let `a` be this device's `last_ctr` in `M_K` (0 while `M_K` holds no record of this device, §10.3), `h` as §10.3 defines it (the larger of `a` and the largest counter of a record with a frame, so `h = a` when no record has a frame), and `r = last_ctr` and `q = last_seq` from the welcome.
 
 1. `r < a`: the relay lacks counters this device has classified: evidence `relay_behind`.
 2. `a ≤ r ≤ h`: normal. The frames `a + 1` to `r` are stored; the engine reads up to at least `q` before it seals anything new.
@@ -935,6 +946,8 @@ The identity minter for commands (`core.md` §7.2) is raised by the runtime afte
 - **ENG-RECON-002** (engine) During a restored-copy reconcile the engine MUST drop, as already sent, every record whose `entry_id` is sequenced and accepted at a counter in the range of §11.3 step 3, and MUST NOT send it again.
 - **ENG-RECON-003** (engine) The engine MUST clear for re-sealing every record whose frame sits at a counter the relay holds with a different frame.
 - **ENG-RECON-004** (engine) The engine MUST accept a relay `last_ctr` above its own only after it has classified this device's own frames up to that counter, and MUST raise `withheld` when the relay cannot produce them (V1-16).
+- **ENG-RECON-008** (engine) In the reconcile of §11.3, the engine MUST take `h` to be the larger of `a` and the largest counter of a record that holds a frame, so that a welcome with `r = a` is the normal case of step 2 whether or not any record holds a frame.
+- **ENG-RECON-009** (engine) While `M_K` holds no record of this device, the engine MUST take `a = 0` in §10.3 and §11.3.
 
 ### 11.4 Conflicts and gaps
 
@@ -961,6 +974,7 @@ A `gap (last_ctr r, last_seq q)` result: if any record holds an acknowledgement 
 SYNC.md §4.3 rule 5. For every record with `ack = (s, c)`: when the log holds seq `s`, the frame there must have the record's `frame_hash` and `C_s` must equal `c`. A difference is evidence `unechoed` (V2-10). A relay head below `s` in any welcome or page is evidence `relay_behind` (§11.2).
 
 - **ENG-ECHO-001** (engine) The engine MUST compare every acknowledged record with the frame and chain value at its acknowledged seq as soon as the log holds that seq, and MUST raise `unechoed` on any difference.
+- **ENG-ECHO-002** (engine) When a `Register` or `Fence` answer arrives after its record has left the outbox, the engine MUST compare the answer's `seq` and `chain` with the frame and chain value its log holds at that seq, as §11.7 states, MUST raise `unechoed` on any difference, and MUST otherwise handle the answer as if the record were present.
 
 ### 11.6 One identity per folder, second and displaced
 
@@ -1004,6 +1018,8 @@ pub struct RelayRefusal { pub status: u16, pub code: String, pub until: Option<i
 
 `Door`, `Seed` and `SeedTail` go to the new relay named by their `host` (§28.3): the runtime sends `Door` and `Seed` with that relay's create secret and `SeedTail` with the token `Seed` returned (`relay.md` §12.7). Every other request goes to the current target. A `Register` or `Fence` with a frame acknowledges that frame on success (`seq`, `chain`), and maps a `409 relay/conflict` or `409 relay/gap` to §11.4. The token a `Register` returns is the new device's and goes to the pairing machine (§28.4), never to the engine.
 
+**An answer after the push.** The admin answer and the `push` of the seq it names travel on different connections (`relay.md` §12.3), so the push can arrive first: the engine then classifies the frame as its own, applies it and drops the record (§12.4). When a `Register` or `Fence` answer with `seq` and `chain` arrives and its record has left the outbox, the engine records no `ack`. It checks at once that its log at `seq` holds a frame under this device's `dev` at the counter it sealed for that record, and that its `C_seq` equals the answer's `chain`; a difference is evidence `unechoed` (§11.5). The rest of the answer is handled as when the record is still in the outbox: for a `Register`, `Notify(PairRegistered …)` and the token as §28.4 step 3 states.
+
 ### 11.8 No relay answer deletes anything
 
 - **ENG-SESS-005** (engine) No relay answer, refusal, close, silence or absence MUST lead the engine to emit `TruncateLogBelow`, `DeleteBases`, an outbox `Drop` of an unapplied record, `forget_roots_below`, or any write that removes a key (SYNC.md §4.3 rule 6, V2-21).
@@ -1020,13 +1036,15 @@ The runtime classifies every relay exchange (`relay.md` §14.5 through `device.m
 | `RelayRefused` `404 relay/no_board` | the status shows the board missing at this relay; reconnect at most once per 3,600,000 ms of `mono_ms`; nothing is deleted |
 | `RelayRefused` `409 relay/seeding` | retry after 60,000 ms of `mono_ms` |
 | `RelayRefused` `507 relay/storage_refused` (with `until`) | the platform refused a write (`relay.md` §14.5): no `Append`, no `Admin` and no blob upload until `wall_ms ≥ until`, then each refused request is sent again; reads go on; `paused_until_ms = until`; no alarm |
-| `RelayRefused` `401 relay/unauthorized` with `req: None` in `Connecting` (a refused login), while `meta.relay` is the relay of `M_K`'s latest accepted `Fence` (`home_host`, `home_door`, `home_gen`) | this device is no member of the board there (§28.7): the stop `Closed` with the action `RePair` (§24.5); no `Connect` while it is in force; it ends at the next `Start`; no alarm |
-| `RelayRefused` with `req: None` in `Connecting`, any code the rows above do not name | a refused login: alarm `RelayProtocol` with the code; `Connect` again at most once per 3,600,000 ms of `mono_ms` (§11.1) |
+| `RelayRefused` `401 relay/unauthorized` with `req: None` in `Connecting` (a refused login, `caps` or socket upgrade), while `meta.relay` is the relay of `M_K`'s latest accepted `Fence` (`home_host`, `home_door`, `home_gen`) | this device is no member of the board there (§28.7): the stop `Closed` with the action `RePair` (§24.5); no `Connect` while it is in force; it ends at the next `Start`; no alarm |
+| `RelayRefused` with `req: None` in `Connecting`, any code the rows above do not name | a refused login, `caps` or socket upgrade: alarm `RelayProtocol` with the code; `Connect` again at most once per 3,600,000 ms of `mono_ms` (§11.1) |
 | `RelayRefused` any other | alarm `RelayProtocol` with the code; the request is not repeated until the next `Welcome` |
 | `Disconnected { paused_until_ms: Some(t) }` | a platform quota pause: no request until `wall_ms ≥ t` (`relay.md` §14.5) |
 
+A refused login, `caps` or socket upgrade reaches the engine as `RelayRefused { req: None, refusal }`, then `Disconnected { unreachable: false, paused_until_ms: None }`, while the session is `Connecting`; the `Disconnected` takes the session to `Offline`, and the guards on `Offline` decide the next `Connect`. (`device.md` §10.6; §11.1.)
+
 - **ENG-SESS-006** (engine) The engine MUST act on each whole-request refusal as §11.9 states, and MUST NOT delete or forget anything because of one.
-- **ENG-SESS-007** (engine) On a login refused with `401 relay/unauthorized` while its relay target is the relay of its latest accepted `Fence`, the engine MUST enter the stop `Closed`, MUST emit no `Connect` while that stop is in force, and MUST offer re-pair and resubmit.
+- **ENG-SESS-007** (engine) On a login, `caps` or socket upgrade refused with `401 relay/unauthorized` while its relay target is the relay of its latest accepted `Fence`, the engine MUST enter the stop `Closed`, MUST emit no `Connect` while that stop is in force, and MUST offer re-pair and resubmit.
 
 ## 12. Receive
 
@@ -1055,9 +1073,9 @@ In order:
 3. **Head.** The checks of §11.2 steps 2 and 3 with the page's head.
 4. **Truncation.** If `truncated` and `L + 1 < floor`: the log this device needs is gone from the relay; go to §19.7 and stop processing the page.
 5. **Contiguity.** Ignore entries with seq at or below `L` whose frame equals the log's (a repeated push); an entry at or below `L` with another frame is evidence `fork`. The first remaining entry must have seq `L + 1` and each next one the seq after; otherwise evidence `withheld` (entries above the floor are contiguous on an honest relay, `relay.md` §10.5).
-6. **Dry run.** For each entry in seq order: `C_s = chain_step(C_{s−1}, s, frame)`; `classify` with `M_{s−1}` from the previous step (or `M_L` for the first). A `NeedFrames` result pauses the page until §17.2 supplies the frames, then the same entry is classified again. A `Tamper` class, or a frame at or below `L` that differs (step 5), is evidence: the **cut** is that entry, and no entry from the cut on is persisted (§21). A receipt with a rules or commitment halt ends the dry run after that entry: the cut is the next one, and nothing after it is evidence (§16.3).
+6. **Dry run.** For each entry in seq order: `C_s = chain_step(C_{s−1}, s, frame)`; `classify` with `M_{s−1}` from the previous step (or `M_L` for the first), and with `chain_at(b)` answering `C_b` for every `b` from `retained_from` to `s − 1`: from the chain index for `b ≤ L`, and from this dry run's earlier steps for `L < b < s`; it answers `None` for every other `b`. A `NeedFrames` result pauses the page until §17.2 supplies the frames, and then the same entry is classified again. A `Tamper` class, or a frame at or below `L` that differs (step 5), is evidence: the **cut** is that entry, and no entry from the cut on is persisted (§21). A receipt with a rules or commitment halt ends the dry run after that entry: the cut is the next one, and nothing after it is evidence (§16.3).
 7. **Head chain.** If the last entry before the cut has the page's `head.seq`, its `C` must equal `head.chain`; otherwise evidence `fork` and the cut is the first entry of the page.
-8. **Persist.** One `Persist` with `AppendLog` of the entries before the cut (seq, `C_s`, `τ_s`, frame), `SetMarker { first, last, attempt }` over them, and `WriteIdentity` when a classification reported `keys_changed`.
+8. **Persist.** One `Persist` holding, in order: `AppendLog` of the entries before the cut (seq, `C_s`, `τ_s`, frame); `SetMarker { first, last, attempt }` over them; `WriteIdentity` when a classification reported `keys_changed`; and, last, the `Outbox` op of the acknowledgement `Put`s that §10.4 left for the next `Persist`, when there are any.
 9. **Commit.** On its `Persisted`: `L` and `K` become the last persisted seq, `M_K` the dry run's last membership; the membership effects of §14 run for each entry in order; then the board applies entries `B + 1` to `K` (§12.4), unless a halt holds the board (§16).
 10. **Continue.** If `more`, or the known relay head is above `L`, read again (§12.2); otherwise the run has ended: rebase (§8.4) and, if the reconcile is complete, the session becomes `Live`.
 
@@ -1076,7 +1094,10 @@ For each seq `s` from `B + 1` to `K`, in order, with the receipt the dry run pro
 
 The board's apply of a page runs under the page's marker and `catch_unwind` (§15).
 
+**After the apply.** When the board has applied, without a panic, every entry that the current marker covers (a page's entries in page mode, one entry in single mode, §15), the engine emits one `Persist` holding, in order: a `Notices` op with an `Add` for each notice and refusal record those entries produced (§13.3, §13.4), in seq order, and within one seq in the order `apply` returned them; an `Outbox` op with the `Drop` of each record that step 3 dropped, in seq order; and `ClearMarker`. When a run produces no record and no `Drop`, the `Persist` holds only `ClearMarker`. Any `Notify(NoticesAdded)` for those records waits for that `Persisted` (ENG-REF-002). A panic, or a halt that holds the board, leaves the marker in place for §15.
+
 - **ENG-RECV-005** (engine) The engine MUST apply the entries to the confirmed state in seq order, each exactly once per state it rebuilds, with the action of §13.1 for its receipt.
+- **ENG-RECV-006** (engine) After the board has applied, without a panic, every entry that a marker covers, the engine MUST write in one `Persist`, in this order, the notice and refusal records those entries produced, the outbox `Drop`s they caused, and `ClearMarker`.
 
 ## 13. Classes, refusals and notices
 
@@ -1202,6 +1223,7 @@ A deterministic panic therefore halts within one run, after its second attempt; 
 - **ENG-POISON-002** (engine) After a `Start` that finds a marker above the checkpoint, the engine MUST apply the entries of that marker one at a time, each under its own durable marker.
 - **ENG-POISON-003** (engine) The engine MUST halt on an entry only when that entry failed (a caught panic, or a single-entry marker left by a hard abort) in two consecutive attempts.
 - **ENG-POISON-004** (engine) After a caught panic, the engine MUST rebuild the confirmed state from its checkpoint and log before applying any further entry, and MUST NOT use the state the panic left.
+- **ENG-POISON-005** (engine) The engine MUST emit `ClearMarker` only after the board has applied, without a panic, every entry that the marker covers, and only in the `Persist` of §12.4 "After the apply".
 
 ## 16. Halts
 
@@ -1306,6 +1328,8 @@ A base is a checkpoint taken when `B` equals an aligned seq `S` (`S ≥ 64`, `S 
 2. `τ_S − τ` of the newest base is at least 604,800,000 ms (seven days of log clock);
 3. a snapshot is due at `S` (§19.2), so that the device can write it later from the base.
 
+Two more bases are written whether or not their seq is aligned: the base of the state before a rejoin (§19.7 step 2) and the base at the snapshot's seq of a bootstrap (§19.7 step 4, §19.8). Retention treats them like any base (§7.13).
+
 Bases are kept 400 days (§7.13; SYNC.md §4.1, V2-9, V2-12). A restore to a point, a Skip replay and an adoption replay from them.
 
 - **ENG-CKPT-003** (engine) The engine MUST write a base at every aligned seq at which one of the three conditions of §18.2 holds, with the confirmed state exactly at that seq.
@@ -1327,8 +1351,11 @@ ctx("state") = "taskdeck/v1/state" followed by one 0x00 byte (18 bytes; seal.md 
 
 The state and membership are taken at the same seq: the confirmed state after the entry `S` and `M_S`. The engine records its state hash at every aligned `S` after applying `S` (`AppendHashes`, SYNC.md §4.7: "where every device records its state hash"), and computes it for every snapshot, `ResetTo` target, pairing bundle and backup. `taskdeck_sync::state_hash` (§37) is the one implementation the other crates call or reproduce.
 
+A bootstrap from a snapshot at `S` (§19.7 step 4, §19.8) records no hash at `S`, aligned or not: the device did not apply the entry at `S`, so it has no state hash of its own there and gives no verdict on a `snap` entry for `S` (§19.5). Its first hash record is at the first aligned seq it applies.
+
 - **ENG-HASH-001** (engine, seal, recovery) A state hash MUST be SHA-256 of exactly the 86 bytes of §18.3, with the board hash and the membership hash taken at the same seq.
 - **ENG-HASH-002** (engine) The engine MUST record its state hash at every seq `S ≥ 64` with `S ≡ 0 mod 64` that it applies, after applying the entry at `S`.
+- **ENG-HASH-003** (engine) The engine MUST NOT write a hash record at the seq of a snapshot it bootstrapped from.
 
 ## 19. Snapshots and bootstrap
 
@@ -1393,23 +1420,24 @@ The runtime performs `blob-begin` and every `blob-put`, resuming from `blob-meta
 
 A page with `truncated` set and `L + 1 < floor` means the relay no longer holds the log this device needs: it was away for more than 365 days, or behind a purge (SYNC.md §4.7, V2-15).
 
-1. The engine enters `Rejoining`, shows it, and waits for `UserAction::ConfirmRejoin`: it will replace its log, and the user decides that, not the relay (ENG-SESS-005).
+1. The engine enters `Rejoining` and shows it: while `session` is `Rejoining`, `status.stops` carries one `StopView { kind: Rejoin, since_ms, alarm: None, action: ConfirmRejoin }`, with `since_ms` the `wall_ms` at which it entered. That view is derived from the session; it is no `StopRecord` in `Meta`, and it holds back nothing that `Rejoining` does not already hold back (§10.1, §11.1). The engine waits for `UserAction::ConfirmRejoin`: it will replace its log, and the user decides that, not the relay (ENG-SESS-005).
 2. It writes a base of its current confirmed state (kept by retention like any base), then lists blobs (`Blob { List }`) and takes as candidates the complete purpose-1 snapshots with `seq ≥ floor − 1`, newest first.
 3. For a candidate: fetch the parts; `Sealer::open_snapshot(parts, expected, author, exact: false)`, with `expected.seq`, `blob`, `sha256`, `size` and `parts` from the blob's metadata (its other fields are not read) and `author` the metadata's author (`seal.md` §20.5, declared mode); then: the membership bytes parse, name this board and list this device as current; the board loads (`SM::load`) and `SM::rules` of it equals the membership's `rules`; the state hash recomputed (§18.3) equals the body's. A failure (including the lack of the root of the blob's epoch) moves to the next candidate; a failed `SM::load` also raises the alarm `BlobFailure` with the writer, the blob id and the load's code.
-4. On the first candidate that passes: `TruncateLogBelow(S + 1)` (allowed by the user's confirmation, ENG-PERSIST-005), the confirmed state and `M_S` from the snapshot, `B = K = L = S`, `C_S` from the body, `log_floor = S + 1`, `retained_from = S`, a checkpoint and a base; then read from `S + 1`.
+4. On the first candidate that passes: the confirmed state and `M_S` from the snapshot, `B = K = L = S`, `C_S` from the body, `log_floor = S + 1`, `retained_from = S`. Then one `Persist` holding `WriteCheckpoint` and `WriteBase`, both at `S` (the store writes the snapshot's history records ahead of the checkpoint, `device.md` §15.7, §8.3); and, after its `Persisted` (D8), a `Persist` holding `TruncateLogBelow(S + 1, Some(C_S))` with `C_S` from the body (allowed by the user's confirmation, ENG-PERSIST-005). No hash record is written at `S` (§18.3). Then read from `S + 1`; the read need not wait for either `Persisted`, because the page's own `Persist` follows both in the serial queue (ENG-PERSIST-001).
 5. While classifying from `S + 1`, the engine looks for the `snap` entry naming the candidate's blob: its author must be the `author` the snapshot was opened with, and its `seq`, `hash`, `sha256`, `size`, `parts`, `inflated` and `epoch` must equal what was opened (the epoch and inflated length that `open_snapshot` returned) (else alarm `snapshot_mismatch` naming the writer, and step 3 with the next candidate, from a fresh base). When the log reaches the relay head, the snapshot must be usable (§19.3); otherwise the next candidate is tried.
 6. If no candidate passes: the stop `stranded` (§21.4); the device offers "re-pair and resubmit" (§24.5).
-7. On success the status carries the notice `continuity_unchecked { from: S }` until acknowledged (SYNC.md §4.7).
+7. On success the engine sets `meta.continuity_unchecked = Some(S)`, persisted in the next `WriteMeta`. While it is set, `status.warnings` carries `ContinuityUnchecked { from: S }` (SYNC.md §4.7). `UserAction::AckContinuity` sets it to `None`, persisted in the next `WriteMeta`.
 
 Records in the outbox survive a rejoin; frames sealed under an epoch that no longer applies are refused and re-sealed (§24.3).
 
 - **ENG-BOOT-001** (engine) The engine MUST NOT replace its log for a rejoin without the user's confirmation, and MUST keep its state before the rejoin as a base.
 - **ENG-BOOT-002** (engine) A rejoin MUST end only on a snapshot that opened under a root this device holds, whose recomputed state hash matched, whose announcing `snap` entry matched it in author, seq, hash, `sha256`, `size`, `parts`, `inflated` and epoch, and that is usable when the log reaches the relay head.
+- **ENG-BOOT-007** (engine) While its session is `Rejoining`, the engine MUST show in `status.stops` exactly one stop of kind `Rejoin` with the action `ConfirmRejoin`, and MUST NOT persist it as a `StopRecord`.
 
 ### 19.8 Bootstrap at creation and at pairing
 
 - **Genesis** (ruling S2, SYNC.md §9 step 6). `Loaded.bootstrap = Genesis { board, frame_1, relay }`: the creating device's runtime has built the genesis frame with the sealer and created the board at the relay (`relay.md` §10.2); `relay` is that relay's host and the board's door, with `home_gen = 1` (the genesis membership's, `seal.md` §13.3), and the engine sets `meta.relay` from it. The engine loads `board` (`SM::load`), classifies seq 1 (the sealer uses its genesis anchor), which must be `Accept` with a `Genesis` item, checks that `SM::rules(board) = M_1.rules` and that the item's `state_hash` equals the state hash of `board` and `M_1`, and persists `AppendLog[1]`, a checkpoint and a base at 1. Otherwise (a failed load included) it stops with `engine/bad_genesis`.
-- **Join** (`seal.md` §17.9). `Loaded.bootstrap = Join { material, added_seq, relay }`: the pairing machine has checked the bundle, the snapshot and the log to the relay's head. The engine loads the snapshot at `h` as in §19.7 step 4 (no user confirmation: the log was empty; a material whose board `SM::load` refuses, or whose `SM::rules` differs from `M_h.rules`, is the local fault `engine/local_fault`, and the user pairs again), sets the relay target from the bundle's host and door, and reads from `h + 1`; it has joined once `B ≥ added_seq` and `M_B` gives it a `device_no` (`seal.md` SEAL-PAIR-012). Before that, `Enqueue` is refused with `engine/not_joined`.
+- **Join** (`seal.md` §17.9). `Loaded.bootstrap = Join { material, added_seq, relay }`: the pairing machine has checked the bundle, the snapshot and the log to the relay's head. The engine loads the snapshot at `h` as §19.7 step 4 states, with `S = h`: the same state, the same `Persist` of `WriteCheckpoint` and `WriteBase` at `h` whether or not `h` is aligned (§18.2), and after its `Persisted` the same `TruncateLogBelow(h + 1, Some(C_h))`, which deletes nothing (the log is empty) and makes the runtime keep `C_h` as `floor_chain` (`device.md` §7.3). It needs no user confirmation. A material whose board `SM::load` refuses, or whose `SM::rules` differs from `M_h.rules`, is the local fault `engine/local_fault`, and the user pairs again. The engine sets the relay target from the bundle's host and door, and reads from `h + 1`; it has joined once `B ≥ added_seq` and `M_B` gives it a `device_no` (`seal.md` SEAL-PAIR-012). Before that, `Enqueue` is refused with `engine/not_joined`.
 
 - **ENG-BOOT-003** (engine) A device bootstrapped by pairing MUST NOT enqueue, seal or send any entry before it has applied the `DeviceAdded` at `added_seq` that names it.
 - **ENG-BOOT-004** (engine) At genesis, the engine MUST check the `Genesis` item's state hash against the state hash it computes from the genesis state and `M_1`, and the genesis state's rules version (`SM::rules`) against `M_1.rules`, and MUST refuse to start the board when either differs.
@@ -1419,6 +1447,7 @@ Records in the outbox survive a rejoin; frames sealed under an epoch that no lon
 When a Skip (§17.3) or a `ResetTo` (§28.1) needs a state from before this device's oldest base or log (it bootstrapped after the target), the engine stops its board at `s − 1` with the stop `rebootstrap { after: s }` (§21.4), keeps classifying and committing membership as under a crash halt, and waits for a usable snapshot at an aligned `S > s`. It then opens it with `exact = true` and the `snap` entry's `SnapInfo`, checks that the membership bytes equal its own `M_S`, loads the board at `S` (`SM::load`) and checks `SM::rules(board) = M_S.rules`, sets `B = S` and applies the classified entries after it. A snapshot that fails to open or to load, or fails either check, is passed over (alarm `BlobFailure` with the writer, the blob id and the code of a failed open or load), and the device waits for the next usable snapshot. This keeps its log; it needs no confirmation.
 
 - **ENG-BOOT-005** (engine) A device that cannot replay to a Skip or `ResetTo` target MUST NOT apply the entry that needs it, and MUST resume only from a usable snapshot above that entry whose membership bytes equal its own and whose board loads with that membership's rules version.
+- **ENG-BOOT-006** (engine) On a bootstrap from a snapshot at `S` (a rejoin, §19.7 step 4, or a join, §19.8), the engine MUST write the checkpoint and the base at `S` in one `Persist`, and MUST emit `TruncateLogBelow(S + 1, Some(C_S))` only after that `Persist`'s `Persisted`.
 
 ## 20. Compaction
 
@@ -1533,11 +1562,13 @@ On `RelayBehind`, `Fork`, `Counter`, `Unechoed` or `Withheld`, the device (SYNC.
 
 **Restore tail** (`relay.md` §12.9). When the evidence is `RelayBehind` and the relay's chain at its head equals this device's `C` at that seq (the relay is a prefix of this device's log: a plain rollback), the device repairs it, as any device does that holds more than the relay. No device is designated: whoever is awake restores what it holds; another device's later attempt answers `relay/not_next` with the relay head and resumes from there.
 
-1. Requests of at most 64 frames and 1,048,576 bytes, from the relay head + 1, in seq order, with `chain_before` equal to this device's chain at the relay head. A request ends with the first control entry it contains; the next request is sent only after that entry's repairs of step 2 have succeeded, so that a frame of an author the entry registers never reaches the relay before that author's row (`relay.md` §12.9, `relay/unknown_author`).
+1. Requests of at most 64 frames and 1,048,576 bytes, from the relay head + 1, in seq order, with `chain_before` equal to this device's chain at the relay head. The engine takes each request's frames from its durable log with `ReadLog { from, to }` over at most 64 seqs (§4.3; the in-memory state holds no frames, §7.1), ends the request before the frame that would take it above 1,048,576 bytes, and sends the frames byte for byte as the log holds them. A `LocalRead` answered `Missing` is the local fault `engine/local_fault` (§21.4), and nothing is sent. A request ends with the first control entry it contains; the next request is sent only after that entry's repairs of step 2 have succeeded, so that a frame of an author the entry registers never reaches the relay before that author's row (`relay.md` §12.9, `relay/unknown_author`).
 2. After the request that restores a control entry this device classified `Accept`, before the next request, the device repairs the relay for it, in item order (`relay.md` §12.9): `RegisterSeq { seq, dev, sign_pk, frame_hash }` for a `DeviceAdded`, with `sign_pk` the added device's (`DeviceView.sign_pk`, §6.2); `RecoveryRegisterSeq { seq, dev_r, sign_pk, frame_hash }` for a `K`-shape entry, with `dev_r` and `sign_pk` those of the `recovery` entry it installed (§6.2); `Revoke` for each revoked device other than itself; `Fence` without a frame for a `Fence`; and, for a rotation that carries `purge_before = p` with new epoch `n`, `Purge { before_seq: p, epoch: n }`, whose continuation of §28.2 step 3 (`duties.purge`) runs once the stop has ended. A refused control entry needs no repair. A `DeviceReinstated` needs the recovery identity's signature: the device records the alarm `RelayProtocol` with `engine/restore_incomplete` naming the seq, and the user repairs it with the recovery tool.
 3. `409 relay/not_next` with `head`: when `head.seq ≤ L` and this device's chain at `head.seq` equals `head.chain`, resume from `head.seq + 1`; when `head.seq > L`, read (the stop is lifted for this check), and clear the evidence when the relay's chain at `L` equals this device's; else evidence `Fork`.
 4. `409 relay/chain_mismatch`: evidence `Fork`.
 5. When the relay head reaches `L` with this device's chain, and every acknowledgement echoes, the evidence is resolved and the stop ends.
+
+**Blobs.** A restore tail restores log rows and the author rows they need, not blobs: a blob that the rollback lost stays lost, and no device uploads it again, because its sealed bytes, which the announcing `snap` entry pins by `sha256`, cannot be reproduced. The `SnapRecord` of that `snap` entry stays in the registry. A rejoin does not meet the blob (it takes its candidates from the relay's blob list, §19.7 step 2); a compaction that names it is answered `409 relay/no_snapshot` and records the day (§20.2); the next snapshot that §19.2 makes due gives compaction a usable blob again.
 
 **Re-home.** `Fork`, `Counter`, `Unechoed`, and `Withheld` that lasts more than 86,400,000 ms of `wall_ms` are answered by moving the board to another relay, seeded from this device's log (§28.3, SYNC.md §6.7). The stop ends on this device when it follows a `Fence` to a relay whose log agrees with its own.
 
@@ -1549,6 +1580,7 @@ On `RelayBehind`, `Fork`, `Counter`, `Unechoed` or `Withheld`, the device (SYNC.
 `engine/persist_failed`, `engine/local_fault` (a panic in a trait method other than `apply`, an inconsistency between two of the device's own records, a checkpoint, base or pairing material of its own whose board does not load, an `SM::reset` error, or a `LocalRead` answered `Missing`), `engine/missing_root`, `engine/own_frame_refused`, `engine/skip_unreachable`, `engine/runtime_protocol` (when it is persistent: the same violation three times in one `Start`), `engine/bad_genesis`, `stranded` and `rebootstrap` stop sending and applying like evidence (except `rebootstrap`, §19.9), show their code, and end at the next `Start` (`stranded` and `rebootstrap` end as §19.7 and §19.9 say). They are not integrity alarms: nothing proves the relay did wrong.
 
 - **ENG-EVID-006** (engine) A local fault MUST stop sending and applying, MUST NOT be shown as an integrity alarm, and MUST be re-evaluated at the next `Start`.
+- **ENG-EVID-007** (engine) The engine MUST take the frames of each restore-tail request from its durable log through `ReadLog` and send them unchanged, and MUST send no request whose `ReadLog` was answered `Missing`.
 
 ## 22. Determinism mismatch and adoption
 
@@ -1595,10 +1627,11 @@ A beat is a duty "daily while awake" (SYNC.md §4.2). An eligible device (§29.1
 
 ### 23.2 Contents
 
-`BeatInfo` (`seal.md` §11.4): `rules = SM::supported_rules()`, `envelopes = Sealer::supported_envelopes()`, `hash_versions = SM::hash_versions()`, `state` = this device's hash record at the largest aligned `S ≤ B` (absent when `B < 64`), `acks` = `pending_verdicts` (at most 64, ascending, distinct). The beat's head is its `based_on = (B, C_B)`. `pending_verdicts` are removed when the beat is seen accepted.
+`BeatInfo` (`seal.md` §11.4): `rules = SM::supported_rules()`, `envelopes = Sealer::supported_envelopes()`, `hash_versions = SM::hash_versions()`, `state` = this device's hash record at the largest aligned `S ≤ B`, absent when it holds no hash record at that `S` (`B < 64`, or the device bootstrapped from a snapshot at a seq at or above `S`, §18.3), `acks` = `pending_verdicts` (at most 64, ascending, distinct). The beat's head is its `based_on = (B, C_B)`. `pending_verdicts` are removed when the beat is seen accepted.
 
 - **ENG-BEAT-001** (engine) An eligible engine MUST enqueue a beat when one of the three conditions of §23.1 holds and no beat record of it is unsent.
 - **ENG-BEAT-002** (engine) A beat MUST carry exactly the contents of §23.2.
+- **ENG-BEAT-003** (engine) The engine MUST start a new replica's `Meta` with `last_beat_ms = 0`.
 
 ### 23.3 What receivers derive
 
@@ -1638,7 +1671,7 @@ A revoked device sends nothing, takes no duty, keeps every record, and shows "th
 - **ENG-EPOCH-002** (engine) A revoked device MUST keep its log, outbox, keys and notices, MUST NOT send, and MUST offer re-pair and resubmit.
 - **ENG-EPOCH-004** (engine) A revoked device MUST emit `Connect` at most once per 3,600,000 ms of `mono_ms`, and while revoked MUST emit no `Append`, no `Admin` and no blob upload.
 
-**Reinstatement (ruling S24).** The recovery tool reinstates a revoked device with the `reinstate` admin operation, whose `args` carry the wraps, to the device's `hpke_pk`, of the roots of epochs `first_epoch` to `E` (`seal.md` §16.2: `first_epoch` is the epoch the revoking entry's rotation set up, or the epoch in force at `purge_seq` when that is later; `E` is the epoch the reinstating entry is sealed under), and then with the `R`-shape entry whose `DeviceReinstated` names it and whose rotation to `E + 1` wraps to it like to every other recipient. The relay stores the wraps on the device's row and returns them in every `login` answer of that device until it is revoked again (`relay.md` §10.3 `wraps`, §12.5). The runtime logs in at every `Connect` while this device is revoked and sends `MissedRoots { first_epoch, wraps }` after each login whose answer carries them (`device.md` §10.3). While revoked, the device keeps its log and pauses classification at the first entry for which `classify` returns `seal/missing_root` (the paused seq, `K + 1`), without the local fault `engine/missing_root`. On `MissedRoots` while revoked, the engine calls `Sealer::take_missed_wraps(M_K, first_epoch, wraps)`; a `MissedRoots` with no wrap, more than 256 wraps or `first_epoch = 0` is `engine/runtime_protocol` and is ignored, and one that arrives while the device is not revoked is ignored (the relay returns the wraps until the next `revoke`). When the sealer reports a learned root, the engine persists the identity (D4), clears the revoked state (the stop `Revoked` and its banner action), and classifies and applies in seq order from the paused seq, from its log and then from the relay, before it seals or appends anything: the root of each later epoch is checked against the commitment of the rotation that set it as that rotation is classified (each rotation is sealed under the epoch before it; §6.1 `classify`), and the reinstating entry's own rotation gives `R_{E+1}`. A wrap that does not open, or a root that does not match its commitment, is the commitment halt (§16.1). A reinstated device does not pair again. If `M_K` still records this device as revoked when classification reaches the relay's head (a `reinstate` whose entry never landed), the device is revoked again with `source: log` and the revoking entry's seq and author, and pauses at the next `seal/missing_root`. A device revoked before a purge cannot replay across it: its membership holds no commitment of `first_epoch`, so the sealer learns no root from the wraps; when its reads reach the relay's floor it rejoins from a snapshot at or after `purge_seq` by §19.7, as a device away more than 365 days does, and without the root of a candidate's epoch it ends in the stop `stranded` and is offered re-pair and resubmit (§24.5).
+**Reinstatement (ruling S24).** The recovery tool reinstates a revoked device with the `reinstate` admin operation, whose `args` carry the wraps, to the device's `hpke_pk`, of the roots of epochs `first_epoch` to `E` (`seal.md` §16.2: `first_epoch` is the epoch the revoking entry's rotation set up; `E` is the epoch the reinstating entry is sealed under), and then with the `R`-shape entry whose `DeviceReinstated` names it and whose rotation to `E + 1` wraps to it like to every other recipient (`device.md` §15.8). The relay stores the wraps on the device's row and returns them in every `login` answer of that device until it is revoked again (`relay.md` §10.3 `wraps`, §12.5). The runtime logs in at every `Connect` while this device is revoked and sends `MissedRoots { first_epoch, wraps }` after each login whose answer carries them (`device.md` §10.3). While revoked, the device keeps its log and pauses classification at the first entry for which `classify` returns `seal/missing_root` (the paused seq, `K + 1`), without the local fault `engine/missing_root`. On `MissedRoots` while revoked, the engine calls `Sealer::take_missed_wraps(M_K, first_epoch, wraps)`; a `MissedRoots` with no wrap, more than 256 wraps or `first_epoch = 0` is `engine/runtime_protocol` and is ignored, and one that arrives while the device is not revoked is ignored (the relay returns the wraps until the next `revoke`). When the sealer reports a learned root, the engine persists the identity (D4), clears the revoked state (the stop `Revoked` and its banner action), and classifies and applies in seq order from the paused seq, from its log and then from the relay, before it seals or appends anything: the root of each later epoch is checked against the commitment of the rotation that set it as that rotation is classified (each rotation is sealed under the epoch before it; §6.1 `classify`), and the reinstating entry's own rotation gives `R_{E+1}`. A wrap that does not open, or a root that does not match its commitment, is the commitment halt (§16.1). A reinstated device does not pair again. If `M_K` still records this device as revoked when classification reaches the relay's head (a `reinstate` whose entry never landed), the device is revoked again with `source: log` and the revoking entry's seq and author, and pauses at the next `seal/missing_root`. The recovery tool does not offer reinstatement to a device whose revoking entry lies below `purge_seq` (lead ruling L20): such a device stays revoked and is offered re-pair and resubmit (§24.5), or the owner restores to a new board.
 
 - **ENG-EPOCH-005** (engine) A device revoked in its membership MUST keep its log and MUST pause classification at the first entry for which the sealer returns `seal/missing_root`; on `MissedRoots` while revoked it MUST pass the wraps to `Sealer::take_missed_wraps` with `M_K`, and once the sealer reports a learned root it MUST persist the identity, clear the revoked state, and classify and apply in seq order from the paused seq up to the relay's head before it seals or appends anything.
 
@@ -1793,7 +1826,7 @@ SYNC.md §4.7, V2-13, rulings S13. On the purging device:
 On **every device**, at the board apply of an accepted rotation with `purge_before = p` at `r`:
 
 1. write a base at `r` (D7);
-2. `TruncateLogBelow(p)`, `log_floor = p`; drop hash records and `SnapRecord`s below `p`;
+2. `TruncateLogBelow(p, floor_chain)`, with `floor_chain` = `C_{p−1}` from the chain index when `p − 1 ≥ retained_from`, else `None` (§7.11), and `log_floor = p`; drop hash records and `SnapRecord`s below `p`;
 3. `DeleteBases` of every base below `r`;
 4. when `τ_K ≥ τ_r + 2,592,000,000` (thirty days, after which no entry under the old epoch can be accepted, `seal.md` §13.9): `Sealer::forget_roots_below(n)` and `WriteIdentity`, which crypto-shreds the relay's copies (SYNC.md §4.7).
 
@@ -1841,24 +1874,26 @@ SYNC.md §5.3, `seal.md` §17.1 step 9 and SEAL-PAIR-010.
 `PairRegister { ticket, device }` from the existing-device machine. Refused with `engine/halted`, `engine/not_eligible` (not current, stopped, not `Live`) or `engine/pair_busy` (one pairing at a time). Otherwise:
 
 1. `h = B`. The material at `h`: the confirmed state's bytes, `M_h`, `C_h` and the state hash. `Sealer::seal_snapshot(M_K, material)`; `Blob { Upload { purpose: 2, seq: h } }`. A `SealerError` from `seal_snapshot` (`seal/snapshot_large`) ends the pairing before any upload or entry: `Notify(PairFailed { ticket, code })` with that code.
-2. Enqueue `CtlIntent::AddDevice { dev, sign_pk, hpke_pk, name, transcript, bootstrap_seq: h }` with `based_on = (h, C_h)` and `via: Register { dev, sign_pk }`.
+2. When the `BlobResult` of that upload arrives with `Uploaded`, enqueue `CtlIntent::AddDevice { dev, sign_pk, hpke_pk, name, transcript, bootstrap_seq: h }` with `based_on = (h, C_h)` and `via: Register { dev, sign_pk }`. A `BlobResult` with a `RelayRefusal` ends the pairing before any entry: nothing is enqueued, and the engine answers `Notify(PairFailed { ticket, code })` with the refusal's code.
 3. When the send loop reaches it: if `M_K.epoch` differs from the epoch of the snapshot uploaded in step 1 (a rotation was classified after `h`), the engine drops the record unsent (`Outbox[Drop]`), sends nothing to the relay, and answers `Notify(PairFailed { ticket, code: "seal/pair_raced" })`; the user pairs again. Otherwise it seals the record and sends `Admin { Register { frame } }`. On success at seq `a`: `Notify(PairRegistered { ticket, head: (h, C_h), snapshot: SnapInfo, added_seq: a })`; the runtime hands the pairing machine the token from the admin answer and, from the sealer, the roots of the snapshot's epoch and of the epoch before it when that epoch is 2 or more, never a later root (`seal.md` §17.8); the machine posts slot D.
 4. A refusal of the entry (a rotation raced it, `seal/stale_epoch`; a device cap) first sends `Admin { Revoke { dev } }` for the new device, so that the relay drops the row and token `register` created for it (`relay.md` §12.4); a `409 relay/target` answer (already revoked) counts as done. Then it answers `Notify(PairFailed { ticket, code })`, and the user pairs again (`seal.md` `seal/pair_raced`).
 
 - **ENG-OPS-001** (engine) The engine MUST compose the `DeviceAdded` of a pairing with `based_on` and `bootstrap_seq` equal to the seq of the snapshot it uploaded for the bundle, and MUST send it with the `register` admin operation.
 - **ENG-OPS-004** (engine) When the `DeviceAdded` of a pairing that it sent with `register` is refused, the engine MUST send the `revoke` admin operation for that device before it reports the pairing failed.
 - **ENG-OPS-006** (engine) The engine MUST NOT seal a pairing's `DeviceAdded` under an epoch other than that of the snapshot it uploaded for the bundle: when `M_K.epoch` differs from it, the engine MUST drop the record unsent and report the pairing failed with `seal/pair_raced`.
+- **ENG-OPS-008** (engine) The engine MUST enqueue a pairing's `DeviceAdded` only after the `BlobResult` `Uploaded` of that pairing's snapshot, and MUST enqueue nothing and report the pairing failed with the refusal's code when the upload is refused.
 
 ### 28.5 Revoking and replacing a device
 
 `Operation::Revoke { dev, replace }` (SYNC.md §5.4, V1-3). Refused with `engine/revoke_target` when `dev` is not a current device of `M_K`, is this device, or is the last current device (ruling S14).
 
-1. `Admin { Revoke { dev } }` (the relay drops the target's tokens at once, `relay.md` §12.4).
-2. Enqueue `CtlIntent::Rotate { revoke: [dev], reinstate: [], purge_before: None }`.
+1. After the `WriteMeta` of stage 1 (D10): `Admin { Revoke { dev } }` (the relay drops the target's tokens at once, `relay.md` §12.4).
+2. When its `AdminResult` is `Ok`, or is the refusal `409 relay/target` (the relay already holds no current row for the target, for example after a `Start` repeated stage 1 whose call had committed): enqueue `CtlIntent::Rotate { revoke: [dev], reinstate: [], purge_before: None }` as §9.2 states, in one `Persist` holding, in order, the `WriteMeta` of stage 2 and the `Outbox` op with the `Put` of that record. Any other refusal ends the operation before any entry: nothing is enqueued, and `Notify(OpDone { ticket, result: Err(code) })` carries the refusal's code.
 3. Accepted: done. With `replace`, `Notify(ReplaceReady { dev })`: the user pairs that machine again as a new device.
 4. Refused with `seal/ctl_epoch` or `seal/ctl_wraps` (another rotation or a membership change raced it): if `dev` is now revoked in `M_K`, done; otherwise compose again from stage 2, after every such race, until the entry is accepted or `dev` is revoked in `M_K`, bounded only by the operation timeout of §28.8 (the relay has already locked the target out, `relay.md` §12.4, so the log must follow). Any other refusal: failed.
 
 - **ENG-OPS-002** (engine) The engine MUST send the `revoke` admin operation before it enqueues the rotation that revokes the device, and MUST compose the rotation again after every race until the target is revoked in its membership or the operation times out (§28.8).
+- **ENG-OPS-009** (engine) The engine MUST enqueue the rotation of a `Revoke` operation only after the `revoke` admin answer is `Ok` or `409 relay/target`, in one `Persist` with the operation's stage 2, and on any other refusal MUST enqueue nothing and end the operation with the refusal's code.
 
 ### 28.6 Recovery-key changes
 
@@ -1943,7 +1978,7 @@ The engine gives the data; `desktop` and `android` choose the words (SYNC_PLAN.m
 | `fingerprint` | string | `Sealer::sync_fingerprint` of `(B, C_B)` (`seal.md` §15.3) |
 | `clock` | `{ skew_ms: Option<i64>, warning: bool, blocked: bool, confirmed_until_ms: Option<i64> }` | §27 |
 | `halt` | `Option<{ kind, seq, author, author_name, author_fp, since_ms, code, skip_offer: Option<{ seq, here: bool }> }>` | §16; `here` is true when this device may compose the Skip (§17.1) |
-| `stops` | list of `{ kind, since_ms, alarm: Option<u64>, action }` | §11.9, §21, §22, §24.4; `action` is one of `RestoreTail`, `ReHome`, `Adopt`, `RePair`, `ReplaceDevice`, `UseThisCopy`, `Restart`, `ConfirmRejoin`, `Wait` |
+| `stops` | list of `{ kind, since_ms, alarm: Option<u64>, action }` | §11.9, §19.7 step 1, §21, §22, §24.4; `action` is one of `RestoreTail`, `ReHome`, `Adopt`, `RePair`, `ReplaceDevice`, `UseThisCopy`, `Restart`, `ConfirmRejoin`, `Wait`; `ConfirmRejoin` only with the kind `Rejoin`, while `session` is `Rejoining` |
 | `alarms` | list of `AlarmRecord` | unresolved alarms with their evidence (§21.1) |
 | `banners` | list of `Banner` | unacknowledged banners (§14.2) |
 | `devices` | list of `{ dev, name, key_fp, device_no, status, is_self, last_beat_ms, last_entry_ms, rules, bootstrap_seq }` | last seen, never an alarm (V2-10) |
@@ -2045,13 +2080,14 @@ pub enum Notification {
 pub enum UserAction {
     AckBanner { id: (u64, u8) }, DismissNotice { seq: u64, index: u32 }, DismissAlarm { id: u64 },
     ConfirmClock, MoveCode { text: String },
-    ConfirmRejoin, UseThisCopy, ExportUnsent,
+    ConfirmRejoin, UseThisCopy, ExportUnsent, AckContinuity,
 }
 ```
 
 `DismissAlarm` hides an alarm that does not stop the engine; an alarm behind a stop is resolved only by its repair.
 
 - **ENG-UI-002** (engine) The engine MUST ignore `DismissAlarm` for an alarm whose kind stops it while that stop is in force.
+- **ENG-UI-003** (engine) The engine MUST show `ContinuityUnchecked { from: S }` in `status.warnings` from the success of a rejoin at `S` until `UserAction::AckContinuity`, across restarts, and at no other time.
 
 ## 31. The simulator
 
@@ -2120,7 +2156,7 @@ Let the **reference log** be the final model relay's log after the settle, or, i
 2. **Acknowledged entries.** For every `entry_id` that a relay acknowledged (`new` or `dup`) to a device: at the end, the reference log holds it exactly once with class `Accept` (applied, or refused by `apply`), after any number of re-sealable refusals; and every device whose `B` is past that seq has applied it exactly once.
 3. **Queued edits.** For every `Notify(Enqueued)` with an `entry_id`: at the end, either the reference log holds that `entry_id` exactly once with class `Accept`, or the record is still in the outbox of a device that is halted, stopped or revoked, or it was finally refused with a refusal record on its device.
 4. **Tampering.** No device's confirmed state at any moment differs from the oracle's at the same `B` (on the branch it followed), and every device that received a welcome or page contradicting its own log, or a page from a rolled-back or forked relay state that it would otherwise have applied, raised an alarm of §21.1 with evidence before applying any entry of it; every injected frame raised `SkippedFrame`.
-5. **No deletion by the relay.** Every `TruncateLogBelow`, `DeleteBases`, outbox `Drop`, `forget_roots_below` and identity change a device emits is explained by one of: the retention rules of §7.13; an accepted purge rotation (§28.2); a `ConfirmRejoin` (§19.7); an entry that reached the board head; a cancelled hold; an accepted epoch rotation or refused own rotation.
+5. **No deletion by the relay.** Every `TruncateLogBelow`, `DeleteBases`, outbox `Drop`, `forget_roots_below` and identity change a device emits is explained by one of: the retention rules of §7.13; an accepted purge rotation (§28.2); a `ConfirmRejoin` (§19.7); a join (§19.8); an entry that reached the board head; a cancelled hold; an accepted epoch rotation or refused own rotation.
 6. **Settling.** At `T_f + 7,200,000`, every device is either `Live`, caught up, with no record older than `T_f + 600,000` in its outbox, or halted or stopped with a persisted reason; no request has been outstanding longer than 120,000 ms; and in the last 1,800,000 ms no device emitted an `Append` other than of beats and duty entries.
 
 - **ENG-SIM-002** (engine) The simulator MUST check the six invariants of §31.7 at the end of every run and MUST report each violation with the seed, the invariant and the first trace line that shows it.
@@ -2324,6 +2360,7 @@ Stage `engine` publishes these families under `crates/taskdeck-sync/tests/vector
 
 **`device.md`.**
 - Requires: the runtime of §4: serial persists with `Persisted` in order (ENG-PERSIST-001), the other effects in order without waiting (ENG-EFFECT-001), `Start` with every record of §7.10, a session id per process, the backoff, login and tokens, the poll rate while visible, ticks.
+- Requires: the sealer adapter composes rotations, draws its random values and retires its pending roots as §6.1 `seal` and `classify` state (ENG-SEALER-007 to ENG-SEALER-009).
 - Requires: the facade compiles against the engine's pending view and sends `Enqueue` with no other input in between, with `at_ms` the compile clock (§9.1), and persists nothing of its own about the command (the origin state travels in the record).
 - Requires: after a catch-up that showed higher marks, the runtime raises the `IdMinter` (`core.md` §19); after `Notify(RecoveryKeyChanged)`, backup writers ask for the new fingerprint (SEAL-BKP-006); after `Notify(PurgeBackups)` and `Notify(ReuploadPicture)`, the runtime acts on the user's confirmation; it gates operations by platform (SYNC_PLAN.md §2).
 - Requires: backups read the confirmed state, `M_B` and the history from the engine (`Engine::confirmed()`, `Engine::membership()`), and the history records of every accepted control entry are kept for the life of the board (`seal.md` §25), which the engine's log retention does not provide below `log_floor`: `device.md` keeps them in `history.tdk` (kind 11, `device.md` §15.7).
@@ -2423,14 +2460,15 @@ pub struct HaltRecord { pub kind: HaltKind, pub seq: u64, pub author: Dev, pub s
 pub enum HaltKind { Crash { frame_hash: Hash32 }, Rules { version: u32 }, Commitment }
 pub struct StopRecord { pub kind: StopKind, pub since_ms: i64, pub alarm: Option<u64> }
 pub enum StopKind { Evidence, Divergence, ForeignSigner, IdentityClone, Revoked { by_log: bool },
-                    LocalFault { code: String }, Stranded, Rebootstrap { after: u64 }, Closed }
+                    LocalFault { code: String }, Stranded, Rebootstrap { after: u64 }, Closed, Rejoin }
 pub struct DutyState { pub snapshot: Option<(u64, i64, u8)>, pub last_compact_day: i64,
                        pub purge: Option<(u64, u32)>, pub upgrade: Option<(u32, i64)> }
 pub struct Meta { pub attempt: u64, pub last_failed: Option<(u64, u64)>, pub build_id: String,
                   pub halt: Option<HaltRecord>, pub stops: Vec<StopRecord>, pub alarms: Vec<AlarmRecord>,
                   pub banners: Vec<Banner>, pub relay: RelayTarget, pub prev_session: Option<[u8; 16]>,
                   pub conflicts: u32, pub clock: Option<(i64, i64)>, pub last_beat_ms: i64,
-                  pub duties: DutyState, pub ops: Vec<OpRecord>, pub move_tries: (u32, i64) }
+                  pub duties: DutyState, pub ops: Vec<OpRecord>, pub move_tries: (u32, i64),
+                  pub continuity_unchecked: Option<u64> }
 pub enum PersistOp { AppendLog(Vec<LogRecord>), SetMarker(Marker), ClearMarker, WriteCheckpoint(Checkpoint),
                      WriteBase(Checkpoint), DeleteBases(Vec<u64>), TruncateLogBelow(u64, Option<Hash32>),
                      AppendHashes(Vec<HashRecord>), Outbox(Vec<OutboxOp>), RewriteOutbox(Vec<OutboxRecord>),
@@ -2515,6 +2553,6 @@ Non-normative. Each states the default this spec takes.
 21. **The move-code limit** is 5 tries, then an hour (§28.3). Decided here (`seal.md` leaves it to the engine).
 22. **The clock confirmation lasts seven days and five minutes of drift** (§27.2). Decided here (SYNC.md: "until the user confirms the clock").
 23. **`view_version` restarts at every start** (§8.2). Decided here; `bridge.md` must treat it as a change token.
-24. **A reinstated device reads what was sealed while it was revoked** (§24.4; ruling S24, lead ruling L1): the wraps of the roots it missed reach it in its `login` answer, outside the reinstating entry it cannot open, and it resumes classification at the paused seq; it does not pair again. A device revoked before a purge cannot replay across it and rejoins as §19.7 states. Decided here.
+24. **A reinstated device reads what was sealed while it was revoked** (§24.4; ruling S24, lead rulings L1 and L20): the wraps of the roots it missed reach it in its `login` answer, outside the reinstating entry it cannot open, and it resumes classification at the paused seq; it does not pair again. A device whose revoking entry lies below `purge_seq` is not offered reinstatement and pairs again. Decided here.
 25. **The model relay does not model nonces or admin signatures** (§31.3); the conformance suite covers them. Decided here.
 26. **The seeded tail can reach back further than 30 days** (§28.3 stage 3): `first_seq = min(S + 1, max(1, M_L.purge_seq, L + 1 − 16,384))` keeps on the new relay every Skip target ruling S15 permits after the move, at a cost of at most 16,384 frames written once; on a quiet board that reaches back further than SYNC.md §6.7's "up to 30 days of tail". Default: the longer tail (lead ruling L2), a deliberate difference from SYNC.md §6.7.

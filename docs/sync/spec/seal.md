@@ -290,6 +290,8 @@ plaintext   = R_e (32 bytes)
 
 The info binds the use, the board, the epoch and the recipient; the aad binds the envelope version, the suite and the commitment (V1-12).
 
+**The ephemeral key.** `SealBase` makes its ephemeral key with RFC 9180's `GenerateKeyPair`: `wrap_root` draws exactly 32 bytes `ikm` from its `Entropy` argument and takes the key pair `DeriveKeyPair(ikm)` (RFC 9180 §7.1.3). It draws nothing else. A test vector (§24) gives those 32 bytes for each wrap, in the order the wraps are made.
+
 **Wrap layout** (96 bytes):
 
 | Offset | Field | Width | Value |
@@ -301,11 +303,12 @@ The info binds the use, the board, the epoch and the recipient; the aad binds th
 
 In JSON a wrap is a 192-character hex string of these 96 bytes.
 
-**Wraps delivered outside an entry.** A device that the recovery identity reinstates (ruling S24) receives, outside the log, the wraps of the roots of the epochs it missed: the recovery identity signs them in the `reinstate` operation (§16.2), and the relay returns them at the device's login (`relay.md`; `device.md` §10.3). The device opens the wrap of epoch `e` by SEAL-WRAP-002, with `c_e` as its own membership records it, and only once its membership records `c_e`, oldest epoch first: the commitment of the first wrapped epoch is already in its membership (it classified the revoking rotation, which is sealed under an epoch it held), unless `first_epoch` was raised to the epoch in force at `purge_seq`: then its membership records no commitment for that epoch, it opens none of the wraps, and it cannot replay across the purge (`engine.md` §24.4); each later one enters it when the device classifies, in seq order, the rotation that set that epoch, which is sealed under the epoch before it. It uses a root only after it matched `c_e` (SEAL-KEY-013).
+**Wraps delivered outside an entry.** A device that the recovery identity reinstates (ruling S24) receives, outside the log, the wraps of the roots of the epochs it missed: the recovery identity signs them in the `reinstate` operation (§16.2), and the relay returns them at the device's login (`relay.md`; `device.md` §10.3). The device opens the wrap of epoch `e` by SEAL-WRAP-002, with `c_e` as its own membership records it, and only once its membership records `c_e`, oldest epoch first: the commitment of the first wrapped epoch is already in its membership (it classified the revoking rotation, which is sealed under an epoch it held; the recovery tool offers no reinstatement when the revoking entry lies below `purge_seq`, lead ruling L20, `device.md` §15.8); each later one enters it when the device classifies, in seq order, the rotation that set that epoch, which is sealed under the epoch before it. It uses a root only after it matched `c_e` (SEAL-KEY-013).
 
 - **SEAL-WRAP-001** (seal, recovery) A wrap of `R_e` MUST be produced by HPKE `SealBase` with the suite, `info`, `aad` and plaintext of §7, and laid out as the 96-byte table of §7.
 - **SEAL-WRAP-002** (seal, recovery) Unwrapping MUST call HPKE `OpenBase` with the `info` and `aad` rebuilt from the receiver's own `board_id`, the epoch named by the item, the receiver's own id and public key, and the commitment `c_e` from the same item (for a wrap delivered outside an entry, §7: the epoch it is delivered for and `c_e` as the receiver's membership records it), never from values taken from the wrap.
 - **SEAL-WRAP-003** (seal) A device MUST treat a failure to open its own wrap, or an opened root whose commitment differs from `c_e`, as the commitment halt of §14.5, for a wrap delivered outside an entry (§7) as for one inside a rotation.
+- **SEAL-WRAP-004** (seal) `wrap_root` MUST draw exactly 32 bytes from its `Entropy` argument, MUST derive HPKE's ephemeral key pair from them with `DeriveKeyPair`, and MUST draw nothing else.
 
 ## 8. Frame
 
@@ -1073,7 +1076,7 @@ An admin operation needs a fresh signature from a current device or the current 
 |---|---|---|---|
 | `register` | `dev[16] ‖ sign_pk[32] ‖ frame_hash[32]` | 80 | frame mode: the `DeviceAdded` frame appended in the same call, `frame_hash` its hash; seq mode (repairing the relay's rows after a restore tail, `relay.md` §12.9): the entry already stored at the `u64 seq` carried in the unsigned `extra`, `frame_hash` its hash |
 | `revoke` | `dev[16]` | 16 | before the `R`-shape entry that revokes it; or alone, for a device that `register` added at the relay but whose `DeviceAdded` clients refused (`engine.md` §28.4) |
-| `reinstate` | `dev[16] ‖ u32 first_epoch ‖ u16 n ‖ n × wrap[96]` | 22 + 96n | signed by the current recovery identity, before the `R`-shape entry that reinstates `dev`: the wraps (§7) of the roots of epochs `first_epoch` to `first_epoch + n − 1`, in order, each to the target's `hpke_pk`, with `1 ≤ n ≤ 256`; `first_epoch` is the epoch the rotation in the revoking entry set up, or the epoch in force at `purge_seq` when that is later; the last wrapped epoch is the one the reinstating entry is sealed under, whose own rotation wraps to the target as to every recipient (ruling S24, lead ruling L1); the relay stores the wraps and returns them at the target's login (`relay.md`) |
+| `reinstate` | `dev[16] ‖ u32 first_epoch ‖ u16 n ‖ n × wrap[96]` | 22 + 96n | signed by the current recovery identity, before the `R`-shape entry that reinstates `dev`: the wraps (§7) of the roots of epochs `first_epoch` to `first_epoch + n − 1`, in order, each to the target's `hpke_pk`, with `1 ≤ n ≤ 256`; `first_epoch` is the epoch the rotation in the revoking entry set up, and no reinstatement is offered for a revoking entry below `purge_seq` (lead ruling L20, `device.md` §15.8); the last wrapped epoch is the one the reinstating entry is sealed under, whose own rotation wraps to the target as to every recipient (ruling S24, lead ruling L1); the relay stores the wraps and returns them at the target's login (`relay.md`) |
 | `recovery_register` | `dev_R[16] ‖ sign_pk[32] ‖ frame_hash[32]` | 80 | after the `K`-shape entry that installs the new recovery key has been appended as an ordinary entry, sequenced, and classified `Accept` by the sender: the unsigned `extra` carries that entry's `u64 seq`, `frame_hash` is its hash; never with the frame in the same call (`relay.md` §12.12) |
 | `fence` | `vb8(host) ‖ door[5] ‖ u32 home_gen` | 10 + n | to the old relay, with the `Fence` frame in the same call (in the unsigned `extra`) or after the `Fence` entry is sequenced |
 | `seed` | `u32 home_gen ‖ u64 first_seq ‖ chain_before[32] ‖ u64 last_seq ‖ chain_last[32] ‖ blob_id[16] ‖ u16 n ‖ n × (dev[16] ‖ sign_pk[32] ‖ u8 role ‖ u8 status ‖ u64 last_ctr)` | 102 + 58n | to the new relay, with its create secret. `first_seq` is the first tail seq: `min(S + 1, max(1, purge_seq, last_seq + 1 − 16,384))`, with `S` the seeded snapshot's seq and `purge_seq` that of `M_{last_seq}`, whenever the seeding device holds those frames (`engine.md` §28.3), so that the new relay holds every Skip target §13.6 permits after the move; `chain_before = C_{first_seq − 1}`; `last_seq` is the last tail seq (`first_seq − 1` for no tail) and `chain_last = C_{last_seq}`; the entries are the devices and recovery identities of `M_{last_seq}` with their role and status there, and each `last_ctr` is that author's counter at `first_seq − 1`; `blob_id` is the seeded snapshot's, or 16 zero bytes, and is informational |
@@ -1195,6 +1198,8 @@ In order, aborting on the first failure:
 ### 17.7 Transcript and SAS
 
 ```text
+esk_X = 32 bytes from Entropy (X = E or N), used as an X25519 scalar as RFC 7748 §5 decodes it
+epk_X = X25519(esk_X, 9)                                             (the base point u = 9)
 dh  = X25519(esk_E, epk_N) on E, X25519(esk_N, epk_E) on N         (all-zero output aborts, SEAL-GEN-013)
 T   = H(ctx("pair-transcript") ‖ vb16(relay origin) ‖ board_id[16] ‖ tid[16] ‖ dev_E[16] ‖ slot A ‖ slot B ‖ slot C)
 sas = HKDF(salt = s, ikm = dh, info = ctx("sas") ‖ T, L = 8)
@@ -1202,6 +1207,9 @@ digits = (sas read as a big-endian u64) mod 1,000,000, written as 6 decimal digi
 ```
 
 Slots A, B and C enter `T` verbatim as posted, MACs included, so `T` covers N's long-term keys and name, both ephemeral keys, the commitment and its opening (V1-6). The relay origin is the one each side is connected to (§5.4).
+
+The ephemeral keys are not HPKE keys: `epk_X` is the RFC 7748 X25519 function of the raw 32 bytes and the base
+point, with no `DeriveKeyPair` (§6.4 uses `DeriveKeyPair` only for a device's long-term X25519 key).
 
 - **SEAL-PAIR-006** (seal) `T` and the six SAS digits MUST be computed exactly as §17.7 states.
 - **SEAL-PAIR-007** (seal) N MUST compare the typed digits with its own SAS in constant time, MUST allow at most 3 entries, and MUST abort the pairing after the third mismatch.
@@ -1284,6 +1292,13 @@ Both roles are sans-IO machines. Inputs arrive as events; the machine answers wi
 | any but `Done`, `Aborted` | a failed check, the third SAS mismatch, `Cancel`, or `Tick{now}` with `now − start ≥ 600,000` | | `Abort{code}`; erase `s` and every derived key and the long-term keys generated for this attempt | `Aborted` |
 
 `start` is the time of `Start` on E and of `CodeEntered` on N.
+
+**Draws.** Each machine draws from the `Entropy` it is given, in this order. E, on `Start`: `s` (10 bytes),
+`esk_E` (32), `r_E` (32). N, on `Slot{A}` after the MAC passes: `dev_N` (16), the signing key (32), the X25519
+`ikm` (32) of §6.4, then `esk_N` (32). No other value is drawn before slot B is posted.
+
+- **SEAL-PAIR-016** (seal) Each pairing machine MUST draw its random values in the order of §17.10 "Draws": E `s`, `esk_E`, `r_E`; N `dev_N`, the signing key, the X25519 `ikm`, `esk_N`.
+- **SEAL-PAIR-017** (seal) A pairing's ephemeral secret key MUST be 32 bytes from `Entropy` used as an RFC 7748 X25519 scalar, and its public key MUST be `X25519(esk, 9)`.
 
 ### 17.11 Limits and aborts
 
@@ -2103,4 +2118,4 @@ Non-normative. Each states the default this spec takes.
 15. **Purge keeps every root inside backups?** Default: no. Backups carry the roots the writer holds (§21.5); after a purge those are only the new ones, and the history stays verifiable through inner signatures.
 16. **Backup `meta`, the sync metadata,** is opaque here and defined by `device.md`. Decided here.
 17. **Rules version 1 allows only envelope (1, 1) and state-hash version 1** (§14.3). A later version extends the table through this spec and `core.md`.
-18. **A device the recovery key reinstates reads what was sealed while it was revoked** (ruling S24, lead ruling L1). The wraps of the roots it missed travel in the recovery-signed `reinstate` operation (§16.2), outside the reinstating entry, which the device cannot open; the relay returns them at the device's login, and the device opens each by §7 once its membership records that epoch's commitment. More than 256 missed epochs: the recovery tool does not offer reinstatement, and the owner restores to a new board. Decided there.
+18. **A device the recovery key reinstates reads what was sealed while it was revoked** (ruling S24, lead rulings L1 and L20). The wraps of the roots it missed travel in the recovery-signed `reinstate` operation (§16.2), outside the reinstating entry, which the device cannot open; the relay returns them at the device's login, and the device opens each by §7 once its membership records that epoch's commitment. More than 256 missed epochs: the recovery tool does not offer reinstatement, and the owner restores to a new board. A device whose revoking entry lies below `purge_seq` is not offered reinstatement either: it pairs again, or the owner restores to a new board. Decided there.
