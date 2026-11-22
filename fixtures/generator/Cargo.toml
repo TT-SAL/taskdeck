@@ -1,0 +1,19 @@
+# The fixture generator (SYNC_PLAN.md §6.1 item 5). Built on today's board
+# code, through the root library's public API only; it writes the data under
+# `fixtures/` that later stages test against instead of the old code.
+#
+# No dependency of its own: the root package (without the window) and crates
+# the root package already depends on. Its randomness (SplitMix64) and the
+# manifest's SHA-256 are written in the crate.
+[package]
+name = "taskdeck-fixtures"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+task_deck = { path = "../..", default-features = false }
+chrono = { workspace = true, features = ["clock", "serde", "std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }

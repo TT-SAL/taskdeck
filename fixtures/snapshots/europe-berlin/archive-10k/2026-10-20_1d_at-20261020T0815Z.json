@@ -1,0 +1,4238 @@
+{
+  "version": 0,
+  "today": "2026-10-20",
+  "now_minutes": 615,
+  "palette": [
+    [
+      10,
+      20,
+      30,
+      40
+    ],
+    [
+      200,
+      60,
+      60,
+      120
+    ],
+    [
+      60,
+      200,
+      60,
+      104
+    ],
+    [
+      60,
+      60,
+      200,
+      88
+    ],
+    [
+      180,
+      180,
+      40,
+      74
+    ],
+    [
+      120,
+      40,
+      160,
+      136
+    ]
+  ],
+  "labels": {
+    "severity": [
+      "Not important",
+      "Mildly important",
+      "Important",
+      "Highly important",
+      "Lethally important"
+    ],
+    "horizon": [
+      "Within a month",
+      "Within a week",
+      "Within days",
+      "Whenever"
+    ],
+    "horizon_order": [
+      2,
+      1,
+      0,
+      3
+    ],
+    "weekdays": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat",
+      "Sun"
+    ]
+  },
+  "days": [
+    {
+      "date": "2026-10-20",
+      "weekday": "Tuesday",
+      "label": "20 October 2026",
+      "is_today": true,
+      "summary": "5h 45m planned · 5 blocks · 9h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 10147,
+          "session": null,
+          "name": "Synthetic routine 1",
+          "kind": "routine",
+          "color": 0,
+          "start": 480,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 10148,
+          "session": null,
+          "name": "Synthetic routine 2",
+          "kind": "routine",
+          "color": 0,
+          "start": 720,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 2
+        },
+        {
+          "id": 10036,
+          "session": 0,
+          "name": "Synthetic live task 35: indigo garnet",
+          "kind": "task",
+          "color": 1,
+          "start": 735,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 2
+        },
+        {
+          "id": 10093,
+          "session": 1,
+          "name": "Synthetic live task 92: amber fjord",
+          "kind": "task",
+          "color": 0,
+          "start": 870,
+          "minutes": 105,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 3
+        },
+        {
+          "id": 10063,
+          "session": 0,
+          "name": "Synthetic live task 62: basalt fjord",
+          "kind": "task",
+          "color": 4,
+          "start": 930,
+          "minutes": 120,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 3
+        },
+        {
+          "id": 10146,
+          "session": null,
+          "name": "Synthetic routine 0",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 3
+        },
+        {
+          "id": 10069,
+          "session": 1,
+          "name": "Synthetic live task 68: indigo juniper",
+          "kind": "task",
+          "color": 4,
+          "start": 1110,
+          "minutes": 15,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 3
+        },
+        {
+          "id": 10114,
+          "session": null,
+          "name": "Synthetic live event 3: amber",
+          "kind": "event",
+          "color": 5,
+          "start": 1260,
+          "minutes": 90,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 3
+        }
+      ],
+      "ghosts": []
+    }
+  ],
+  "tray": {
+    "due": [
+      {
+        "id": 10009,
+        "name": "Synthetic live task 8: nectar basalt",
+        "color": 3,
+        "deadline": "2026-10-02T16:45",
+        "due_in": "overdue",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10083,
+        "name": "Synthetic live task 82: harbor marble",
+        "color": 3,
+        "deadline": "2026-10-10T20:45",
+        "due_in": "overdue",
+        "duration": 150,
+        "planned": 45,
+        "drop_minutes": 105
+      },
+      {
+        "id": 10071,
+        "name": "Synthetic live task 70: indigo harbor",
+        "color": 3,
+        "deadline": "2026-10-03T10:45",
+        "due_in": "overdue",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10094,
+        "name": "Synthetic live task 93: ember indigo",
+        "color": 3,
+        "deadline": "2026-10-07T19:30",
+        "due_in": "overdue",
+        "duration": 120,
+        "planned": 45,
+        "drop_minutes": 75
+      },
+      {
+        "id": 10038,
+        "name": "Synthetic live task 37: kelp marble",
+        "color": 3,
+        "deadline": "2026-10-13T18:30",
+        "due_in": "overdue",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10023,
+        "name": "Synthetic live task 22: indigo opal",
+        "color": 2,
+        "deadline": "2026-10-10T17:45",
+        "due_in": "overdue",
+        "duration": 150,
+        "planned": 60,
+        "drop_minutes": 90
+      },
+      {
+        "id": 10026,
+        "name": "Synthetic live task 25: opal garnet",
+        "color": 1,
+        "deadline": "2026-10-03T12:45",
+        "due_in": "overdue",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      }
+    ],
+    "later": [
+      {
+        "id": 10021,
+        "name": "Synthetic live task 20: amber dune",
+        "color": 4,
+        "deadline": "2026-10-22T18:00",
+        "due_in": "2d",
+        "duration": 165,
+        "planned": 105,
+        "drop_minutes": 60
+      },
+      {
+        "id": 10006,
+        "name": "Synthetic live task 5: amber harbor",
+        "color": 4,
+        "deadline": "2026-10-25T13:15",
+        "due_in": "5d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10069,
+        "name": "Synthetic live task 68: indigo juniper",
+        "color": 4,
+        "deadline": "2026-11-25T17:00",
+        "due_in": "36d",
+        "duration": 210,
+        "planned": 105,
+        "drop_minutes": 105
+      },
+      {
+        "id": 10002,
+        "name": "Synthetic live task 1: dune juniper",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10005,
+        "name": "Synthetic live task 4: opal juniper",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10046,
+        "name": "Synthetic live task 45: nectar harbor",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": 120,
+        "planned": 0,
+        "drop_minutes": 120
+      },
+      {
+        "id": 10067,
+        "name": "Synthetic live task 66: pebble cobalt",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10084,
+        "name": "Synthetic live task 83: garnet kelp",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10091,
+        "name": "Synthetic live task 90: basalt lumen",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10001,
+        "name": "Synthetic live task 0: cobalt dune",
+        "color": 3,
+        "deadline": "2026-10-26T11:45",
+        "due_in": "6d",
+        "duration": 105,
+        "planned": 90,
+        "drop_minutes": 15
+      },
+      {
+        "id": 10018,
+        "name": "Synthetic live task 17: harbor pebble",
+        "color": 1,
+        "deadline": null,
+        "due_in": null,
+        "duration": 45,
+        "planned": 0,
+        "drop_minutes": 45
+      },
+      {
+        "id": 10031,
+        "name": "Synthetic live task 30: kelp ember",
+        "color": 1,
+        "deadline": null,
+        "due_in": null,
+        "duration": 165,
+        "planned": 0,
+        "drop_minutes": 165
+      },
+      {
+        "id": 10050,
+        "name": "Synthetic live task 49: lumen fjord",
+        "color": 1,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10043,
+        "name": "Synthetic live task 42: indigo kelp",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": 90,
+        "planned": 75,
+        "drop_minutes": 15
+      },
+      {
+        "id": 10051,
+        "name": "Synthetic live task 50: garnet lumen",
+        "color": 0,
+        "deadline": "2026-11-25T15:45",
+        "due_in": "36d",
+        "duration": 180,
+        "planned": 75,
+        "drop_minutes": 105
+      },
+      {
+        "id": 10101,
+        "name": "Synthetic live task 100: cobalt basalt",
+        "color": 0,
+        "deadline": "2026-11-07T17:45",
+        "due_in": "18d",
+        "duration": 225,
+        "planned": 105,
+        "drop_minutes": 120
+      },
+      {
+        "id": 10104,
+        "name": "Synthetic live task 103: opal kelp",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": 120,
+        "planned": 105,
+        "drop_minutes": 15
+      },
+      {
+        "id": 10090,
+        "name": "Synthetic live task 89: fjord juniper",
+        "color": 1,
+        "deadline": null,
+        "due_in": null,
+        "duration": 60,
+        "planned": 0,
+        "drop_minutes": 60
+      },
+      {
+        "id": 10034,
+        "name": "Synthetic live task 33: amber cobalt",
+        "color": 3,
+        "deadline": "2026-11-02T09:15",
+        "due_in": "13d",
+        "duration": 75,
+        "planned": 0,
+        "drop_minutes": 75
+      },
+      {
+        "id": 10020,
+        "name": "Synthetic live task 19: basalt marble",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10044,
+        "name": "Synthetic live task 43: garnet harbor",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": 90,
+        "planned": 0,
+        "drop_minutes": 90
+      },
+      {
+        "id": 10062,
+        "name": "Synthetic live task 61: indigo indigo",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10074,
+        "name": "Synthetic live task 73: juniper garnet",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10077,
+        "name": "Synthetic live task 76: garnet basalt",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": 30,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10085,
+        "name": "Synthetic live task 84: marble amber",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10109,
+        "name": "Synthetic live task 108: basalt ember",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10010,
+        "name": "Synthetic live task 9: juniper dune",
+        "color": 3,
+        "deadline": "2026-11-14T18:30",
+        "due_in": "25d",
+        "duration": 210,
+        "planned": 0,
+        "drop_minutes": 210
+      },
+      {
+        "id": 10014,
+        "name": "Synthetic live task 13: dune basalt",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10024,
+        "name": "Synthetic live task 23: kelp amber",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10029,
+        "name": "Synthetic live task 28: fjord nectar",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": 120,
+        "planned": 0,
+        "drop_minutes": 120
+      },
+      {
+        "id": 10032,
+        "name": "Synthetic live task 31: indigo fjord",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10037,
+        "name": "Synthetic live task 36: ember basalt",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": 225,
+        "planned": 0,
+        "drop_minutes": 225
+      },
+      {
+        "id": 10052,
+        "name": "Synthetic live task 51: marble nectar",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": 75,
+        "planned": 0,
+        "drop_minutes": 75
+      },
+      {
+        "id": 10108,
+        "name": "Synthetic live task 107: fjord indigo",
+        "color": 3,
+        "deadline": "2026-11-19T15:30",
+        "due_in": "30d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10042,
+        "name": "Synthetic live task 41: opal opal",
+        "color": 2,
+        "deadline": "2026-11-03T08:00",
+        "due_in": "13d",
+        "duration": 225,
+        "planned": 45,
+        "drop_minutes": 180
+      },
+      {
+        "id": 10102,
+        "name": "Synthetic live task 101: pebble amber",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10110,
+        "name": "Synthetic live task 109: amber garnet",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10048,
+        "name": "Synthetic live task 47: dune basalt",
+        "color": 2,
+        "deadline": "2026-11-12T12:45",
+        "due_in": "23d",
+        "duration": 225,
+        "planned": 45,
+        "drop_minutes": 180
+      },
+      {
+        "id": 10070,
+        "name": "Synthetic live task 69: fjord nectar",
+        "color": 2,
+        "deadline": "2026-11-12T11:45",
+        "due_in": "23d",
+        "duration": 105,
+        "planned": 75,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10017,
+        "name": "Synthetic live task 16: pebble basalt",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": 150,
+        "planned": 60,
+        "drop_minutes": 90
+      },
+      {
+        "id": 10078,
+        "name": "Synthetic live task 77: pebble cobalt",
+        "color": 2,
+        "deadline": "2026-11-25T09:15",
+        "due_in": "36d",
+        "duration": 225,
+        "planned": 165,
+        "drop_minutes": 60
+      },
+      {
+        "id": 10098,
+        "name": "Synthetic live task 97: marble pebble",
+        "color": 1,
+        "deadline": "2026-11-04T10:15",
+        "due_in": "15d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10103,
+        "name": "Synthetic live task 102: marble kelp",
+        "color": 2,
+        "deadline": "2026-11-29T09:00",
+        "due_in": "39d",
+        "duration": 90,
+        "planned": 0,
+        "drop_minutes": 90
+      },
+      {
+        "id": 10008,
+        "name": "Synthetic live task 7: opal marble",
+        "color": 0,
+        "deadline": "2026-10-31T09:00",
+        "due_in": "10d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10049,
+        "name": "Synthetic live task 48: lumen amber",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": 90,
+        "planned": 15,
+        "drop_minutes": 75
+      },
+      {
+        "id": 10013,
+        "name": "Synthetic live task 12: garnet pebble",
+        "color": 0,
+        "deadline": "2026-11-05T17:30",
+        "due_in": "16d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10016,
+        "name": "Synthetic live task 15: garnet nectar",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": 225,
+        "planned": 60,
+        "drop_minutes": 165
+      },
+      {
+        "id": 10054,
+        "name": "Synthetic live task 53: pebble amber",
+        "color": 0,
+        "deadline": "2026-11-10T14:45",
+        "due_in": "21d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10096,
+        "name": "Synthetic live task 95: amber kelp",
+        "color": 0,
+        "deadline": "2026-11-14T12:00",
+        "due_in": "25d",
+        "duration": 30,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10047,
+        "name": "Synthetic live task 46: kelp indigo",
+        "color": 0,
+        "deadline": "2026-11-16T10:30",
+        "due_in": "27d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      }
+    ]
+  },
+  "items": [
+    {
+      "id": 10001,
+      "name": "Synthetic live task 0: cobalt dune",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-26T11:45",
+      "duration": 105,
+      "planned": 90,
+      "remaining": 15,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-31",
+          "start": 1020,
+          "minutes": 90
+        }
+      ],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 10002,
+      "name": "Synthetic live task 1: dune juniper",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 10003,
+      "name": "Synthetic live task 2: opal juniper",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-10-17T16:30",
+      "duration": null,
+      "planned": 105,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-26",
+          "start": 1020,
+          "minutes": 30
+        },
+        {
+          "index": 1,
+          "day": "2026-10-22",
+          "start": 1140,
+          "minutes": 75
+        }
+      ],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 10004,
+      "name": "Synthetic live task 3: marble harbor",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-10-26T10:15",
+      "duration": null,
+      "planned": 60,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-29",
+          "start": 1185,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 10005,
+      "name": "Synthetic live task 4: opal juniper",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 10006,
+      "name": "Synthetic live task 5: amber harbor",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-10-25T13:15",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-02"
+    },
+    {
+      "id": 10007,
+      "name": "Synthetic live task 6: harbor nectar",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 90,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-12",
+          "start": 1050,
+          "minutes": 90
+        }
+      ],
+      "created": "2026-10-02"
+    },
+    {
+      "id": 10008,
+      "name": "Synthetic live task 7: opal marble",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-10-31T09:00",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-02"
+    },
+    {
+      "id": 10009,
+      "name": "Synthetic live task 8: nectar basalt",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-02T16:45",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-02"
+    },
+    {
+      "id": 10010,
+      "name": "Synthetic live task 9: juniper dune",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-11-14T18:30",
+      "duration": 210,
+      "planned": 0,
+      "remaining": 210,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-02"
+    },
+    {
+      "id": 10011,
+      "name": "Synthetic live task 10: amber indigo",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-25T13:45",
+      "duration": 45,
+      "planned": 90,
+      "remaining": 0,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-05",
+          "start": 1095,
+          "minutes": 30
+        },
+        {
+          "index": 1,
+          "day": "2026-10-24",
+          "start": 720,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-02"
+    },
+    {
+      "id": 10012,
+      "name": "Synthetic live task 11: cobalt indigo",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 75,
+      "planned": 150,
+      "remaining": 0,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-27",
+          "start": 735,
+          "minutes": 30
+        },
+        {
+          "index": 1,
+          "day": "2026-11-12",
+          "start": 600,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-10-02"
+    },
+    {
+      "id": 10013,
+      "name": "Synthetic live task 12: garnet pebble",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-11-05T17:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-02"
+    },
+    {
+      "id": 10014,
+      "name": "Synthetic live task 13: dune basalt",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-03"
+    },
+    {
+      "id": 10015,
+      "name": "Synthetic live task 14: garnet kelp",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 60,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-23",
+          "start": 1200,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-03"
+    },
+    {
+      "id": 10016,
+      "name": "Synthetic live task 15: garnet nectar",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 225,
+      "planned": 60,
+      "remaining": 165,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-07",
+          "start": 765,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-03"
+    },
+    {
+      "id": 10017,
+      "name": "Synthetic live task 16: pebble basalt",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 150,
+      "planned": 60,
+      "remaining": 90,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-25",
+          "start": 555,
+          "minutes": 15
+        },
+        {
+          "index": 1,
+          "day": "2026-11-09",
+          "start": 960,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-03"
+    },
+    {
+      "id": 10018,
+      "name": "Synthetic live task 17: harbor pebble",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-03"
+    },
+    {
+      "id": 10019,
+      "name": "Synthetic live task 18: fjord amber",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-05T08:15",
+      "duration": null,
+      "planned": 90,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-03",
+          "start": 435,
+          "minutes": 90
+        }
+      ],
+      "created": "2026-10-03"
+    },
+    {
+      "id": 10020,
+      "name": "Synthetic live task 19: basalt marble",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-03"
+    },
+    {
+      "id": 10021,
+      "name": "Synthetic live task 20: amber dune",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-10-22T18:00",
+      "duration": 165,
+      "planned": 105,
+      "remaining": 60,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-03",
+          "start": 810,
+          "minutes": 105
+        }
+      ],
+      "created": "2026-10-03"
+    },
+    {
+      "id": 10022,
+      "name": "Synthetic live task 21: pebble opal",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": null,
+      "planned": 45,
+      "remaining": null,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-05",
+          "start": 435,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-03"
+    },
+    {
+      "id": 10023,
+      "name": "Synthetic live task 22: indigo opal",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-10-10T17:45",
+      "duration": 150,
+      "planned": 60,
+      "remaining": 90,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-01",
+          "start": 450,
+          "minutes": 30
+        },
+        {
+          "index": 1,
+          "day": "2026-10-16",
+          "start": 810,
+          "minutes": 30
+        }
+      ],
+      "created": "2026-10-04"
+    },
+    {
+      "id": 10024,
+      "name": "Synthetic live task 23: kelp amber",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-04"
+    },
+    {
+      "id": 10025,
+      "name": "Synthetic live task 24: dune fjord",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-10-28T11:00",
+      "duration": null,
+      "planned": 105,
+      "remaining": null,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-30",
+          "start": 1155,
+          "minutes": 105
+        }
+      ],
+      "created": "2026-10-04"
+    },
+    {
+      "id": 10026,
+      "name": "Synthetic live task 25: opal garnet",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-10-03T12:45",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-04"
+    },
+    {
+      "id": 10027,
+      "name": "Synthetic live task 26: kelp basalt",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-11-12T20:00",
+      "duration": null,
+      "planned": 120,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-29",
+          "start": 840,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-10-04"
+    },
+    {
+      "id": 10028,
+      "name": "Synthetic live task 27: garnet nectar",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 240,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-11",
+          "start": 525,
+          "minutes": 120
+        },
+        {
+          "index": 1,
+          "day": "2026-10-27",
+          "start": 1095,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-10-04"
+    },
+    {
+      "id": 10029,
+      "name": "Synthetic live task 28: fjord nectar",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 120,
+      "planned": 0,
+      "remaining": 120,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-04"
+    },
+    {
+      "id": 10030,
+      "name": "Synthetic live task 29: marble marble",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-10-05T13:00",
+      "duration": null,
+      "planned": 240,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-05",
+          "start": 570,
+          "minutes": 120
+        },
+        {
+          "index": 1,
+          "day": "2026-10-23",
+          "start": 495,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-10-04"
+    },
+    {
+      "id": 10031,
+      "name": "Synthetic live task 30: kelp ember",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 165,
+      "planned": 0,
+      "remaining": 165,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-04"
+    },
+    {
+      "id": 10032,
+      "name": "Synthetic live task 31: indigo fjord",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-05"
+    },
+    {
+      "id": 10033,
+      "name": "Synthetic live task 32: dune amber",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-11-10T09:15",
+      "duration": null,
+      "planned": 60,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-12",
+          "start": 1140,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-05"
+    },
+    {
+      "id": 10034,
+      "name": "Synthetic live task 33: amber cobalt",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-11-02T09:15",
+      "duration": 75,
+      "planned": 0,
+      "remaining": 75,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-05"
+    },
+    {
+      "id": 10035,
+      "name": "Synthetic live task 34: indigo basalt",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-10-13T10:00",
+      "duration": null,
+      "planned": 60,
+      "remaining": null,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-24",
+          "start": 570,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-05"
+    },
+    {
+      "id": 10036,
+      "name": "Synthetic live task 35: indigo garnet",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": null,
+      "planned": 120,
+      "remaining": null,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 735,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-21",
+          "start": 1110,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-05"
+    },
+    {
+      "id": 10037,
+      "name": "Synthetic live task 36: ember basalt",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 225,
+      "planned": 0,
+      "remaining": 225,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-05"
+    },
+    {
+      "id": 10038,
+      "name": "Synthetic live task 37: kelp marble",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-13T18:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10039,
+      "name": "Synthetic live task 38: fjord kelp",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-27T17:45",
+      "duration": null,
+      "planned": 135,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-04",
+          "start": 1080,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-16",
+          "start": 480,
+          "minutes": 75
+        }
+      ],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10040,
+      "name": "Synthetic live task 39: fjord basalt",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 60,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-11",
+          "start": 1200,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10041,
+      "name": "Synthetic live task 40: garnet harbor",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 30,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-06",
+          "start": 1005,
+          "minutes": 30
+        }
+      ],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10042,
+      "name": "Synthetic live task 41: opal opal",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-03T08:00",
+      "duration": 225,
+      "planned": 45,
+      "remaining": 180,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-27",
+          "start": 1185,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10043,
+      "name": "Synthetic live task 42: indigo kelp",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 90,
+      "planned": 75,
+      "remaining": 15,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-15",
+          "start": 885,
+          "minutes": 75
+        }
+      ],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10044,
+      "name": "Synthetic live task 43: garnet harbor",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 90,
+      "planned": 0,
+      "remaining": 90,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10045,
+      "name": "Synthetic live task 44: kelp fjord",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 165,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-22",
+          "start": 1200,
+          "minutes": 90
+        },
+        {
+          "index": 1,
+          "day": "2026-10-27",
+          "start": 465,
+          "minutes": 75
+        }
+      ],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10046,
+      "name": "Synthetic live task 45: nectar harbor",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": 120,
+      "planned": 0,
+      "remaining": 120,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10047,
+      "name": "Synthetic live task 46: kelp indigo",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-11-16T10:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-06"
+    },
+    {
+      "id": 10048,
+      "name": "Synthetic live task 47: dune basalt",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-12T12:45",
+      "duration": 225,
+      "planned": 45,
+      "remaining": 180,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-24",
+          "start": 780,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-07"
+    },
+    {
+      "id": 10049,
+      "name": "Synthetic live task 48: lumen amber",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": 90,
+      "planned": 15,
+      "remaining": 75,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-04",
+          "start": 1065,
+          "minutes": 15
+        }
+      ],
+      "created": "2026-10-07"
+    },
+    {
+      "id": 10050,
+      "name": "Synthetic live task 49: lumen fjord",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-07"
+    },
+    {
+      "id": 10051,
+      "name": "Synthetic live task 50: garnet lumen",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-11-25T15:45",
+      "duration": 180,
+      "planned": 75,
+      "remaining": 105,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-07",
+          "start": 705,
+          "minutes": 30
+        },
+        {
+          "index": 1,
+          "day": "2026-10-15",
+          "start": 420,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-07"
+    },
+    {
+      "id": 10052,
+      "name": "Synthetic live task 51: marble nectar",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 75,
+      "planned": 0,
+      "remaining": 75,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-07"
+    },
+    {
+      "id": 10053,
+      "name": "Synthetic live task 52: ember harbor",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": null,
+      "planned": 45,
+      "remaining": null,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-26",
+          "start": 435,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-07"
+    },
+    {
+      "id": 10054,
+      "name": "Synthetic live task 53: pebble amber",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-11-10T14:45",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-07"
+    },
+    {
+      "id": 10055,
+      "name": "Synthetic live task 54: lumen ember",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": null,
+      "planned": 45,
+      "remaining": null,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-10",
+          "start": 645,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-07"
+    },
+    {
+      "id": 10056,
+      "name": "Synthetic live task 55: ember lumen",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-11-09T10:45",
+      "duration": null,
+      "planned": 150,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-13",
+          "start": 900,
+          "minutes": 120
+        },
+        {
+          "index": 1,
+          "day": "2026-10-29",
+          "start": 1110,
+          "minutes": 30
+        }
+      ],
+      "created": "2026-10-08"
+    },
+    {
+      "id": 10057,
+      "name": "Synthetic live task 56: fjord basalt",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": null,
+      "planned": 105,
+      "remaining": null,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-09",
+          "start": 1050,
+          "minutes": 15
+        },
+        {
+          "index": 1,
+          "day": "2026-11-10",
+          "start": 1110,
+          "minutes": 90
+        }
+      ],
+      "created": "2026-10-08"
+    },
+    {
+      "id": 10058,
+      "name": "Synthetic live task 57: fjord indigo",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-10-28T08:30",
+      "duration": 240,
+      "planned": 240,
+      "remaining": 0,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-10",
+          "start": 915,
+          "minutes": 120
+        },
+        {
+          "index": 1,
+          "day": "2026-11-04",
+          "start": 900,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-10-08"
+    },
+    {
+      "id": 10059,
+      "name": "Synthetic live task 58: ember nectar",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-24T18:00",
+      "duration": null,
+      "planned": 45,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-01",
+          "start": 960,
+          "minutes": 30
+        },
+        {
+          "index": 1,
+          "day": "2026-11-05",
+          "start": 855,
+          "minutes": 15
+        }
+      ],
+      "created": "2026-10-08"
+    },
+    {
+      "id": 10060,
+      "name": "Synthetic live task 59: kelp garnet",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 120,
+      "remaining": null,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-17",
+          "start": 975,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-22",
+          "start": 420,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-08"
+    },
+    {
+      "id": 10061,
+      "name": "Synthetic live task 60: amber lumen",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-11-18T08:15",
+      "duration": null,
+      "planned": 75,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-21",
+          "start": 825,
+          "minutes": 75
+        }
+      ],
+      "created": "2026-10-08"
+    },
+    {
+      "id": 10062,
+      "name": "Synthetic live task 61: indigo indigo",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-08"
+    },
+    {
+      "id": 10063,
+      "name": "Synthetic live task 62: basalt fjord",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-11-01T11:15",
+      "duration": 120,
+      "planned": 120,
+      "remaining": 0,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 930,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10064,
+      "name": "Synthetic live task 63: pebble pebble",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 60,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-18",
+          "start": 480,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10065,
+      "name": "Synthetic live task 64: kelp amber",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": null,
+      "planned": 105,
+      "remaining": null,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-25",
+          "start": 750,
+          "minutes": 45
+        },
+        {
+          "index": 1,
+          "day": "2026-11-13",
+          "start": 465,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10066,
+      "name": "Synthetic live task 65: opal fjord",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 60,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-26",
+          "start": 765,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10067,
+      "name": "Synthetic live task 66: pebble cobalt",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10068,
+      "name": "Synthetic live task 67: juniper pebble",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 135,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-23",
+          "start": 420,
+          "minutes": 45
+        },
+        {
+          "index": 1,
+          "day": "2026-11-05",
+          "start": 450,
+          "minutes": 90
+        }
+      ],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10069,
+      "name": "Synthetic live task 68: indigo juniper",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-11-25T17:00",
+      "duration": 210,
+      "planned": 105,
+      "remaining": 105,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-06",
+          "start": 660,
+          "minutes": 90
+        },
+        {
+          "index": 1,
+          "day": "2026-10-20",
+          "start": 1110,
+          "minutes": 15
+        }
+      ],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10070,
+      "name": "Synthetic live task 69: fjord nectar",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-12T11:45",
+      "duration": 105,
+      "planned": 75,
+      "remaining": 30,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-01",
+          "start": 600,
+          "minutes": 75
+        }
+      ],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10071,
+      "name": "Synthetic live task 70: indigo harbor",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-03T10:45",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10072,
+      "name": "Synthetic live task 71: dune amber",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-10-09T09:15",
+      "duration": null,
+      "planned": 180,
+      "remaining": null,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-15",
+          "start": 1020,
+          "minutes": 105
+        },
+        {
+          "index": 1,
+          "day": "2026-11-06",
+          "start": 450,
+          "minutes": 75
+        }
+      ],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10073,
+      "name": "Synthetic live task 72: ember lumen",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-10-31T19:45",
+      "duration": null,
+      "planned": 90,
+      "remaining": null,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-16",
+          "start": 1080,
+          "minutes": 90
+        }
+      ],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10074,
+      "name": "Synthetic live task 73: juniper garnet",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-09"
+    },
+    {
+      "id": 10075,
+      "name": "Synthetic live task 74: marble juniper",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-10-04T19:15",
+      "duration": 120,
+      "planned": 135,
+      "remaining": 0,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-13",
+          "start": 690,
+          "minutes": 75
+        },
+        {
+          "index": 1,
+          "day": "2026-10-27",
+          "start": 945,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-10"
+    },
+    {
+      "id": 10076,
+      "name": "Synthetic live task 75: fjord fjord",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-29T12:00",
+      "duration": 45,
+      "planned": 120,
+      "remaining": 0,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-18",
+          "start": 1155,
+          "minutes": 105
+        },
+        {
+          "index": 1,
+          "day": "2026-10-17",
+          "start": 600,
+          "minutes": 15
+        }
+      ],
+      "created": "2026-10-10"
+    },
+    {
+      "id": 10077,
+      "name": "Synthetic live task 76: garnet basalt",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-10"
+    },
+    {
+      "id": 10078,
+      "name": "Synthetic live task 77: pebble cobalt",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-25T09:15",
+      "duration": 225,
+      "planned": 165,
+      "remaining": 60,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-27",
+          "start": 585,
+          "minutes": 120
+        },
+        {
+          "index": 1,
+          "day": "2026-10-26",
+          "start": 885,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-10"
+    },
+    {
+      "id": 10079,
+      "name": "Synthetic live task 78: ember pebble",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-10-09T17:30",
+      "duration": null,
+      "planned": 105,
+      "remaining": null,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-09",
+          "start": 1170,
+          "minutes": 105
+        }
+      ],
+      "created": "2026-10-10"
+    },
+    {
+      "id": 10080,
+      "name": "Synthetic live task 79: pebble nectar",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 30,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-05",
+          "start": 1140,
+          "minutes": 30
+        }
+      ],
+      "created": "2026-10-10"
+    },
+    {
+      "id": 10081,
+      "name": "Synthetic live task 80: nectar dune",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-11T08:30",
+      "duration": null,
+      "planned": 75,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-27",
+          "start": 510,
+          "minutes": 75
+        }
+      ],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10082,
+      "name": "Synthetic live task 81: fjord kelp",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-10-07T08:30",
+      "duration": null,
+      "planned": 60,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-21",
+          "start": 1020,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10083,
+      "name": "Synthetic live task 82: harbor marble",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-10T20:45",
+      "duration": 150,
+      "planned": 45,
+      "remaining": 105,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-30",
+          "start": 885,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10084,
+      "name": "Synthetic live task 83: garnet kelp",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10085,
+      "name": "Synthetic live task 84: marble amber",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10086,
+      "name": "Synthetic live task 85: kelp dune",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": 45,
+      "planned": 45,
+      "remaining": 0,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-28",
+          "start": 1035,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10087,
+      "name": "Synthetic live task 86: marble kelp",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 105,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-03",
+          "start": 930,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-24",
+          "start": 720,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10088,
+      "name": "Synthetic live task 87: pebble cobalt",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 60,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-11",
+          "start": 1005,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10089,
+      "name": "Synthetic live task 88: fjord nectar",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 45,
+      "remaining": null,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-21",
+          "start": 570,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10090,
+      "name": "Synthetic live task 89: fjord juniper",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 60,
+      "planned": 0,
+      "remaining": 60,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10091,
+      "name": "Synthetic live task 90: basalt lumen",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-11"
+    },
+    {
+      "id": 10092,
+      "name": "Synthetic live task 91: juniper dune",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-11-13T08:00",
+      "duration": null,
+      "planned": 75,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-11",
+          "start": 1020,
+          "minutes": 15
+        },
+        {
+          "index": 1,
+          "day": "2026-11-08",
+          "start": 1110,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10093,
+      "name": "Synthetic live task 92: amber fjord",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 165,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-07",
+          "start": 585,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-20",
+          "start": 870,
+          "minutes": 105
+        }
+      ],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10094,
+      "name": "Synthetic live task 93: ember indigo",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-07T19:30",
+      "duration": 120,
+      "planned": 45,
+      "remaining": 75,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-25",
+          "start": 1080,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10095,
+      "name": "Synthetic live task 94: lumen dune",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-11-05T09:45",
+      "duration": null,
+      "planned": 45,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-31",
+          "start": 900,
+          "minutes": 15
+        },
+        {
+          "index": 1,
+          "day": "2026-11-01",
+          "start": 570,
+          "minutes": 30
+        }
+      ],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10096,
+      "name": "Synthetic live task 95: amber kelp",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-11-14T12:00",
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10097,
+      "name": "Synthetic live task 96: amber fjord",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-10-02T10:00",
+      "duration": null,
+      "planned": 90,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-09",
+          "start": 630,
+          "minutes": 90
+        }
+      ],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10098,
+      "name": "Synthetic live task 97: marble pebble",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-11-04T10:15",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10099,
+      "name": "Synthetic live task 98: garnet harbor",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": null,
+      "planned": 135,
+      "remaining": null,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-22",
+          "start": 885,
+          "minutes": 30
+        },
+        {
+          "index": 1,
+          "day": "2026-10-16",
+          "start": 585,
+          "minutes": 105
+        }
+      ],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10100,
+      "name": "Synthetic live task 99: garnet basalt",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-11-16T08:45",
+      "duration": 15,
+      "planned": 180,
+      "remaining": 0,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-25",
+          "start": 1005,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-25",
+          "start": 840,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10101,
+      "name": "Synthetic live task 100: cobalt basalt",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-11-07T17:45",
+      "duration": 225,
+      "planned": 105,
+      "remaining": 120,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-19",
+          "start": 960,
+          "minutes": 105
+        }
+      ],
+      "created": "2026-10-12"
+    },
+    {
+      "id": 10102,
+      "name": "Synthetic live task 101: pebble amber",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-13"
+    },
+    {
+      "id": 10103,
+      "name": "Synthetic live task 102: marble kelp",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-29T09:00",
+      "duration": 90,
+      "planned": 0,
+      "remaining": 90,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-13"
+    },
+    {
+      "id": 10104,
+      "name": "Synthetic live task 103: opal kelp",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": 120,
+      "planned": 105,
+      "remaining": 15,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-18",
+          "start": 795,
+          "minutes": 105
+        }
+      ],
+      "created": "2026-10-13"
+    },
+    {
+      "id": 10105,
+      "name": "Synthetic live task 104: cobalt ember",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-10-05T13:45",
+      "duration": null,
+      "planned": 75,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-23",
+          "start": 420,
+          "minutes": 75
+        }
+      ],
+      "created": "2026-10-13"
+    },
+    {
+      "id": 10106,
+      "name": "Synthetic live task 105: juniper ember",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 90,
+      "remaining": null,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-30",
+          "start": 795,
+          "minutes": 30
+        },
+        {
+          "index": 1,
+          "day": "2026-10-19",
+          "start": 900,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-10-13"
+    },
+    {
+      "id": 10107,
+      "name": "Synthetic live task 106: indigo nectar",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 225,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-11-02",
+          "start": 465,
+          "minutes": 105
+        },
+        {
+          "index": 1,
+          "day": "2026-11-10",
+          "start": 465,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-10-13"
+    },
+    {
+      "id": 10108,
+      "name": "Synthetic live task 107: fjord indigo",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-11-19T15:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-13"
+    },
+    {
+      "id": 10109,
+      "name": "Synthetic live task 108: basalt ember",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-13"
+    },
+    {
+      "id": 10110,
+      "name": "Synthetic live task 109: amber garnet",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-13"
+    },
+    {
+      "id": 10111,
+      "name": "Synthetic live event 0: cobalt",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-24T17:45",
+      "duration": 90,
+      "planned": 0,
+      "remaining": 90,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10112,
+      "name": "Synthetic live event 1: fjord",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-29T18:15",
+      "duration": 90,
+      "planned": 0,
+      "remaining": 90,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10113,
+      "name": "Synthetic live event 2: kelp",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-15T20:00",
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10114,
+      "name": "Synthetic live event 3: amber",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-20T21:00",
+      "duration": 90,
+      "planned": 0,
+      "remaining": 90,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10115,
+      "name": "Synthetic live event 4: kelp",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-01T17:30",
+      "duration": 120,
+      "planned": 0,
+      "remaining": 120,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10116,
+      "name": "Synthetic live event 5: ember",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-21T08:45",
+      "duration": 105,
+      "planned": 0,
+      "remaining": 105,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10117,
+      "name": "Synthetic live event 6: marble",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-01T18:15",
+      "duration": 105,
+      "planned": 0,
+      "remaining": 105,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10118,
+      "name": "Synthetic live event 7: ember",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-25T09:00",
+      "duration": 105,
+      "planned": 0,
+      "remaining": 105,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10119,
+      "name": "Synthetic live event 8: harbor",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-01T19:45",
+      "duration": 75,
+      "planned": 0,
+      "remaining": 75,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10120,
+      "name": "Synthetic live event 9: opal",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-26T16:15",
+      "duration": 120,
+      "planned": 0,
+      "remaining": 120,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10121,
+      "name": "Synthetic live event 10: cobalt",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-22T13:00",
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10122,
+      "name": "Synthetic live event 11: amber",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-05T16:45",
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10123,
+      "name": "Synthetic live event 12: marble",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-07T13:45",
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10124,
+      "name": "Synthetic live event 13: lumen",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-29T19:30",
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10125,
+      "name": "Synthetic live event 14: nectar",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-17T17:30",
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10126,
+      "name": "Synthetic live event 15: kelp",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-26T17:45",
+      "duration": 75,
+      "planned": 0,
+      "remaining": 75,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10127,
+      "name": "Synthetic live event 16: marble",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-22T20:45",
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10128,
+      "name": "Synthetic live event 17: marble",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-27T12:45",
+      "duration": 105,
+      "planned": 0,
+      "remaining": 105,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10129,
+      "name": "Synthetic live event 18: fjord",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-01T18:15",
+      "duration": 120,
+      "planned": 0,
+      "remaining": 120,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-14"
+    },
+    {
+      "id": 10130,
+      "name": "Synthetic live event 19: ember",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-11T13:30",
+      "duration": 105,
+      "planned": 0,
+      "remaining": 105,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10131,
+      "name": "Synthetic live event 20: ember",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-01T12:30",
+      "duration": 90,
+      "planned": 0,
+      "remaining": 90,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10132,
+      "name": "Synthetic live event 21: lumen",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-22T17:45",
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10133,
+      "name": "Synthetic live event 22: ember",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-29T14:30",
+      "duration": 90,
+      "planned": 0,
+      "remaining": 90,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10134,
+      "name": "Synthetic live event 23: pebble",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-28T20:45",
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10135,
+      "name": "Synthetic live event 24: indigo",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-19T12:15",
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10136,
+      "name": "Synthetic live event 25: harbor",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-19T18:00",
+      "duration": 105,
+      "planned": 0,
+      "remaining": 105,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10137,
+      "name": "Synthetic live event 26: basalt",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-09T09:30",
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10138,
+      "name": "Synthetic live event 27: lumen",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-16T16:45",
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10139,
+      "name": "Synthetic live event 28: pebble",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-21T15:30",
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10140,
+      "name": "Synthetic live event 29: lumen",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-14T10:15",
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10141,
+      "name": "Synthetic live event 30: dune",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-11T08:30",
+      "duration": 75,
+      "planned": 0,
+      "remaining": 75,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10142,
+      "name": "Synthetic live event 31: juniper",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-29T14:30",
+      "duration": 90,
+      "planned": 0,
+      "remaining": 90,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10143,
+      "name": "Synthetic live event 32: basalt",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-11-16T10:15",
+      "duration": 45,
+      "planned": 0,
+      "remaining": 45,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10144,
+      "name": "Synthetic live event 33: indigo",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-30T19:15",
+      "duration": 90,
+      "planned": 0,
+      "remaining": 90,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10145,
+      "name": "Synthetic live event 34: lumen",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-13T12:30",
+      "duration": 105,
+      "planned": 0,
+      "remaining": 105,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10146,
+      "name": "Synthetic routine 0",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": {
+        "days": 127,
+        "summary": "every day",
+        "start": 960,
+        "minutes": 480
+      },
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10147,
+      "name": "Synthetic routine 1",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": {
+        "days": 31,
+        "summary": "weekdays",
+        "start": 480,
+        "minutes": 45
+      },
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10148,
+      "name": "Synthetic routine 2",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": {
+        "days": 127,
+        "summary": "every day",
+        "start": 720,
+        "minutes": 60
+      },
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10149,
+      "name": "Synthetic routine 3",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": {
+        "days": 96,
+        "summary": "weekends",
+        "start": 1080,
+        "minutes": 90
+      },
+      "sessions": [],
+      "created": "2026-10-15"
+    },
+    {
+      "id": 10150,
+      "name": "Synthetic routine 4",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": {
+        "days": 21,
+        "summary": "Mon · Wed · Fri",
+        "start": 420,
+        "minutes": 30
+      },
+      "sessions": [],
+      "created": "2026-10-15"
+    }
+  ],
+  "ranked": [
+    10079,
+    10009,
+    10083,
+    10019,
+    10071,
+    10094,
+    10038,
+    10105,
+    10075,
+    10023,
+    10003,
+    10073,
+    10021,
+    10063,
+    10006,
+    10069,
+    10058,
+    10025,
+    10082,
+    10076,
+    10030,
+    10097,
+    10026,
+    10035,
+    10106,
+    10060,
+    10002,
+    10005,
+    10039,
+    10072,
+    10046,
+    10067,
+    10084,
+    10091,
+    10001,
+    10099,
+    10036,
+    10061,
+    10018,
+    10031,
+    10050,
+    10089,
+    10043,
+    10051,
+    10101,
+    10104,
+    10090,
+    10034,
+    10093,
+    10095,
+    10064,
+    10020,
+    10044,
+    10062,
+    10074,
+    10077,
+    10033,
+    10085,
+    10109,
+    10092,
+    10010,
+    10014,
+    10024,
+    10029,
+    10032,
+    10037,
+    10052,
+    10108,
+    10004,
+    10042,
+    10102,
+    10110,
+    10068,
+    10045,
+    10011,
+    10048,
+    10015,
+    10081,
+    10087,
+    10065,
+    10070,
+    10017,
+    10100,
+    10078,
+    10053,
+    10066,
+    10098,
+    10012,
+    10086,
+    10059,
+    10028,
+    10027,
+    10056,
+    10103,
+    10008,
+    10107,
+    10049,
+    10022,
+    10013,
+    10080,
+    10041,
+    10016,
+    10057,
+    10055,
+    10054,
+    10088,
+    10040,
+    10007,
+    10096,
+    10047
+  ],
+  "done": [
+    {
+      "id": 10000,
+      "archived_at": "2026-02-19T17:09:00+01:00",
+      "name": "Synthetic archived #10000: fjord garnet",
+      "kind": "task",
+      "color": 2,
+      "finished": true,
+      "when": "Thu 19 Feb 17:09",
+      "verdict": "finished 3d early  ·  no time set aside  ·  31d on the board"
+    },
+    {
+      "id": 9999,
+      "archived_at": "2026-02-19T12:42:00+01:00",
+      "name": "Synthetic archived #9999: pebble juniper",
+      "kind": "task",
+      "color": 4,
+      "finished": false,
+      "when": "Thu 19 Feb 12:42",
+      "verdict": "dropped 2d late  ·  3h over 2 sittings  ·  2d on the board"
+    },
+    {
+      "id": 9998,
+      "archived_at": "2026-02-19T11:38:00+01:00",
+      "name": "Synthetic archived #9998: kelp indigo",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Thu 19 Feb 11:38",
+      "verdict": "finished  ·  2h 30m estimated, never booked  ·  39d on the board"
+    },
+    {
+      "id": 9997,
+      "archived_at": "2026-02-19T06:50:00+01:00",
+      "name": "Synthetic archived #9997: basalt opal",
+      "kind": "task",
+      "color": 3,
+      "finished": true,
+      "when": "Thu 19 Feb 06:50",
+      "verdict": "finished 1d late  ·  1h 45m over 2 sittings  ·  10d on the board"
+    },
+    {
+      "id": 9996,
+      "archived_at": "2026-02-19T04:45:00+01:00",
+      "name": "Synthetic archived #9996: opal pebble",
+      "kind": "task",
+      "color": 4,
+      "finished": true,
+      "when": "Thu 19 Feb 04:45",
+      "verdict": "finished 1d late  ·  3h 30m over 3 sittings  ·  33d on the board"
+    },
+    {
+      "id": 9995,
+      "archived_at": "2026-02-19T02:17:00+01:00",
+      "name": "Synthetic archived #9995: harbor lumen",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Thu 19 Feb 02:17",
+      "verdict": "finished 3d early  ·  1h estimated, never booked  ·  32d on the board"
+    },
+    {
+      "id": 9994,
+      "archived_at": "2026-02-19T01:07:00+01:00",
+      "name": "Synthetic archived #9994: basalt lumen",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Thu 19 Feb 01:07",
+      "verdict": "finished  ·  no time set aside  ·  18d on the board"
+    },
+    {
+      "id": 9993,
+      "archived_at": "2026-02-18T21:51:00+01:00",
+      "name": "Synthetic archived #9993: harbor dune",
+      "kind": "task",
+      "color": 2,
+      "finished": false,
+      "when": "Wed 18 Feb 21:51",
+      "verdict": "dropped 4h early  ·  3h 45m estimated, 3h 30m over 3 sittings  ·  7d on the board"
+    },
+    {
+      "id": 9992,
+      "archived_at": "2026-02-18T20:01:00+01:00",
+      "name": "Synthetic archived #9992: opal marble",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Wed 18 Feb 20:01",
+      "verdict": "finished 19h early  ·  45m estimated, 1h 30m over 2 sittings  ·  35d on the board"
+    },
+    {
+      "id": 9991,
+      "archived_at": "2026-02-18T17:15:00+01:00",
+      "name": "Synthetic archived #9991: fjord amber",
+      "kind": "task",
+      "color": 3,
+      "finished": true,
+      "when": "Wed 18 Feb 17:15",
+      "verdict": "finished 5h late  ·  2h 15m estimated, 2h 30m over 2 sittings  ·  14d on the board"
+    },
+    {
+      "id": 9990,
+      "archived_at": "2026-02-18T13:19:00+01:00",
+      "name": "Synthetic archived #9990: amber marble",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Wed 18 Feb 13:19",
+      "verdict": "finished  ·  3h 45m estimated, 2h 30m over 2 sittings  ·  32d on the board"
+    },
+    {
+      "id": 9989,
+      "archived_at": "2026-02-18T10:54:00+01:00",
+      "name": "Synthetic archived #9989: basalt ember",
+      "kind": "task",
+      "color": 3,
+      "finished": true,
+      "when": "Wed 18 Feb 10:54",
+      "verdict": "finished 1d early  ·  2h 45m estimated, 2h 45m over 2 sittings  ·  29d on the board"
+    },
+    {
+      "id": 9988,
+      "archived_at": "2026-02-18T07:09:00+01:00",
+      "name": "Synthetic archived #9988: juniper basalt",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Wed 18 Feb 07:09",
+      "verdict": "finished 3d early  ·  3h estimated, never booked  ·  34d on the board"
+    },
+    {
+      "id": 9987,
+      "archived_at": "2026-02-18T05:05:00+01:00",
+      "name": "Synthetic archived #9987: amber indigo",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Wed 18 Feb 05:05",
+      "verdict": "finished 2d late  ·  1h 45m in one sitting  ·  5d on the board"
+    },
+    {
+      "id": 9986,
+      "archived_at": "2026-02-18T03:16:00+01:00",
+      "name": "Synthetic archived #9986: dune harbor",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Wed 18 Feb 03:16",
+      "verdict": "finished  ·  2h 30m over 3 sittings  ·  14d on the board"
+    },
+    {
+      "id": 9985,
+      "archived_at": "2026-02-18T02:01:00+01:00",
+      "name": "Synthetic archived #9985: fjord harbor",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Wed 18 Feb 02:01",
+      "verdict": "finished 2d early  ·  1h 15m estimated, 2h 30m over 2 sittings  ·  22d on the board"
+    },
+    {
+      "id": 9984,
+      "archived_at": "2026-02-17T21:42:00+01:00",
+      "name": "Synthetic archived #9984: juniper indigo",
+      "kind": "task",
+      "color": 4,
+      "finished": true,
+      "when": "Tue 17 Feb 21:42",
+      "verdict": "finished 3d early  ·  1h 30m estimated, 2h 15m over 2 sittings  ·  28d on the board"
+    },
+    {
+      "id": 9983,
+      "archived_at": "2026-02-17T19:53:00+01:00",
+      "name": "Synthetic archived #9983: kelp lumen",
+      "kind": "task",
+      "color": 0,
+      "finished": false,
+      "when": "Tue 17 Feb 19:53",
+      "verdict": "dropped 1d late  ·  2h 30m estimated, 1h 45m in one sitting  ·  25d on the board"
+    },
+    {
+      "id": 9982,
+      "archived_at": "2026-02-17T18:22:00+01:00",
+      "name": "Synthetic archived #9982: dune indigo",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Tue 17 Feb 18:22",
+      "verdict": "finished 3d early  ·  1h 15m over 2 sittings  ·  1d on the board"
+    },
+    {
+      "id": 9981,
+      "archived_at": "2026-02-17T15:33:00+01:00",
+      "name": "Synthetic archived #9981: lumen lumen",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Tue 17 Feb 15:33",
+      "verdict": "finished  ·  no time set aside  ·  8d on the board"
+    },
+    {
+      "id": 9980,
+      "archived_at": "2026-02-17T13:41:00+01:00",
+      "name": "Synthetic archived #9980: opal indigo",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Tue 17 Feb 13:41",
+      "verdict": "finished 3d early  ·  1h in one sitting  ·  20d on the board"
+    },
+    {
+      "id": 9979,
+      "archived_at": "2026-02-17T09:52:00+01:00",
+      "name": "Synthetic archived #9979: opal opal",
+      "kind": "task",
+      "color": 3,
+      "finished": true,
+      "when": "Tue 17 Feb 09:52",
+      "verdict": "finished 2d late  ·  2h 15m estimated, 1h 45m in one sitting  ·  5d on the board"
+    },
+    {
+      "id": 9978,
+      "archived_at": "2026-02-17T05:20:00+01:00",
+      "name": "Synthetic archived #9978: marble harbor",
+      "kind": "task",
+      "color": 3,
+      "finished": true,
+      "when": "Tue 17 Feb 05:20",
+      "verdict": "finished 23h late  ·  1h 15m in one sitting  ·  16d on the board"
+    },
+    {
+      "id": 9977,
+      "archived_at": "2026-02-17T01:43:00+01:00",
+      "name": "Synthetic archived #9977: ember indigo",
+      "kind": "task",
+      "color": 4,
+      "finished": true,
+      "when": "Tue 17 Feb 01:43",
+      "verdict": "finished 2d late  ·  3h estimated, 3h over 2 sittings  ·  25d on the board"
+    },
+    {
+      "id": 9976,
+      "archived_at": "2026-02-16T22:39:00+01:00",
+      "name": "Synthetic archived #9976: garnet basalt",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Mon 16 Feb 22:39",
+      "verdict": "finished 4d early  ·  45m estimated, 2h over 3 sittings  ·  32d on the board"
+    },
+    {
+      "id": 9975,
+      "archived_at": "2026-02-16T19:16:00+01:00",
+      "name": "Synthetic archived #9975: pebble lumen",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Mon 16 Feb 19:16",
+      "verdict": "finished 1d early  ·  no time set aside  ·  8d on the board"
+    },
+    {
+      "id": 9974,
+      "archived_at": "2026-02-16T18:13:00+01:00",
+      "name": "Synthetic archived #9974: indigo opal",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Mon 16 Feb 18:13",
+      "verdict": "finished 22h late  ·  2h over 3 sittings  ·  4d on the board"
+    },
+    {
+      "id": 9973,
+      "archived_at": "2026-02-16T13:26:00+01:00",
+      "name": "Synthetic archived #9973: nectar amber",
+      "kind": "task",
+      "color": 2,
+      "finished": false,
+      "when": "Mon 16 Feb 13:26",
+      "verdict": "dropped 1d late  ·  no time set aside  ·  13d on the board"
+    },
+    {
+      "id": 9972,
+      "archived_at": "2026-02-16T11:29:00+01:00",
+      "name": "Synthetic archived #9972: fjord juniper",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Mon 16 Feb 11:29",
+      "verdict": "finished  ·  2h 15m over 2 sittings  ·  7d on the board"
+    },
+    {
+      "id": 9971,
+      "archived_at": "2026-02-16T06:53:00+01:00",
+      "name": "Synthetic archived #9971: marble pebble",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Mon 16 Feb 06:53",
+      "verdict": "finished  ·  1h 15m over 2 sittings  ·  25d on the board"
+    },
+    {
+      "id": 9970,
+      "archived_at": "2026-02-16T05:39:00+01:00",
+      "name": "Synthetic archived #9970: fjord nectar",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Mon 16 Feb 05:39",
+      "verdict": "finished  ·  30m estimated, 2h over 3 sittings  ·  32d on the board"
+    },
+    {
+      "id": 9969,
+      "archived_at": "2026-02-16T01:08:00+01:00",
+      "name": "Synthetic archived #9969: fjord opal",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Mon 16 Feb 01:08",
+      "verdict": "finished 3d early  ·  4h 45m over 3 sittings  ·  22d on the board"
+    },
+    {
+      "id": 9968,
+      "archived_at": "2026-02-15T22:23:00+01:00",
+      "name": "Synthetic archived #9968: fjord cobalt",
+      "kind": "task",
+      "color": 3,
+      "finished": true,
+      "when": "Sun 15 Feb 22:23",
+      "verdict": "finished 1d early  ·  1h 30m estimated, 2h 15m over 2 sittings  ·  38d on the board"
+    },
+    {
+      "id": 9967,
+      "archived_at": "2026-02-15T17:41:00+01:00",
+      "name": "Synthetic archived #9967: juniper fjord",
+      "kind": "event",
+      "color": 5,
+      "finished": false,
+      "when": "Sun 15 Feb 17:41",
+      "verdict": "event removed  ·  was set for 30 Jan 15:26  ·  16d on the board"
+    },
+    {
+      "id": 9966,
+      "archived_at": "2026-02-15T16:20:00+01:00",
+      "name": "Synthetic archived #9966: basalt garnet",
+      "kind": "event",
+      "color": 5,
+      "finished": false,
+      "when": "Sun 15 Feb 16:20",
+      "verdict": "event removed  ·  was set for 11 Jan 09:35  ·  38d on the board"
+    },
+    {
+      "id": 9965,
+      "archived_at": "2026-02-15T13:05:00+01:00",
+      "name": "Synthetic archived #9965: pebble cobalt",
+      "kind": "event",
+      "color": 5,
+      "finished": false,
+      "when": "Sun 15 Feb 13:05",
+      "verdict": "event removed  ·  was set for 19 Jan 23:20  ·  28d on the board"
+    },
+    {
+      "id": 9964,
+      "archived_at": "2026-02-15T10:07:00+01:00",
+      "name": "Synthetic archived #9964: fjord indigo",
+      "kind": "task",
+      "color": 4,
+      "finished": true,
+      "when": "Sun 15 Feb 10:07",
+      "verdict": "finished 2d late  ·  45m in one sitting  ·  6d on the board"
+    },
+    {
+      "id": 9963,
+      "archived_at": "2026-02-15T06:10:00+01:00",
+      "name": "Synthetic archived #9963: opal harbor",
+      "kind": "task",
+      "color": 2,
+      "finished": true,
+      "when": "Sun 15 Feb 06:10",
+      "verdict": "finished  ·  1h 30m estimated, 4h over 3 sittings  ·  17d on the board"
+    },
+    {
+      "id": 9962,
+      "archived_at": "2026-02-15T01:51:00+01:00",
+      "name": "Synthetic archived #9962: ember opal",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Sun 15 Feb 01:51",
+      "verdict": "finished 2d late  ·  15m in one sitting  ·  26d on the board"
+    },
+    {
+      "id": 9961,
+      "archived_at": "2026-02-14T22:38:00+01:00",
+      "name": "Synthetic archived #9961: opal pebble",
+      "kind": "task",
+      "color": 4,
+      "finished": true,
+      "when": "Sat 14 Feb 22:38",
+      "verdict": "finished 3d early  ·  2h 15m over 3 sittings  ·  22d on the board"
+    }
+  ],
+  "notes": "Synthetic notes for the ten-thousand-row board.",
+  "dials": {
+    "blur": 11,
+    "light": 39
+  }
+}

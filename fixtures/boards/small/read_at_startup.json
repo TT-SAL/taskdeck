@@ -1,0 +1,330 @@
+[
+  {
+    "id": 1,
+    "importance": 0,
+    "time_importance": null,
+    "name": "Fixture task, severity 0: polish the pretend trophy",
+    "created": "2026-10-01T08:00:00+02:00",
+    "deadline": "2026-10-21T17:00:00+02:00",
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 2,
+    "importance": 1,
+    "time_importance": null,
+    "name": "Fixture task, severity 1: polish the pretend trophy",
+    "created": "2026-10-01T08:07:00+02:00",
+    "deadline": "2026-10-22T17:00:00+02:00",
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 3,
+    "importance": 2,
+    "time_importance": null,
+    "name": "Fixture task, severity 2: polish the pretend trophy",
+    "created": "2026-10-01T08:14:00+02:00",
+    "deadline": "2026-10-23T17:00:00+02:00",
+    "is_event": false,
+    "sessions": [
+      {
+        "start": "2026-10-20T14:15:00+02:00",
+        "minutes": 45
+      },
+      {
+        "start": "2026-10-23T15:30:00+02:00",
+        "minutes": 45
+      }
+    ],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 4,
+    "importance": 3,
+    "time_importance": null,
+    "name": "Fixture task, severity 3: polish the pretend trophy",
+    "created": "2026-10-01T08:21:00+02:00",
+    "deadline": "2026-10-24T17:00:00+02:00",
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 5,
+    "importance": 4,
+    "time_importance": null,
+    "name": "Fixture task, severity 4: polish the pretend trophy",
+    "created": "2026-10-01T08:28:00+02:00",
+    "deadline": "2026-10-25T17:00:00+01:00",
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 6,
+    "importance": 2,
+    "time_importance": 0,
+    "name": "Fixture task, horizon 0: sort the imaginary buttons",
+    "created": "2026-10-01T08:35:00+02:00",
+    "deadline": "2026-11-05T09:00:00+01:00",
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 7,
+    "importance": null,
+    "time_importance": 1,
+    "name": "Fixture task, horizon 1: sort the imaginary buttons",
+    "created": "2026-10-01T08:40:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": 120,
+    "recurrence": null
+  },
+  {
+    "id": 8,
+    "importance": null,
+    "time_importance": 2,
+    "name": "Fixture task, horizon 2: sort the imaginary buttons",
+    "created": "2026-10-01T08:45:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 9,
+    "importance": null,
+    "time_importance": 3,
+    "name": "Fixture task, horizon 3: sort the imaginary buttons",
+    "created": "2026-10-01T08:50:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 10,
+    "importance": 4,
+    "time_importance": 1,
+    "name": "Fixture task with nothing said about it",
+    "created": "2026-10-01T08:55:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 11,
+    "importance": null,
+    "time_importance": 3,
+    "name": "Quick add, renamed: oil the made-up tricycle",
+    "created": "2026-10-01T08:55:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 12,
+    "importance": 2,
+    "time_importance": null,
+    "name": "Quick add, dated: return the invented book",
+    "created": "2026-10-01T08:55:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 13,
+    "importance": null,
+    "time_importance": null,
+    "name": "Fixture event: widget guild meetup",
+    "created": "2026-10-01T08:55:00+02:00",
+    "deadline": "2026-10-21T18:30:00+02:00",
+    "is_event": true,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  },
+  {
+    "id": 14,
+    "importance": null,
+    "time_importance": 1,
+    "name": "Fixture plan: draft the moon-garden layout",
+    "created": "2026-10-01T09:25:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [
+      {
+        "start": "2026-10-20T12:45:00+02:00",
+        "minutes": 90
+      },
+      {
+        "start": "2026-10-21T10:00:00+02:00",
+        "minutes": 60
+      },
+      {
+        "start": "2026-10-22T13:00:00+02:00",
+        "minutes": 90
+      }
+    ],
+    "planned_start": null,
+    "duration_minutes": 240,
+    "recurrence": null
+  },
+  {
+    "id": 15,
+    "importance": null,
+    "time_importance": 1,
+    "name": "Fixture plan that will be unplanned",
+    "created": "2026-10-01T09:25:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": 30,
+    "recurrence": null
+  },
+  {
+    "id": 16,
+    "importance": null,
+    "time_importance": 1,
+    "name": "Fixture plan with a block removed",
+    "created": "2026-10-01T09:25:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [
+      {
+        "start": "2026-10-22T08:00:00+02:00",
+        "minutes": 30
+      }
+    ],
+    "planned_start": null,
+    "duration_minutes": 30,
+    "recurrence": null
+  },
+  {
+    "id": 17,
+    "importance": null,
+    "time_importance": null,
+    "name": "Fictional event: tea with the robot",
+    "created": "2026-10-01T09:55:00+02:00",
+    "deadline": "2026-10-20T17:15:00+02:00",
+    "is_event": true,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": 60,
+    "recurrence": null
+  },
+  {
+    "id": 18,
+    "importance": null,
+    "time_importance": null,
+    "name": "Fictional event: lantern talk",
+    "created": "2026-10-01T09:55:00+02:00",
+    "deadline": "2026-10-22T19:00:00+02:00",
+    "is_event": true,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": 120,
+    "recurrence": null
+  },
+  {
+    "id": 19,
+    "importance": null,
+    "time_importance": null,
+    "name": "Example routine: sleep",
+    "created": "2026-10-01T09:55:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": {
+      "days": 127,
+      "anchor": "2026-10-01",
+      "start_minutes": 960,
+      "minutes": 480
+    }
+  },
+  {
+    "id": 20,
+    "importance": null,
+    "time_importance": null,
+    "name": "Example routine: commute",
+    "created": "2026-10-01T09:55:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": {
+      "days": 31,
+      "anchor": "2026-10-01",
+      "start_minutes": 465,
+      "minutes": 45
+    }
+  },
+  {
+    "id": 21,
+    "importance": null,
+    "time_importance": null,
+    "name": "Example one-off: the window cleaner visits",
+    "created": "2026-10-01T09:55:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": {
+      "days": 0,
+      "anchor": "2026-10-23",
+      "start_minutes": 600,
+      "minutes": 60
+    }
+  },
+  {
+    "id": 29,
+    "importance": 2,
+    "time_importance": null,
+    "name": "Archived fixture: finished, then put back",
+    "created": "2026-10-12T11:30:00+02:00",
+    "deadline": null,
+    "is_event": false,
+    "sessions": [],
+    "planned_start": null,
+    "duration_minutes": null,
+    "recurrence": null
+  }
+]

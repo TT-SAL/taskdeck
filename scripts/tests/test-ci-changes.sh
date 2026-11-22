@@ -50,7 +50,7 @@ echo "-- root: what the root package compiles, embeds or reads"
 for p in src/main.rs src/phone.html src/notes.md resources.rc icon.ico icon.png noback.png \
     1920px-Blue_Marble_2002.png fonts/DejaVuSans.ttf fonts/LICENSES/dejavu.txt \
     images/pexels-francesco-ungaro-1525041.jpg weather_svgs_2/04.svg; do
-    paths "root: $p" "root" "$p"
+    paths "root (and so foundation): $p" "root foundation" "$p"
 done
 paths "root and foundation: build.rs (check-build-date.sh checks it)" "root foundation" build.rs
 paths "root: the release-panic check (desktop runs it on every OS)" "root foundation" scripts/check-release-panic.sh
@@ -70,6 +70,14 @@ paths "supply: scripts/cooldown-exemptions.txt" "supply foundation" scripts/cool
 echo "-- foundation"
 paths "foundation: a spec" "foundation" docs/sync/spec/core.md
 paths "foundation: fixtures also mean core" "foundation core device recovery android" fixtures/boards/small.json
+paths "foundation only: the fixture generator's code" "foundation" fixtures/generator/src/main.rs
+paths "foundation only: the fixture generator's case variant" "foundation" Fixtures/Generator/src/main.rs
+paths "foundation and supply: the fixture generator's manifest" "supply foundation" fixtures/generator/Cargo.toml
+paths "the generator's code next to fixture data marks core again" "foundation core device recovery android" \
+    fixtures/generator/src/main.rs fixtures/snapshots/x.json
+# Whatever marks root marks foundation: the generator links the root package,
+# and the foundation job checks the fixtures against what it writes.
+paths "root marks foundation: src/board.rs" "root foundation" src/board.rs
 paths "foundation: a script" "foundation" scripts/check-build-date.sh
 paths "foundation: a script test" "foundation" scripts/tests/run.sh
 paths "foundation: any crate" "foundation" crates/other/src/main.rs
@@ -111,12 +119,12 @@ done
 paths "a nested .md is not a root .md" "$ALL" tests/NOTES.md
 paths "a nested .png is not a root .png" "$ALL" docs/shot.png
 paths "docs plus one unknown path" "$ALL" README.md docs/sync/status/x.md deploy/install.sh Makefile
-paths "mixed areas add up" "root device relay android" README.md src/ui.rs relay/x.js
-paths "a CRLF line still matches" "root" $'src/ui.rs\r'
+paths "mixed areas add up" "root foundation device relay android" README.md src/ui.rs relay/x.js
+paths "a CRLF line still matches" "root foundation" $'src/ui.rs\r'
 
 echo "-- case variants: one file on Windows and macOS file systems"
 for p in 1920px-blue_marble_2002.png 1920px-blue_Marble_2002.png ICON.png Noback.PNG Fonts/x.ttf SRC/main.rs; do
-    paths "root: the case variant $p" "root" "$p"
+    paths "root: the case variant $p" "root foundation" "$p"
 done
 paths "shared: the case variant SCRIPTS/DEV-SETUP.SH" "$ALL" SCRIPTS/DEV-SETUP.SH
 for p in Deploy/install.sh docs/sync/Status/x.md README.MD license; do
@@ -124,10 +132,10 @@ for p in Deploy/install.sh docs/sync/Status/x.md README.MD license; do
 done
 
 echo "-- wide, oses and [ci full]"
-EV=push paths "push: narrow" "root" src/ui.rs
+EV=push paths "push: narrow" "root foundation" src/ui.rs
 verdict "push: wide=false" "$(value_of wide "$LAST")" "false"
 verdict "push: Linux only" "$(value_of oses "$LAST")" '["ubuntu-latest"]'
-EV=pull_request paths "pull request: still only what changed" "root" src/ui.rs
+EV=pull_request paths "pull request: still only what changed" "root foundation" src/ui.rs
 verdict "pull request: wide=true" "$(value_of wide "$LAST")" "true"
 verdict "pull request: three systems" "$(value_of oses "$LAST")" '["ubuntu-latest","windows-latest","macos-latest"]'
 EV=pull_request paths "pull request, docs only: nothing" "none" README.md
@@ -181,8 +189,8 @@ git_case() {
     LAST="$out"
     verdict "$name" "$(on_areas "$out")" "$want"
 }
-git_case "push: the diff before..after" "root" CI_EVENT=push CI_BEFORE="$A" CI_AFTER="$B"
-git_case "push: after defaults to HEAD" "root" CI_EVENT=push CI_BEFORE="$A"
+git_case "push: the diff before..after" "root foundation" CI_EVENT=push CI_BEFORE="$A" CI_AFTER="$B"
+git_case "push: after defaults to HEAD" "root foundation" CI_EVENT=push CI_BEFORE="$A"
 git_case "push: a docs-only push runs nothing" "none" CI_EVENT=push CI_BEFORE="$B" CI_AFTER="$C"
 git_case "push: before all zeros means everything" "$ALL" \
     CI_EVENT=push CI_BEFORE=0000000000000000000000000000000000000000 CI_AFTER="$C"
@@ -205,12 +213,12 @@ git_case "another event means everything" "$ALL" CI_EVENT=workflow_dispatch CI_B
 g mv src/a.rs docs-a.md 2>/dev/null || mv "$REPO/src/a.rs" "$REPO/docs-a.md"
 g add -A && g commit -qm move
 D="$(g rev-parse HEAD)"
-git_case "push: a rename counts its old path too" "root" CI_EVENT=push CI_BEFORE="$C" CI_AFTER="$D"
+git_case "push: a rename counts its old path too" "root foundation" CI_EVENT=push CI_BEFORE="$C" CI_AFTER="$D"
 # Odd file names are neither quoted nor split.
 mkdir -p "$REPO/src/odd dir" && echo x >"$REPO/src/odd dir/ü näme.rs"
 g add -A && g commit -qm odd
 E="$(g rev-parse HEAD)"
-git_case "push: a path with spaces and non-ASCII letters" "root" CI_EVENT=push CI_BEFORE="$D" CI_AFTER="$E"
+git_case "push: a path with spaces and non-ASCII letters" "root foundation" CI_EVENT=push CI_BEFORE="$D" CI_AFTER="$E"
 
 # Pull requests: the checkout is the merge commit, base first.
 g checkout -q -b feature "$C"

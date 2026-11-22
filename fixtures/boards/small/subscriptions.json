@@ -1,0 +1,50 @@
+[
+  {
+    "id": 31,
+    "name": "Fixture team calendar",
+    "url": "https://example.invalid/fixture/team.ics",
+    "color": [
+      200,
+      120,
+      40,
+      255
+    ],
+    "enabled": true
+  },
+  {
+    "id": 32,
+    "name": "Fixture holidays",
+    "url": "https://calendar.example.com/made-up/holidays.ics",
+    "color": [
+      90,
+      140,
+      200,
+      255
+    ],
+    "enabled": true
+  },
+  {
+    "id": 33,
+    "name": "Fixture club (renamed)",
+    "url": "https://example.com/synthetic/club.ics",
+    "color": [
+      120,
+      175,
+      110,
+      255
+    ],
+    "enabled": true
+  },
+  {
+    "id": 34,
+    "name": "Fixture calendar, switched off",
+    "url": "https://example.invalid/fixture/off.ics",
+    "color": [
+      175,
+      120,
+      190,
+      255
+    ],
+    "enabled": false
+  }
+]

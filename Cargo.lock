@@ -4238,6 +4238,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "taskdeck-fixtures"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "task_deck",
+ "tempfile",
+]
+
+[[package]]
 name = "taskdeck-recover"
 version = "0.1.0"
 dependencies = [

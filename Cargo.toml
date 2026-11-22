@@ -12,6 +12,7 @@ members = [
     "crates/taskdeck-backup",
     "crates/taskdeck-recover",
     "crates/taskdeck-android",
+    "fixtures/generator",
 ]
 default-members = ["."]
 # A standalone package unpacked under target/ (an older build for the legacy

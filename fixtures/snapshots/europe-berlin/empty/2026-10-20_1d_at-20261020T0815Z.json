@@ -1,0 +1,97 @@
+{
+  "version": 0,
+  "today": "2026-10-20",
+  "now_minutes": 615,
+  "palette": [
+    [
+      10,
+      20,
+      30,
+      40
+    ],
+    [
+      200,
+      60,
+      60,
+      120
+    ],
+    [
+      60,
+      200,
+      60,
+      104
+    ],
+    [
+      60,
+      60,
+      200,
+      88
+    ],
+    [
+      180,
+      180,
+      40,
+      74
+    ],
+    [
+      120,
+      40,
+      160,
+      136
+    ]
+  ],
+  "labels": {
+    "severity": [
+      "Not important",
+      "Mildly important",
+      "Important",
+      "Highly important",
+      "Lethally important"
+    ],
+    "horizon": [
+      "Within a month",
+      "Within a week",
+      "Within days",
+      "Whenever"
+    ],
+    "horizon_order": [
+      2,
+      1,
+      0,
+      3
+    ],
+    "weekdays": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat",
+      "Sun"
+    ]
+  },
+  "days": [
+    {
+      "date": "2026-10-20",
+      "weekday": "Tuesday",
+      "label": "20 October 2026",
+      "is_today": true,
+      "summary": "nothing on this day",
+      "behind_minutes": 0,
+      "entries": [],
+      "ghosts": []
+    }
+  ],
+  "tray": {
+    "due": [],
+    "later": []
+  },
+  "items": [],
+  "ranked": [],
+  "done": [],
+  "notes": "",
+  "dials": {
+    "blur": 11,
+    "light": 39
+  }
+}

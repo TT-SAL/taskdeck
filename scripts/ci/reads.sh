@@ -13,7 +13,8 @@
 #     `workspace = true` from the path in the root Cargo.toml's
 #     [workspace.dependencies]: every tracked file under <dep> must mark every
 #     area <manifest's directory>/src/lib.rs marks. So a crate the root package
-#     links must mark root.
+#     links must mark root. A dependency on the top of the tree (the root
+#     package) stands for the tracked files under src/, build.rs and Cargo.toml.
 #   - a target's source in a Cargo.toml (`path` in [lib], [[bin]], [[test]],
 #     [[example]], [[bench]]; `build` in [package]) must mark every area
 #     <manifest's directory>/src/lib.rs marks, and be a file git tracks.
@@ -76,7 +77,9 @@ check() {   # check <what> <reader path> <read path> file|dir|link
         report "$1: $3 is outside the tree, so it cannot be checked"
         BAD=1 && return
     fi
-    if [[ $4 != dir ]] && git -C "$TREE" cat-file -e ":0:$3" 2>/dev/null; then
+    if [[ $4 == dir && $3 == . ]]; then   # the root package: its sources, not the whole tree
+        mapfile -t -d '' files < <(git -C "$TREE" ls-files -z -- ':(literal)src/' ':(literal)build.rs' ':(literal)Cargo.toml')
+    elif [[ $4 != dir ]] && git -C "$TREE" cat-file -e ":0:$3" 2>/dev/null; then
         files=("$3")
     elif [[ $4 != file ]]; then
         mapfile -t -d '' files < <(git -C "$TREE" ls-files -z -- ":(literal)$3/")

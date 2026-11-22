@@ -121,7 +121,11 @@ classify() {
         # build.rs too: the foundation job's check-build-date.sh checks it.
         docs/sync/spec/* | fixtures/* | scripts/* | crates/* | build.rs) mark foundation ;;
     esac
-    case "$p" in crates/taskdeck-core/* | fixtures/*) mark core ;; esac
+    # The generator's code is foundation's alone; the fixture data is core's.
+    case "$p" in
+        fixtures/generator/*) ;;
+        crates/taskdeck-core/* | fixtures/*) mark core ;;
+    esac
     case "$p" in crates/taskdeck-seal/* | docs/sync/vectors/*) mark seal ;; esac
     case "$p" in crates/taskdeck-sync/*) mark engine ;; esac
     # relay too: the relay's suite takes seal's published vectors.
@@ -259,6 +263,9 @@ main() {
     if [[ -n "$EVERYTHING" ]]; then
         for a in "${AREAS[@]}"; do ON[$a]=true; done
     else
+        # The fixture generator links the root package, and the foundation job
+        # checks the committed fixtures against what it writes.
+        if [[ ${ON[root]} == true ]]; then ON[foundation]=true; fi
         # What builds on what (SYNC_PLAN.md §4), in this order: recovery reads
         # core's board and seal's files; the device runtime links core, seal,
         # the engine and the backup crate, and its end-to-end tests run against

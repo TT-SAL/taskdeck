@@ -31,8 +31,8 @@ is true.
 | every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, `.cargo/**` except `.cargo/audit.toml` (a `.cargo/config.toml` changes every build), `scripts/dev-setup.sh` (it installs the tools of the supply-chain job and of every stage's `ci.sh` hook), a file directly under `crates/` (such as `crates/clippy.toml`: clippy and rustfmt read their config from every parent of a crate), any path no rule here knows, and any path that holds a control character such as a newline (its name could otherwise inject a workflow command into the log) |
 | `root` | `src/**`, `build.rs`, `resources.rc`, `icon.ico`, `icon.png`, `noback.png`, `1920px-Blue_Marble_2002.png`, `fonts/**`, `images/**`, `weather_svgs_2/**`; `scripts/check-release-panic.sh` and `crates/panic-probe/**` (the desktop job runs that check on every OS) |
 | `supply` | `Cargo.lock`, any `Cargo.toml`, `deny.toml`, `.cargo/audit.toml`, `scripts/supply-chain.sh`, `scripts/cooldown*` |
-| `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**`, `build.rs` (checked by `scripts/check-build-date.sh`) |
-| `core` | `crates/taskdeck-core/**`, `fixtures/**` |
+| `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**`, `build.rs` (checked by `scripts/check-build-date.sh`); and whenever `root` is true (the fixture generator, `fixtures/generator`, links the root package, and `scripts/check-fixtures.sh` compares the committed fixtures with what it writes) |
+| `core` | `crates/taskdeck-core/**`, `fixtures/**` except `fixtures/generator/**` (the generator's code is `foundation`'s alone) |
 | `seal` | `crates/taskdeck-seal/**`, `docs/sync/vectors/**` |
 | `engine` | `crates/taskdeck-sync/**` |
 | `relay` | `relay/**`, `docs/sync/vectors/**` (the relay's suite takes seal's published vectors) |
@@ -53,7 +53,9 @@ run when the code reads a file whose change would not run that code's jobs. A
 read is a path dependency in any dependencies table of a `Cargo.toml` (also
 under `[target.<cfg>]`, and `[patch]`), written with `path` or inherited with
 `workspace = true` from the root's `[workspace.dependencies]` (every tracked
-file of the crate must mark every area the reader's `src/lib.rs` marks), a target's
+file of the crate must mark every area the reader's `src/lib.rs` marks; a dependency on
+the top of the tree is one on the root package, whose files are the tracked files
+under `src/`, `build.rs` and the root `Cargo.toml`), a target's
 source (`path` of `[lib]`, `[[bin]]`, `[[test]]`, `[[example]]`, `[[bench]]`;
 `build` of `[package]`; manifests are parsed with python3's `tomllib`, and one
 that is not valid TOML, or a path that is not a string, fails), a path in `include!`, `include_bytes!`, `include_str!`,

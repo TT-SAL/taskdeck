@@ -256,9 +256,27 @@ output_has "concat! with a \$stem must name a tracked directory" \
 output_has "include! whose file is not one literal path cannot be checked" \
     'src/main.rs: an include! or #[path] whose file is not a single literal path cannot be checked: concat!("data/"'
 
+echo "-- a path dependency on the root package (the top of the tree)"
+ROOTDEP="$TMP/rootdep"
+mkdir -p "$ROOTDEP/src" "$ROOTDEP/crates/taskdeck-core/src"
+printf '[package]\nname = "app"\n' >"$ROOTDEP/Cargo.toml"
+printf '[dependencies]\napp = { path = "../.." }\n' >"$ROOTDEP/crates/taskdeck-core/Cargo.toml"
+touch_in "$ROOTDEP" src/lib.rs build.rs README.md docs/sync/status/x.txt crates/taskdeck-core/src/lib.rs
+tree "$ROOTDEP"
+expect "a crate of another area that depends on the root package fails" 1 bash "$READS" "$ROOTDEP"
+output_has "the root package's sources are checked" \
+    "crates/taskdeck-core/Cargo.toml depends on ../..: a change to src/lib.rs does not mark core"
+output_has "the root package's build script is checked" \
+    "crates/taskdeck-core/Cargo.toml depends on ../..: a change to build.rs does not mark core"
+output_lacks "the root package is not every file of the tree (README.md)" "a change to README.md"
+output_lacks "the root package is not every file of the tree (docs/sync/status)" "docs/sync/status/x.txt"
+
 echo "-- reads changes.sh covers"
 GOOD="$TMP/good"
-mkdir -p "$GOOD/src" "$GOOD/weather_svgs_2" "$GOOD/crates/a/src" "$GOOD/crates/b/src"
+mkdir -p "$GOOD/src" "$GOOD/weather_svgs_2" "$GOOD/crates/a/src" "$GOOD/crates/b/src" "$GOOD/fixtures/generator/src"
+# The fixture generator links the root package (ruling 14): its sources mark
+# foundation, and a no-CI file at the top of the tree is not one of them.
+printf '[dependencies]\napp = { path = "../..", default-features = false }\n' >"$GOOD/fixtures/generator/Cargo.toml"
 cat >"$GOOD/Cargo.toml" <<'EOF'
 [workspace.dependencies]
 a = { path = "crates/a" }
@@ -289,7 +307,7 @@ const T: &str = include_str!("../Cargo.toml");
 EOF
 ln -s main.rs "$GOOD/src/other.rs"
 touch_in "$GOOD" icon.png fonts/x.ttf fonts/y.ttf weather_svgs_2/04.svg weather_svgs_2/gen.rs src/page.html build.rs \
-    crates/a/src/lib.rs crates/b/src/lib.rs
+    crates/a/src/lib.rs crates/b/src/lib.rs fixtures/generator/src/main.rs README.md LICENSE docs/sync/status/s.md
 tree "$GOOD"
 expect "a tree whose reads changes.sh covers passes" 0 bash "$READS" "$GOOD"
 
