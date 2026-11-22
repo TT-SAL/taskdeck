@@ -455,11 +455,17 @@ Rulings on what the bridge draft raised (2026-11-21):
 
 ## Deviations from the plan
 
-- **`foundation` edits three files under `src/`**, which SYNC_PLAN.md §4 gives to `desktop`:
-  `src/main.rs`, `src/server_main.rs` and a small new module for the panic hook (D11). Without it
-  the plan's own `panic = "unwind"` would break "every merge keeps today's app working" for the
-  server. Nothing else in `src/` is touched. `desktop` should note it in its status file when it
-  starts.
+- **`foundation` touches four files under `src/`**, which SYNC_PLAN.md §4 gives to `desktop`:
+  `src/main.rs`, `src/server_main.rs`, the new module `src/panic_abort.rs` for the panic hook, and
+  one line in `src/lib.rs` that declares it (D11). Without the hook the plan's own
+  `panic = "unwind"` would break "every merge keeps today's app working" for the server. Nothing
+  else in `src/` is touched. `desktop` should note it in its status file when it starts.
+- **More crates moved in the lockfile than the plan's four** (SYNC_PLAN.md §6.1 item 1 names
+  `rustls`, `rustls-webpki`, `webpki-roots` and `tokio` only). The supply-chain gate the same item
+  asks for could not pass otherwise: crossbeam-epoch, rustix, webbrowser, clipboard-win,
+  wayland-scanner with quick-xml, quinn-proto, quinn-udp and chacha20 each moved for an advisory or
+  a yanked version, each by a targeted `cargo update -p --precise` (D19). egui, wgpu and winit did
+  not move. Three advisories are ignored with dated reasons instead (`deny.toml`).
 - **The two-readers test ran two rounds, not "two rounds with no difference, or four" (SYNC_PLAN.md
   §6.1).** Round 1 found 40 differences that needed a spec change and round 2 found 12, all about
   behaviour the specs had left open; in both rounds the readers agreed on every byte layout,
@@ -584,8 +590,9 @@ Decisions the lead took that the owner may want to overrule:
 - **Specs.** `docs/sync/spec/`: six specs, 955 clauses, with `README.md` for the conventions and the
   requirement map (502 rows). They are the contract. The two-readers test ran two rounds of four,
   so expect to meet a behaviour the specs leave open: raise a spec change (plan §3.3), do not
-  improvise. `scripts/spec-lint.sh` must stay green; `tools/clause-index.py` here prints every
-  clause in one file, which is the cheap way to find the clause that states something.
+  improvise. `scripts/spec-lint.sh` must stay green. `docs/sync/status/foundation/tools/clause-index.py`
+  (kept with this stage's papers, which stay in the repository) prints every clause in one file,
+  the cheap way to find the clause that states something.
 - **Skeletons.** Every crate has its spec's public surface; bodies are exactly `unimplemented!()`
   (`grep -rn 'unimplemented!()' crates/<crate>` is your to-do list, and your gate wants zero). Each
   skeleton root carries `#![allow(unused_variables)]`: remove it. Names and signatures come from
@@ -619,6 +626,18 @@ Decisions the lead took that the owner may want to overrule:
 - **Left open for a stage.** Whether `MoveReport` should carry the seed's first seq, and whether
   the shared picture is uploaded again after a relay move (T21): `engine` and `device`. The words
   for a calendar or forecast that could not be refreshed (T19): `desktop` and `android`.
+- **Files at the root that the plan's ownership table does not name** (`rust-toolchain.toml`,
+  `deny.toml`, `.cargo/audit.toml`, `crates/panic-probe/`, `fixtures/.gitattributes`) stay
+  foundation's and follow the shared-file rule of plan §3.2: a small pull request of their own,
+  noted in both status files.
+- **Fuzz targets.** Nothing installs cargo-fuzz and the pinned toolchain is stable. A wave-1 stage
+  with fuzz targets makes them compile on the pinned toolchain in its `ci.sh`; running them is
+  stage `release`'s nightly job, which adds the tool to `scripts/dev-setup.sh`.
+- **`crates/taskdeck-android`.** Stage `android-shell` fills everything but
+  `src/device_backend.rs`, which holds the `backend-device` items and is stage `android`'s; the
+  gate's scan for unimplemented bodies leaves that file out for `android-shell`.
+- **spec-coverage** counts a clause as covered when its id stands in a file under your stage's test
+  paths (`bash scripts/spec-coverage.sh --paths`). It does not judge whether that test runs.
 - **In a cloud container you are root.** Never give `/dev/null` as an output file to a compiler or
   linker, and never run `git config --global` with `GIT_CONFIG_GLOBAL=/dev/null`: both replace the
   device with a file, and everything that reads it then misbehaves.

@@ -1,6 +1,6 @@
 # TaskDeck sync specs: common conventions
 
-> **Status: first drafts.** Stage `foundation` has not exited. The six specs in this folder are complete first drafts; they have not yet been through the interface reviews or the two-readers test of SYNC_PLAN.md §6.1, and they are not yet the contract of §3.3. No later stage starts from them until `docs/sync/status/foundation.md` says `final` and this notice is gone.
+> **Status: the contract.** Stage `foundation` exited on 2026-11-22, and the six specs in this folder are the contract of SYNC_PLAN.md §3.3. They went through the pairwise interface reviews, two rounds of the two-readers test (of at most four; [`CHANGES.md`](CHANGES.md) says what that leaves open), a compile check of every "Public API" section against the skeleton crates, and the requirement map at the end of this file. A stage that finds a spec wrong or ambiguous changes it through a spec-change pull request with a row in `CHANGES.md`; it does not improvise.
 
 *The conventions every spec in this folder follows, the notation and encodings they share, and the glossary. This file holds no clauses of its own. It points to [`SYNC.md`](../../../SYNC.md) for the design and to [`SYNC_PLAN.md`](../../../SYNC_PLAN.md) for the plan; it does not restate either.*
 
