@@ -65,7 +65,7 @@ Rules:
   `disallowed-methods` / `disallowed-types` can name. Prove the configuration bites with a scratch file
   you delete afterwards. `taskdeck-sync` gets the same list.
 - Build proofs, all with `--locked`, in the `CARGO_TARGET_DIR` you are given:
-  `cargo test --workspace --exclude task_deck`; `cargo clippy --workspace --exclude task_deck
+  `cargo test --workspace --exclude task_deck`; `cargo clippy --workspace --exclude task_deck --exclude taskdeck-fixtures
   --all-targets -- -D warnings`; `cargo check -p taskdeck-core -p taskdeck-sync --target
   wasm32-unknown-unknown`; and, if an Android NDK is installed (it is not by default: report that, do not
   install it), `cargo check` of `taskdeck-android` for `aarch64-linux-android`. Check that crates without

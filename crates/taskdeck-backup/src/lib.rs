@@ -4,6 +4,10 @@
 //! `docs/sync/spec/device.md` §15 (scheduling, destinations, re-reading).
 //! Owner: stage `recovery`, then `device` (SYNC_PLAN.md §4, §6.8). Created as a
 //! shell by stage `foundation`.
+//!
+//! No spec names a public item of this crate yet, so the skeletons task
+//! (stage `foundation`, task 4) leaves it a shell: its public surface is
+//! written by its owning stage.
 #![forbid(unsafe_code)]
 
 // Declared for the stage that fills this crate: each dependency is named once

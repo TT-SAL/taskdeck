@@ -78,7 +78,7 @@ Rules:
 
 `cargo test --workspace --exclude task_deck`; `cargo test -p taskdeck-sync --features sim`;
 `cargo test -p taskdeck-android --no-default-features --features backend-echo`;
-`cargo clippy --workspace --exclude task_deck --all-targets -- -D warnings`, and again for
+`cargo clippy --workspace --exclude task_deck --exclude taskdeck-fixtures --all-targets -- -D warnings`, and again for
 `-p taskdeck-sync --features sim`, for `-p taskdeck-device --features test-trust`, for seal with its test
 feature if it has one, and for the echo backend; `cargo check -p taskdeck-core -p taskdeck-sync
 --target wasm32-unknown-unknown`, and `-p taskdeck-sync --features sim` for the same target;

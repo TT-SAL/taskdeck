@@ -55,4 +55,33 @@ already took a reading, the spec is brought to the skeleton, not the other way r
     README's four columns, with the status and the message inside "Meaning" (as relay.md's "Meaning
     (status)" does).
 
-(The device, android and fake-sealer implementers' points are added below as they report.)
+## bridge.md and device.md (from the device and android skeletons)
+
+17. bridge.md §21 and §12.4: `PageFacade::answer_snapshot` and `PageFacade::today` take `chrono::NaiveDate`,
+    but §12.4's list of the crate's dependencies has no `chrono`. `chrono` joins the list (the workspace pin;
+    it is already in the lockfile), and the lead adds it to the manifest. The two methods are missing from
+    the skeleton until then.
+18. bridge.md §21 writes `pub mod reminders` without a feature gate, but it names `taskdeck_core`, which the
+    crate has only with `backend-device`: the module is gated on that feature.
+19. device.md §25: the section names the key stores and the file layers but writes no `impl`: say that the
+    four key stores implement `KeyStore` and that `OsFiles` and `CrashFiles` implement `FileLayer` (the
+    skeleton has these), and that the impls of `StateMachine` for `CoreMachine`, of `Sealer` for `SealSealer`
+    and of `Backend` for the two backends are stage `device`'s and `android`'s to write.
+
+## seal.md and engine.md (from the fake sealer)
+
+20. seal.md §14.3 defines only rules version 1; the toy's upgrade path needs to know what a later version
+    allows. The fake treats later versions as allowing (1, 1) and hash version 1: one of the two specs says so.
+21. engine.md §6.3 and §37: `FakeSealer::create(seed, name)` takes no time and the fake has no way to be given
+    its supported rules; the fake uses `at_ms = 0`, the list `[1]` and crate-private setters. Say which of
+    these, if any, §37 names publicly for the simulator.
+22. seal.md: SEAL-FRAME-004 (a frame with `ctr = 0`) names no catalogue code; the fake answers
+    `seal/frame_format`.
+23. engine.md §6.1: `open_snapshot` takes `&self` although §6.1 and §6.3 have it keep the body's history;
+    the fake uses interior mutability. Either the method takes `&mut self` or the text says the sealer keeps
+    that history behind shared access.
+24. The workspace-wide clippy command of the briefs lints the root package's `build.rs` since
+    `fixtures/generator` depends on the root package, and fails on a warning that today's code has always
+    had. The command excludes `taskdeck-fixtures`, and the generator is linted alone with `--no-deps`. (Not
+    a spec matter: the briefs and the attack workflows carry the new command.)
+
