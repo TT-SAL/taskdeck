@@ -1,6 +1,6 @@
 //! The fixture generator (SYNC_PLAN.md §6.1 item 5): made-up boards written by
-//! today's board code at a pinned clock and zone, the same boards in the older
-//! build's formats, the phone snapshots and the command transcripts of today's
+//! today's board code at a pinned clock and zone, the same boards in older
+//! builds' formats, the phone snapshots and the command transcripts of today's
 //! code. `fixtures/README.md` describes the output.
 
 pub mod boards;
@@ -18,7 +18,7 @@ use clock::Zone;
 
 /// The directories the generator owns under `fixtures/`; the manifest lists
 /// every file in them.
-pub const GENERATED: [&str; 4] = ["boards", "legacy-main", "snapshots", "transcripts"];
+pub const GENERATED: [&str; 5] = ["boards", "legacy-main", "legacy-other", "snapshots", "transcripts"];
 pub const MANIFEST: &str = "MANIFEST.sha256";
 
 /// Write one zone's set into `out_dir`. Berlin first (it writes the boards,

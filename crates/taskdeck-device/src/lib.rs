@@ -714,6 +714,11 @@ impl Published {
         unimplemented!()
     }
 
+    /// Each subscription's last good fetch, ascending id (device.md §25, §13.1.2 step 8).
+    pub fn overlay_fetched(&self) -> &[(u64, i64)] {
+        unimplemented!()
+    }
+
     /// The picture shown (device.md §17.5, §14.2).
     pub fn picture(&self) -> Option<PictureView> {
         unimplemented!()
@@ -1206,5 +1211,13 @@ mod tests {
     #[test]
     fn the_shell_builds() {
         assert_eq!(env!("CARGO_PKG_NAME"), "taskdeck-device");
+    }
+
+    /// Pins the signature of `Published::overlay_fetched` (device.md §25, DEV-ICS-011);
+    /// it compiles only while the method exists as written. Nothing is called.
+    #[test]
+    fn overlay_fetched_has_the_spec_signature() {
+        let _: for<'a> fn(&'a super::Published) -> &'a [(u64, i64)] =
+            super::Published::overlay_fetched;
     }
 }

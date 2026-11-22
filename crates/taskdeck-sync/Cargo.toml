@@ -6,9 +6,9 @@ publish = false
 description = "The sans-IO replica engine and its simulator, generic over traits it defines (spec: docs/sync/spec/engine.md)."
 
 [features]
-# The toy state machine, the fake sealer and the simulator (engine.md §5.3,
-# §6.3, §31; ENG-TOY-002). Off by default; release builds never enable it. It
-# enables nothing yet: the engine stage adds the modules behind it.
+# Compiles the modules `toy` (the toy state machine, engine.md §5.3), `fake`
+# (the fake sealer and membership, §6.3) and `sim` (the simulator, §31;
+# ENG-TOY-002). No default feature enables it; release builds never do.
 sim = []
 
 # ENG-GEN-005: exactly sha2 and zeroize outside the dev-dependencies, and

@@ -15,7 +15,7 @@ out="${1:-$root/fixtures}"
 cd "$root"
 cargo build --locked --quiet -p taskdeck-fixtures
 mkdir -p "$out"
-for generated in boards legacy-main snapshots transcripts MANIFEST.sha256; do
+for generated in boards legacy-main legacy-other snapshots transcripts MANIFEST.sha256; do
     rm -rf -- "${out:?}/$generated"
 done
 TZ=Europe/Berlin cargo run --locked --quiet -p taskdeck-fixtures -- --zone berlin --out "$out"

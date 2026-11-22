@@ -1,21 +1,173 @@
 [
-  {"id":1,"importance":0,"time_importance":null,"name":"Fixture task, severity 0: polish the pretend trophy","created":"2026-10-01T08:00:00+02:00","deadline":"2026-10-21T17:00:00+02:00","is_event":false},
-  {"id":2,"importance":1,"time_importance":null,"name":"Fixture task, severity 1: polish the pretend trophy","created":"2026-10-01T08:07:00+02:00","deadline":"2026-10-22T17:00:00+02:00","is_event":false},
-  {"id":3,"importance":2,"time_importance":null,"name":"Fixture task, severity 2: polish the pretend trophy","created":"2026-10-01T08:14:00+02:00","deadline":"2026-10-23T17:00:00+02:00","is_event":false,"planned_start":"2026-10-20T14:15:00+02:00","duration_minutes":45},
-  {"id":4,"importance":3,"time_importance":null,"name":"Fixture task, severity 3: polish the pretend trophy","created":"2026-10-01T08:21:00+02:00","deadline":"2026-10-24T17:00:00+02:00","is_event":false},
-  {"importance":4,"time_importance":null,"name":"Fixture task, severity 4: polish the pretend trophy","created":"2026-10-01T08:28:00+02:00","deadline":"2026-10-25T17:00:00+01:00","is_event":false},
-  {"id":6,"importance":2,"time_importance":0,"name":"Fixture task, horizon 0: sort the imaginary buttons","created":"2026-10-01T08:35:00+02:00","deadline":"2026-11-05T09:00:00+01:00","is_event":false},
-  {"id":7,"importance":null,"time_importance":1,"name":"Fixture task, horizon 1: sort the imaginary buttons","created":"2026-10-01T08:40:00+02:00","deadline":null,"is_event":false},
-  {"id":8,"importance":null,"time_importance":2,"name":"Fixture task, horizon 2: sort the imaginary buttons","created":"2026-10-01T08:45:00+02:00","deadline":null,"is_event":false},
-  {"id":9,"importance":null,"time_importance":0,"name":"Fixture task, horizon 3: sort the imaginary buttons","created":"2026-10-01T08:50:00+02:00","deadline":null,"is_event":false},
-  {"importance":4,"time_importance":1,"name":"Fixture task with nothing said about it","created":"2026-10-01T08:55:00+02:00","deadline":null,"is_event":false},
-  {"id":11,"importance":null,"time_importance":0,"name":"Quick add, renamed: oil the made-up tricycle","created":"2026-10-01T08:55:00+02:00","deadline":null,"is_event":false},
-  {"id":12,"importance":2,"time_importance":null,"name":"Quick add, dated: return the invented book","created":"2026-10-01T08:55:00+02:00","deadline":null,"is_event":false},
-  {"id":13,"importance":null,"time_importance":null,"name":"Fixture event: widget guild meetup","created":"2026-10-01T08:55:00+02:00","deadline":"2026-10-21T18:30:00+02:00","is_event":true},
-  {"id":14,"importance":null,"time_importance":1,"name":"Fixture plan: draft the moon-garden layout","created":"2026-10-01T09:25:00+02:00","deadline":null,"is_event":false,"planned_start":"2026-10-20T12:45:00+02:00","duration_minutes":90},
-  {"importance":null,"time_importance":1,"name":"Fixture plan that will be unplanned","created":"2026-10-01T09:25:00+02:00","deadline":null,"is_event":false},
-  {"id":16,"importance":null,"time_importance":1,"name":"Fixture plan with a block removed","created":"2026-10-01T09:25:00+02:00","deadline":null,"is_event":false,"planned_start":"2026-10-22T08:00:00+02:00","duration_minutes":30},
-  {"id":17,"importance":null,"time_importance":null,"name":"Fictional event: tea with the robot","created":"2026-10-01T09:55:00+02:00","deadline":"2026-10-20T17:15:00+02:00","is_event":true},
-  {"id":18,"importance":null,"time_importance":null,"name":"Fictional event: lantern talk","created":"2026-10-01T09:55:00+02:00","deadline":"2026-10-22T19:00:00+02:00","is_event":true},
-  {"id":29,"importance":2,"time_importance":null,"name":"Archived fixture: finished, then put back","created":"2026-10-12T11:30:00+02:00","deadline":null,"is_event":false}
+  {
+    "id": 1,
+    "importance": 0,
+    "time_importance": null,
+    "name": "Fixture task, severity 0: polish the pretend trophy",
+    "created": "2026-10-01T08:00:00+02:00",
+    "deadline": "2026-10-21T17:00:00+02:00",
+    "is_event": false
+  },
+  {
+    "id": 2,
+    "importance": 1,
+    "time_importance": null,
+    "name": "Fixture task, severity 1: polish the pretend trophy",
+    "created": "2026-10-01T08:07:00+02:00",
+    "deadline": "2026-10-22T17:00:00+02:00",
+    "is_event": false
+  },
+  {
+    "id": 3,
+    "importance": 2,
+    "time_importance": null,
+    "name": "Fixture task, severity 2: polish the pretend trophy",
+    "created": "2026-10-01T08:14:00+02:00",
+    "deadline": "2026-10-23T17:00:00+02:00",
+    "is_event": false
+  },
+  {
+    "id": 4,
+    "importance": 3,
+    "time_importance": null,
+    "name": "Fixture task, severity 3: polish the pretend trophy",
+    "created": "2026-10-01T08:21:00+02:00",
+    "deadline": "2026-10-24T17:00:00+02:00",
+    "is_event": false
+  },
+  {
+    "id": 5,
+    "importance": 4,
+    "time_importance": null,
+    "name": "Fixture task, severity 4: polish the pretend trophy",
+    "created": "2026-10-01T08:28:00+02:00",
+    "deadline": "2026-10-25T17:00:00+01:00",
+    "is_event": false
+  },
+  {
+    "id": 6,
+    "importance": 2,
+    "time_importance": 0,
+    "name": "Fixture task, horizon 0: sort the imaginary buttons",
+    "created": "2026-10-01T08:35:00+02:00",
+    "deadline": "2026-11-05T09:00:00+01:00",
+    "is_event": false
+  },
+  {
+    "id": 7,
+    "importance": null,
+    "time_importance": 1,
+    "name": "Fixture task, horizon 1: sort the imaginary buttons",
+    "created": "2026-10-01T08:40:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 8,
+    "importance": null,
+    "time_importance": 2,
+    "name": "Fixture task, horizon 2: sort the imaginary buttons",
+    "created": "2026-10-01T08:45:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 9,
+    "importance": null,
+    "time_importance": 0,
+    "name": "Fixture task, horizon 3: sort the imaginary buttons",
+    "created": "2026-10-01T08:50:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 10,
+    "importance": 4,
+    "time_importance": 1,
+    "name": "Fixture task with nothing said about it",
+    "created": "2026-10-01T08:55:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 11,
+    "importance": null,
+    "time_importance": 0,
+    "name": "Quick add, renamed: oil the made-up tricycle",
+    "created": "2026-10-01T08:55:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 12,
+    "importance": 2,
+    "time_importance": null,
+    "name": "Quick add, dated: return the invented book",
+    "created": "2026-10-01T08:55:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 13,
+    "importance": null,
+    "time_importance": null,
+    "name": "Fixture event: widget guild meetup",
+    "created": "2026-10-01T08:55:00+02:00",
+    "deadline": "2026-10-21T18:30:00+02:00",
+    "is_event": true
+  },
+  {
+    "id": 14,
+    "importance": null,
+    "time_importance": 1,
+    "name": "Fixture plan: draft the moon-garden layout",
+    "created": "2026-10-01T09:25:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 15,
+    "importance": null,
+    "time_importance": 1,
+    "name": "Fixture plan that will be unplanned",
+    "created": "2026-10-01T09:25:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 16,
+    "importance": null,
+    "time_importance": 1,
+    "name": "Fixture plan with a block removed",
+    "created": "2026-10-01T09:25:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 17,
+    "importance": null,
+    "time_importance": null,
+    "name": "Fictional event: tea with the robot",
+    "created": "2026-10-01T09:55:00+02:00",
+    "deadline": "2026-10-20T17:15:00+02:00",
+    "is_event": true
+  },
+  {
+    "id": 18,
+    "importance": null,
+    "time_importance": null,
+    "name": "Fictional event: lantern talk",
+    "created": "2026-10-01T09:55:00+02:00",
+    "deadline": "2026-10-22T19:00:00+02:00",
+    "is_event": true
+  },
+  {
+    "id": 29,
+    "importance": 2,
+    "time_importance": null,
+    "name": "Archived fixture: finished, then put back",
+    "created": "2026-10-12T11:30:00+02:00",
+    "deadline": null,
+    "is_event": false
+  }
 ]

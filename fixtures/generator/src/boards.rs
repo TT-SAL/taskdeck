@@ -400,7 +400,8 @@ fn id_limits(dir: &Path) -> Result<(), String> {
         let name = match n {
             0 => "a".repeat(NAME_MAX_CHARS),
             1 => "\u{1f9ea}".repeat(NAME_MAX_CHARS),
-            2 => "\u{e9}".repeat(NAME_MAX_CHARS - 1) + "e\u{301}",
+            // 200 code points (today's limit counts `chars()`), 199 graphemes.
+            2 => "\u{e9}".repeat(NAME_MAX_CHARS - 2) + "e\u{301}",
             _ => format!("Limit fixture item {id}"),
         };
         let created = utc(2026, 9, 1, 8, 0, 0) + Duration::nanoseconds(999_999_999) + Duration::minutes(n as i64);
@@ -436,6 +437,10 @@ fn id_limits(dir: &Path) -> Result<(), String> {
             }
         }
         items.push(item);
+    }
+    // Set directly, past the wire's own check: hold them to it here.
+    if let Some(long) = items.iter().find(|item| item.name.chars().count() > NAME_MAX_CHARS) {
+        return Err(format!("id-limits: item {} has a name past {NAME_MAX_CHARS} characters", long.id));
     }
     b.board.items = items;
     let mut notes: String = "Limit fixture notes. ".chars().cycle().take(NOTES_MAX_CHARS - 2).collect();
@@ -505,7 +510,9 @@ fn unreadable(dir: &Path) -> Result<(), String> {
     bytes.extend(b"\n");
     bytes.extend(b"   \t \n");
     bytes.extend(b"\xff\xfe invalid UTF-8 \xc3\x28 in a line\n");
-    bytes.extend(b"\xef\xbb\xbf{\"id\":905,\"note\":\"a byte-order mark first\"}\n");
+    // A good row behind a byte-order mark: today's reader does not skip one.
+    bytes.extend(b"\xef\xbb\xbf");
+    bytes.extend(row(905, "Unreadable fixture: a good row behind a byte-order mark", utc(2026, 9, 12, 8, 0, 0)));
     let mut crlf = row(906, "Unreadable fixture: a good row ending in CRLF", utc(2026, 9, 13, 8, 0, 0));
     crlf.insert(crlf.len() - 1, b'\r');
     bytes.extend(crlf);

@@ -1,5 +1,29 @@
 [
-  {"id":1,"importance":2,"time_importance":null,"name":"Unreadable fixture: live, and archived too","created":"2026-10-01T08:00:00+02:00","deadline":"2026-10-22T12:00:00+02:00","is_event":false},
-  {"id":2,"importance":null,"time_importance":1,"name":"Unreadable fixture: a planned task","created":"2026-10-01T08:00:00+02:00","deadline":null,"is_event":false,"planned_start":"2026-10-20T10:00:00+02:00","duration_minutes":60},
-  {"id":3,"importance":null,"time_importance":null,"name":"Unreadable fixture: an event","created":"2026-10-01T08:00:00+02:00","deadline":"2026-10-21T12:00:00+02:00","is_event":true}
+  {
+    "id": 1,
+    "importance": 2,
+    "time_importance": null,
+    "name": "Unreadable fixture: live, and archived too",
+    "created": "2026-10-01T08:00:00+02:00",
+    "deadline": "2026-10-22T12:00:00+02:00",
+    "is_event": false
+  },
+  {
+    "id": 2,
+    "importance": null,
+    "time_importance": 1,
+    "name": "Unreadable fixture: a planned task",
+    "created": "2026-10-01T08:00:00+02:00",
+    "deadline": null,
+    "is_event": false
+  },
+  {
+    "id": 3,
+    "importance": null,
+    "time_importance": null,
+    "name": "Unreadable fixture: an event",
+    "created": "2026-10-01T08:00:00+02:00",
+    "deadline": "2026-10-21T12:00:00+02:00",
+    "is_event": true
+  }
 ]
