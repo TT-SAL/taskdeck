@@ -493,7 +493,7 @@ The gate has checked the MAC; the object checks state, in one read of the creden
 | Credential | Valid at the object when | Else |
 |---|---|---|
 | token, role 1 | a `devices` row with `dev`, `role = 1` exists; `state = 1`; `gen` equals the token's | no row or `role = 2`: `401 relay/unauthorized`; `state = 2`: `403 relay/revoked`; `gen` differs: `401 relay/token_stale` |
-| token, role 1, on `login-nonce` and `login` | a `devices` row with `dev` and `role = 1` exists | as above, but the generation is not checked |
+| token, role 1, on `login-nonce` and `login` | a `devices` row with `dev` and `role = 1` exists; `state = 1` | as above, but the generation is not checked |
 | token, role 2 | a `read_tokens` row with `dev` exists, `state = 1`, `gen` equals the token's | `401 relay/token_stale` (no row: `401 relay/unauthorized`) |
 | door, create secret | always (the gate checked it); each route then limits what it does with it | |
 

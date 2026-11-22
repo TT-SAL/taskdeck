@@ -49,3 +49,18 @@ round, or a small fix pass before it) writes them.
 13. **device.md §15.8 and the crate table of §4: `taskdeck-recover` depends on `taskdeck-device`** for the
     online steps (`recovery_online::RecoveryLink`); any table or clause that lists the tool's dependencies
     as backup, seal and core only must say so (lead ruling 3 of `briefs/workspace.md`).
+
+## State (2026-11-22 10:15 UTC)
+
+Items 6 to 13 are written as exact changes in `r3-followups-changes.md` (TR3-FOLLOW-1 to -10) and applied:
+seal 1, relay 1, engine 2, device 3, bridge 2, README 1. The specs hold 941 clauses. The lead's rulings on
+the three open points:
+
+- **T14. `BasedOnUnchecked` counts an entry once**: when it is first applied to the board; a replay of the
+  log from a base at `Start` does not count it again. (One sentence in `engine.md` §13.1, written by the
+  lead.)
+- **T15. Several restored-copy catch-ups before an acknowledgement add up** (saturating), as written.
+- **T16. `TrustRoots::Bundled` has nothing to link until `android-shell` chooses bundled roots**; the stage
+  that makes the choice adds `webpki-roots` and implements `Bundled` in the same change. No interim refusal.
+
+Nothing is open in this file.

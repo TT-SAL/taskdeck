@@ -67,7 +67,7 @@ These hold for all code in `crates/taskdeck-device/` except its tests, benches a
 - **DEV-GEN-008** (device) No error, status, notice, alarm, log line, panic message or devicectl output the crate produces MUST contain a board text (item name, notes, subscription name), a subscription URL or any part of one, a token, a key, a code, a seed or a create secret; only codes, seqs, ids, counts, device names, key fingerprints, hosts of the relay and of Open-Meteo, and HTTP status numbers; the only exceptions are devicectl's `sheet` and `pair_start` answers (DEV-CTL-002), which exist only with `test-trust`.
 - **DEV-GEN-009** (device) Every call into `taskdeck-core`, `taskdeck-seal`, `taskdeck-sync` or the `image` crate that processes data from a file, the relay, a feed or Open-Meteo MUST run inside `std::panic::catch_unwind`, and a caught panic MUST be handled as the section that makes the call states, never by unwinding out of the sync thread or a facade call.
 - **DEV-GEN-010** (device) The crate MUST NOT write to standard output or standard error, and MUST NOT write any log file; diagnostics reach the caller only through the facade (§17).
-- **DEV-GEN-011** (device) The crate's non-development dependencies MUST be exactly `taskdeck-core`, `taskdeck-seal`, `taskdeck-sync`, `taskdeck-backup`, `serde`, `serde_json`, `chrono`, `zeroize`, `subtle`, `sha2`, `base64`, `flate2`, `image` (features `jpeg` and `png` only), `ureq`, `tungstenite`, `rustls`, `rustls-platform-verifier`, `url` and, per target, `windows` (Windows) and `security-framework` (macOS), at the workspace's pinned versions.
+- **DEV-GEN-011** (device) The crate's non-development dependencies MUST be exactly `taskdeck-core`, `taskdeck-seal`, `taskdeck-sync`, `taskdeck-backup`, `serde`, `serde_json`, `chrono`, `zeroize`, `subtle`, `sha2`, `base64`, `flate2`, `image` (features `jpeg` and `png` only), `ureq`, `tungstenite`, `rustls`, `rustls-platform-verifier`, `url`, `webpki-roots` 1.0.12 if and only if stage `android-shell` chooses bundled roots for an API level (SYNC_PLAN.md §3.4, §6.6 item 7; §10.1), and, per target, `windows` (Windows) and `security-framework` (macOS), at the workspace's pinned versions.
 
 ## 4. Crates, threads and ownership
 
@@ -77,6 +77,7 @@ These hold for all code in `crates/taskdeck-device/` except its tests, benches a
 |---|---|---|---|
 | `taskdeck-device` | `device` | store, transport, key-store trait and the desktop key stores, fetchers, blobs, backup scheduling, the facade, the adapters that implement `taskdeck_sync::StateMachine` over `taskdeck-core` and `taskdeck_sync::Sealer` over `taskdeck-seal` (decision D6) | core, seal, sync, backup |
 | `taskdeck-devicectl` | `device` | a binary target of `taskdeck-device`, `required-features = ["test-trust"]` (§19) | `taskdeck-device` |
+| `taskdeck-recover` | `recovery` | the recovery tool (SYNC_PLAN.md §6.8): the backup reader, the replay and the online steps of §15.8 | backup, seal, core, and `taskdeck-device` with default features for `recovery_online::RecoveryLink` (§15.8, §25; lead ruling 3 of the workspace brief) |
 | `tests/e2e/` | `device` | the end-to-end suite (§20) | the standby relay, devicectl |
 | `taskdeck-android` | `android-shell`, then `android` (SYNC_PLAN.md §4) | the JNI library: the facade behind JNI, the Keystore key store over the bridge (§12.5) | `taskdeck-device` with default features (V3-17) |
 | `src/` | `desktop` | `TaskApp` on the facade | `taskdeck-device` with default features |
@@ -1168,7 +1169,7 @@ Every device holds every control entry from seq 1 in `history.tdk` (`history_com
 
 ### 15.8 The recovery tool's online steps
 
-`taskdeck-recover` (stage `recovery`) runs offline until these steps, which use `taskdeck_device::recovery_online::RecoveryLink` (§25) over the transport of §10, with the relay address from the sheet (never from the backup, SEAL-BKP-004), the door as credential where no token exists, and the recovery identity (`dev_R`, the recovery signing key) as signer:
+`taskdeck-recover` (stage `recovery`) runs offline until these steps, which use `taskdeck_device::recovery_online::RecoveryLink` (§25), so the tool's crate depends on `taskdeck-device` (§4.1), over the transport of §10, with the relay address from the sheet (never from the backup, SEAL-BKP-004), the door as credential where no token exists, and the recovery identity (`dev_R`, the recovery signing key) as signer:
 
 **Topping up** a verified backup at seq `b` with chain `c_b`:
 
@@ -1379,6 +1380,8 @@ The notepad edits a draft, not `board.notes` (SYNC.md §4.6). The facade holds t
 | `confirm_clock()` | D, A | `User(ConfirmClock)` | — | — | short | all |
 | `confirm_rejoin()` | D, A | `User(ConfirmRejoin)` | — | — | short | all |
 | `ack_continuity()` | D, A | `User(AckContinuity)`: the user has read `ContinuityUnchecked` (`engine.md` §19.7 step 7) | — | — | short | all |
+| `ack_restored_copy()` | D, A | `User(AckRestoredCopy)`: the user has read `RestoredCopy` (`engine.md` §11.3 step 3) | — | — | short | all |
+| `ack_based_on_unchecked()` | D, A | `User(AckBasedOnUnchecked)`: the user has read `BasedOnUnchecked` (`engine.md` §13.1) | — | — | short | all |
 | `use_this_copy()` | D, A | `User(UseThisCopy)` | — | auth | short | desktops; API 30 |
 | `adopt(dev, typed_fp)` | D, A | `Op(Adopt { dev, typed_fp })`: adopting a state by fingerprint (V1-10); returns a ticket | `engine/op_busy`; through `wait_op`: `engine/fingerprint`, `engine/adopt_membership`, the open and load codes of `engine.md` §22.3 step 3, `engine/op_timeout` | auth | short | desktops; API 30 |
 | `skip(seq)` | D, A | `Op(Skip { seq })`: the halted view's Skip | `engine/skip_target`, `engine/op_busy` | auth | short | desktops; API 30 |
@@ -1603,7 +1606,7 @@ Request: `{"id": u53, "cmd": string, ...arguments}`. Answer: `{"id": u53, "ok": 
 | `release_hold` | | `release_hold` | |
 | `notices`, `dismiss_notice` | `seq`, `index` | | |
 | `ack_banner`, `dismiss_alarm` | `id` | | |
-| `confirm_clock`, `confirm_rejoin`, `use_this_copy`, `ack_continuity` | | | |
+| `confirm_clock`, `confirm_rejoin`, `use_this_copy`, `ack_continuity`, `ack_restored_copy`, `ack_based_on_unchecked` | | | |
 | `adopt` | `dev` hex16, `fp` | | ticket |
 | `skip`, `restore_to` | `seq` | | ticket |
 | `restore_targets`, `purge_preview`, `purge` | | | |
@@ -1948,6 +1951,8 @@ impl Device {
     pub fn confirm_clock(&self) -> Result<(), DeviceError>;
     pub fn confirm_rejoin(&self) -> Result<(), DeviceError>;
     pub fn ack_continuity(&self) -> Result<(), DeviceError>;
+    pub fn ack_restored_copy(&self) -> Result<(), DeviceError>;
+    pub fn ack_based_on_unchecked(&self) -> Result<(), DeviceError>;
     pub fn use_this_copy(&self) -> Result<(), DeviceError>;
     pub fn adopt(&self, dev: [u8; 16], typed_fp: &str) -> Result<u64, DeviceError>;               // ticket
     pub fn skip(&self, seq: u64) -> Result<u64, DeviceError>;                       // ticket

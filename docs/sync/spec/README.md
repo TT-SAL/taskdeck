@@ -222,7 +222,7 @@ One or two lines per term. "Defined in" names the spec that defines the term nor
 | outbox | A device's persistent queue of compiled entries not yet acknowledged. | `engine.md`, `device.md` |
 | rebase | Recomputing the pending state over a newer confirmed state. | `engine.md` |
 | refusal | An entry that every device treats as not applied, reported to its author. | `engine.md` |
-| notice | A persistent per-device message that is not a refusal, such as "changed on Desk since you last synced". | `core.md`, `engine.md` |
+| notice | A persistent per-device message that is not a refusal, such as an overwrite notice. | `core.md`, `engine.md` |
 | skip (of a frame) | Dropping a frame with an unknown author or a bad signature: no counter value consumed, a tampering alarm raised. Lowercase. | `engine.md` |
 | Skip | The control entry `Skip{seq, frame_hash}` that makes every device treat one entry as refused. Capitalised. | `seal.md`, `engine.md` |
 | halt | A device stops applying entries; only in the cases `engine.md` lists. | `engine.md` |

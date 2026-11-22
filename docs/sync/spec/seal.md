@@ -290,7 +290,7 @@ plaintext   = R_e (32 bytes)
 
 The info binds the use, the board, the epoch and the recipient; the aad binds the envelope version, the suite and the commitment (V1-12).
 
-**The ephemeral key.** `SealBase` makes its ephemeral key with RFC 9180's `GenerateKeyPair`: `wrap_root` draws exactly 32 bytes `ikm` from its `Entropy` argument and takes the key pair `DeriveKeyPair(ikm)` (RFC 9180 §7.1.3). It draws nothing else. The wraps of one rotation are made in ascending recipient-id order, the order in which they stand in the item (§12.5); so within the one sealing call of a rotation the root is drawn first, then the 32 bytes of each wrap in that order, then the frame's nonce (`engine.md` §6.1 `seal`, ENG-SEALER-008). A test vector (§24) gives those 32 bytes for each wrap, in that order.
+**The ephemeral key.** `SealBase` makes its ephemeral key with RFC 9180's `GenerateKeyPair`: `wrap_root` draws exactly 32 bytes `ikm` from its `Entropy` argument and takes the key pair `DeriveKeyPair(ikm)` (RFC 9180 §7.1.3). It draws nothing else. The wraps of one rotation are made in ascending recipient-id order, the order in which they stand in the item (§12.5); so within the one sealing call of a rotation the root is drawn first, then the 32 bytes of each wrap in that order, then the frame's nonce (`engine.md` §6.1 `seal`, ENG-SEALER-008). A test vector (§24, `seal-rotation.json`) gives those 32 bytes for each wrap, in that order.
 
 **Wrap layout** (96 bytes):
 
@@ -1796,6 +1796,7 @@ Stage `seal` publishes these families under `docs/sync/vectors/`, one JSON file 
 | `seal-padding.json` | §10.2, §10.3 | `payload_len` values (including 0, 443, 444, 8123, 8124, 257,979, 257,980) and malformed plaintexts, including `at_ms` 253,402,300,799,999 (accepted) and 253,402,300,800,000 (refused) | `P(U)`, or the unpadding error |
 | `seal-kdf.json` | §6 | seed, salt, roots, `L_d`, kinds, epochs | recovery keys, `board_id`, `dev_R`, `c_e`, `K_entry,e`, `K_snap,e`, `K_blob,e`, `K_file(k)`, key fingerprints |
 | `seal-wrap.json` | §7 | root, recipient keys, epoch, entropy | 96-byte wrap; open results; tampered-wrap failures |
+| `seal-rotation.json` | §7, §12.5 | one rotation's sealing call: board, author keys, `ctr`, the new epoch, its recipients' keys in ascending recipient-id order, and entropy in draw order (the bytes drawn for the root, then the 32 bytes `ikm` of each wrap in that order, then the frame's nonce) | the root; for each wrap, its `ikm`, the ephemeral public key `DeriveKeyPair(ikm)` yields and the 96-byte wrap, in item order; the `EpochRotated` item; the frame bytes; a case whose entropy is one byte short, with the error |
 | `seal-commit.json` | §6.5, §13.8 | rotations with good and bad wraps | accept, or the commitment halt |
 | `seal-chain.json` | §15 | board, frames | `C_0`, `C_s`, sync fingerprints, move codes |
 | `seal-membership.json` | §11 to §14 | `M_{s−1}` (canonical bytes), a frame, the other inputs of §14.1 | class, code, flags, `M_s` canonical bytes; one case per row of §13.6 and per refusal code, plus the races of V2-8 |

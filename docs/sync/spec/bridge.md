@@ -476,7 +476,7 @@ Everything not in §6.2 is refused. By name, so that a test lists each:
 
 ### 6.7 The echo backend (`android-shell`)
 
-The `echo` flavour links `taskdeck-android` with the feature `backend-echo` instead of `backend-device`, and no `taskdeck-device`. It exists so that the shell, the fork, the WebView hardening, the bridge and the timing harness are tested before the device runtime exists (SYNC_PLAN.md §6.6: "the bridge answers from the fixtures and an in-memory echo"). It holds, in memory:
+The `echo` flavour builds `taskdeck-android` with `--no-default-features --features backend-echo` (so without the default `backend-device`, §11.1), and links no `taskdeck-device`. It exists so that the shell, the fork, the WebView hardening, the bridge and the timing harness are tested before the device runtime exists (SYNC_PLAN.md §6.6: "the bridge answers from the fixtures and an in-memory echo"). It holds, in memory:
 
 | State | Initial value | Changed by |
 |---|---|---|
@@ -937,7 +937,9 @@ If an attempt reaches the sink and no change to the page, the CSP, `PAGE_GUARD` 
 
 ### 11.1 Library and loading
 
-`crates/taskdeck-android` builds a `cdylib` named `taskdeck` (`libtaskdeck.so`) with `jni` 0.22.4. Features: exactly one of `backend-echo` (`android-shell`; no `taskdeck-device`) and `backend-device` (`android`; links `taskdeck-device` with its default features, and so `taskdeck-core`, `taskdeck-seal`, `taskdeck-sync`, `taskdeck-backup`; no code of the root package, V3-17). Building with both or neither is a `compile_error!`. The Gradle `echo` flavour builds with `backend-echo`, `full` with `backend-device`.
+`crates/taskdeck-android` builds a `cdylib` named `taskdeck` (`libtaskdeck.so`) with `jni` 0.22.4. Features: `backend-echo` (`android-shell`; no `taskdeck-device`) and `backend-device` (`android`; links `taskdeck-device` with its default features, and so `taskdeck-core`, `taskdeck-seal`, `taskdeck-sync`, `taskdeck-backup`; no code of the root package, V3-17), with `default = ["backend-device"]` (ruling S32). A build has exactly one of them: building with both or with neither is a `compile_error!`. The Gradle `echo` flavour builds with `--no-default-features --features backend-echo`; the `full` flavour builds with the default features, and so with `backend-device`. A build that passes no feature arguments (a workspace-wide cargo command, `cargo test -p taskdeck-android`) gets `backend-device`, never `backend-echo`.
+
+- **BRIDGE-GEN-011** (android-shell) `crates/taskdeck-android` MUST declare `default = ["backend-device"]` and MUST fail to compile with both `backend-echo` and `backend-device` or with neither; the `echo` flavour MUST build it with `--no-default-features --features backend-echo`, and the `full` flavour MUST build it with the default features and MUST NOT pass `--no-default-features`.
 
 `TaskDeckApp.onCreate` calls `System.loadLibrary("taskdeck")` (BRIDGE-PROC-002). `JNI_OnLoad` stores the `JavaVM`, finds the class `app/taskdeck/phone/KeyVault` and its three static methods (§11.5) and keeps a `GlobalRef` to the class and the method ids: a thread the Rust runtime started cannot find an app class by name later, because it has no app class loader.
 
@@ -1003,6 +1005,8 @@ The administration and platform surface. Only the shell calls it, from native sc
 | `confirm_clock` | `{}` | `null` | `confirm_clock` | — | android |
 | `confirm_rejoin` | `{}` | `null` | `confirm_rejoin` | — | android |
 | `ack_continuity` | `{}` | `null` | `ack_continuity` | — | android |
+| `ack_restored_copy` | `{}` | `null` | `ack_restored_copy` | — | android |
+| `ack_based_on_unchecked` | `{}` | `null` | `ack_based_on_unchecked` | — | android |
 | `use_this_copy` | `{}` | `null` | `use_this_copy` | auth, API 30 | android |
 | `adopt` | `{"dev": hex32, "typed_fp": string}` | ticket | `adopt` | auth, API 30 | android |
 | `skip` | `{"seq": int}` | ticket (int) | `skip` | auth, API 30 | android |
@@ -1091,7 +1095,7 @@ The panic's message is never included (it may hold data). The backend stays usab
 | page size | 16 KB: every `LOAD` segment of each `libtaskdeck.so` aligned to at least `0x4000` (NDK r28's default, also passed as `-C link-arg=-Wl,-z,max-page-size=16384`); `packaging.jniLibs.useLegacyPackaging = false`; the APK passes `zipalign -c -P 16 4` |
 | Rust profile | the workspace's `release` profile with `panic = "unwind"` (SYNC.md §8: `catch_unwind` at every JNI entry) |
 
-Build variants: `echoDebug` (`android-shell`'s tests, `backend-echo`), `echoTiming` and `fullTiming` (the timing harness, §16: built as release, with R8 and the optimised Rust profile, signed with the debug key, never published), `fullDebug` (`backend-device`, `taskdeck-device` with `test-trust` for the end-to-end tests against a relay on loopback, reached through `adb reverse`), `fullRelease` (`backend-device` without `test-trust`; the only variant `release` builds and the only one a phone runs). `echoRelease` does not exist.
+Build variants: `echoDebug` (`android-shell`'s tests, `--no-default-features --features backend-echo`), `echoTiming` and `fullTiming` (the timing harness, §16: built as release, with R8 and the optimised Rust profile, signed with the debug key, never published; each with its flavour's features), `fullDebug` (the default features, so `backend-device`, and `taskdeck-device` with `test-trust` for the end-to-end tests against a relay on loopback, reached through `adb reverse`), `fullRelease` (the default features, so `backend-device`, without `test-trust`; the only variant `release` builds and the only one a phone runs). `echoRelease` does not exist.
 
 - **BRIDGE-PLAT-001** (android-shell) The app MUST build with the levels, tools and ABIs of §12.1, and CI MUST check every `LOAD` segment of each ABI's `libtaskdeck.so` for an alignment of at least `0x4000` and the APK with `zipalign -c -P 16 4`.
 - **BRIDGE-PLAT-002** (android-shell) The `armeabi-v7a` build MUST link, in CI, on every pull request that changes `android/` or `crates/taskdeck-android/`.
@@ -1135,7 +1139,7 @@ Exactly these, in the manifest (SYNC.md §2.1, with the calendar permissions dro
 |---|---|
 | app, run time | `org.jetbrains.kotlin:kotlin-stdlib`; `androidx.webkit:webkit:1.18.0` and its transitive set (`androidx.core` and the rest, each listed in the verification metadata, V3-16); the platform verifier's Android component (`rustls-platform-verifier-android`, the version `rustls-platform-verifier` 0.7.1 requires), vendored as an AAR under `android/vendor/` with its SHA-256 recorded (SYNC_PLAN.md §3.4) |
 | app, tests | `junit:junit`, `androidx.test:runner`, `androidx.test:rules`, `androidx.test.ext:junit`, `androidx.test.uiautomator:uiautomator`, `androidx.test.espresso:espresso-core`, `androidx.test.espresso:espresso-web` |
-| `taskdeck-android` | `jni` 0.22.4, `serde`, `serde_json`, `base64`, `sha2`, `zeroize`; with `backend-device` also `taskdeck-core`, `taskdeck-device`, `rustls-platform-verifier` (for its Android initialiser); all at the workspace's pins |
+| `taskdeck-android` | `jni` 0.22.4, `serde`, `serde_json`, `base64`, `sha2`, `zeroize`; with `backend-device` (the default feature, §11.1) also `taskdeck-core`, `taskdeck-device`, `rustls-platform-verifier` (for its Android initialiser); all at the workspace's pins |
 
 No Firebase, Play services, WorkManager, CameraX, Compose, AppCompat or Material (SYNC.md §2.1). Gradle verifies every artifact, plugins included, against `android/gradle/verification-metadata.xml` (SHA-256), and the wrapper carries `distributionSha256Sum`.
 
@@ -1187,6 +1191,8 @@ The native screens are plain framework views (no AppCompat, no Compose, §12.4) 
 | Devices: rejoin | while `status().engine.stops` holds the stop of kind `Rejoin` (`engine.md` §19.7 step 1), the line "This device was away longer than the relay keeps its history. Rebuild it from the newest checked snapshot? Changes not yet sent stay queued and are sent after the rebuild." | Rebuild (`confirm_rejoin`) | all |
 | Devices: the clock | the skew when `clock.warning` | Confirm the clock (`confirm_clock`) | all |
 | Devices: continuity | `ContinuityUnchecked { from }` of `status().warnings`, with its seq | Acknowledge (`ack_continuity`) | all |
+| Devices: restored copy | `RestoredCopy { entries }` of `status().warnings`, with its count | Acknowledge (`ack_restored_copy`) | all |
+| Devices: unchecked history | `BasedOnUnchecked { count }` of `status().warnings`, with its count | Acknowledge (`ack_based_on_unchecked`) | all |
 | Devices: the halted view | the halt's kind, since when, the entry's author and key fingerprint, the Skip offer | Skip (`skip`) when `skip_offer.here` | API 30 and auth |
 | Devices: add a device | — | Add a device (`pair_start`, then the address and code shown, then the SAS shown, then `pair_confirm`; `pair_cancel`) | API 30 and auth |
 | Devices: per device | — | Remove (`revoke` with `replace: false`), Replace (`revoke` with `replace: true`) | API 30 and auth |
@@ -1519,6 +1525,8 @@ Example of a case of `routes-echo.json` (illustrative):
 **Rust, `crates/taskdeck-android`** (`#![deny(unsafe_code)]`, BRIDGE-GEN-001):
 
 ```rust
+// Cargo features (§11.1, ruling S32): default = ["backend-device"]; the echo flavour builds with
+// --no-default-features --features backend-echo.
 #[cfg(all(feature = "backend-echo", feature = "backend-device"))] compile_error!("choose one backend");
 #[cfg(not(any(feature = "backend-echo", feature = "backend-device")))] compile_error!("choose a backend");
 

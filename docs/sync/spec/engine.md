@@ -652,6 +652,8 @@ Every entry this device authors goes through the outbox, in the order it was enq
 | `ops` | list of `OpRecord`, at most 16 | operations in progress (§28) |
 | `move_tries` | `(u32, i64)` | wrong move codes in a row, and the `wall_ms` until which entry is locked (§28.3) |
 | `continuity_unchecked` | `Option<u64>` | the `S` of the last rejoin, until the user acknowledges it (§19.7 step 7) |
+| `restored_copy` | `Option<u32>` | the count of own entries matched by restored-copy catch-ups (§11.3 step 3), until the user acknowledges it |
+| `based_on_unchecked` | u32 | the number of accepted entries whose `based_on` check was skipped (`seal.md` §14.8 step 3) since the user last acknowledged them (§13.1); 0 in the first `Meta` of a new replica |
 
 ### 7.9 Bases
 
@@ -941,7 +943,7 @@ SYNC.md §4.3 rule 3, V1-16, V2-3. Let `a` be this device's `last_ctr` in `M_K` 
    - supplies to `own_sealed`, for every counter in `h + 1..=r`, the hash of the frame being classified, so those frames are classified as its own;
    - for every such accepted frame, looks up its `entry_id` among the records: a match is the same entry sent by the earlier copy, and is treated as this device's own entry from then on (seen, then applied and dropped);
    - every record that holds a frame at a counter `≤ r` whose hash differs from the relay's frame at that counter has its frame cleared for re-sealing (D9);
-   - when the log reaches `q`: if `a` (now updated) is below `r`, the relay claimed counters it cannot produce: evidence `withheld`; otherwise `restored` is cleared, the status carries the notice `restored_copy { entries }`, and `next_ctr` uses `w = r`.
+   - when the log reaches `q`: if `a` (now updated) is below `r`, the relay claimed counters it cannot produce: evidence `withheld`; otherwise `restored` is cleared, `meta.restored_copy` becomes `Some(n + m)`, with `m` the number of records this catch-up matched by `entry_id` and `n` the count it held (0 when `None`), saturating at `u32::MAX`, persisted in the next `WriteMeta`, and `next_ctr` uses `w = r`. While `restored_copy` is set, `status.warnings` carries `RestoredCopy { entries }` with its count. `UserAction::AckRestoredCopy` sets it to `None`, persisted in the next `WriteMeta`.
 4. Frames under this device's `dev` at counters above every value covered by steps 2 and 3 that the device did not seal are classified with `own_dev_foreign` (`seal.md` §14.7) and raise §21's `foreign_signer`.
 
 The identity minter for commands (`core.md` §7.2) is raised by the runtime after this catch-up, from the marks the confirmed state now holds (`core.md` §19 requires it of `device.md`).
@@ -1118,7 +1120,7 @@ The board's apply of a page runs under the page's marker and `catch_unwind` (§1
 | `Accept`, `snap` | as `seal.md` | nothing | §19.5 | registry: `SnapRecord`, own verdict |
 | `NeedFrames` | — | — | §17.2 | — |
 | `own_dev_foreign` flag | — | — | stop sending with `foreign_signer` (§21.1); applying goes on | — |
-| `based_on_unchecked` flag | — | — | none: the count of such entries is in the status (V2-15) | — |
+| `based_on_unchecked` flag | — | — | none: when an accepted entry with the flag is applied to the board for the first time, `meta.based_on_unchecked` rises by 1 (saturating at `u32::MAX`; a replay of the log from a base at `Start` does not count an entry again), persisted in the next `WriteMeta`; while it is above 0, `status.warnings` carries `BasedOnUnchecked { count }` with its value (V2-15); `UserAction::AckBasedOnUnchecked` sets it to 0, persisted in the next `WriteMeta` | — |
 | `halt` set | — | — | §16 | — |
 | `SealerError seal/missing_root` | — | — | §24.4 when this device is revoked in `M_{s−1}`, else the local fault `engine/missing_root` | — |
 
@@ -1831,7 +1833,7 @@ SYNC.md §4.7, V2-13, rulings S13. On the purging device:
 On **every device**, at the board apply of an accepted rotation with `purge_before = p` at `r`:
 
 1. write a base at `r` (D7);
-2. `TruncateLogBelow(p, floor_chain)`, with `floor_chain` = `C_{p−1}` from the chain index when `p − 1 ≥ retained_from`, else `None` (§7.11), and `log_floor = p`; drop hash records and `SnapRecord`s below `p`;
+2. when `log_floor < p`: `TruncateLogBelow(p, floor_chain)`, with `floor_chain` = `C_{p−1}` from the chain index when `p − 1 ≥ retained_from`, else `None` (§7.11), and `log_floor = p`; when `log_floor ≥ p` (the device bootstrapped between `p` and the purge rotation, lead ruling L27): no `TruncateLogBelow`, and `log_floor` and `floor_chain` stay as they are, so `log_floor` becomes the larger of the two; in both cases, drop hash records and `SnapRecord`s below `p`;
 3. `DeleteBases` of every base below `r`;
 4. when `τ_K ≥ τ_r + 2,592,000,000` (thirty days, after which no entry under the old epoch can be accepted, `seal.md` §13.9): `Sealer::forget_roots_below(n)` and `WriteIdentity`, which crypto-shreds the relay's copies (SYNC.md §4.7).
 
@@ -1992,7 +1994,7 @@ The engine gives the data; `desktop` and `android` choose the words (SYNC_PLAN.m
 | `moving` | `Option<{ host, home_gen, fence_seq, tries_left: u32, locked_until_ms: Option<i64> }>` | §28.3 |
 | `ops` | list of `{ ticket, kind, stage, started_ms }` | §28 |
 | `notices_unread`, `refusals_unread` | u32 | the badge (V2-16) |
-| `warnings` | list of `RestoredCopy { entries }`, `ContinuityUnchecked { from }`, `BasedOnUnchecked { count }` | informational |
+| `warnings` | list of `RestoredCopy { entries }`, `ContinuityUnchecked { from }`, `BasedOnUnchecked { count }` | informational; each is shown while its `Meta` field is set (`restored_copy`, `continuity_unchecked`, `based_on_unchecked` above 0), until its acknowledgement (§30.4) |
 
 The table's fields are those of `Status`:
 
@@ -2085,7 +2087,7 @@ pub enum Notification {
 pub enum UserAction {
     AckBanner { id: (u64, u8) }, DismissNotice { seq: u64, index: u32 }, DismissAlarm { id: u64 },
     ConfirmClock, MoveCode { text: String },
-    ConfirmRejoin, UseThisCopy, ExportUnsent, AckContinuity,
+    ConfirmRejoin, UseThisCopy, ExportUnsent, AckContinuity, AckRestoredCopy, AckBasedOnUnchecked,
 }
 ```
 
@@ -2093,6 +2095,8 @@ pub enum UserAction {
 
 - **ENG-UI-002** (engine) The engine MUST ignore `DismissAlarm` for an alarm whose kind stops it while that stop is in force.
 - **ENG-UI-003** (engine) The engine MUST show `ContinuityUnchecked { from: S }` in `status.warnings` from the success of a rejoin at `S` until `UserAction::AckContinuity`, across restarts, and at no other time.
+- **ENG-UI-004** (engine) The engine MUST show `RestoredCopy { entries }` in `status.warnings`, with `entries` the count `meta.restored_copy` holds, from the end of a restored-copy catch-up (§11.3 step 3) until `UserAction::AckRestoredCopy`, across restarts, and at no other time.
+- **ENG-UI-005** (engine) The engine MUST show `BasedOnUnchecked { count }` in `status.warnings`, with `count` the value of `meta.based_on_unchecked`, while that value is above 0, across restarts, and MUST set it to 0 on `UserAction::AckBasedOnUnchecked`.
 
 ## 31. The simulator
 
@@ -2473,7 +2477,8 @@ pub struct Meta { pub attempt: u64, pub last_failed: Option<(u64, u64)>, pub bui
                   pub banners: Vec<Banner>, pub relay: RelayTarget, pub prev_session: Option<[u8; 16]>,
                   pub conflicts: u32, pub clock: Option<(i64, i64)>, pub last_beat_ms: i64,
                   pub duties: DutyState, pub ops: Vec<OpRecord>, pub move_tries: (u32, i64),
-                  pub continuity_unchecked: Option<u64> }
+                  pub continuity_unchecked: Option<u64>, pub restored_copy: Option<u32>,
+                  pub based_on_unchecked: u32 }
 pub enum PersistOp { AppendLog(Vec<LogRecord>), SetMarker(Marker), ClearMarker, WriteCheckpoint(Checkpoint),
                      WriteBase(Checkpoint), DeleteBases(Vec<u64>), TruncateLogBelow(u64, Option<Hash32>),
                      AppendHashes(Vec<HashRecord>), Outbox(Vec<OutboxOp>), RewriteOutbox(Vec<OutboxRecord>),
