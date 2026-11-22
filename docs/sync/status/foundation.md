@@ -78,8 +78,8 @@ These are working papers of the stage, not contracts. The exit pull request may 
 | 0 | Status file, first pull request | done | this file; TT-SAL/taskdeck#1, merged |
 | 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | **done.** The fourth loop (second session) ran six rounds: rounds 1 and 3 dry, rounds 2 and 4 one low finding each about which invalid `SOURCE_DATE_EPOCH` spellings the date check tries (fixed; rulings 8 and 9 in the brief close that list), rounds 5 and 6 dry on all three lenses: converged. The lead ran the gate after each fix: 265 passed, 1 ignored | commits `6ca1240`, `938e4b9`; `briefs/task-1a.md` |
 | 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | **done.** The lead's lockfile rulings (D19) are applied and proven in CI on Windows, macOS and Linux. The first loop of six rounds found a real gap in every round (index failures failing open, twice; notices; a lockfile source in another spelling; replaced crates.io sources; a configuration `include`), all fixed and each verified by the lead (script tests, the gate, the cooldown over all 519 packages). Ruling 8 in the brief then made the gate's five properties a closed list, and the second loop's rounds 1 and 2 were both dry on all three lenses (real tools on scratch projects, the lockfile compared entry by entry with the base, fresh tool and cargo homes, dead network): converged | `briefs/supply-chain.md`; commits to `e4c81fe` |
-| 1c | CI: path filters at job level, aggregate `gate` job | implemented, committed, and proven on GitHub: the pull-request run on `fee727d` was green in every job on all three systems, with `gate` named `gate` only on the pull-request run. Two loops so far, eleven attack rounds, and each found something real: the colour defect from the first real run, path-filter gaps, a file-name injection, cancelled push runs losing their changes, and, round after round, one more way to write a file read that the reads check did not follow. All fixed, each with a test; the lead ran the script tests after each loop. The second loop (six rounds) ended with the reads check failing closed on anything it cannot resolve to a tracked file (ruling 12) and with two low findings in `toolchain.sh` (ruling 13 closes that class). Not converged: a third loop runs with the next code workflow | `briefs/ci.md`; `scripts/ci/README.md` |
-| 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | implemented: seven shell crates (core, seal, sync, device, backup, recover, android) with their dependencies in a root `[workspace.dependencies]` table, exact pins for the versions SYNC.md names, TLS on the ring provider only, one RustCrypto generation, 56 new third-party lockfile entries (the youngest published 2026-11-12) and nothing existing moved; READMEs for `relay/`, `android/`, `tests/e2e/`. Where a spec clause and the brief's table disagreed the implementer followed the clause (confirmed, ruling 1 of the brief). The lead ran every proof in the main checkout. Three lead findings wait for the attack loop (a default backend for the Android library, S32; `taskdeck-recover` depends on `taskdeck-device`; `rand_core` for seal) | `briefs/workspace.md` |
+| 1c | CI: path filters at job level, aggregate `gate` job | implemented, committed, and proven on GitHub: the pull-request run on `fee727d` was green in every job on all three systems, with `gate` named `gate` only on the pull-request run. Two loops so far, eleven attack rounds, and each found something real: the colour defect from the first real run, path-filter gaps, a file-name injection, cancelled push runs losing their changes, and, round after round, one more way to write a file read that the reads check did not follow. All fixed, each with a test; the lead ran the script tests after each loop. The second loop (six rounds) ended with the reads check failing closed on anything it cannot resolve to a tracked file (ruling 12) and with two low findings in `toolchain.sh` (ruling 13 closes that class). The second loop's fixes are proven on GitHub: the push run on `bef6b87` ran every area on all three systems and was green. Not converged: a third loop runs with the next code workflow | `briefs/ci.md`; `scripts/ci/README.md` |
+| 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | implemented: seven shell crates (core, seal, sync, device, backup, recover, android) with their dependencies in a root `[workspace.dependencies]` table, exact pins for the versions SYNC.md names, TLS on the ring provider only, one RustCrypto generation, 56 new third-party lockfile entries (the youngest published 2026-11-12) and nothing existing moved; READMEs for `relay/`, `android/`, `tests/e2e/`. Where a spec clause and the brief's table disagreed the implementer followed the clause (confirmed, ruling 1 of the brief). The lead ran every proof in the main checkout (20 steps, all passed, 2026-11-22 09:19 UTC: tests, clippy with each feature, wasm32, the Android target for the crates without C code, the stage script for every stage, supply chain, script tests, the reads check, the server build, today's 265 tests), and the pull-request run on `08dfc65` was green on Windows, macOS and Linux, so the device crate's Windows-only and macOS-only declarations compile there. Three lead findings wait for the attack loop (a default backend for the Android library, S32; `taskdeck-recover` depends on `taskdeck-device`; `rand_core` for seal) | `briefs/workspace.md` |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
 | 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge drafted (1,655 lines, 110 clauses). All six are first drafts: 11,635 lines, 852 clauses | `docs/sync/spec/*.md` |
 | 3c | Pairwise interface reviews: the plan's six pairs (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) plus core–device, seal–device, relay–device | **done.** Nine reviews brought 152 findings (26 high, 75 medium, 51 low); nine resolvers turned them into 232 exact changes; the lead ruled on the open points (L1 to L23); one more resolver wrote the rulings as exact text; fixers applied everything spec by spec and a second agent checked each spec against its diff (seal 102 of 102 items exact, core 15 of 15, relay 78 of 79 and the last fixed, engine 179 of 179, device 225 of 226 with the one a placement the lead confirmed, bridge 34 of 34; nothing unrequested). The six specs now hold 899 clauses (7 withdrawn) in 12,237 lines, and the lead's format check finds no problem. Five small follow-ups for the next spec pass are in `resolutions/r1-followups.md` | commits `220f07a` to this one; `resolutions/` |
@@ -95,15 +95,17 @@ These are working papers of the stage, not contracts. The exit pull request may 
 In this order; a resuming session starts at the first open one. Steps 1 and 6 to 8 are the spec
 track, steps 2 to 5 the code track (D15); the two run side by side.
 
-Where the second session stands (2026-11-22 08:20 UTC): steps 1 to 3 are done (task 1b's second
-loop converged). Task 1c is implemented, committed and green in CI; its second loop is running
-(`workflows/c3-1c-rulings-loops-workspace.js`: ruling 11 applied, rounds 1 to 3 each found something
-small and real, all fixed in the code track's working copy, not yet integrated), and the same
-workflow then implements task 2. Two-readers round 1 is done and integrated (commit `1e9c0f5`);
-round 2 is running in steps (`workflows/s4-two-readers-later-round.js`, started with
-`until: 'read'`; the lead resumes it for the comparers and fixers when the usage window allows,
-D23). The usage limit cut both tracks at about 06:45 UTC; the window after it runs from 07:20 to
-12:20 UTC.
+Where the second session stands (2026-11-22 09:45 UTC): tasks 0, 1a, 1b, 3a, 3b and 3c are done.
+Task 1c is implemented and green in CI after two attack loops that did not converge; a third loop
+is queued. Task 2 is implemented, proven by the lead and green in CI on all three systems; its
+attack loop is queued, with three lead findings. Two-readers rounds 1 and 2 are done and applied
+(938 clauses); rounds 3 and 4 follow. Nothing is running: the third usage window (07:20 to 12:20
+UTC) stands at about 6.1 million agent tokens, so the next launches wait for the reset. Ready to
+launch then: `workflows/s4-two-readers-later-round.js` with round 3 and the follow-ups 6 to 13 of
+`resolutions/r1-followups.md`; `workflows/c4-workspace-loop-fixtures-tooling.js` with the steps
+`1c-loop`, `workspace-loop` and `fixtures` (then `fixtures-loop`, `tooling`, `tooling-loop` by
+resume). After those: task 4 (`briefs/skeletons.md`) once round 4 has settled the specs' "Public
+API" sections, the requirement map (3e), and the stage exit.
 
 1. **Interface reviews of the six spec drafts.** Nine pairs, each reviewer also checking that the
    rulings S1 to S31 are reflected; then one resolver per spec, in dependency order, writes the exact
@@ -474,6 +476,7 @@ Rulings on what the bridge draft raised (2026-11-21):
 | Two-readers round 2 (two readers for all six scenarios, three comparers, six fixers) | 11 agents, 2.0 million tokens (readers 1.06 million, the rest 0.90 million), 38 minutes of agent time; round 1 took 4.4 million | 2026-11-22 08:15 to 08:55 UTC |
 | Code workflow 3 (ruling 11, two attack rounds on 1b, six on 1c with six fixes, the workspace implementation) | 16 agents, 2.4 million tokens, 1 h 44 min; the workspace implementer alone 270,000 | 2026-11-22 07:22 to 09:06 UTC |
 | The third usage window (07:20 to 12:20 UTC) | about 6.4 million agent tokens: two-readers round 1's second part 1.7, round 2 2.0, code workflow 3 2.4, and the lead's own turns; no cut | D22, D23 |
+| A pull-request CI run with the seven workspace crates | 19.5 minutes (13 before): the stage jobs build the device crate's TLS stack on three systems without a cache | run 124 on `08dfc65` |
 | The first real run of the new CI (pull request, every area) | 13 minutes; all stage jobs and the toolchain script work on Windows, macOS and Linux runners; `gate` is named `gate` only on the pull-request run and failed because two jobs failed; one real defect found: `scripts/check-build-date.sh` cannot see `build.rs` rerun when the workflow's `CARGO_TERM_COLOR: always` colours cargo's output (a lead finding for task 1c's loop) | run 44976738183 on `3d6ff82`, 2026-11-22 02:35 UTC |
 
 ## Facts found along the way
@@ -498,6 +501,13 @@ Rulings on what the bridge draft raised (2026-11-21):
   each fix grows the script. Name the mutations a check must catch before the loop starts.
 - A spec drafter cut off late leaves a nearly complete file; a finishing pass that runs the closing
   checks is far cheaper than a redraft (this is how `relay.md` was completed).
+- A commit message that quotes the marker `[ci full]`, even inside a sentence, makes that push's run
+  wide. It happened on `bef6b87` (harmless: it gave the proof on three systems). Write "the full-CI
+  marker" in a message that only talks about it.
+- `cargo build --workspace` on Windows would write `taskdeck.pdb` (the Android library's name) and
+  `TaskDeck.pdb` (the root binary) into one directory. The default build is the root package alone,
+  and CI never builds both in one job.
+
 
 ## Open questions for the owner
 
