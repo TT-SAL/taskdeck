@@ -67,6 +67,7 @@ This file is the stage's memory (SYNC_PLAN.md §3.5).
 | `workflows/c1-supply-chain-1a-loop-ci.js` | code track, on the working copy `target/work/c`: finishing task 1b, task 1a's attack loop until two dry rounds, task 1c's implementation. Launch with `args: { scratch: <session scratchpad> }` after creating `lead-findings/` in the scratchpad, cloning the working copy and warming its `target/debug` and `target/attack-0` to `-2` (copies of the main `target/debug` after `cargo test --locked --no-default-features --lib --no-run`) |
 | `tools/waitwriter.py`, `tools/speccheck.py` | the lead's waiter for finished writers, and a quick format check of the six specs (clause lines, unique ids, owners, MUST outside clauses, closing sections, dangling references). Neither is the stage's tooling; `scripts/spec-lint.sh` comes with task 6 |
 | `tools/wf.py` | prints which agents of a running workflow have finished and their reports (`WF_JOURNAL=<transcript dir>/journal.jsonl`) |
+| `tools/tokens.py`, `tools/sync-clone.sh` | adds up the tokens of a workflow's agents from their transcripts (`tokens.py <journal.jsonl>`), per agent and in total; brings a track's working copy to the pushed branch after the lead has integrated |
 
 These are working papers of the stage, not contracts. The exit pull request may delete them.
 
@@ -76,7 +77,7 @@ These are working papers of the stage, not contracts. The exit pull request may 
 |---|---|---|---|
 | 0 | Status file, first pull request | done | this file; TT-SAL/taskdeck#1, merged |
 | 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | **done.** The fourth loop (second session) ran six rounds: rounds 1 and 3 dry, rounds 2 and 4 one low finding each about which invalid `SOURCE_DATE_EPOCH` spellings the date check tries (fixed; rulings 8 and 9 in the brief close that list), rounds 5 and 6 dry on all three lenses: converged. The lead ran the gate after each fix: 265 passed, 1 ignored | commits `6ca1240`, `938e4b9`; `briefs/task-1a.md` |
-| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | implemented; the lead's lockfile rulings (D19) are applied and proven in CI on Windows, macOS and Linux. The first loop of six rounds found a real gap in every round (index failures failing open, twice; notices; a lockfile source in another spelling; replaced crates.io sources; a configuration `include`), all fixed and each verified by the lead (script tests, the gate, the cooldown over all 519 packages). Not converged; ruling 8 in the brief makes the gate's five properties a closed list; the loop runs again | `briefs/supply-chain.md` |
+| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | **done.** The lead's lockfile rulings (D19) are applied and proven in CI on Windows, macOS and Linux. The first loop of six rounds found a real gap in every round (index failures failing open, twice; notices; a lockfile source in another spelling; replaced crates.io sources; a configuration `include`), all fixed and each verified by the lead (script tests, the gate, the cooldown over all 519 packages). Ruling 8 in the brief then made the gate's five properties a closed list, and the second loop's rounds 1 and 2 were both dry on all three lenses (real tools on scratch projects, the lockfile compared entry by entry with the base, fresh tool and cargo homes, dead network): converged | `briefs/supply-chain.md`; commits to `e4c81fe` |
 | 1c | CI: path filters at job level, aggregate `gate` job | implemented, committed, and proven on GitHub: the pull-request run on `fee727d` was green in every job on all three systems, with `gate` named `gate` only on the pull-request run. The first loop (five rounds, the sixth cut by the usage limit) found something in every round: the colour defect from the first real run, path-filter gaps, a file-name injection, cancelled push runs losing their changes, and several spellings past the new reads check. All fixed; the lead ran the script tests after each. Closing rulings 10 and 11 in the brief; the loop runs again | `briefs/ci.md`; `scripts/ci/README.md` |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo; brief ready (`briefs/workspace.md`). Today the workspace has the root package and `crates/panic-probe` | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
@@ -94,14 +95,15 @@ These are working papers of the stage, not contracts. The exit pull request may 
 In this order; a resuming session starts at the first open one. Steps 1 and 6 to 8 are the spec
 track, steps 2 to 5 the code track (D15); the two run side by side.
 
-Where the second session stands (2026-11-22 07:25 UTC): steps 1 and 2 are done. Steps 3 and 4
-(tasks 1b and 1c) are implemented, committed and green in CI, but neither attack loop has converged:
-each found something real in every round of its first loop, and each now has a closing ruling in its
-brief (1b ruling 8; 1c rulings 10 and 11). Running: `workflows/c3-1c-rulings-loops-workspace.js`
-(ruling 11, both loops again, then task 2's implementation) and round 1 of the two-readers test
-(`workflows/s3-two-readers.js`, `briefs/two-readers.md`; five of six readers and the follow-ups
-resolver are done and their files are in `two-readers/r1/`). The account's usage limit cut both
-workflows at about 06:45 UTC; they were resumed after the reset at 07:20 UTC.
+Where the second session stands (2026-11-22 08:20 UTC): steps 1 to 3 are done (task 1b's second
+loop converged). Task 1c is implemented, committed and green in CI; its second loop is running
+(`workflows/c3-1c-rulings-loops-workspace.js`: ruling 11 applied, rounds 1 to 3 each found something
+small and real, all fixed in the code track's working copy, not yet integrated), and the same
+workflow then implements task 2. Two-readers round 1 is done and integrated (commit `1e9c0f5`);
+round 2 is running in steps (`workflows/s4-two-readers-later-round.js`, started with
+`until: 'read'`; the lead resumes it for the comparers and fixers when the usage window allows,
+D23). The usage limit cut both tracks at about 06:45 UTC; the window after it runs from 07:20 to
+12:20 UTC.
 
 1. **Interface reviews of the six spec drafts.** Nine pairs, each reviewer also checking that the
    rulings S1 to S31 are reflected; then one resolver per spec, in dependency order, writes the exact
@@ -254,6 +256,17 @@ workflows at about 06:45 UTC; they were resumed after the reset at 07:20 UTC.
   tokens because it reads nearly all of the specs, whatever its scenarios: rounds 2 to 4 therefore
   use two readers for all six scenarios, as SYNC_PLAN.md §6.1 words it, instead of six. The lead
   integrates once per finished workflow, not after every fix, to spend fewer turns of its own.
+- **D23. Counting usage, and fewer messages per agent (2026-11-22 08:15 UTC).** The number a workflow
+  reports is input plus cache writes plus output; `tools/tokens.py` adds the same up from the agents'
+  transcripts while a workflow runs, so the lead knows where a window stands before it launches
+  (this window at 08:15: 3.0 million). The transcripts also show what the reported number hides:
+  each message an agent sends re-reads its whole context, and round 1's readers each re-read about
+  10 million tokens over some 40 messages. So from round 2 a reader issues the reads of all the
+  specs as parallel calls in its first message and writes each file in one call, and every agent is
+  told to batch its look-ups. A workflow whose cost is uncertain is launched in steps (`until`): it
+  returns after a phase, the lead looks at the window, and a resume replays the finished agents
+  from the cache. Round 2's readers come first (about 1.3 million); the comparers and fixers (about
+  1.2 million) follow in the same window only if it then stands under about 5.5 million.
 - **D21. The spec resolutions are kept in the repository** (`docs/sync/status/foundation/resolutions/`):
   nine files with 232 exact changes and the lead's rulings on them are eighteen agent runs of work
   and existed only in the session's scratch space.
