@@ -183,7 +183,11 @@ impl ToyMachine {
         for _ in 0..n_marks {
             let device_no = r.u16()?;
             let n = r.u64()?;
-            if last_dev.is_some_and(|last| device_no <= last) || n < 1 {
+            // Strictly ascending, `device_no` from 1 to 8,191, `n` from 1 to 2^40 − 1 (engine.md §5.3).
+            if last_dev.is_some_and(|last| device_no <= last)
+                || !(1..=MAX_DEVICE_NO).contains(&device_no)
+                || !(1..=ID_LOW).contains(&n)
+            {
                 return None;
             }
             last_dev = Some(device_no);
@@ -728,11 +732,21 @@ mod tests {
         assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(2, 1), (1, 1)])), format);
         assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(1, 1), (1, 2)])), format);
         assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(1, 0)])), format);
-        // n_items above 10,000 and n_marks above 8,191, with well-formed entries.
+        // A mark's device_no from 1 to 8,191 and its n from 1 to 2^40 - 1, with no item.
+        assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(0, 1)])), format);
+        assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(8_192, 1)])), format);
+        assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(u16::MAX, 1)])), format);
+        assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(1, 1), (8_191, 1)])), "ok");
+        assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(1, ID_LOW)])), "ok");
+        assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(1, ID_SPLIT)])), format);
+        assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(1, u64::MAX)])), format);
+        assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &[(2, 1), (3, ID_SPLIT)])), format);
+        // n_items above 10,000 and n_marks above 8,191, with well-formed entries
+        // (8,191 marks is every device_no, so an 8,192nd cannot be well formed).
         let items: Vec<(u64, u32)> = (1..=10_001).map(|n| (id(1, n), 0)).collect();
         assert_eq!(load_code(&toy, &state_bytes(1, &[], &items, &[(1, 10_001)])), format);
         assert_eq!(load_code(&toy, &state_bytes(1, &[], &items[..10_000], &[(1, 10_001)])), "ok");
-        let marks: Vec<(u16, u64)> = (0..8_192).map(|d| (d, 1)).collect();
+        let marks: Vec<(u16, u64)> = (1..=8_192).map(|d| (d, 1)).collect();
         assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &marks)), format);
         assert_eq!(load_code(&toy, &state_bytes(1, &[], &[], &marks[..8_191])), "ok");
     }

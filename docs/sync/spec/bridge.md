@@ -1139,7 +1139,7 @@ Exactly these, in the manifest (SYNC.md §2.1, with the calendar permissions dro
 |---|---|
 | app, run time | `org.jetbrains.kotlin:kotlin-stdlib`; `androidx.webkit:webkit:1.18.0` and its transitive set (`androidx.core` and the rest, each listed in the verification metadata, V3-16); the platform verifier's Android component (`rustls-platform-verifier-android`, the version `rustls-platform-verifier` 0.7.1 requires), vendored as an AAR under `android/vendor/` with its SHA-256 recorded (SYNC_PLAN.md §3.4) |
 | app, tests | `junit:junit`, `androidx.test:runner`, `androidx.test:rules`, `androidx.test.ext:junit`, `androidx.test.uiautomator:uiautomator`, `androidx.test.espresso:espresso-core`, `androidx.test.espresso:espresso-web` |
-| `taskdeck-android` | `jni` 0.22.4, `serde`, `serde_json`, `base64`, `sha2`, `zeroize`; with `backend-device` (the default feature, §11.1) also `taskdeck-core`, `taskdeck-device`, `rustls-platform-verifier` (for its Android initialiser); all at the workspace's pins |
+| `taskdeck-android` | `jni` 0.22.4, `serde`, `serde_json`, `base64`, `sha2`, `zeroize`; with `backend-device` (the default feature, §11.1) also `taskdeck-core`, `taskdeck-device`, `chrono` (for `PageFacade::answer_snapshot` and `PageFacade::today`, §21), `rustls-platform-verifier` (for its Android initialiser); all at the workspace's pins |
 
 No Firebase, Play services, WorkManager, CameraX, Compose, AppCompat or Material (SYNC.md §2.1). Gradle verifies every artifact, plugins included, against `android/gradle/verification-metadata.xml` (SHA-256), and the wrapper carries `distributionSha256Sum`.
 
@@ -1554,6 +1554,8 @@ pub struct BridgeError { pub code: &'static str, pub message: Option<String> }
 #[cfg(feature = "backend-echo")]   impl EchoBackend { pub fn from_fixtures() -> Self; }
 #[cfg(feature = "backend-device")] pub struct DeviceBackend { /* Device, the request-key cache */ }
 #[cfg(feature = "backend-device")] impl DeviceBackend { pub fn open(config: &OpenConfig) -> Result<(Self, serde_json::Value), BridgeError>; }
+// impl Backend for EchoBackend (stage android-shell, §6.7) and impl Backend for DeviceBackend (stage android) are
+// those stages' to write; the skeleton carries the two structs without them.
 #[cfg(feature = "backend-device")] pub struct PageFacade { /* wraps taskdeck_device::Device */ }
 #[cfg(feature = "backend-device")] impl PageFacade {
     pub fn answer_snapshot(&self, from: chrono::NaiveDate, days: u32, now_ms: i64) -> serde_json::Value;
@@ -1579,7 +1581,7 @@ pub fn parse_open_config(text: &str) -> Result<OpenConfig, BridgeError>;     // 
 pub fn parse_zone(value: &serde_json::Value) -> Result<ZoneJson, BridgeError>; // §12.7 step 4
 #[cfg(feature = "backend-device")] pub struct AndroidKeyStore { /* JavaVM, KeyVault refs, data_dir */ }
 #[cfg(feature = "backend-device")] impl taskdeck_device::KeyStore for AndroidKeyStore {}
-pub mod reminders {                                                          // §15.2
+#[cfg(feature = "backend-device")] pub mod reminders {                       // §15.2; it names taskdeck_core, which the crate has only with backend-device
     pub fn record_json(r: &taskdeck_core::reminders::Reminder, zone: &dyn taskdeck_core::time::Zone) -> serde_json::Value;
 }
 mod jni_entry;   // the nine entry points and JNI_OnLoad (§11.2); the only module with `unsafe`

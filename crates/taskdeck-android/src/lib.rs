@@ -68,6 +68,9 @@ pub struct BridgeError {
     pub message: Option<String>,
 }
 
+// impl Backend for EchoBackend (stage android-shell, §6.7) and impl Backend for DeviceBackend (stage android) are
+// those stages' to write; the skeleton carries the two structs without them (bridge.md §21).
+
 /// The echo backend (bridge.md §6.7).
 #[cfg(feature = "backend-echo")]
 #[derive(Clone)]
@@ -101,9 +104,15 @@ pub struct PageFacade {}
 
 #[cfg(feature = "backend-device")]
 impl PageFacade {
-    // Not yet: `answer_snapshot(&self, from: chrono::NaiveDate, days: u32, now_ms: i64) -> serde_json::Value`
-    // and `today(&self, now_ms: i64) -> chrono::NaiveDate` (bridge.md §21) name `chrono`, which is not a
-    // dependency of this crate (bridge.md §12.4) and cannot be added without changing Cargo.lock.
+    /// The `/api/state` body: the snapshot JSON of `core.md` §14.3 (bridge.md §6.4.1, §21).
+    pub fn answer_snapshot(&self, from: chrono::NaiveDate, days: u32, now_ms: i64) -> serde_json::Value {
+        unimplemented!()
+    }
+
+    /// Today in the device's zone at `now_ms` (bridge.md §6.4.1, §21).
+    pub fn today(&self, now_ms: i64) -> chrono::NaiveDate {
+        unimplemented!()
+    }
 
     /// The weather route's body (bridge.md §6.4.2).
     pub fn weather(&self) -> Option<serde_json::Value> {

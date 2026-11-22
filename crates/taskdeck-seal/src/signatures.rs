@@ -7,7 +7,7 @@ pub fn login_message(
     origin: &str,
     board: &BoardId,
     dev: &DevId,
-    r#gen: u32, // `gen` is reserved in edition 2024
+    generation: u32, // the wire field `gen` of §16.1; `gen` is reserved in edition 2024
     relay_nonce: &[u8],
     client_nonce: &[u8; 32],
 ) -> Result<Vec<u8>, SealError> {
@@ -19,7 +19,7 @@ pub fn sign_login(
     keys: &DeviceKeys,
     origin: &str,
     board: &BoardId,
-    r#gen: u32, // `gen` is reserved in edition 2024
+    generation: u32, // the wire field `gen` of §16.1; `gen` is reserved in edition 2024
     relay_nonce: &[u8],
     rng: &mut dyn Entropy,
 ) -> Result<([u8; 32], [u8; 64]), SealError> {

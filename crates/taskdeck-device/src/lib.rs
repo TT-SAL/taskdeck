@@ -1059,7 +1059,7 @@ impl KeyStore for MemoryKeyStore {
     }
 }
 
-// AndroidKeyStore lives in taskdeck-android (device.md §12.5).
+// AndroidKeyStore lives in taskdeck-android (device.md §12.5) and implements KeyStore there (bridge.md §21).
 
 // ---------- the store and its file layer (§6, §7)
 
@@ -1179,6 +1179,9 @@ pub struct CoreMachine {}
 
 /// The sealer over `taskdeck-seal` (device.md §4.1, decision D6).
 pub struct SealSealer {}
+
+// impl taskdeck_sync::StateMachine for CoreMachine and impl taskdeck_sync::Sealer for SealSealer are stage
+// device's to write (device.md §25); the skeleton carries the two structs without them.
 
 // ---------- test-only (§11)
 

@@ -834,7 +834,7 @@ Every failure is `core/intent_json` with HTTP status 400 and the parser's messag
 |---|---|---|---|
 | `add` | `name` String; `deadline` wire time; `importance` u8 (none); `is_event` bool (false); `time_importance` u8 (none) | desk | `create_task` or `create_event` |
 | `quick_add` | `name` String; `deadline` wire time | phone, desk | `create_task` |
-| `create` | `kind` `task`/`event`/`routine`; `name` String; `day` date; `start` i32; `minutes` u32 | phone, desk | `create_task`, `create_event` or `create_routine` |
+| `create` | `kind` `board::Kind` (JSON `"task"`, `"event"` or `"routine"`); `name` String; `day` date; `start` i32; `minutes` u32 | phone, desk | `create_task`, `create_event` or `create_routine` |
 | `rename` | `id` u64; `name` String | phone, desk | `rename` |
 | `complete` | `id` u64; `at` wire time | phone, desk | `complete` |
 | `delete` | `id` u64; `at` wire time | phone, desk | `delete` |
@@ -906,7 +906,7 @@ Policy lives here and nowhere else (thin apply, SYNC.md §4.5, V2-1): default na
 
 ### 13.4 Per intent
 
-Each row's steps run in order; the first failure is the result. "Missing" means no live item in `view` has `id` (`core/gone`, 410 "That item is no longer on the board."). `item` is that live item. `L(t)` is the local minutes of instant `t` and `D(t)` its local day, in the origin's zone. `clamp_block`, `resolve_on_day`, `snap` are §5.4 and §5.5, all in the origin's zone. "Cap" is the live-item cap of §9.5 (`core/cap_items`), checked on `view`; for a `create` of a task it includes the block caps of §9.4 (`core/cap_blocks`).
+Each row's steps run in order; the first failure is the result. "Missing" means no live item in `view` has `id` (`core/item_gone`, 410 "That item is no longer on the board."). `item` is that live item. `L(t)` is the local minutes of instant `t` and `D(t)` its local day, in the origin's zone. `clamp_block`, `resolve_on_day`, `snap` are §5.4 and §5.5, all in the origin's zone. "Cap" is the live-item cap of §9.5 (`core/cap_items`), checked on `view`; for a `create` of a task it includes the block caps of §9.4 (`core/cap_blocks`).
 
 | Intent | Steps | Command | Reply |
 |---|---|---|---|
@@ -1009,7 +1009,8 @@ Each is today's function (file:line in today's `src/`) moved into the core with 
 | `planner::placements_for`, `placements_of`, `appears_on` (planner.rs:153-225) | same names, `(…, day, zone)` | yes | `DayPlacement.session` is `Option<u64>`, a sid; blocks in ascending sid |
 | `planner::lay_out`, `summarize`, `summary_text`, `format_minutes`, `format_duration`, `drop_length_for`, `duration_options`, `relative_due`, `reflow`, `behind_minutes` | same | no | `relative_due(deadline, now)` takes instants |
 | `planner::backlog_group(deadline, day)` | `backlog_group(deadline, day, zone)` | yes | `Due` when `D(deadline) ≤ day` |
-| `planner::now_marker(day, now)` | `now_marker(day, now, zone)` | yes | §5.5 |
+| `planner::now_marker(day, now)` | `time::now_marker(day, now, zone)` | yes | §5.5; in `time`, not `planner` (§20) |
+| `planner::snap`, `clamp_block`, `resolve_on_day` (planner.rs:296-311 for the last) | `time::snap(m)`, `time::clamp_block(start, minutes)`, `time::resolve_on_day(day, minutes, zone)` | `resolve_on_day` only | §5.4, §5.5; in `time`, not `planner` (§20) |
 | `Active::is_planned`, `planned_minutes`, `remaining_minutes`, `wants_planning`, `planner_anchor`, `calendar_item_color`, `is_routine` | `Item::` same | no | |
 | `Recurrence::falls_on`, `repeats`, `includes`, `summary`, `summary_dated` | same | no | `toggle` stays in the UI |
 | `Archived::verdict`, `timing`, `was_finished`, `was_judged`, `mark`, `lifetime`, `booked_minutes`, `sittings`, `color_id` | `ArchiveRow::` same; `verdict(zone)` | `verdict` only | |
@@ -1212,44 +1213,44 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 |---|---|---|---|
 | `core/unknown_rules` | `upgrade_rules` to a version that is not newer or not supported; `reset` with a target newer than the current board | §11.2, §11.3 | engine: halt with the rules halt (`seal.md` §14.5, `engine.md`); from `reset`, the local fault `engine/local_fault` (`engine.md` §28.1) |
 
-**Intent and compile errors.** Returned by `parse_intent` (§12) and `compile` (§13) as `CompileError{code, status, message}`; nothing is queued. The UI shows `message`; the bridge returns it as today's `{"error": message}` with `status` (`bridge.md`). Messages are today's (board.rs, subscriptions.rs) except where marked new.
+**Intent and compile errors.** Returned by `parse_intent` (§12) and `compile` (§13) as `CompileError{code, status, message}`; nothing is queued. The UI shows `message`; the bridge returns it as today's `{"error": message}` with `status` (`bridge.md`). Messages are today's (board.rs, subscriptions.rs) except where the status parentheses say new.
 
-| Code | Status | Message | Raised when | What the caller does |
-|---|---|---|---|---|
-| `core/intent_json` | 400 | the parser's message, e.g. `` not a time: `<text>` `` | §12.2; §13.3 G3 | show it |
-| `core/query` | 400 | That is a query, not a command. | `snapshot`, `feed`, `board` | the bridge answers queries itself |
-| `core/name_long` | 400 | A name is at most 200 characters. | G2 | show it |
-| `core/name_empty` | 400 | `add`: It needs a name. `quick_add`: A task needs a name. `rename`: A name cannot be empty. | §13.4 | show it |
-| `core/event_time` | 400 | An event needs a time. | `add` | show it |
-| `core/date_range` | 400 | That date is out of range (1970–9999). | G4, G5 | show it |
-| `core/severity` | 400 | No such severity. | `add`, `set_severity` | show it |
-| `core/horizon` | 400 | No such horizon. | `add`, `set_horizon` | show it |
-| `core/gone` | 410 | That item is no longer on the board. | missing (§13.4) | show it; refresh |
-| `core/block_gone` | 410 | That block is no longer there. | `move_block`, `remove_block` | show it; refresh |
-| `core/bad_time` | 400 | That time doesn't exist on this day (daylight saving). | `create`, `move_block`, `add_block` | show it |
-| `core/finish_kind` | 400 | Only a task can be finished — an event or a routine is deleted instead. | `complete` | show it |
-| `core/block_kind` | 400 | Only a task can be given a block of time. | `add_block` | show it |
-| `core/unplan_kind` | 400 | Only a task can be unplanned. | `unplan` | show it |
-| `core/length_range` | 400 | A length is between fifteen minutes and a day. | `set_estimate` | show it |
-| `core/deadline_kind` | 400 | Only a task has a due date; an event's time is its time. | `set_deadline` | show it |
-| `core/severity_kind` | 400 | Only a task has a severity. | `set_severity` | show it |
-| `core/horizon_kind` | 400 | Only a task has a horizon. | `set_horizon` | show it |
-| `core/repeat_kind` | 400 | Only a routine repeats. | `set_repeat` | show it |
-| `core/notes_long` | 400 | Those notes are too long for the notepad. | `set_notes` | show it; keep the draft |
-| `core/archive_gone` | 410 | That is no longer in the archive. | `restore`, `forget_archived` | show it; refresh |
-| `core/calendars_full` | 400 | That is already 20 calendars, which is as many as this keeps. | `add_subscription` | show it |
-| `core/url_empty` | 400 | An address is needed. | `checked_url` | show it |
-| `core/url_long` | 400 | That address is too long. | `checked_url` | show it |
-| `core/url_http` | 400 | Use https — a calendar link is a password, and http sends it in clear. | `checked_url` | show it |
-| `core/url_scheme` | 400 | An address should start with https:// | `checked_url` | show it |
-| `core/url_host` | 400 | That address has no host in it. | `checked_url` | show it |
-| `core/url_duplicate` | 400 | That calendar is already subscribed to. | `add_subscription` | show it |
-| `core/calendar_gone` | 410 | That calendar is no longer subscribed to. | subscription intents | show it; refresh |
-| `core/cap_items` | 400 | That is as many items as a board can hold. (new) | creating intents, `restore` | show it |
-| `core/cap_blocks` | 400 | That is as many blocks as a board can hold. (new) | `create` (task), `add_block` | show it |
-| `core/cap_archive` | 400 | The archive is full. (new) | `complete`, `delete` | show it |
-| `core/place` | 400 | That place is off the map. (new) | `set_home` | show it |
-| `core/picture` | 400 | That picture could not be shared. (new) | `set_picture` | a fault of the uploading code: log it |
+| Code | Meaning (status) | Raised when | What the caller does |
+|---|---|---|---|
+| `core/intent_json` | the parser's message, e.g. `` not a time: `<text>` `` (400) | §12.2; §13.3 G3 | show it |
+| `core/query` | "That is a query, not a command." (400) | `snapshot`, `feed`, `board` | the bridge answers queries itself |
+| `core/name_long` | "A name is at most 200 characters." (400) | G2 | show it |
+| `core/name_empty` | `add`: "It needs a name."; `quick_add`: "A task needs a name."; `rename`: "A name cannot be empty." (400) | §13.4 | show it |
+| `core/event_time` | "An event needs a time." (400) | `add` | show it |
+| `core/date_range` | "That date is out of range (1970–9999)." (400) | G4, G5 | show it |
+| `core/severity` | "No such severity." (400) | `add`, `set_severity` | show it |
+| `core/horizon` | "No such horizon." (400) | `add`, `set_horizon` | show it |
+| `core/item_gone` | "That item is no longer on the board." (410) | missing (§13.4) | show it; refresh |
+| `core/block_gone` | "That block is no longer there." (410) | `move_block`, `remove_block` | show it; refresh |
+| `core/bad_time` | "That time doesn't exist on this day (daylight saving)." (400) | `create`, `move_block`, `add_block` | show it |
+| `core/finish_kind` | "Only a task can be finished — an event or a routine is deleted instead." (400) | `complete` | show it |
+| `core/block_kind` | "Only a task can be given a block of time." (400) | `add_block` | show it |
+| `core/unplan_kind` | "Only a task can be unplanned." (400) | `unplan` | show it |
+| `core/length_range` | "A length is between fifteen minutes and a day." (400) | `set_estimate` | show it |
+| `core/deadline_kind` | "Only a task has a due date; an event's time is its time." (400) | `set_deadline` | show it |
+| `core/severity_kind` | "Only a task has a severity." (400) | `set_severity` | show it |
+| `core/horizon_kind` | "Only a task has a horizon." (400) | `set_horizon` | show it |
+| `core/repeat_kind` | "Only a routine repeats." (400) | `set_repeat` | show it |
+| `core/notes_long` | "Those notes are too long for the notepad." (400) | `set_notes` | show it; keep the draft |
+| `core/archive_gone` | "That is no longer in the archive." (410) | `restore`, `forget_archived` | show it; refresh |
+| `core/calendars_full` | "That is already 20 calendars, which is as many as this keeps." (400) | `add_subscription` | show it |
+| `core/url_empty` | "An address is needed." (400) | `checked_url` | show it |
+| `core/url_long` | "That address is too long." (400) | `checked_url` | show it |
+| `core/url_http` | "Use https — a calendar link is a password, and http sends it in clear." (400) | `checked_url` | show it |
+| `core/url_scheme` | "An address should start with https://" (400) | `checked_url` | show it |
+| `core/url_host` | "That address has no host in it." (400) | `checked_url` | show it |
+| `core/url_duplicate` | "That calendar is already subscribed to." (400) | `add_subscription` | show it |
+| `core/calendar_gone` | "That calendar is no longer subscribed to." (410) | subscription intents | show it; refresh |
+| `core/cap_items` | "That is as many items as a board can hold." (400; new) | creating intents, `restore` | show it |
+| `core/cap_blocks` | "That is as many blocks as a board can hold." (400; new) | `create` (task), `add_block` | show it |
+| `core/cap_archive` | "The archive is full." (400; new) | `complete`, `delete` | show it |
+| `core/place` | "That place is off the map." (400; new) | `set_home` | show it |
+| `core/picture` | "That picture could not be shared." (400; new) | `set_picture` | a fault of the uploading code: log it |
 
 **Import.**
 
@@ -1571,7 +1572,7 @@ pub mod apply {
 // ---------- intents and compile (§12, §13)
 pub mod intent {
     pub enum WireTime { Exact(chrono::DateTime<chrono::FixedOffset>), Naive(chrono::NaiveDateTime, String) }
-    pub enum Intent { /* one variant per row of §12.3, fields as its table */ }
+    pub enum Intent { /* one variant per row of §12.3, fields as its table; Create { kind: super::board::Kind, name: String, day: chrono::NaiveDate, start: i32, minutes: u32 } */ }
     pub fn parse_intent(text: &str) -> Result<Intent, super::CompileError>;
 }
 pub mod compile {
@@ -1585,12 +1586,142 @@ pub mod compile {
 }
 
 // ---------- read side (§14), copied modules with the zone parameter; every zone parameter, here and in planner, archive, ics and the snapshot builders, is &(impl Zone + ?Sized) or Z: Zone + ?Sized (§5.2)
-pub mod planner;   // Placement, DayPlacement { session: Option<u64>, .. }, placements_for, lay_out, summarize, reflow, …
-pub mod tasks;     // scoring: importance_score, tables, tie_break_jitter; IMPORTANCE_LABELS, HORIZON_LABELS, …
-pub mod archive;   // verdicts, Filter, Summary, group_by_month
-pub mod ics;       // parse(text, from, until, limits, zone)
-pub mod overlay;   // OverlayEvent, Overlay, FetchOutcome, FetchStatus (at: chrono::DateTime<chrono::FixedOffset>, §14.6), Covered
-pub mod weather;   // Report, Hour, Day, Now, build_report, sky_symbol
+// Each module carries exactly the items below: those of §14.2's table and of today's src/, without UI-only items and file I/O.
+// "today's fields" and "today's variants" are those of the type of that name in today's src/, with §14.2's changes.
+pub mod planner {
+    pub const DAY_MINUTES: i32 = 24 * 60;
+    pub const SNAP_MINUTES: i32 = 15;
+    pub const MIN_BLOCK_MINUTES: u32 = 15;
+    pub const DEFAULT_BLOCK_MINUTES: u32 = 30;
+    pub enum Placement { /* today's variants */ }
+    impl Placement { pub fn start(&self) -> i32; pub fn end(&self) -> i32; }
+    pub struct DayPlacement { /* today's fields; session: Option<u64>, a sid */ }
+    pub struct Placeable<'a> { /* today's fields, borrowed from an &'a Item */ }
+    impl<'a> Placeable<'a> { pub fn of(item: &'a Item) -> Self; }
+    pub fn placements_for(item: &Item, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized)) -> Vec<DayPlacement>;
+    pub fn placements_of(item: Placeable, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized)) -> Vec<DayPlacement>;
+    pub fn appears_on(item: &Item, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized)) -> bool;
+    pub struct Lane { /* today's fields */ }
+    pub fn lay_out(placements: &[Placement]) -> Vec<Lane>;
+    pub struct DaySummary { /* today's fields */ }
+    pub fn summarize(placements: &[Placement]) -> DaySummary;
+    pub fn summary_text(planned: DaySummary, routine: DaySummary, done: DaySummary) -> String;
+    pub fn format_minutes(minutes: i32) -> String;
+    pub fn format_duration(minutes: u32) -> String;
+    pub fn drop_length_for(item: &Item) -> u32;
+    pub fn duration_options(current: Option<u32>) -> Vec<u32>;
+    pub enum BacklogGroup { /* today's variants */ }
+    pub fn backlog_group(deadline: Option<Instant>, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized)) -> BacklogGroup;
+    pub fn relative_due(deadline: Instant, now: Instant) -> String;
+    pub struct Flowable<K> { /* today's fields */ }
+    pub fn behind_minutes(blocks: &[Placement], now: i32) -> i32;
+    pub fn reflow<K: Copy>(blocks: &[Flowable<K>], anchors: &[(i32, i32)], now: i32) -> Vec<(K, i32)>;
+}   // now_marker, snap, clamp_block and resolve_on_day are in time, not here (§14.2)
+pub mod tasks {
+    pub const WEEKDAY_NAMES: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    pub const EVERY_DAY: u8 = 0b0111_1111;
+    pub const WEEKDAYS: u8 = 0b0001_1111;
+    pub const IMPORTANCE_LABELS: [&str; 5];                       // today's labels
+    pub const HORIZON_LABELS: [&str; 4] = ["Within a month", "Within a week", "Within days", "Whenever"];
+    pub const HORIZON_DISPLAY_ORDER: [u8; 4] = [2, 1, 0, 3];
+    pub const ROUTINE_COLOR_INDEX: usize = 0;
+    pub const PALETTE_LEN: usize = 6;
+    pub const HORIZON_WHENEVER: u8 = 3;
+    pub const WEIGHT_BY_IMPORTANCE: [f32; 5] = [1.0, 2.0, 4.0, 8.0, 16.0];
+    pub const LEAD_DAYS_BY_IMPORTANCE: [f32; 5] = [0.5, 1.0, 2.0, 4.0, 8.0];
+    pub const WEIGHT_BY_HORIZON: [f32; 4] = [1.0, 2.0, 4.0, 0.5];
+    pub const RIPEN_DAYS_BY_HORIZON: [f32; 4] = [30.0, 10.0, 3.0, 90.0];
+    pub const PLANNED_LEAD_DAYS: f32 = 0.5;
+    pub const OVERDUE_DOUBLING_DAYS: f32 = 1.0;
+    pub const OVERDUE_PRESSURE_CAP: f32 = 4.0;
+    pub const ASSUMED_IMPORTANCE: u8 = 2;
+    pub const MALFORMED_SCORE: f32 = 1.0e6;
+    pub const JITTER: f32 = 0.08;
+    pub fn weekday_bit(day: chrono::NaiveDate) -> u8;
+    pub fn calendar_item_color(is_event: bool, importance: Option<u8>, time_importance: Option<u8>) -> usize;
+    impl Recurrence { pub fn falls_on(&self, day: chrono::NaiveDate) -> bool; pub fn repeats(&self) -> bool;
+                      pub fn includes(&self, index: u32) -> bool; pub fn summary(&self) -> String;
+                      pub fn summary_dated(&self) -> String; }
+    impl Item { pub fn importance_score(&self, now: Instant, seed: u64) -> f32;
+                pub fn tie_break_jitter(&self, seed: u64) -> f32;
+                pub fn is_routine(&self) -> bool;
+                pub fn calendar_item_color(&self) -> usize;
+                pub fn planner_anchor(&self) -> Option<Instant>;
+                pub fn is_planned(&self) -> bool;
+                pub fn planned_minutes(&self) -> u32;
+                pub fn remaining_minutes(&self) -> Option<u32>;
+                pub fn wants_planning(&self) -> bool; }
+}
+pub mod archive {
+    pub enum Timing { /* today's variants */ }
+    impl ArchiveRow { pub fn verdict(&self, zone: &(impl Zone + ?Sized)) -> String;
+                      pub fn timing(&self) -> Timing;
+                      pub fn was_finished(&self) -> bool;
+                      pub fn was_judged(&self) -> bool;
+                      pub fn mark(&self) -> &'static str;
+                      pub fn lifetime(&self) -> chrono::TimeDelta;
+                      pub fn booked_minutes(&self) -> u32;
+                      pub fn sittings(&self) -> usize;
+                      pub fn color_id(&self) -> usize;
+                      pub fn is_routine(&self) -> bool; }
+    pub fn format_span(span: chrono::TimeDelta) -> String;
+    pub fn format_total(minutes: u64) -> String;
+    pub struct Filter { /* today's fields */ }
+    pub enum OutcomeFilter { /* today's variants */ }
+    pub enum KindFilter { /* today's variants */ }
+    impl Filter { pub fn admits(&self, row: &ArchiveRow) -> bool; pub fn is_open(&self) -> bool; }
+    pub struct Summary { /* today's fields */ }
+    impl Summary { pub fn headline(&self) -> String; }
+    pub fn summarize<'a>(rows: impl IntoIterator<Item = &'a ArchiveRow>) -> Summary;
+    pub struct MonthRun { /* today's fields */ }
+    pub fn group_by_month(rows: &[&ArchiveRow], zone: &(impl Zone + ?Sized)) -> Vec<MonthRun>;   // rows newest first
+}
+pub mod ics {
+    pub struct Occurrence { /* today's fields */ }
+    impl Occurrence { pub fn is_busy(&self) -> bool; }
+    pub struct Parsed { /* today's fields */ }
+    pub struct Limits { /* today's fields */ }
+    impl Default for Limits {}
+    pub fn parse(text: &str, from: chrono::NaiveDate, until: chrono::NaiveDate, limits: Limits,
+                 zone: &(impl Zone + ?Sized)) -> Result<Parsed, String>;
+}
+pub mod overlay {
+    pub struct Covered { /* today's fields */ }
+    impl Covered { pub fn holds(&self, day: chrono::NaiveDate) -> bool; }
+    pub struct OverlayEvent { /* today's fields */ }
+    pub const LONG_EVENT_MINUTES: i32 = 12 * 60;
+    impl OverlayEvent { pub fn minutes(&self) -> i32; pub fn is_background(&self) -> bool; pub fn is_busy(&self) -> bool; }
+    pub enum FetchOutcome { /* today's variants */ }
+    pub fn placeholder_name(id: u64) -> String;
+    pub fn name_from_url(url: &str) -> Option<String>;
+    pub fn better_name(subscription: &Subscription, overlay: &Overlay) -> Option<String>;
+    pub fn is_unnamed(subscription: &Subscription) -> bool;
+    pub struct FetchStatus { /* today's fields; at: chrono::DateTime<chrono::FixedOffset> (§14.6) */ }
+    pub struct Overlay { /* today's fields */ }
+    impl Overlay { pub fn covering(self, covers: Option<Covered>) -> Overlay;
+                   pub fn sealed(events: Vec<OverlayEvent>, status: Vec<FetchStatus>) -> Overlay;
+                   pub fn digest(&self) -> u64;
+                   pub fn anchors_on(&self, day: chrono::NaiveDate) -> Vec<(i32, i32)>;
+                   pub fn events_on(&self, day: chrono::NaiveDate) -> impl Iterator<Item = &OverlayEvent>;
+                   pub fn forget(&mut self, subscription: u64);
+                   pub fn status_for(&self, subscription: u64) -> Option<&FetchStatus>; }
+}
+pub mod weather {
+    // The response types that today's code keeps private are public here, so that build_report can be called.
+    pub struct WeatherResponse { /* today's fields */ }
+    pub struct HourlyData { /* today's fields */ }
+    pub struct CurrentData { /* today's fields */ }
+    pub struct DailyData { /* today's fields */ }
+    pub struct Hour { /* today's fields */ }
+    pub struct Day { /* today's fields */ }
+    pub struct Now { /* today's fields */ }
+    pub struct Report { /* today's fields */ }
+    pub fn build_report(json: &WeatherResponse, coordinates: [f32; 2]) -> Report;
+    pub fn sky_symbol(code: i32, is_day: bool) -> &'static str;
+    pub struct City { /* today's fields */ }
+    pub fn nearest_city(latitude: f32, longitude: f32) -> Option<&'static City>;
+    pub static CITIES: &[City];                                   // today's table
+}
 pub mod read {
     pub fn ranked_ids(board: &BoardData, now: Instant, zone: &(impl Zone + ?Sized)) -> Vec<u64>;
     pub fn shuffle_seed(now: Instant, zone: &(impl Zone + ?Sized)) -> u64;
@@ -1607,9 +1738,28 @@ pub mod snapshot {
     pub struct Snapshot { /* today's fields, plus notes_base: u64 */ }
     pub struct Look { pub id: String, pub aspect: f32, pub top: String }
     pub struct Dials { pub blur: u32, pub light: u32 }
+    pub struct DoneRow { /* today's fields */ }
+    pub struct Labels { /* today's fields */ }
+    impl Labels { pub fn current() -> Self; }
+    pub struct DaySnapshot { /* today's fields */ }
+    pub struct SubscribedSnapshot { /* today's fields */ }
+    pub struct EntrySnapshot { /* today's fields */ }
+    pub struct GhostSnapshot { /* today's fields */ }
+    pub struct Tray { /* today's fields */ }
+    pub struct TrayCard { /* today's fields */ }
+    pub struct ItemDetail { /* today's fields */ }
+    pub struct RepeatDetail { /* today's fields */ }
+    pub struct SessionDetail { /* today's fields */ }
     pub fn snapshot<Z: Zone + ?Sized>(input: &SnapshotInput<Z>) -> Snapshot;
     pub fn answer_snapshot<Z: Zone + ?Sized>(input: &SnapshotInput<Z>) -> serde_json::Value;
-    // build_day, build_tray, item_detail, done_rows, with_subscribed: today's, with the zone
+    pub fn build_day(items: &[Item], ghosts: &[(&ArchiveRow, &RowBlock)], day: chrono::NaiveDate, now: Instant,
+                     zone: &(impl Zone + ?Sized)) -> DaySnapshot;                       // §14.3
+    pub fn build_tray(items: &[Item], day: chrono::NaiveDate, now: Instant, shuffle_seed: u64,
+                      zone: &(impl Zone + ?Sized)) -> Tray;                             // §14.3 item 4
+    pub fn item_detail(item: &Item, zone: &(impl Zone + ?Sized)) -> ItemDetail;        // §14.3 item 6
+    pub fn done_rows<'a>(rows: impl IntoIterator<Item = &'a ArchiveRow>, zone: &(impl Zone + ?Sized)) -> Vec<DoneRow>;   // newest first, §14.3 items 7 and 8
+    pub fn with_subscribed(days: Vec<DaySnapshot>, subscriptions: &[Subscription], overlay: &Overlay,
+                           zone: &(impl Zone + ?Sized)) -> Vec<DaySnapshot>;             // §14.3 item 11
 }
 pub mod reminders {
     pub struct ReminderDefaults { pub event_lead_minutes: u32, pub block_lead_minutes: u32, pub due_lead_minutes: u32 }

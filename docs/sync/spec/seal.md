@@ -345,7 +345,7 @@ The signature covers the header and the body, so the author commits to board, au
 - **SEAL-FRAME-001** (seal, relay) A frame MUST be laid out exactly as the table of §8.1, with `len` equal to the byte length of `body`.
 - **SEAL-FRAME-002** (seal, relay) A frame's signature MUST be the Ed25519 signature by the author's signing key over `ctx("frame") ‖ frame[0 .. 48 + len]`.
 - **SEAL-FRAME-003** (seal, relay) A receiver MUST reject a frame whose total length exceeds 262,144 bytes or is below 670 bytes, whose first four bytes are not `"TDF1"`, or whose `len` field is not its total length minus 112, before reading any other field.
-- **SEAL-FRAME-004** (seal) A sealer MUST refuse to produce a frame with `ctr = 0`.
+- **SEAL-FRAME-004** (seal) A sealer MUST refuse to produce a frame with `ctr = 0`, returning `seal/frame_format` and no frame.
 - **SEAL-FRAME-005** (seal) A sealer MUST produce the frame for a given (author, `ctr`) at most once and MUST return the stored bytes, never a new sealing, when it is asked again for an entry it already sealed (SYNC.md §4.3 rule 2).
 
 ## 9. Envelope
@@ -1080,7 +1080,7 @@ An admin operation needs a fresh signature from a current device or the current 
 | `recovery_register` | `dev_R[16] ‖ sign_pk[32] ‖ frame_hash[32]` | 80 | after the `K`-shape entry that installs the new recovery key has been appended as an ordinary entry, sequenced, and classified `Accept` by the sender: the unsigned `extra` carries that entry's `u64 seq`, `frame_hash` is its hash; never with the frame in the same call (`relay.md` §12.12) |
 | `fence` | `vb8(host) ‖ door[5] ‖ u32 home_gen` | 10 + n | to the old relay, with the `Fence` frame in the same call (in the unsigned `extra`) or after the `Fence` entry is sequenced |
 | `seed` | `u32 home_gen ‖ u64 first_seq ‖ chain_before[32] ‖ u64 last_seq ‖ chain_last[32] ‖ blob_id[16] ‖ u16 n ‖ n × (dev[16] ‖ sign_pk[32] ‖ u8 role ‖ u8 status ‖ u64 last_ctr)` | 102 + 58n | to the new relay, with its create secret. `first_seq` is the first tail seq: `min(S + 1, max(1, purge_seq, last_seq + 1 − 16,384))`, with `S` the seeded snapshot's seq and `purge_seq` that of `M_{last_seq}`, whenever the seeding device holds those frames (`engine.md` §28.3), so that the new relay holds every Skip target §13.6 permits after the move; `chain_before = C_{first_seq − 1}`; `last_seq` is the last tail seq (`first_seq − 1` for no tail) and `chain_last = C_{last_seq}`; the entries are the devices and recovery identities of `M_{last_seq}` with their role and status there, and each `last_ctr` is that author's counter at `first_seq − 1`; `blob_id` is the seeded snapshot's, or 16 zero bytes, and is informational |
-| `compact` | `u64 below_seq ‖ u64 snap_entry_seq ‖ blob_id[16] ‖ u32 n ‖ n × u64 keep_seq` | 36 + 8n | `blob_id` is the blob the `snap` entry at `snap_entry_seq` announces (its `SnapInfo.blob`), which the relay records as `compact_snap`; `keep_seq` ascending: the control entries and the recorded Skip targets (§13.1 `skips`) below `below_seq` that stay (`engine.md` §20.2); `below_seq` at most `head_seq − 16,384` (`relay.md` §12.8) |
+| `compact` | `u64 below_seq ‖ u64 snap_entry_seq ‖ blob_id[16] ‖ u32 n ‖ n × u64 keep_seq` | 36 + 8n | `blob_id` is the blob the `snap` entry at `snap_entry_seq` announces (its `SnapAnnounce.blob`, §11.5, §26), which the relay records as `compact_snap`; `keep_seq` ascending: the control entries and the recorded Skip targets (§13.1 `skips`) below `below_seq` that stay (`engine.md` §20.2); `below_seq` at most `head_seq − 16,384` (`relay.md` §12.8) |
 | `restore_tail` | `u64 first_seq ‖ u32 n ‖ n × frame_hash[32]` | 12 + 32n | the frames re-uploaded at their original seqs; `chain_before` and the frames travel unsigned in `extra` (`relay.md` §12.9) |
 | `purge` | `u64 before_seq ‖ u32 epoch` | 12 | by a device, after the rotation that carries `purge_before` has been sequenced: `before_seq` is that `purge_before`, `epoch` the rotation's new epoch; `extra` is empty |
 | `mint_read_token` | `dev[16] ‖ u32 epoch` | 20 | `dev` is the signer: a device that writes backups, or `dev_R` for the recovery tool (ruling S21). `epoch` is the writer's current membership epoch; the recovery tool sends 1 and, when refused with `relay/stale_epoch`, the `read_epoch` that refusal reports (`relay.md` §4.2, §12.11) |
@@ -1261,13 +1261,16 @@ A rotation sequenced between `h` and `added_seq` races the pairing in either ord
 
 ### 17.10 State machines
 
-Both roles are sans-IO machines. Inputs arrive as events; the machine answers with effects; time is a monotonic millisecond count passed with each event.
+Both roles are sans-IO machines. Inputs arrive as events; the machine answers with effects. Time is a monotonic
+millisecond count (`u64`) passed with the inputs that need it: E's `Start` (the call `Existing::start`), N's
+`CodeEntered` and `Tick` on both; no other event carries a time. N's machine is made by `New::new()`, in `Idle`, and
+draws nothing until `Slot{A}`. §26 gives the events and effects with their fields.
 
 **E (existing device):**
 
 | State | Event | Guard | Effects | Next |
 |---|---|---|---|---|
-| `Idle` | `Start{membership, head, relay origin}` | E is current and unhalted | draw `s`, `esk_E`, `r_E`; `RegisterTicket{tid, slot A}`; `ShowCode{code}` | `Posted` |
+| `Idle` | `Start{membership, head, relay origin, own dev, now}` (the call `Existing::start`) | E is current and unhalted | draw `s`, `esk_E`, `r_E`; `RegisterTicket{tid, slot A}`; `ShowCode{code}` | `Posted` |
 | `Posted` | `SlotB{bytes}` | §17.6 passes | `PostSlot{slot C}`; compute `T`, SAS; `ShowSas{digits}` | `Showing` |
 | `Showing` | `UserConfirmed` | | `NeedSnapshotAndRegister{device item}` (the engine takes the snapshot at `h`, seals `DeviceAdded`, appends with `register`) | `Registering` |
 | `Registering` | `Registered{h, chain, snapshot ref, added_seq, token, roots, host, door}` | | `PostSlot{slot D}`; `Done{dev_N}` | `Done` |
@@ -1278,8 +1281,8 @@ Both roles are sans-IO machines. Inputs arrive as events; the machine answers wi
 
 | State | Event | Guard | Effects | Next |
 |---|---|---|---|---|
-| `Idle` | `CodeEntered{code, host, board_id, door}` (the relay address as `relay.md` parses it) | §17.2 check passes | derive keys; `FetchSlot{tid, ticket_key, A}` | `AwaitA` |
-| `Idle` | `CodeEntered` | check fails | `AskAgain` | `Idle` |
+| `Idle` | `CodeEntered{code, host, board_id, door, name, now}` (the relay address as `relay.md` parses it; `name` the new device's name, §5.5) | §17.2 check passes | derive keys; `FetchSlot{tid, ticket_key, A}` | `AwaitA` |
+| `Idle` | `CodeEntered` | check fails | `AskAgain{code}` | `Idle` |
 | `AwaitA` | `Slot{A}` | MAC passes | generate long-term keys and `esk_N`; `PostSlot{slot B}`; `FetchSlot{C}` | `AwaitC` |
 | `AwaitC` | `Slot{C}` | MAC and commitment pass | compute `T`, SAS; `AskSas` | `AwaitSas` |
 | `AwaitSas` | `SasEntered{digits}` | equal | `ShowAccepted`; `FetchSlot{D}` | `AwaitD` |
@@ -1291,7 +1294,7 @@ Both roles are sans-IO machines. Inputs arrive as events; the machine answers wi
 | `Joining` | `Entries{frames}` | §17.9 steps 6 to 8 pass | `Joined{device_no, keys, bundle, snapshot}` | `Done` |
 | any but `Done`, `Aborted` | a failed check, the third SAS mismatch, `Cancel`, or `Tick{now}` with `now − start ≥ 600,000` | | `Abort{code}`; erase `s` and every derived key and the long-term keys generated for this attempt | `Aborted` |
 
-`start` is the time of `Start` on E and of `CodeEntered` on N.
+`start` is the `now` of `Start` on E and of the `CodeEntered` that passes the check on N.
 
 **Draws.** Each machine draws from the `Entropy` it is given, in this order. E, on `Start`: `s` (10 bytes),
 `esk_E` (32), `r_E` (32). N, on `Slot{A}` after the MAC passes: `dev_N` (16), the signing key (32), the X25519
@@ -1647,7 +1650,7 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 
 | Code | Meaning | Raised when | What the caller does |
 |---|---|---|---|
-| `seal/frame_format` | not a well-formed frame | §14.2 step 1 | class `Skip`; tampering alarm (`engine.md`) |
+| `seal/frame_format` | not a well-formed frame, or a frame asked for with `ctr = 0` | §14.2 step 1; `seal_frame` with `ctr = 0` (SEAL-FRAME-004) | class `Skip`; tampering alarm (`engine.md`); from `seal_frame`: a fault of the caller, nothing is sealed |
 | `seal/wrong_board` | frame of another board | step 2 | `Skip`; tampering alarm |
 | `seal/unknown_author` | no key of this board signed it | step 3 | `Skip`; tampering alarm |
 | `seal/bad_signature` | signature fails under the author's key | step 4 | `Skip`; tampering alarm |
@@ -1865,7 +1868,8 @@ pub struct Chain(pub [u8; 32]);
 pub struct Head { pub seq: u64, pub chain: Chain }
 pub struct Epoch(pub u32);
 
-pub enum SealError { /* one variant per code of §22 */ }
+pub enum SealError { /* one unit variant per code of §22, named the CamelCase of the code's name:
+                        seal/frame_format is FrameFormat, seal/bad_version is BadVersion, seal/ctl_genesis is CtlGenesis */ }
 impl SealError { pub fn code(&self) -> &'static str; }   // "seal/…"
 
 // ---------- randomness (§3)
@@ -1943,6 +1947,12 @@ pub enum CtlItem { Genesis(Genesis), DeviceAdded(DeviceAdded), DeviceRevoked(Dev
                    DeviceReinstated(DevId), EpochRotated(EpochRotated), RecoveryKeyChange(RecoveryKeyChange),
                    Fence(Fence), ResetTo(ResetTo), Skip(SkipItem), RulesUpgrade(RulesUpgrade) }
 // one struct per item of §12, fields as its table; plus:
+pub struct Genesis { pub salt: [u8; 16], pub recovery: RecoveryPublic, pub device: GenesisDevice, pub epoch: u32,
+                     pub commit: [u8; 32], pub wraps: Vec<[u8; 96]>, pub rules: u32, pub hash_version: u32,
+                     pub state_hash: [u8; 32], pub snapshot: Option<GenesisSnapshot> }
+                     // wraps: a Vec, as EpochRotated.wraps; it holds exactly two (§12.2), and one with any other count fails §12.2
+pub struct GenesisDevice { pub dev: DevId, pub sign_pk: [u8; 32], pub hpke_pk: [u8; 32], pub name: String }   // §12.2 `device`
+pub struct GenesisSnapshot { pub blob: BlobId, pub sha256: [u8; 32], pub size: u64, pub parts: u32, pub inflated: u64 }  // §12.2 `snapshot`
 pub struct Beat { /* §11.4 */ }
 pub struct SnapAnnounce { /* §11.5 */ }
 pub fn ctl_payload(items: &[CtlItem], signer: &Signer, board: &BoardId, ctr: u64,
@@ -2012,9 +2022,9 @@ pub fn key_fingerprint(sign_pk: &[u8; 32], hpke_pk: &[u8; 32]) -> String;
 pub fn state_hash(hash_version: u32, board_hash: &[u8; 32], membership_bytes: &[u8]) -> [u8; 32];  // engine.md §18.3, ENG-HASH-001
 
 // ---------- signatures (§16)
-pub fn login_message(origin: &str, board: &BoardId, dev: &DevId, gen: u32,
+pub fn login_message(origin: &str, board: &BoardId, dev: &DevId, generation: u32,
                      relay_nonce: &[u8], client_nonce: &[u8; 32]) -> Result<Vec<u8>, SealError>;
-pub fn sign_login(keys: &DeviceKeys, origin: &str, board: &BoardId, gen: u32, relay_nonce: &[u8],
+pub fn sign_login(keys: &DeviceKeys, origin: &str, board: &BoardId, generation: u32, relay_nonce: &[u8],
                   rng: &mut dyn Entropy) -> Result<([u8; 32], [u8; 64]), SealError>;   // (client_nonce, sig)
 pub enum AdminOp { Register { dev: DevId, sign_pk: [u8; 32], frame_hash: FrameHash }, Revoke(DevId),
                    Reinstate { dev: DevId, first_epoch: u32, wraps: Vec<[u8; 96]> }, RecoveryRegister { dev: DevId, sign_pk: [u8; 32], frame_hash: FrameHash },
@@ -2030,13 +2040,36 @@ pub mod pair {
     pub fn new_code(rng: &mut dyn super::Entropy) -> Result<(PairSecret, String), super::SealError>;
     pub fn parse_code(text: &str) -> Result<PairSecret, super::SealError>;
     pub struct PairSecret { /* secret */ }
-    pub struct Existing { /* E's machine, §17.10 */ }
-    pub struct New { /* N's machine, §17.10 */ }
-    pub enum ExistingEvent { /* §17.10 */ }  pub enum ExistingEffect { /* §17.10 */ }
-    pub enum NewEvent { /* §17.10 */ }       pub enum NewEffect { /* §17.10 */ }
-    impl Existing { pub fn start(/* … */) -> (Self, Vec<ExistingEffect>);
+    pub struct Existing { /* secret: E's machine, §17.10 */ }
+    pub struct New { /* secret: N's machine, §17.10 */ }
+    pub enum ExistingEvent {
+        SlotB { bytes: Vec<u8> }, UserConfirmed,
+        Registered { h: u64, chain: super::Chain, snapshot: super::SnapAnnounce, added_seq: u64, token: String,
+                     roots: Vec<(u32, super::EpochRoot)>, host: String, door: [u8; 5] },
+        RegisterFailed { code: super::SealError }, Cancel, Tick { now: u64 } }
+    pub enum ExistingEffect {
+        RegisterTicket { tid: [u8; 16], slot_a: Vec<u8> }, ShowCode { code: String }, PostSlot { slot: Vec<u8> },
+        ShowSas { digits: String }, NeedSnapshotAndRegister { device: super::DeviceAdded }, Done { dev: super::DevId },
+        DeleteTicket { tid: [u8; 16] }, Abort { code: super::SealError } }
+    pub enum NewEvent {
+        CodeEntered { code: String, host: String, board_id: super::BoardId, door: [u8; 5], name: String, now: u64 },
+        Slot { bytes: Vec<u8> }, SasEntered { digits: String }, Snapshot { parts: Vec<Vec<u8>> },
+        Entries { frames: Vec<(u64, Vec<u8>)> }, Frames { frames: Vec<(u64, Vec<u8>)> }, Cancel, Tick { now: u64 } }
+    pub enum NewEffect {
+        FetchSlot { tid: [u8; 16], ticket_key: zeroize::Zeroizing<[u8; 32]>, label: u8 },
+        AskAgain { code: super::SealError }, PostSlot { slot: Vec<u8> }, AskSas, ShowAccepted,
+        FetchSnapshot { token: String, blob: super::BlobId, parts: u32 }, ReadLog { token: String, from: u64 },
+        FetchFrames { token: String, seqs: Vec<u64> },
+        Joined { device_no: u16, keys: super::DeviceKeys, bundle: Bundle, snapshot: super::SnapshotBody },
+        Abort { code: super::SealError } }
+    pub struct Bundle { pub board_id: super::BoardId, pub host: String, pub door: [u8; 5],
+                        pub roots: Vec<(u32, super::EpochRoot)>, pub head: super::Head, pub snapshot: super::SnapAnnounce,
+                        pub added_seq: u64, pub token: String }               // slot D, §17.8; ZeroizeOnDrop
+    impl Existing { pub fn start(membership: &super::Membership, head: super::Head, relay_origin: &str,
+                                 own: &super::DevId, now: u64, rng: &mut dyn super::Entropy) -> (Self, Vec<ExistingEffect>);
                     pub fn on(&mut self, ev: ExistingEvent, rng: &mut dyn super::Entropy) -> Vec<ExistingEffect>; }
-    impl New { pub fn on(&mut self, ev: NewEvent, rng: &mut dyn super::Entropy) -> Vec<NewEffect>; }
+    impl New { pub fn new() -> Self;                                          // Idle; draws nothing (§17.10)
+               pub fn on(&mut self, ev: NewEvent, rng: &mut dyn super::Entropy) -> Vec<NewEffect>; }
 }
 
 // ---------- sealed files (§19)
@@ -2066,9 +2099,9 @@ pub fn seal_snapshot(body: &SnapshotBody, key: &SymKey, board: &BoardId, epoch: 
                      rng: &mut dyn Entropy) -> Result<SealedBlob, SealError>;
 pub fn open_snapshot(parts: &[&[u8]], expected: &BlobRef, s: u64, writer: &DevId, key: &SymKey,
                      board: &BoardId) -> Result<SnapshotBody, SealError>;
-pub fn open_snapshot_declared(parts: &[&[u8]], sha256: &[u8; 32], size: u64, s: u64, writer: &DevId,
-                              roots: &dyn Fn(u32) -> Option<&EpochRoot>, board: &BoardId)
-                              -> Result<(SnapshotBody, u32, u64), SealError>;  // §20.5 declared mode: (body, epoch, inflated)
+pub fn open_snapshot_declared<'a>(parts: &[&[u8]], sha256: &[u8; 32], size: u64, s: u64, writer: &DevId,
+                                  roots: &dyn Fn(u32) -> Option<&'a EpochRoot>, board: &BoardId)
+                                  -> Result<(SnapshotBody, u32, u64), SealError>;  // §20.5 declared mode: (body, epoch, inflated)
 pub fn seal_blob(body: &[u8], key: &SymKey, board: &BoardId, epoch: u32, writer: &DevId,
                  rng: &mut dyn Entropy) -> Result<SealedBlob, SealError>;
 pub fn open_blob(parts: &[&[u8]], expected: &BlobRef, writer: &DevId, key: &SymKey, board: &BoardId) -> Result<Vec<u8>, SealError>;

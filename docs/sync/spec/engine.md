@@ -273,10 +273,10 @@ The engine composes the state hash (ruling S7, §18.3) from `board_hash` and the
 | `n_items` | 4 | u32, 0 to 10,000 |
 | items | 12 × `n_items` | `u64 id ‖ u32 name`, strictly ascending by `id` |
 | `n_marks` | 2 | u16, 0 to 8,191 |
-| marks | 10 × `n_marks` | `u16 device_no ‖ u64 n`, strictly ascending by `device_no`, `n ≥ 1` |
+| marks | 10 × `n_marks` | `u16 device_no ‖ u64 n`, strictly ascending by `device_no`, `device_no` from 1 to 8,191, `n` from 1 to 2^40 − 1 |
 | **total** | **16 + 19k + 12i + 10m** | no trailing bytes |
 
-`load` refuses with `engine/toy_format` any input that violates this table, an item id whose high part `h = id div 2^40` is 0 or above 8,191, whose low part `n = id mod 2^40` is 0, or whose `n` exceeds the mark of `h`. The empty state is `rules = 1` and no keys, items or marks (16 bytes).
+`load` refuses with `engine/toy_format` any input that violates this table (a mark whose `device_no` is outside 1 to 8,191 or whose `n` is outside 1 to 2^40 − 1 included), an item id whose high part `h = id div 2^40` is 0 or above 8,191, whose low part `n = id mod 2^40` is 0, or whose `n` exceeds the mark of `h`. The empty state is `rules = 1` and no keys, items or marks (16 bytes).
 
 **Commands** (one `u8` op, then the fields):
 
@@ -292,7 +292,7 @@ The engine composes the state hash (ruling S7, §18.3) from `board_hash` and the
 | 8 | `Panic` | | 1 | 1, 2 |
 | 9 | `Mul` | `u8 key ‖ i64 factor` | 10 | 2 |
 
-`parse` refuses with `engine/toy_parse` an unknown op or a payload whose length is not the op's width; it accepts op 9 under any rules (the rules check is `apply`'s). `op_name` is the name in lowercase; `target` is the key (as `u64`) or the id.
+`parse` refuses with `engine/toy_parse` an unknown op or a payload whose length is not the op's width; it accepts op 9 under any rules (the rules check is `apply`'s). `op_name` is the name in lowercase; `target` is the key (as `u64`) or the id, and none for `Fail` and `Panic`.
 
 **`apply`**, in this order, stopping at the first failure:
 
@@ -308,7 +308,10 @@ The engine composes the state hash (ruling S7, §18.3) from `board_hash` and the
    - `Fail`: refused with `engine/toy_fail`.
    - `Panic`: calls `panic!` with a constant message.
 
-**Other methods.** `supported_rules` is `[1]`, or `[1, 2]` when the toy is constructed with `rules2 = true`. `hash_versions` is `[1]`. `upgrade(v)`: `v > rules` and `v` supported, else `engine/toy_unknown_rules`; then `rules = v`. `reset(target, current)` is `Ok` of `target` with `rules = current.rules` and every mark the maximum of the two; it never fails. `hold` is `Some(id)` for `Create`. `coalesce(Create{id, name}, next)` is `Merge(Create{id, name: m})` for `Name{id, name: m}` with the same `id`, `CancelBoth` for `Forget{id}` with the same `id`, else `Keep`. The origin state is the toy minter, `u64 next_n` (8 bytes, big-endian). `rebind` maps, in order, every `Create` whose id has high part `from_device_no` to `to_device_no × 2^40 + n`, with `n = max(next_n, m + 1)` and `m` the mark of `to_device_no` in `view` (0 when absent), then sets `next_n = n + 1`; it rewrites `Name` and `Forget` ids by that mapping and returns the commands with the final `next_n`. A notice's bytes are `u64 seq ‖ u16 author ‖ u16 other ‖ u64 other_seq ‖ u8 key` (21 bytes); it concerns `author` and `other`. A refusal's bytes (`refusal_bytes`) are `u64 seq ‖ u16 author ‖ vb8(code) ‖ vb8(op) ‖ u8 has_target ‖ u64 target`, with `op` empty when absent, and `has_target = 1` with the target, or `has_target = 0` with eight zero bytes.
+Every refusal `apply` returns, whatever its code and step, carries `op = op_name(command)` and
+`target = target(command)`, with `base` and `current` absent.
+
+**Other methods.** `supported_rules` is `[1]`, or `[1, 2]` when the toy is constructed with `rules2 = true`. `hash_versions` is `[1]`. `upgrade(v)`: `v > rules` and `v` supported, else `engine/toy_unknown_rules`; then `rules = v`. `reset(target, current)` is `Ok` of `target` with `rules = current.rules` and every mark the maximum of the two; it never fails. `hold` is `Some(id)` for `Create`. `coalesce(Create{id, name}, next)` is `Merge(Create{id, name: m})` for `Name{id, name: m}` with the same `id`, `CancelBoth` for `Forget{id}` with the same `id`, else `Keep`. The origin state is the toy minter, `u64 next_n` (8 bytes, big-endian). `rebind` maps, in order, every `Create` whose id has high part `from_device_no` to `to_device_no × 2^40 + n`, with `n = max(next_n, m + 1)` and `m` the mark of `to_device_no` in `view` (0 when absent), then sets `next_n = n + 1`; it rewrites `Name` and `Forget` ids by that mapping and returns the commands with the final `next_n`. `rebind` returns `engine/toy_format` when `origin_state` is not exactly 8 bytes, and `engine/toy_bad_id` when a mint's `n` would exceed 2^40 − 1, and in either case no commands. A notice's bytes are `u64 seq ‖ u16 author ‖ u16 other ‖ u64 other_seq ‖ u8 key` (21 bytes); it concerns `author` and `other`. A refusal's bytes (`refusal_bytes`) are `u64 seq ‖ u16 author ‖ vb8(code) ‖ vb8(op) ‖ u8 has_target ‖ u64 target`, with `op` empty when absent, and `has_target = 1` with the target, or `has_target = 0` with eight zero bytes.
 
 - **ENG-TOY-001** (engine) `ToyMachine` MUST encode, parse, apply, reset, coalesce and rebind exactly as §5.3 states, and MUST produce the bytes of the vectors `engine-toy.json` (§35).
 - **ENG-TOY-002** (engine) `ToyMachine` and `FakeSealer` MUST be compiled only with the cargo feature `sim`, and no default feature of `taskdeck-sync` MUST enable it.
@@ -435,7 +438,7 @@ pub trait Sealer {
 | `discard_pending` | forgets the pending root of an own rotation that was refused (SEAL-MEM-016); true when a secret changed |
 | `forget_roots_below` | deletes every epoch root below `epoch` (purge, §28.2); true when a secret changed |
 | `take_missed_wraps` | ruling S24 (§24.4): keeps in memory the wraps of the roots of epochs `first_epoch` to `first_epoch + wraps.len() − 1` that a `login` answer carried, replacing any it holds, and opens at once, by `seal.md` §7 (SEAL-WRAP-002, SEAL-KEY-013), the wrap of each of those epochs whose root it lacks and whose commitment `m` records; `classify` opens the others as it accepts the rotations that set their epochs; true when it learned a root (a changed secret, ENG-SEALER-004); `seal/commitment` when such a wrap does not open or its root does not match the commitment (SEAL-WRAP-003); it never persists the wraps; the fake sealer opens them with its wrap layout (§6.3) |
-| `seal_snapshot`, `open_snapshot` | `seal.md` §20. `seal_snapshot` seals under `m`'s current epoch and puts into the body the sealer's own control history up to `material.seq` (`seal.md` §20.4, ruling S27); the engine never supplies or reads it. It refuses a body over 67,108,864 bytes, or one whose sealed bytes would exceed 67,108,864, with `seal/snapshot_large` (`seal.md` SEAL-BLOB-009): §19.4 then uploads and announces nothing, §28.4 reports the pairing failed, and any other caller fails its operation with that code (`OpDone`, §28). `open_snapshot` checks the body's history (`seal.md` §20.5 step 7), keeps it for the runtime (`device.md` §15.7), and returns the material, the sealed header's epoch and the inflated length. With `exact = true` it is `seal.md` §20.5 with every value of `expected`, and the returned epoch and length equal `expected`'s; with `exact = false` it is the declared mode of `seal.md` §20.5 (§19.7) and reads only `expected.seq`, `blob`, `sha256`, `size` and `parts` |
+| `seal_snapshot`, `open_snapshot` | `seal.md` §20. `seal_snapshot` seals under `m`'s current epoch and puts into the body the sealer's own control history up to `material.seq` (`seal.md` §20.4, ruling S27); the engine never supplies or reads it. It refuses a body over 67,108,864 bytes, or one whose sealed bytes would exceed 67,108,864, with `seal/snapshot_large` (`seal.md` SEAL-BLOB-009): §19.4 then uploads and announces nothing, §28.4 reports the pairing failed, and any other caller fails its operation with that code (`OpDone`, §28). `open_snapshot` checks the body's history (`seal.md` §20.5 step 7), keeps it for the runtime (`device.md` §15.7), and returns the material, the sealed header's epoch and the inflated length; since it takes `&self`, a sealer keeps that history behind shared access (interior mutability), and the kept history is what its next `seal_snapshot` and `export_identity` see. With `exact = true` it is `seal.md` §20.5 with every value of `expected`, and the returned epoch and length equal `expected`'s; with `exact = false` it is the declared mode of `seal.md` §20.5 (§19.7) and reads only `expected.seq`, `blob`, `sha256`, `size` and `parts` |
 | `sync_fingerprint`, `move_code`, `check_move_code` | `seal.md` §15.3 and §15.4, the check in constant time |
 | `export_identity` | the bytes of the sealed identity file (`seal.md` §19.2 kind 7): keys, roots, pending roots, anchor |
 
@@ -515,12 +518,17 @@ Each field is the field of the same name of `seal.md` §13.1 (`dev_r` is `dev_R`
 
 `snap` payload (116 bytes): `u64 seq ‖ hash[32] ‖ u32 hash_version ‖ blob[16] ‖ sha256[32] ‖ u64 size ‖ u32 parts ‖ u64 inflated ‖ u32 epoch`.
 
-**Control history.** The fake keeps in memory one history record (the layout of `seal.md` §21.5) for every control entry it accepts: from seq 1 for a fake made by `create`, and from the history of the snapshot it bootstrapped from for one made by `join` or after a rejoin. It puts the records with seq at most `S` into every snapshot body it seals at `S`, and checks a body's history on opening as `seal.md` §20.5 step 7 states. `FakeBundle` carries the history records with the snapshot material.
+**Control history.** The fake keeps in memory, behind shared access because `open_snapshot` takes `&self` (§6.1), one history record (the layout of `seal.md` §21.5) for every control entry it accepts: from seq 1 for a fake made by `create`, and from the history of the snapshot it bootstrapped from for one made by `join` or after a rejoin. It puts the records with seq at most `S` into every snapshot body it seals at `S`, and checks a body's history on opening as `seal.md` §20.5 step 7 states. `FakeBundle` carries the history records with the snapshot material.
 
-The fake has a genesis helper `FakeSealer::create(seed, name) -> (FakeSealer, frame_1, board_bytes)` that draws, in this order, the salt, the recovery key, the device keys, `dev`, `R_1` and the entry id, and builds seq 1 exactly as `seal.md` §12.2 and §13.3 with the toy empty state; and a pairing helper `FakeSealer::join(seed, name, bundle: FakeBundle) -> FakeSealer` that takes a new device's keys and the roots the existing device hands over, standing in for `seal.md` §17.
+The fake has a genesis helper `FakeSealer::create(seed, name) -> (FakeSealer, frame_1, board_bytes)` that draws, in this order, the salt, the recovery key, the device keys, `dev`, `R_1` and the entry id, and builds seq 1 exactly as `seal.md` §12.2 and §13.3 with the toy empty state; the plaintext of seq 1 carries `at_ms = 0`; and a pairing helper `FakeSealer::join(seed, name, bundle: FakeBundle) -> FakeSealer` that takes a new device's keys and the roots the existing device hands over, standing in for `seal.md` §17. A fake made by `create` or `join` supports the rules `[1]`. The simulator, in the same crate, gives a fake another genesis time or another list of supported rules through crate-private functions; they are not part of §37's API.
+
+`seal.md` §14.3 defines only rules version 1. A fake whose supported rules (the paragraph on `create` below) hold a version above 1
+treats that version as allowing exactly (`ver`, `suite`) = (1, 1) and state-hash version 1, the values of version 1,
+in its `classify` (`seal.md` §14.2 step 8) and in the beat it composes (`seal.md` §11.4).
 
 - **ENG-FAKE-001** (engine) `FakeSealer` MUST implement every check, transition and layout of `seal.md` §8 to §15 and §20 that §6.3 does not substitute, and MUST produce the bytes of the vectors `engine-fake.json` (§35).
 - **ENG-FAKE-002** (engine) `FakeSealer` MUST draw every random byte from its seeded SplitMix64 generator in the order its calls are made, so that equal seeds and equal call sequences give equal frames.
+- **ENG-FAKE-003** (engine) `FakeSealer` MUST treat every supported rules version above 1 as allowing exactly (`ver`, `suite`) = (1, 1) and state-hash version 1, in its receipt checks and in the beats it composes.
 
 ## 7. Replica state and persistent records
 
@@ -2253,13 +2261,13 @@ Codes the engine returns in `EnqueueRefused`, `OpDone`, `PairFailed`, stops, ref
 | `engine/restore_incomplete` | a restored `DeviceReinstated` needs the recovery identity at the relay | §21.3 | run the recovery tool's reinstate |
 | `engine/stranded` | a rejoin found no snapshot this device can open and trust | §19.7 | re-pair and resubmit |
 | `engine/rebootstrap` | a Skip or `ResetTo` needs a state this device never held | §19.9 | wait for the next usable snapshot |
-| `engine/toy_format` | toy state bytes invalid | §5.3 | simulator only |
+| `engine/toy_format` | toy state bytes invalid, or a toy origin state that is not 8 bytes | §5.3 `load`, `rebind` | simulator only |
 | `engine/toy_parse` | toy command bytes invalid | §5.3 | simulator only |
 | `engine/toy_bad_ctx` | `Ctx` out of range | §5.3 | simulator only |
 | `engine/toy_rules` | op not in the active toy rules | §5.3 | simulator only |
 | `engine/toy_gone` | key or item absent | §5.3 | simulator only |
 | `engine/toy_overflow` | arithmetic overflow | §5.3 | simulator only |
-| `engine/toy_bad_id` | minted id out of range or not above the mark | §5.3 | simulator only |
+| `engine/toy_bad_id` | minted id out of range or not above the mark, or a rebind mint above 2^40 − 1 | §5.3 `apply`, `rebind` | simulator only |
 | `engine/toy_cap` | 10,000 items | §5.3 | simulator only |
 | `engine/toy_fail` | the `Fail` command | §5.3 | simulator only |
 | `engine/toy_unknown_rules` | upgrade to an unknown or older toy version | §5.3 | simulator only |
@@ -2441,6 +2449,10 @@ pub use ui::{Status, SessionState, ClockStatus, SkipOffer, HaltView, StopAction,
              VersionStatus, RulesStatus, RecoveryChangeView, MovingView, OpStatus, StatusWarning,
              PendingMark, NoticeEntry, Notification, UserAction, Banner, BannerKind, BannerDetail,
              AlarmRecord, AlarmKind, Evidence, ForkSource};                        // §14.2, §21.1, §30
+// PendingMark and NoticeEntry live in ui and are re-exported above; their fields:
+// ui::PendingMark { pub entry_id: [u8; 16], pub provisional_seq: u64, pub op: &'static str,
+//                   pub target: Option<u64>, pub doomed: Option<&'static str>, pub acknowledged: bool }
+// ui::NoticeEntry { pub kind: NoticeKind, pub seq: u64, pub index: u32, pub record: Vec<u8>, pub dismissed: bool }
 
 // ---------- records (§7)
 pub struct LogRecord { pub seq: u64, pub chain: Hash32, pub tau: i64, pub frame: Vec<u8> }
@@ -2511,9 +2523,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     pub fn purge_preview(&self) -> Result<(u64, i64), &'static str>;    // §28.2 step 1: (p, τ_{p−1})
     pub fn sealer(&self) -> &S;
 }
-pub struct PendingMark { pub entry_id: [u8; 16], pub provisional_seq: u64, pub op: &'static str,
-                         pub target: Option<u64>, pub doomed: Option<&'static str>, pub acknowledged: bool }
-pub struct NoticeEntry { pub kind: NoticeKind, pub seq: u64, pub index: u32, pub record: Vec<u8>, pub dismissed: bool }
 
 // ---------- the toy, the fake and the simulator (§5.3, §6.3, §31), feature "sim"
 #[cfg(feature = "sim")] pub mod toy { pub struct ToyMachine { /* rules2: bool */ }
@@ -2524,15 +2533,18 @@ pub struct NoticeEntry { pub kind: NoticeKind, pub seq: u64, pub index: u32, pub
                                      pub struct ToyState { /* §5.3 */ }  pub struct ToyNotice { /* §5.3 */ } }
 #[cfg(feature = "sim")] pub mod fake { pub struct FakeSealer { /* §6.3 */ }  pub struct FakeMembership { /* seal.md §13.1 */ }
                                       pub struct FakeBundle { /* roots, snapshot material and its history records, added seq */ }
-                                      impl FakeSealer { pub fn create(seed: u64, name: &str) -> (Self, Vec<u8>, Vec<u8>);
-                                                        pub fn join(seed: u64, name: &str, bundle: FakeBundle) -> Self; } }
+                                      impl FakeSealer { pub fn create(seed: u64, name: &str) -> (Self, Vec<u8>, Vec<u8>);   // seq 1 at at_ms = 0; supported rules [1]
+                                                        pub fn join(seed: u64, name: &str, bundle: FakeBundle) -> Self; }    // supported rules [1]
+                                      // the genesis time and the supported rules have crate-private setters only (§6.3)
+                                      }
 #[cfg(feature = "sim")] pub mod sim { pub struct SplitMix64 { pub state: u64 }
                                      impl SplitMix64 { pub fn next(&mut self) -> u64; pub fn below(&mut self, n: u64) -> u64;
                                                        pub fn chance(&mut self, ppm: u32) -> bool; }
-                                     pub struct SimConfig { /* §31.1 */ }  pub struct FaultSet { /* §31.6 */ }
-                                     pub struct OpSet { /* §31.5 */ }      pub struct SimReport { /* §31.1 */ }
+                                     pub struct SimConfig { /* §31.1 */ }  pub struct SimReport { /* §31.1 */ }
+                                     pub struct FaultSet {}   // empty in the skeleton: stage engine names its fields (the faults of §31.6) through a spec change
+                                     pub struct OpSet {}      // empty in the skeleton: stage engine names its fields (the operations of §31.5) through a spec change
                                      pub struct Violation { pub invariant: u8, pub line: u64, pub detail: String }
-                                     pub struct SimStats { /* counts per event and effect kind */ }
+                                     pub struct SimStats {}   // empty in the skeleton: stage engine names its counts (per event and effect kind) through a spec change
                                      pub fn run(seed: u64, config: &SimConfig) -> SimReport; }
 ```
 

@@ -21,15 +21,16 @@
 //! - "H(items bytes)" of the inner control signature, and a history record's
 //!   `items`, are the bytes `u8 n_items ‖ items` of the fake `ctl` payload.
 //! - Rules versions above 1 allow what rules version 1 allows (`seal.md` §14.3
-//!   lists only version 1): `(1, 1)` and state-hash version 1.
+//!   lists only version 1): `(1, 1)` and state-hash version 1 (ENG-FAKE-003).
 //! - The genesis helper composes seq 1 at `at_ms = 0`; `create_at` takes
-//!   another time. The fake's build supports rules `[1]` unless the simulator
-//!   sets another list (`set_supported_rules`).
+//!   another time. A fake made by `create` or `join` supports rules `[1]`
+//!   unless the simulator sets another list (`set_supported_rules`); both
+//!   setters are crate-private (engine.md §6.3).
 //! - The empty membership before seq 1 (`seal.md` §13.3) is
 //!   `FakeMembership::default()`.
-//! - `seal` refuses `ctr = 0` (SEAL-FRAME-004), which the catalogue gives no
-//!   code, with `seal/frame_format`, and an unencodable item (a device name
-//!   outside §5.5, a missing recovery key) with `seal/bad_payload`.
+//! - `seal` refuses `ctr = 0` with `seal/frame_format`, the code
+//!   SEAL-FRAME-004 names, and an unencodable item (a device name outside
+//!   §5.5, a missing recovery key) with `seal/bad_payload`.
 //! - `join` keeps the bundle's roots whose commitment the snapshot's
 //!   membership records (SEAL-KEY-013); the simulator reaches the fake also
 //!   through the crate-private `create_at`, `join_keys`, `bundle` and

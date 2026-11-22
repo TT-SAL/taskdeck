@@ -2105,10 +2105,14 @@ pub trait KeyStore: Send + Sync {
 }
 pub enum KeyStoreError { NotFound, CannotUnwrap, Unavailable, Failed }
 #[cfg(windows)] pub struct DpapiKeyStore;
+#[cfg(windows)] impl KeyStore for DpapiKeyStore {}
 #[cfg(target_os = "macos")] pub struct KeychainKeyStore;
+#[cfg(target_os = "macos")] impl KeyStore for KeychainKeyStore {}
 #[cfg(feature = "test-trust")] pub struct FileKeyStore { pub dir: std::path::PathBuf }
+#[cfg(feature = "test-trust")] impl KeyStore for FileKeyStore {}
 #[cfg(feature = "test-trust")] pub struct MemoryKeyStore { /* map */ }
-// AndroidKeyStore lives in taskdeck-android (§12.5).
+#[cfg(feature = "test-trust")] impl KeyStore for MemoryKeyStore {}
+// AndroidKeyStore lives in taskdeck-android (§12.5) and implements KeyStore there (bridge.md §21).
 
 // ---------- the store and its file layer (§6, §7)
 pub trait FileLayer: Send + Sync {
@@ -2125,7 +2129,9 @@ pub trait FileLayer: Send + Sync {
     fn exists(&self, path: &std::path::Path) -> bool;
 }
 pub struct OsFiles;
+impl FileLayer for OsFiles {}
 #[cfg(feature = "test-trust")] pub struct CrashFiles { pub inner: OsFiles, pub crash_at: u64 }
+#[cfg(feature = "test-trust")] impl FileLayer for CrashFiles {}
 pub mod store {
     // The file kinds of §6.1 are taskdeck_seal::FileKind (seal.md §19.2, §26): the store passes those variants to
     // FileSealer::create and open_file. These constants are their numbers, never defined a second time.
@@ -2149,8 +2155,10 @@ pub mod store {
 }
 
 // ---------- adapters (decision D6, §4.1)
-pub struct CoreMachine { /* implements taskdeck_sync::StateMachine over taskdeck-core */ }
-pub struct SealSealer { /* implements taskdeck_sync::Sealer over taskdeck-seal */ }
+pub struct CoreMachine { /* over taskdeck-core */ }
+pub struct SealSealer { /* over taskdeck-seal */ }
+// impl taskdeck_sync::StateMachine for CoreMachine and impl taskdeck_sync::Sealer for SealSealer are stage device's
+// to write; the skeleton carries the two structs without them.
 
 // ---------- recovery tool online steps (§15.8)
 pub mod recovery_online {

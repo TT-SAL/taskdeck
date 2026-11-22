@@ -21,7 +21,7 @@ crate-type = ["cdylib"]
 [features]
 default = ["backend-device"]
 backend-echo = []
-backend-device = ["dep:taskdeck-core", "dep:taskdeck-device", "dep:rustls-platform-verifier"]
+backend-device = ["dep:taskdeck-core", "dep:taskdeck-device", "dep:chrono", "dep:rustls-platform-verifier"]
 
 # bridge.md §12.4, "taskdeck-android".
 [dependencies]
@@ -33,5 +33,7 @@ sha2 = { workspace = true }
 zeroize = { workspace = true }
 taskdeck-core = { workspace = true, optional = true }
 taskdeck-device = { workspace = true, optional = true }
+# For `PageFacade::answer_snapshot` and `PageFacade::today` (bridge.md §12.4, §21).
+chrono = { workspace = true, optional = true }
 # Its Android initialiser (bridge.md §11.2).
 rustls-platform-verifier = { workspace = true, optional = true }

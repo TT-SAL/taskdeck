@@ -85,3 +85,25 @@ already took a reading, the spec is brought to the skeleton, not the other way r
     had. The command excludes `taskdeck-fixtures`, and the generator is linted alone with `--no-deps`. (Not
     a spec matter: the briefs and the attack workflows carry the new command.)
 
+
+## State (2026-11-22 13:35 UTC)
+
+Items 1 to 23 are written as 22 exact changes in `skeleton-followups-changes.md` (TR4-FOLLOW-1 to -22) and
+applied: core 5, seal 7, engine 6, device 1, bridge 3. The specs hold 942 clauses. One agent then carried the
+six changes that alter code into the skeleton crates (`generation` for `gen`; `pair::New::new()`; the toy's
+`load` bounds on marks, with tests; `chrono` for the Android crate under `backend-device` and the two
+`PageFacade` methods that waited for it; two comments). The lead ran the checks again.
+
+- **T17. The resolver's conservative readings stand**, each written as its change: `pair::New::new()` is
+  idle and draws nothing, and `CodeEntered.name` is the new device's name; `Genesis.wraps` is a `Vec` whose
+  length of exactly two the parser enforces; `FaultSet`, `OpSet` and `SimStats` are empty until stage
+  `engine` names their fields through a spec change; the toy's `load` refuses a mark whose device number is
+  outside 1 to 8,191 or whose `n` is outside 1 to 2^40 − 1; a later rules version means (1, 1) and hash
+  version 1 for the fake (ENG-FAKE-003); `FakeSealer::create` uses `at_ms = 0` and supports `[1]`, its
+  setters stay private to the crate; a frame asked for with `ctr = 0` is `seal/frame_format`;
+  `open_snapshot` keeps `&self`; the compile-side code is `core/item_gone` and the apply refusal keeps
+  `core/gone`; the echo backend's `Backend` impl is stage `android-shell`'s and the device backend's is
+  stage `android`'s.
+- Stage `engine` publishes `engine-toy.json`; the two new bounds of the toy's `load` are cases for it.
+
+Nothing is open in this file.

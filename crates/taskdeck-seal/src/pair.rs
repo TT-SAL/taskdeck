@@ -229,7 +229,14 @@ impl Existing {
     }
 }
 
+// The spec's API (seal.md §26) names the type `New` and its constructor `New::new()`, with no `Default`.
+#[allow(clippy::new_without_default, clippy::self_named_constructors)]
 impl New {
+    /// N's machine in `Idle`; it draws nothing until `Slot{A}` (seal.md §17.10).
+    pub fn new() -> Self {
+        unimplemented!()
+    }
+
     /// Handles one event (seal.md §17.10).
     pub fn on(&mut self, ev: NewEvent, rng: &mut dyn super::Entropy) -> Vec<NewEffect> {
         unimplemented!()
