@@ -26,7 +26,11 @@ set -uo pipefail
 # path ("ownership passes when the first one merges"), the path is in both
 # stages' lists: the stricter reading, since the later stage's gate runs after
 # the hand-over. `desktop` also gets its test files of spec-coverage.sh
-# (tests/ without tests/e2e). `!` removes a path. `rc` may touch any path; its
+# (tests/ without tests/e2e). `!` removes a path (a directory or a file).
+# `android-shell` leaves out crates/taskdeck-android/src/device_backend.rs,
+# which holds what only the `backend-device` flavour compiles: that is stage
+# `android`'s to fill (lead ruling 10 of the tooling task), and `android`'s
+# list keeps it. `rc` may touch any path; its
 # scans leave out docs/, which holds records and data, not code (the workflow
 # records under docs/sync/status/ are .js files that quote the patterns).
 # ---------------------------------------------------------------------------
@@ -36,7 +40,7 @@ declare -A STAGE_OWNED=(
     [seal]="crates/taskdeck-seal docs/sync/vectors"
     [relay]="relay"
     [engine]="crates/taskdeck-sync"
-    [android-shell]="android crates/taskdeck-android"
+    [android-shell]="android crates/taskdeck-android !crates/taskdeck-android/src/device_backend.rs"
     [device]="crates/taskdeck-device tests/e2e crates/taskdeck-sync crates/taskdeck-backup crates/taskdeck-recover"
     [recovery]="crates/taskdeck-backup crates/taskdeck-recover"
     [desktop]="src tests !tests/e2e"

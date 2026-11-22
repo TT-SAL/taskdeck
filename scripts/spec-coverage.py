@@ -12,12 +12,10 @@ import speclib  # noqa: E402
 
 # Test files are source files: a data file or a note under tests/ cites nothing.
 SOURCE_EXTS = (".rs", ".js", ".mjs", ".cjs", ".ts", ".kt", ".kts", ".java", ".html", ".sh", ".py")
-# The marker `spec: <ID>` (README §4.3): a token after it counts only when it
-# starts like an id, so a field or binding such as `spec: String` is none.
+# A citation is any token shaped like an id (speclib.LOOSE_TOKEN), anywhere in
+# a test file, and the token after the marker `spec:` (README §4.3), so that
+# `spec: SEAL-FRAME` is a malformed citation; `spec: String` is none.
 MARKER = re.compile(r"(?<![A-Za-z0-9_-])spec:\s*((?:%s)-[A-Za-z0-9_-]*)" % speclib.PREFIXES)
-# A line that declares a test whose name may hold an id.
-TEST_DECL = re.compile(r"\b(?:it|test|describe)(?:\.only)?\s*\(\s*['\"`]|\bfun\s+`|@DisplayName\s*\(")
-NAME_TOKEN = re.compile(r"(?<![A-Za-z0-9_-])((?:%s)-[A-Za-z0-9_-]+)" % speclib.PREFIXES)
 
 
 def glob_re(pattern):
@@ -75,7 +73,7 @@ def test_files(root, patterns):
 
 
 def citations(path):
-    """(token, line) pairs a test file cites."""
+    """(token, line) for each id-shaped token in a test file."""
     try:
         with open(path, "rb") as f:
             data = f.read()
@@ -85,11 +83,8 @@ def citations(path):
         return []
     out = []
     for n, line in enumerate(data.decode("utf-8", "replace").split("\n"), 1):
-        for m in MARKER.finditer(line):
-            out.append((m.group(1).rstrip("-"), n))
-        if TEST_DECL.search(line):
-            for m in NAME_TOKEN.finditer(line):
-                out.append((m.group(1).rstrip("-"), n))
+        toks = {m.group(1).rstrip("-") for rx in (MARKER, speclib.LOOSE_TOKEN) for m in rx.finditer(line)}
+        out.extend((t, n) for t in sorted(toks))
     return out
 
 

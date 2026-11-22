@@ -107,5 +107,13 @@ done
 expect "the real foundation gate lists the Android-target check" 0 bash "$GATE" --list foundation
 output_has "with its script" "$ bash scripts/check-android-targets.sh"
 output_has "and the CI-only desktop matrix" "CI-ONLY  ci-green"
+# Every stage job with a crate runs on the three systems (test-ci-workflow.sh
+# checks the matrix), the android job included.
+output_has "skeletons on Windows and macOS name every crate's job" \
+    "CI: core, seal, engine, device, recovery, android on windows-latest and macos-latest (wide runs)"
+# The container gate checks what CI's core job checks: its hook builds the
+# library alone, where chrono::Local does not exist.
+expect "the real core gate reads" 0 bash "$GATE" --list core
+output_has "it runs CI's core hook" "$ bash crates/taskdeck-core/ci.sh"
 
 finish

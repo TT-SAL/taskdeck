@@ -11,6 +11,6 @@ ci  | whole-system     | "The whole system in CI: the Windows and macOS apps' he
 ci  | attack-rounds    | "a whole-system attack round ... repeat until two rounds are dry", each finding with a reproduction (§6.12 item 2) | no CI job: each fix's regression test runs in its stage's job; the rounds are recorded in docs/sync/status/rc.md
 ci  | requirements     | "Every row of SYNC.md §3 and §7 is marked done, deferred to §6.13, or failed" (§6.12 item 3) | no CI job: the table in docs/sync/status/rc.md, read in the exit pull request
 ci  | candidate        | "Name the release candidate: the commit, and the hashes the release dry run produced for it" (§6.12 item 4) | release.yml in dry-run mode on the candidate commit
-run | spec-coverage    | every clause rc owns is cited by a test (§3.3) | bash scripts/spec-coverage.sh rc
+run | spec-coverage    | every live clause is still cited by a test of each stage that owns it (§3.3; stricter reading: rc owns no clause, so it runs every stage's check) | bash scripts/spec-coverage.sh rc
 run | no-unimplemented | no unimplemented!() or todo!() anywhere but docs/ (§3.3; rc may touch any path; docs/ holds records, not code) | bash scripts/gate-lib.sh no-unimplemented rc
 run | no-skipped-tests | no skipped or ignored test anywhere but docs/ (§3.3) | bash scripts/gate-lib.sh no-skipped-tests rc

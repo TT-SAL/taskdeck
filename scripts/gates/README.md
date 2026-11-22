@@ -37,13 +37,17 @@ a gate file without them (§3.3):
 
 | Id | Command | What it proves |
 |---|---|---|
-| `spec-coverage` | `bash scripts/spec-coverage.sh <stage>` | every live clause the stage owns is cited by one of its test files, and no test cites an id that is no clause or is withdrawn |
+| `spec-coverage` | `bash scripts/spec-coverage.sh <stage>` | every live clause the stage owns is cited by one of its test files, and no test cites an id that is no clause or is withdrawn; for `rc`, which owns no clause, every stage's check, each on that stage's test files, and its own on every path |
 | `no-unimplemented` | `bash scripts/gate-lib.sh no-unimplemented <stage>` | no `unimplemented!(`, `todo!(` or `unreachable!("TODO` in the stage's owned paths, tests included. Not in `foundation`'s gate: skeleton bodies may be `unimplemented!()` there "and nowhere later" (§6.1 item 4) |
 | `no-skipped-tests` | `bash scripts/gate-lib.sh no-skipped-tests <stage>` | no `#[ignore`, `it.skip`, `test.skip`, `describe.skip`, `xit(`, `@Ignore`, `@Disabled` or `assumeTrue(false` in the stage's owned paths |
 
 The two scans read the stage's owned paths of SYNC_PLAN.md §4 (`bash
 scripts/gate-lib.sh owned-paths <stage>` prints them; a path two stages share
-is in both lists) and only source files: `.rs`, `.js`, `.mjs`, `.cjs`, `.ts`,
+is in both lists, with one exception: `android-shell`'s list leaves out
+`crates/taskdeck-android/src/device_backend.rs`, the module that holds every
+item only the `backend-device` flavour compiles, re-exported at its bridge.md
+§21 path; that file is `android`'s to fill, and `android`'s list keeps it,
+lead ruling 10 of the tooling task) and only source files: `.rs`, `.js`, `.mjs`, `.cjs`, `.ts`,
 `.html`, `.kt`, `.kts`, `.java`. They skip `target`, `node_modules`, `.git`,
 `.gradle` and `build` directories. `src/phone.rs` carries an `#[ignore]` today
 (the `codec_bake_off` measurement): it belongs to code `desktop` deletes, so
@@ -57,7 +61,7 @@ Every Rust test runs with `--locked`.
 
 | Stage | What the gate runs |
 |---|---|
-| `core` | integration test targets `determinism` (run twice, `TZ=Europe/Helsinki` and `TZ=America/New_York`), `rebase`, `transcripts`, `snapshot_fixtures`, `golden` in `taskdeck-core`; purity is `cargo check -p taskdeck-core --target wasm32-unknown-unknown`, `cargo clippy -p taskdeck-core --all-targets -- -D warnings`, and `crates/taskdeck-core/clippy.toml` keeping every entry of `core-clippy-required.txt` (the clock, `chrono::Local`, file, network, thread and environment entries `foundation` put there), with none of those lints allowed off in the crate; budgets are a CI item |
+| `core` | integration test targets `determinism` (run twice, `TZ=Europe/Helsinki` and `TZ=America/New_York`), `rebase`, `transcripts`, `snapshot_fixtures`, `golden` in `taskdeck-core`; purity is `cargo check -p taskdeck-core --target wasm32-unknown-unknown`, `cargo clippy -p taskdeck-core --all-targets -- -D warnings`, and `crates/taskdeck-core/clippy.toml` keeping every entry of `core-clippy-required.txt` (the clock, `chrono::Local`, file, network, thread, random-source and environment entries of the crate's `clippy.toml`, every one of them), with none of those lints allowed off in the crate, and `bash crates/taskdeck-core/ci.sh` (CI's core hook: the library built alone, without the tests' chrono `clock`, on the host and for wasm32, where `chrono::Local` does not exist); budgets are a CI item |
 | `seal` | targets `kat`, `tamper`, `contexts`, `pairing_mitm`, `parsers` in `taskdeck-seal`; the line `#![forbid(unsafe_code)]` in `crates/taskdeck-seal/src/lib.rs`; `cargo check -p taskdeck-seal` for the three Android targets; vectors in `docs/sync/vectors/*.json`, well formed per `docs/sync/spec/README.md` §7 (`gate-lib.sh vectors`); the budget is a CI item |
 | `engine` | targets `simulator` (with `SIM_SEEDS=1000`) and `regressions` in `taskdeck-sync`; `cargo check -p taskdeck-sync --target wasm32-unknown-unknown` |
 | `relay` | `bash relay/test/run.sh core`, `… standby`, `… worker` (the relay stage writes that runner; each run includes the cases of relay.md §21: rows per operation and the 2% day, refusals before the object, replays without a write); `relay/package.json` without `dependencies`, `optionalDependencies`, `peerDependencies` or bundled ones (`gate-lib.sh npm-no-deps`) |

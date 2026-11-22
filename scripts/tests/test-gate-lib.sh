@@ -158,6 +158,25 @@ expect "a scan from a copy of the scripts runs" 1 bash "$TMP/copy/scripts/gate-l
 expect "and leaves no __pycache__ there" 1 test -e "$TMP/copy/scripts/__pycache__"
 expect "owned-paths prints a stage's paths" 0 lib owned-paths device
 output_has "the engine's crate passes to device" "crates/taskdeck-sync"
+# Lead ruling 10: android-shell leaves out the backend-device file, android keeps it.
+mkdir -p "$R/crates/taskdeck-android/src"
+printf 'fn f() { %s }\n' "$UNIMPL" >"$R/crates/taskdeck-android/src/device_backend.rs"
+printf 'fn g() {}\n' >"$R/crates/taskdeck-android/src/lib.rs"
+expect "android-shell does not scan src/device_backend.rs" 0 lib no-unimplemented android-shell
+output_has "it says so" "without crates/taskdeck-android/src/device_backend.rs"
+expect "android does" 1 lib no-unimplemented android
+output_has "the file is named" "crates/taskdeck-android/src/device_backend.rs:1:"
+printf 'fn g() { %s }\n' "$UNIMPL" >"$R/crates/taskdeck-android/src/lib.rs"
+expect "android-shell still scans the rest of the crate" 1 lib no-unimplemented android-shell
+output_has "lib.rs is named" "crates/taskdeck-android/src/lib.rs:1:"
+output_lacks "the left-out file is not" "device_backend.rs:1:"
+mkdir -p "$R/crates/taskdeck-android/src/device_backend.rs.d"
+printf 'fn h() { %s }\n' "$UNIMPL" >"$R/crates/taskdeck-android/src/device_backend.rs.d/x.rs"
+rm "$R/crates/taskdeck-android/src/lib.rs"
+expect "a path that only starts with the left-out file's name is scanned" 1 lib no-unimplemented android-shell
+rm -r "$R/crates/taskdeck-android"
+expect "the real tree: android-shell's paths leave the file out" 0 bash "$LIB" owned-paths android-shell
+output_has "it is named" "!crates/taskdeck-android/src/device_backend.rs"
 
 # --- data checks --------------------------------------------------------------
 R="$TMP/d"
@@ -194,6 +213,17 @@ output_has "it is named" "no longer has std::thread::spawn in disallowed-methods
 printf 'disallowed-types = [ { path = "std::thread::spawn" }, { path = "std::fs::read" } ]\n' >"$R/clippy.toml"
 expect "an entry in the wrong table fails" 1 lib clippy-config clippy.toml req.txt
 expect "the real core clippy.toml keeps its entries" 0 bash "$LIB" clippy-config crates/taskdeck-core/clippy.toml scripts/gates/core-clippy-required.txt
+# ...and the list names every entry the clippy.toml has, so that removing any of
+# them fails the core gate.
+expect "the required list names every entry of the real core clippy.toml" 0 python3 -I -c '
+import sys, tomllib
+conf = tomllib.load(open(sys.argv[1], "rb"))
+req = {tuple(l.split()) for l in open(sys.argv[2]) if l.strip() and not l.startswith("#")}
+miss = [(t, e["path"]) for t in ("disallowed-types", "disallowed-methods") for e in conf.get(t, [])]
+miss = [m for m in miss if m not in req]
+for t, p in miss:
+    print("missing from the required list:", t, p)
+sys.exit(1 if miss else 0)' crates/taskdeck-core/clippy.toml scripts/gates/core-clippy-required.txt
 # A crate that turns the disallowed lints off forbids nothing (SYNC_PLAN.md §6.2).
 C="$R/crates/c"
 mkdir -p "$C/src" "$C/tests"

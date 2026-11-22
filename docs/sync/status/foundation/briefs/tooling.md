@@ -204,3 +204,9 @@ in the implementer's run; spec-lint fails on two real defects of core.md and on 
     path stays exactly as bridge.md's "Public API" section writes it; `android-shell`'s owned paths in
     `scripts/gate-lib.sh` leave that file out and `android`'s include it; the gates README says so.
 11. **`spec-coverage.sh rc` runs every stage's check** (the stricter reading the second loop took): kept.
+
+Third loop (2026-11-22, three rounds, converged): round 1 confirmed the lead's two findings (ruling 9 for
+spec-coverage; ruling 10 for the android-shell gate), both fixed; round 2 found nothing; round 3 found one
+low, left as it is: a case of `scripts/tests/test-gate-lib.sh` reads `crates/taskdeck-core/clippy.toml` and
+the required list by paths relative to the current directory, so that test file passes only when run from
+the repository root (which is how `scripts/tests/run.sh` is run by CI and by the gate).

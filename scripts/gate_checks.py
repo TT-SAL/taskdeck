@@ -261,7 +261,7 @@ def scan(pattern, *paths):
     if paths[:1] == ("--js",) and len(paths) >= 2:
         js_rx = re.compile(f"(?:{pattern})|(?:{paths[1]})")
         paths = paths[2:]
-    leave_out = tuple(os.path.normpath(p[1:]) + "/" for p in paths if p.startswith("!"))
+    leave_out = [os.path.normpath(p[1:]) for p in paths if p.startswith("!")]
     files = []
     for p in (p for p in paths if not p.startswith("!")):
         if os.path.isfile(p):
@@ -272,7 +272,7 @@ def scan(pattern, *paths):
     found = 0
     for f in files:
         rel = os.path.normpath(f)
-        if not rel.endswith(SCAN_EXTS) or rel.startswith(leave_out):
+        if not rel.endswith(SCAN_EXTS) or any(rel == x or rel.startswith(x + "/") for x in leave_out):
             continue
         try:
             with open(f, "rb") as fh:

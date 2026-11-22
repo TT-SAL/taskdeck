@@ -9,22 +9,26 @@
 #
 # Exit 0 when every clause is covered and every citation is real, 1 otherwise,
 # 2 on a usage error. A stage that owns no clause (foundation) passes.
+# rc owns no clause but runs every other stage's check, each on that stage's
+# test files, then its own on every path (the stricter reading of §3.3 for a
+# release candidate: no clause may have lost its tests since its stage exited).
 #
 # A test file is a source file (.rs .js .mjs .cjs .ts .kt .kts .java .html,
 # and .sh .py for the shell and Python tests of release) that matches the
 # stage's patterns below; a data file, README or note under a test directory
 # cites nothing.
 #
-# A citation is, in a test file of the stage:
-#   - the marker `spec: <ID>` (one id per marker; `// spec: CORE-APPLY-012`),
-#     anywhere in the file, or
-#   - the id spelled exactly inside a test's name, on a line that declares a
-#     test: `it(`, `test(`, `describe(` (with an optional `.only`) followed by
-#     a quote, a Kotlin ``fun `...` `` name, or `@DisplayName(`. Rust names
-#     cannot hold `-`, so Rust tests use the marker.
+# A clause is covered when its id stands, as a whole token, anywhere in a test
+# file of the stage (SYNC_PLAN.md §3.3: "fails if a clause owned by the stage
+# appears in no test"): in the marker `spec: <ID>` (`// spec: CORE-APPLY-012`),
+# in a test's name, or elsewhere. The script does not judge whether the test
+# around it runs: a skipped test is the no-skipped-tests scan's business, a
+# commented-out one is review's (lead ruling 9 of the tooling task).
 # Ids are compared as whole tokens: `CORE-APPLY-0012` does not cite
-# CORE-APPLY-001. A cited token that is no clause, or a withdrawn clause, is
-# an error: a test that cites nothing real proves nothing.
+# CORE-APPLY-001. Every token shaped like an id (a spec prefix and two more
+# hyphen-separated parts, or whatever follows `spec:`) must name a live
+# clause: one that is no clause, or a withdrawn clause, is an error, since a
+# test that cites nothing real proves nothing.
 #
 # There is no option that makes a stage pass without tests.
 set -uo pipefail
@@ -90,9 +94,20 @@ if [[ "$mode" == paths ]]; then
         printf '%-14s %s\n' "$s" "${STAGE_TEST_PATHS[$s]:-(none: the stage has no test files)}"
     done
     echo "(source files only: .rs .js .mjs .cjs .ts .kt .kts .java .html .sh .py)"
+    [[ -n "$stage" && "$stage" != rc ]] || echo "(rc first runs every other stage's check, each on that stage's row)"
     exit 0
 fi
 [[ -n "$stage" ]] || usage
 command -v python3 >/dev/null || { echo "spec-coverage: error: python3 is needed" >&2; exit 2; }
-# shellcheck disable=SC2086 # the patterns are words on purpose
-exec python3 -I -B "$here/spec-coverage.py" "$mode" "$stage" "$root" ${STAGE_TEST_PATHS[$stage]}
+check() {  # check <stage>
+    # shellcheck disable=SC2086 # the patterns are words on purpose
+    python3 -I -B "$here/spec-coverage.py" "$mode" "$1" "$root" ${STAGE_TEST_PATHS[$1]}
+}
+[[ "$stage" == rc ]] || { check "$stage"; exit; }
+status=0
+for s in $STAGE_ORDER; do
+    check "$s"
+    r=$?
+    (( r > status )) && status=$r
+done
+exit "$status"
