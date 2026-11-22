@@ -77,3 +77,8 @@ other entry stay where they are.
 Rulings 1 to 5 and 7 are applied and committed; ruling 6's checks were run by the lead in the main checkout and
 pass. `scripts/tests/test-supply-chain.sh` (the `--base` option) joined the tests. `scripts/tests/lib.sh` and
 `scripts/cooldown.py` stay mode 644: one is only sourced, the other is run through `python3 -I`.
+
+## Already raised and handled (do not re-report)
+
+- [medium] An index lookup failure made the yanked check fail open: cargo-deny only warned, cargo-audit printed an error and exited 0, and the gate passed with a yanked crate in the lockfile (fixed: `scripts/supply-chain.sh` makes cargo-deny's index failures errors and fails on any `error:` line of cargo-audit; a test covers it)
+- [low] cargo-deny's yanked check and a stale local index cache (dropped: with a cache that is really stale, cargo-deny refreshes it; not reproduced)

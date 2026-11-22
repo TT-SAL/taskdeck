@@ -17,6 +17,9 @@ all-features = true
 unmaintained = "all"
 unsound = "all"
 yanked = "deny"
+# A crate whose index entry cannot be fetched or read skips the yanked check
+# with only a warning; scripts/supply-chain.sh passes -D index-failure and
+# -D index-cache-load-failure, so there it is an error.
 # An ignore that no longer matches is reported, so a stale one gets removed.
 unused-ignored-advisory = "deny"
 ignore = [

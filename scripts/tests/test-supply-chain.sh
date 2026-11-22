@@ -3,7 +3,8 @@
 # cooldown.sh, cargo-deny and cargo-audit that log how they were run: --base
 # <rev> reaches the cooldown unchanged, no option means the cooldown's default
 # base, any other argument is refused before anything runs, and all three
-# checks run even when one fails.
+# checks run even when one fails, and an "error:" from cargo-audit fails
+# the run even when it exits 0.
 set -uo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -16,7 +17,7 @@ cp "$SCRIPTS_DIR/supply-chain.sh" "$R/scripts/supply-chain.sh"
 printf 'echo "ok       cargo-deny 0.20.2"\necho "ok       cargo-audit 0.23.0"\n' >"$R/scripts/dev-setup.sh"
 printf 'echo "cooldown${*:+ $*}" >>"$FAKE_LOG"\nexit "${CD_EXIT:-0}"\n' >"$R/scripts/cooldown.sh"
 printf '#!/bin/sh\necho "cargo-deny $*" >>"$FAKE_LOG"\nexit "${DENY_EXIT:-0}"\n' >"$TMP/tools/cargo-deny"
-printf '#!/bin/sh\necho "cargo-audit $*" >>"$FAKE_LOG"\nexit "${AUDIT_EXIT:-0}"\n' >"$TMP/tools/cargo-audit"
+printf '#!/bin/sh\necho "cargo-audit $*" >>"$FAKE_LOG"\n[ -z "${AUDIT_ERR:-}" ] || echo "$AUDIT_ERR" >&2\nexit "${AUDIT_EXIT:-0}"\n' >"$TMP/tools/cargo-audit"
 chmod +x "$TMP/tools/cargo-deny" "$TMP/tools/cargo-audit"
 
 run() { : >"$LOG"; env TASKDECK_TOOLS_DIR="$TMP/tools" "$@" bash "$R/scripts/supply-chain.sh" "${ARGS[@]}"; }
@@ -27,8 +28,8 @@ log_is() {
         FAILS=$((FAILS + 1)); echo "FAIL  $1"; sed 's/^/        got: /' "$LOG"; sed 's/^/        wanted: /' <<<"$2"
     fi
 }
-ALL3="cargo-deny --workspace --locked --all-features check advisories bans sources
-cargo-audit audit"
+ALL3="cargo-deny --workspace --locked --all-features check -D index-failure -D index-cache-load-failure advisories bans sources
+cargo-audit audit --color never"
 
 echo "-- the cooldown's base"
 ARGS=()
@@ -61,5 +62,13 @@ cooldown --base abc"
 expect "cargo audit failing" 1 run AUDIT_EXIT=1
 expect "the cooldown failing" 1 run CD_EXIT=1
 output_has "says which failed" "FAILED: cooldown"
+
+echo "-- an index failure fails closed"
+# cargo-audit 0.23.0 exits 0 when it cannot read a crate's index entry; the
+# gate must still fail. (cargo-deny's index-failure warnings are made errors
+# by the -D options the log checks above.)
+expect "cargo audit printing an error but exiting 0" 1 run \
+    AUDIT_ERR="error: couldn't check if the package is yanked: registry: invalid type"
+output_has "names cargo audit" "FAILED: cargo audit"
 
 finish

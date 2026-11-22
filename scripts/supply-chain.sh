@@ -10,7 +10,9 @@
 #      is given (passed through as `cooldown.sh --base <rev>`), otherwise
 #      against the cooldown's default base
 # and exits non-zero if any of them failed (2, before running anything, on an
-# unknown argument; --base is the only option). cargo-deny and cargo-audit must be
+# unknown argument; --base is the only option). A crate whose registry index
+# entry cargo-deny or cargo-audit cannot fetch or read fails that tool's check,
+# so a yanked crate cannot pass through an index failure. cargo-deny and cargo-audit must be
 # the versions scripts/dev-setup.sh pins, installed by it; the script runs
 # those binaries from the directory dev-setup installs into.
 set -uo pipefail
@@ -49,8 +51,12 @@ missing_hint() {
 
 banner "1/3 cargo deny check advisories bans sources"
 if tool_ok cargo-deny; then
+    # A crate whose index entry cannot be fetched or read is only a warning to
+    # cargo-deny (its yanked check is then skipped): -D makes it an error, so
+    # an index failure fails closed.
     if "$TOOLS_DIR/cargo-deny" --workspace --locked --all-features \
-        check advisories bans sources; then
+        check -D index-failure -D index-cache-load-failure \
+        advisories bans sources; then
         echo "supply-chain: cargo deny: passed"
     else
         echo "supply-chain: cargo deny: FAILED"
@@ -63,7 +69,13 @@ fi
 
 banner "2/3 cargo audit"
 if tool_ok cargo-audit; then
-    if "$TOOLS_DIR/cargo-audit" audit; then
+    # cargo-audit exits 0 when it cannot check a crate for yanking (it prints
+    # "error: couldn't check if the package is yanked"), so any "error:" line
+    # fails the check too: an index failure fails closed.
+    audit_out="$("$TOOLS_DIR/cargo-audit" audit --color never 2>&1)"
+    audit_rc=$?
+    printf '%s\n' "$audit_out"
+    if [[ $audit_rc -eq 0 ]] && ! grep -q '^error:' <<<"$audit_out"; then
         echo "supply-chain: cargo audit: passed"
     else
         echo "supply-chain: cargo audit: FAILED"
