@@ -1,0 +1,34 @@
+[package]
+name = "taskdeck-android"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The JNI library of the Android app: the bridge and the facade behind JNI (spec: docs/sync/spec/bridge.md)."
+
+# `libtaskdeck.so` (bridge.md §11.1).
+[lib]
+name = "taskdeck"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+# Exactly one backend (bridge.md §11.1, §21). `backend-echo` answers from the
+# fixtures and links no taskdeck-device (stage android-shell); `backend-device`
+# links taskdeck-device with its default features (stage android). Neither is
+# a default: the Gradle flavour picks one. Both enable nothing yet beyond the
+# dependencies.
+[features]
+backend-echo = []
+backend-device = ["dep:taskdeck-core", "dep:taskdeck-device", "dep:rustls-platform-verifier"]
+
+# bridge.md §12.4, "taskdeck-android".
+[dependencies]
+jni = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+sha2 = { workspace = true }
+zeroize = { workspace = true }
+taskdeck-core = { workspace = true, optional = true }
+taskdeck-device = { workspace = true, optional = true }
+# Its Android initialiser (bridge.md §11.2).
+rustls-platform-verifier = { workspace = true, optional = true }

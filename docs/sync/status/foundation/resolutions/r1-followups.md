@@ -41,3 +41,11 @@ round, or a small fix pass before it) writes them.
     example of the words; since TR2-EDIT-3 the words are the interfaces' (`bridge.md` A-04, `device.md`
     §17.7). Reword the cell to: A persistent per-device message that is not a refusal, such as an overwrite
     notice.
+12. **device.md DEV-GEN-011 and DEV-NET-002 disagree about `webpki-roots`** (found by the workspace
+    implementer): DEV-NET-002 has the device verify "with `webpki-roots` when the caller passed
+    `TrustRoots::Bundled`", and §10.1 names version 1.0.12, but DEV-GEN-011's exact list of non-development
+    dependencies leaves the crate out. SYNC_PLAN.md §3.4 approves `webpki-roots` "if `android-shell` chooses
+    bundled roots". DEV-GEN-011 must name it with that condition.
+13. **device.md §15.8 and the crate table of §4: `taskdeck-recover` depends on `taskdeck-device`** for the
+    online steps (`recovery_online::RecoveryLink`); any table or clause that lists the tool's dependencies
+    as backup, seal and core only must say so (lead ruling 3 of `briefs/workspace.md`).

@@ -1,0 +1,19 @@
+[package]
+name = "taskdeck-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The pure board: data, log commands, deterministic apply, planner, archive, scoring (spec: docs/sync/spec/core.md)."
+
+# CORE-GEN-005: exactly serde, serde_json and chrono outside the dev-dependencies.
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# No default features, so no `clock`: the core cannot read the clock or the
+# local zone (CORE-GEN-003). The zone comes in as a `Zone` value.
+chrono = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+proptest = { workspace = true }
+# The SHA-256 of canonical bytes in the test vectors (core.md §18).
+sha2 = { workspace = true }

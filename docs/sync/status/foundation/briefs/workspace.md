@@ -83,3 +83,46 @@ Before you fix the dependency lists, read the "Interfaces" and "Public API" sect
 `docs/sync/spec/` (seal.md, core.md, relay.md, engine.md and any other): where a spec names a crate, a feature or
 a cargo feature of its own crate (for example seal's `test-entropy`, device's `test-trust`), declare it, provided
 it is on SYNC_PLAN.md §3.4's pre-approved list; report anything a spec asks for that is not.
+
+## State after the implementation (2026-11-22)
+
+Seven shell crates are members; the root package is still the only default member; 56 third-party entries
+were added to `Cargo.lock` and nothing that existed moved. The lead ran every proof of this brief in the main
+checkout.
+
+## Lead rulings for task workspace
+
+1. **A spec's clause wins over this brief's table.** Where a clause fixes a crate's dependencies or features
+   (ENG-GEN-005, DEV-GEN-011, `bridge.md` §12.4, `core.md` §18) and the table above says otherwise, the
+   clause holds. So `serde` and `serde_json` are development dependencies of `taskdeck-sync`, `getrandom`
+   and `tempfile` of `taskdeck-device`, and the device's `image` has the features `jpeg` and `png`.
+2. **`taskdeck-android` has a default backend** (ruling S32 in the status file): `default =
+   ["backend-device"]`; both backends or neither is a `compile_error!` once the skeleton adds it; the echo
+   flavour builds with `--no-default-features --features backend-echo`. Workspace-wide cargo commands and
+   `scripts/ci/stage.sh android` then work without feature arguments.
+3. **`taskdeck-recover` depends on `taskdeck-device`.** `device.md` §15.8: the tool's online steps use
+   `taskdeck_device::recovery_online::RecoveryLink`. The dependency is declared now, so the stage that writes
+   those steps touches no shared file. A change under `crates/taskdeck-device/` must then mark the area
+   `recovery` as well: for that one rule, and only for it, this task may change `scripts/ci/changes.sh`, its
+   row in `scripts/ci/README.md` and `scripts/tests/test-ci-changes.sh`. `bash scripts/ci/reads.sh` must pass.
+4. **`taskdeck-seal` does not depend on `taskdeck-core`.** SEAL-ENC-003 (payloads in the canonical encoding
+   of `core.md`) is met inside seal for seal's own payloads; the two crates are built side by side in wave 1.
+5. **`webpki-roots` is not declared.** SYNC_PLAN.md §3.4 approves it only if `android-shell` chooses bundled
+   roots; `Cargo.lock` already holds 1.0.12, so declaring it later moves nothing. (That DEV-GEN-011 leaves it
+   out while DEV-NET-002 names it is a matter for the specs, follow-up 12.)
+6. **`rand_core` for seal, if hpke needs it.** If the sealing functions of hpke 0.15.1 take a `rand_core`
+   generator and hpke does not re-export the traits seal must implement for its `Entropy`, seal declares
+   `rand_core` at the version `Cargo.lock` already holds for hpke. Check hpke's API in the registry source
+   and decide; say which.
+7. **No fuzz set-up here.** A stage that adds `crates/<crate>/fuzz` gives it its own `[workspace]` table,
+   which is what cargo-fuzz writes; the lead records for those stages that such a directory has a lockfile
+   of its own.
+8. **Known and accepted:** `base64` 0.22 and 0.23 side by side (ureq 3.5.2 needs the newer one; not a
+   cryptographic crate); the development-only duplicates under `proptest`; `openssl-probe`, pure Rust, under
+   `rustls-native-certs`; the lockfile-only entries `borsh`, `borsh-derive` and `syn` 3 that are never
+   compiled; `cargo build --workspace` on Windows would write `taskdeck.pdb` and `TaskDeck.pdb` into one
+   directory (the default build is the root package alone).
+
+## Already raised and handled (do not re-report)
+
+(none yet)
