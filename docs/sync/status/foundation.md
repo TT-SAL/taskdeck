@@ -83,7 +83,7 @@ These are working papers of the stage, not contracts. The exit pull request may 
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
 | 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge drafted (1,655 lines, 110 clauses). All six are first drafts: 11,635 lines, 852 clauses | `docs/sync/spec/*.md` |
 | 3c | Pairwise interface reviews: the plan's six pairs (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) plus core–device, seal–device, relay–device | **done.** Nine reviews brought 152 findings (26 high, 75 medium, 51 low); nine resolvers turned them into 232 exact changes; the lead ruled on the open points (L1 to L23); one more resolver wrote the rulings as exact text; fixers applied everything spec by spec and a second agent checked each spec against its diff (seal 102 of 102 items exact, core 15 of 15, relay 78 of 79 and the last fixed, engine 179 of 179, device 225 of 226 with the one a placement the lead confirmed, bridge 34 of 34; nothing unrequested). The six specs now hold 899 clauses (7 withdrawn) in 12,237 lines, and the lead's format check finds no problem. Five small follow-ups for the next spec pass are in `resolutions/r1-followups.md` | commits `220f07a` to this one; `resolutions/` |
-| 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | **rounds 1 and 2 done.** One fixed world and six scenarios (`briefs/two-readers.md`); readers work from the specs alone. In both rounds they agreed on every byte layout, counter, seq and chain value both gave. Differences that needed a spec change, all about behaviour the specs left open: 40 in round 1 (edit 10, join 17, trust 13), 12 in round 2 (edit 4, join 5, trust 3). All changes are applied (938 clauses, format check clean). The lead's rulings: `two-readers/r1/lead.md` (T1 to T10), `two-readers/r2/lead.md` (T11 to T13). Round 2 used two readers for all six scenarios (D22). Rounds 3 and 4 follow; what remains after round 4 goes to `spec/CHANGES.md` | `two-readers/r1/`, `two-readers/r2/` |
+| 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | **done after two rounds (deviation).** One fixed world and six scenarios (`briefs/two-readers.md`); readers work from the specs alone. In both rounds they agreed on every byte layout, counter, seq and chain value both gave. Differences that needed a spec change, all about behaviour the specs left open: 40 in round 1 (edit 10, join 17, trust 13), 12 in round 2 (edit 4, join 5, trust 3). All changes are applied (938 clauses, format check clean). The lead's rulings: `two-readers/r1/lead.md` (T1 to T10), `two-readers/r2/lead.md` (T11 to T13). Round 2 used two readers for all six scenarios (D22). The test stops here (a deviation, D24): the open follow-ups 6 to 13 are being applied, and `spec/CHANGES.md` records that two of four rounds were run | `two-readers/r1/`, `two-readers/r2/` |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
 | 4 | Skeleton crates: public types and traits, toy state machine, fake sealer | todo; brief ready (`briefs/skeletons.md`). Comes after the two-readers rounds have settled the specs' "Public API" sections, with a last check of the surface after round 4 | |
 | 5 | Fixtures as data: boards, legacy `main` formats, snapshot JSON, transcripts | todo; brief ready (`briefs/fixtures.md`) | |
@@ -269,6 +269,24 @@ API" sections, the requirement map (3e), and the stage exit.
   returns after a phase, the lead looks at the window, and a resume replays the finished agents
   from the cache. Round 2's readers come first (about 1.3 million); the comparers and fixers (about
   1.2 million) follow in the same window only if it then stands under about 5.5 million.
+- **D24. Build first, check less (the owner, 2026-11-22 10:00 UTC: the token use is unacceptable for
+  the pace; "premature optimization is the root of all evil"; the window stood at 65%).** Counted from
+  the transcripts, this session's agents had used 22.6 million tokens: about 1.2 million built
+  things (tasks 1b, 1c, 2 and the applied rulings), about 4 million wrote spec changes, and about 17
+  million reviewed, attacked and re-read (interface reviews 8.7, two-readers 6.1, the attack loops of
+  1a, 1b and 1c about 6.5). The lead's own turns cost 2.9 million more. From here:
+  1. The remaining deliverables (fixtures, skeletons, tooling, the requirement map) start at once, on
+     both tracks, each track in its own working copy.
+  2. A usage window holds about 9 million agent tokens (6.1 million stood at 65%). The lead plans to
+     about 85% of that, not to 6 million, and does not sit idle below it.
+  3. The attack loop keeps the plan's properties (someone else attacks; a finding is reproduced
+     before anyone acts; a failed agent is never a clean result; the loop reports whether it
+     converged, which means two dry rounds in a row), with one change: a round is dry when it brings
+     no high or medium finding. Low findings (robustness inside the documented use) are listed for
+     the lead, fixed only where the fix is a few lines, and do not start another round. Under this
+     rule task 1c's sixth round was dry (two lows, both fixed); one more dry round closes it.
+  4. The two-readers test stops after round 2 (see "Deviations from the plan").
+  5. The lead takes fewer turns and reads less: one integration per finished workflow.
 - **D21. The spec resolutions are kept in the repository** (`docs/sync/status/foundation/resolutions/`):
   nine files with 232 exact changes and the lead's rulings on them are eighteen agent runs of work
   and existed only in the session's scratch space.
@@ -452,6 +470,15 @@ Rulings on what the bridge draft raised (2026-11-21):
   the plan's own `panic = "unwind"` would break "every merge keeps today's app working" for the
   server. Nothing else in `src/` is touched. `desktop` should note it in its status file when it
   starts.
+- **The two-readers test ran two rounds, not "two rounds with no difference, or four" (SYNC_PLAN.md
+  §6.1).** Round 1 found 40 differences that needed a spec change and round 2 found 12, all about
+  behaviour the specs had left open; in both rounds the readers agreed on every byte layout,
+  counter, seq and chain value. Rounds 3 and 4 would have cost about 4 million tokens for a
+  shrinking yield. The lead stopped the test after the owner's message of 2026-11-22 10:00 UTC
+  about token use (D24); the owner can overrule. What two more rounds would have found is not
+  known: `spec/CHANGES.md` says so, and a stage that meets a behaviour the specs leave open raises
+  a spec change as §3.3 says.
+
 
 ## Measurements
 

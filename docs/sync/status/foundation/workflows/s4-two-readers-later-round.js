@@ -9,7 +9,7 @@ export const meta = {
   ],
 }
 
-// args: { scratch: '<session scratchpad>', round: 2, until: 'read' | 'compare' | 'fix', followups: '' | '<which items of r1-followups.md, and hints>' }
+// args: { scratch: '<session scratchpad>', round: 2, until: 'read' | 'compare' | 'fix', followups: '' | '<which items of r1-followups.md, and hints>', no_readers: false }
 // 'until' names the last phase this launch runs; a later launch with resumeFromRunId replays the finished agents
 // from the cache and goes on, so the lead can check the usage window between the phases.
 const S = args.scratch
@@ -95,6 +95,8 @@ Return the structured summary (changes_per_spec uses the bare names seal, core, 
 }
 
 // ------------------------------------------------------------------ 1. two readers, six scenarios each
+// args.no_readers: a pass that only writes and applies the follow-ups (no readers, no comparers).
+if (!args.no_readers) {
 phase('Read')
 for (const who of ['A', 'B']) {
   const dir = `${TR}/reader-${who}`
@@ -143,6 +145,7 @@ Return the structured summary: the counts by verdict (spec_differences, reader_e
 }
 out.counting_differences = counting
 if (UNTIL === 'compare') { out.stopped_after = 'compare'; return out }
+}
 
 // ------------------------------------------------------------------ 3. fixers, one per spec with changes
 phase('Spec fixes')
