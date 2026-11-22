@@ -207,3 +207,27 @@ Implemented and committed: `.github/workflows/ci.yml`, `scripts/ci/` (`changes.s
     (one string literal, or `concat!` of string literals, in a tracked `*.rs` file) names a tracked file
     that marks fewer areas than its reader, and the check passes; or the check passes a read it could not
     resolve to a tracked file. Any other spelling is either refused by the rule above or left to review.
+
+13. **The hand-written readers of TOML in `scripts/ci/` read the plain spelling and fail on any other (lead
+    ruling, 2026-11-22 09:00 UTC).** `stage.sh` reads a package's name; `toolchain.sh` reads the channel, the
+    profile, the components and the targets. Both run on Windows and macOS runners, where no TOML parser can
+    be relied on, so they stay small bash readers. After the second loop each of them either reads a value
+    correctly or fails with a message that names the file and the key. From here on a finding against
+    these readers counts only if a script goes on, without failing, with a value it read wrongly or did not
+    read. A spelling that makes the script fail loudly is not a finding.
+
+Second loop (2026-11-22, six rounds, every finding fixed in the round that raised it; do not re-report):
+
+- [second loop, round 1, medium] scripts/ci/reads.sh takes an include!/#[path] string literal verbatim, so an escape sequence or a Windows backslash path gets past the check (fixed, with a test)
+- [second loop, round 2, medium] A change to scripts/dev-setup.sh never runs the stage jobs whose ci.sh hooks stage.sh tells to call it (fixed, with a test)
+- [second loop, round 2, low] A case variant of an embedded root image is classified 'no CI' but replaces the embedded file on Windows and macOS checkouts (fixed, with a test)
+- [second loop, round 2, low] reads.sh passes without checking anything when its tree is not a git work tree (fixed, with a test)
+- [second loop, round 3, medium] A clippy.toml directly under crates/ changes every stage crate's `cargo clippy -D warnings` result, but marks only the foundation area, so no stage job runs (fixed, with a test)
+- [second loop, round 3, low] stage.sh rejects a valid single-quoted package name (`name = 'x'`) as 'has no [package] name' (fixed, with a test)
+- [second loop, round 3, low] `[ci full]` is now matched case-sensitively; today's workflow matched it in any case (fixed, with a test)
+- [second loop, round 4, medium] reads.sh checks only the first literal of concat!, so concat!("", "../docs/sync/status/x.txt") or concat!("../", "docs/sync/status/x.txt") gets past it (fixed, with a test)
+- [second loop, round 4, low] reads.sh misses listed reads that rustc compiles from a non-.rs module file, and resolves #[path] inside an inline module from the wrong directory (fixed, with a test)
+- [second loop, round 5, medium] reads.sh passes an include that goes through a tracked symlink under a no-CI path, so the embedded content can change with only changes and gate running (fixed, with a test)
+- [second loop, round 5, medium] reads.sh passes a read that does not name a tracked file, and a read of a path no rule knows passes by 'marking every area', contrary to ruling 12 (fixed, with a test)
+- [second loop, round 6, low] scripts/ci/toolchain.sh reports success when `rustup toolchain install` and `rustup component add` both failed, because set -e is off inside the `( ... ) || die` subshell (fixed, with a test)
+- [second loop, round 6, low] scripts/ci/toolchain.sh silently drops single-quoted (TOML literal string) components and targets from rust-toolchain.toml and still passes (fixed, with a test)

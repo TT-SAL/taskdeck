@@ -21,7 +21,7 @@ const BRIEF = `${MAIN}/docs/sync/status/foundation/briefs/two-readers.md`
 const SPECS = `${MAIN}/docs/sync/spec`
 const TR = `${S}/two-readers/r${ROUND}`
 const CHECKTOOL = `python3 ${MAIN}/docs/sync/status/foundation/tools/speccheck.py ${WORK}/docs/sync/spec 300`
-const ORDER = ['seal', 'core', 'relay', 'engine', 'device', 'bridge']
+const ORDER = ['seal', 'core', 'relay', 'engine', 'device', 'bridge', 'README']
 const GROUPS = [
   { key: 'edit', scenarios: '1 (first edit) and 2 (offline edit replayed)' },
   { key: 'join', scenarios: '3 (pairing) and 6 (snapshot bootstrap)' },
@@ -74,7 +74,7 @@ const FIX = {
   },
   required: ['summary', 'applied', 'not_applied', 'format_check', 'questions_for_lead'],
 }
-const RESOLVER_RULES = `The rules for writing a change: name the section; give the full new text (a clause is one list item "- **SPEC-TOPIC-NNN** (owner stages) text with MUST or MUST NOT"; a new id continues after the highest number of its topic in that spec; never reuse or renumber an id; a new clause may stand after the clause it belongs with, ids need not be in number order); give every table row, error-catalogue row, limit, interface entry and public-API signature the change touches; one owner per rule; a change that needs matching edits in two specs appears under both specs' headings with identical wording for the shared part. Group the changes under level-two headings named exactly "## seal.md", "## core.md", "## relay.md", "## engine.md", "## device.md" or "## bridge.md".`
+const RESOLVER_RULES = `The rules for writing a change: name the section; give the full new text (a clause is one list item "- **SPEC-TOPIC-NNN** (owner stages) text with MUST or MUST NOT"; a new id continues after the highest number of its topic in that spec; never reuse or renumber an id; a new clause may stand after the clause it belongs with, ids need not be in number order); give every table row, error-catalogue row, limit, interface entry and public-API signature the change touches; one owner per rule; a change that needs matching edits in two specs appears under both specs' headings with identical wording for the shared part. Group the changes under level-two headings named exactly "## seal.md", "## core.md", "## relay.md", "## engine.md", "## device.md" or "## bridge.md" (and "## README.md" for a change to the specs\' README, which has no clauses of its own).`
 const BATCH = `Keep the work cheap: every message you send re-reads everything you have read so far, so use few messages. Issue the tool calls you can foresee together, as parallel calls in one message (for example every Grep and Read of a look-up round at once), not one call per message, and do not re-read what you have already read.`
 const changeFiles = []
 
@@ -84,9 +84,9 @@ if (args.followups) {
   const file = `${TR}/followups.md`
   const r = await safe(() => agent(`You write exact spec changes for a few small follow-ups of the TaskDeck sync specs (${SPECS}/: seal.md, core.md, relay.md, engine.md, device.md, bridge.md). You change no spec and run no git command that changes state.
 The follow-ups: ${args.followups}
-They are listed in ${MAIN}/docs/sync/status/foundation/resolutions/r1-followups.md (read that file). The lead's rulings they refer to are in ${MAIN}/docs/sync/status/foundation/resolutions/r1-lead.md (L-numbers) and ${MAIN}/docs/sync/status/foundation/two-readers/r1/lead.md (T-numbers): read only the rulings named. Do not read any spec in full; find the places with Grep and read around them. ${BATCH}
+They are listed in ${MAIN}/docs/sync/status/foundation/resolutions/r1-followups.md (read that file). The lead's rulings they refer to are in ${MAIN}/docs/sync/status/foundation/resolutions/r1-lead.md (L-numbers), ${MAIN}/docs/sync/status/foundation/two-readers/r1/lead.md and r2/lead.md (T-numbers) and ${MAIN}/docs/sync/status/foundation.md (S-numbers: find the one named with Grep and read only that paragraph): read only the rulings named. Do not read any spec in full; find the places with Grep and read around them. ${BATCH}
 Write the changes to ${file} (create the directory). ${RESOLVER_RULES} Head each change "### TR${ROUND}-FOLLOW-<n> (<follow-up item>)". End with "## For the lead" (only what cannot be settled from the specs and rulings, with your recommendation and the conservative reading written as the change).
-Return the structured summary (changes_per_spec uses the bare names seal, core, relay, engine, device, bridge).`,
+Return the structured summary (changes_per_spec uses the bare names seal, core, relay, engine, device, bridge, README).`,
     { label: `resolve:followups:r${ROUND}`, phase: 'Follow-ups', model: 'opus', effort: 'high', schema: CHANGES }))
   if (r === null) { out.failed = 'resolve:followups'; return out }
   out.followups = r
@@ -100,14 +100,15 @@ for (const who of ['A', 'B']) {
   const dir = `${TR}/reader-${who}`
   const r = await safe(() => agent(`You are reader ${who} in the two-readers test of the TaskDeck sync specs. Your instructions are in ${BRIEF} : its sections "A. Reader", "The world" and "The scenarios" are for you (ignore the introduction and section B). All six scenarios are yours.
 You are given ONLY the specs: the files under ${SPECS}/ (README.md, seal.md, core.md, relay.md, engine.md, device.md, bridge.md, wordlist.txt). Apart from the brief, open no other file anywhere: no SYNC.md, no plan, no status or resolution files, no source code, nothing else under ${S}. Run no git command and no search outside ${SPECS}/.
-How to read, so that the work stays cheap (every message you send re-reads all you have read so far, so use few messages):
-- In your FIRST message issue eight Read calls together, as parallel calls in one message: the brief, and README.md, seal.md, core.md, relay.md, engine.md, device.md and bridge.md, each in full (pass allow_large true and limit 3000, no offset; the longest file has 2,558 lines). If a call is refused for size, read that file in two or three consecutive line ranges, again all in one message.
-- Do not read anything twice. Open wordlist.txt only if a scenario needs a word from it, and then only the lines needed. Search with Grep only when you must find a place again.
+How to read, so that the work stays cheap and you keep room to write (every message you send re-reads all you have read so far; the six specs together are about 540,000 tokens, more than you can hold and still write well):
+- In your FIRST message issue these calls together, as parallel calls in one message: Read the brief; Read README.md in full; and one Grep per spec (seal.md, core.md, relay.md, engine.md, device.md, bridge.md) for the pattern "^#{2,3} " with line numbers, which gives you every section heading and where it starts.
+- From the headings choose the sections that govern the six scenarios, and read them in your SECOND message, again as parallel Read calls in one message, each a line range of at most 600 lines (offset and limit). Read a section once and to the byte. Leave out what cannot bear on the scenarios (for example fetchers, the look, the timing harness, release rules).
+- A third message of reads for what you then find you still need is fine; after that, search with Grep rather than reading on. Open wordlist.txt only if a scenario needs a word from it.
 Then work through the three groups one after the other. For each group think its two scenarios through to the byte, then write its file with a single Write call:
 - ${dir}/edit.md : scenarios 1 and 2
 - ${dir}/join.md : scenarios 3 and 6
 - ${dir}/trust.md : scenarios 4 and 5
-Each file is in the format section A fixes: exact, complete for both of its scenarios, no introduction. The three files are your whole product.
+Each file is in the format section A fixes, and that format is binding: every byte string that is sealed, signed, hashed, stored or sent laid out as a table (field, width, value), every JSON body written out in full, every step with its clause or section; exact, complete for both of its scenarios, no introduction. Do not shorten a layout into running text to save space. The three files are your whole product.
 Return the structured summary: the three files, for each scenario its number of steps and of AMBIGUOUS lines, and the specs you read.`,
     { label: `read:${who}:r${ROUND}`, phase: 'Read', model: 'opus', effort: 'high', schema: READ }))
   if (r === null) { out.failed = `read:${who}`; return out }
@@ -126,7 +127,7 @@ for (const g of GROUPS) {
   const earlier = changeFiles.map(c => c.file)
   const r = await safe(() => agent(`You are the comparer for group "${g.key}" (scenarios ${g.scenarios}) in round ${ROUND} of the two-readers test of the TaskDeck sync specs. Your instructions are in ${BRIEF} : read its section "B. Comparer", "The world" and the two scenarios. You change no spec and run no git command.
 The two readers' files are ${TR}/reader-A/${g.key}.md and ${TR}/reader-B/${g.key}.md : read both in full. The specs are under ${SPECS}/ ; open them at the places the readers cite (do not read a spec in full). ${BATCH}
-The lead's rulings of round 1 stand (${MAIN}/docs/sync/status/foundation/two-readers/r1/lead.md , short: read it): write no change that contradicts one; if a difference comes from one, say so under "For the lead".
+The lead's rulings of the earlier rounds stand (${MAIN}/docs/sync/status/foundation/two-readers/r1/lead.md and r2/lead.md , short: read them): write no change that contradicts one; if a difference comes from one, say so under "For the lead".
 ${earlier.length ? `Changes already written in this round, which the fixers will apply before yours: ${earlier.join(' , ')} . Read their headings and, where a difference of yours touches the same place, build on them and do not contradict them.` : ''}
 Write to ${file} :
 1. "# Differences": one numbered entry per difference or AMBIGUOUS line: a short title, what reader A wrote and what reader B wrote (quote the lines), the spec text each relied on (section or clause), and the verdict: spec, reader (say which reader, cite the clear text; add "clarified" if you also write a clarifying change), format, or both-wrong.
@@ -147,9 +148,9 @@ if (UNTIL === 'compare') { out.stopped_after = 'compare'; return out }
 phase('Spec fixes')
 const norm = s => String(s).toLowerCase().replace(/\.md$/, '').trim()
 for (const spec of ORDER) {
-  const files = changeFiles.filter(c => (c.per || []).some(p => norm(p.spec) === spec && p.changes > 0)).map(c => c.file)
+  const files = changeFiles.filter(c => (c.per || []).some(p => norm(p.spec) === spec.toLowerCase() && p.changes > 0)).map(c => c.file)
   if (files.length === 0) continue
-  const n = changeFiles.reduce((a, c) => a + ((c.per || []).find(p => norm(p.spec) === spec) || { changes: 0 }).changes, 0)
+  const n = changeFiles.reduce((a, c) => a + ((c.per || []).find(p => norm(p.spec) === spec.toLowerCase()) || { changes: 0 }).changes, 0)
   const r = await safe(() => agent(`YOUR TASK: apply written changes to ONE spec of the TaskDeck sync build, ${WORK}/docs/sync/spec/${spec}.md . ${WORK} is the spec track's working copy (a clone of the repository); edit only that one file there. ${MAIN} outside ${WORK} is read-only for you. Run no git command that changes state.
 Apply exactly the changes under the heading "## ${spec}.md" of these files, in this order (about ${n} changes, each headed "### TR..."): ${files.join(' , ')} .
 Be economical with reading: do NOT read the spec or the change files in full. In each change file find the heading "## ${spec}.md" with Grep (-n) and read from there to the next level-two heading; in the spec, find each place a change names with Grep and read only around it. ${BATCH} Conventions: a clause is one list item "- **SPEC-TOPIC-NNN** (owner stages) text with MUST or MUST NOT"; ids are unique, never reused or renumbered; each spec ends with the sections Error catalogue, Limits, Test vectors, Interfaces, Public API, Open questions, in that order; every layout's widths add up to its stated total.
