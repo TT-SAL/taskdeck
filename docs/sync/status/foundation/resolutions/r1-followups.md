@@ -18,3 +18,8 @@ round, or a small fix pass before it) writes them.
 5. Settled by the lead, no change needed: DEV-CREATE-005 stands at the end of device.md §18.1 (the change named
    the section and a clause of another section); the sentence R1-SEAL-DEVICE-14 added to seal.md §20.2 stands
    after the exception it builds on.
+
+## For the pass after two-readers round 1
+
+6. **engine.md §28.2 step 2** sets `log_floor = p` even for a device whose `log_floor` is already above `p`
+   (lead ruling L27): it must take the larger of the two and keep `floor_chain` in that case.

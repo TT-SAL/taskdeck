@@ -148,3 +148,16 @@ for the owner's rehearsal (SYNC.md §11 "Still to measure").
   and `RecoveryLink::reinstate`.
 - **L23. A `reinstate` whose entry never lands** leaves the device revoked again once classification reaches
   the relay's head with the membership still recording it revoked. Confirmed as written.
+
+## L24 to L27. On the four points the follow-ups resolver raised (2026-11-22)
+
+- **L24.** Confirmed: TR1-FOLLOW-1 applies L20 in seal.md §7 and §16.2 and engine.md §24.4, and brings the
+  open-question items there in line.
+- **L25. Undoing a reinstatement whose entry is not sequenced or is refused.** Accepted as written: the
+  recovery tool sends `revoke` alone, signed by the recovery identity, so the relay's row matches the
+  membership again and the stored wraps are cleared; it may try once more.
+- **L26. The reinstating entry's counter can be too low**, because `append`'s `conflict` carries no counter.
+  Accepted as a residual, recorded under device.md's open questions.
+- **L27. engine.md §28.2 step 2 must not lower a device's `log_floor`.** A device that bootstrapped between the
+  purge point `p` and the purge rotation already has a floor above `p`; the step must use the larger of the
+  two and keep `floor_chain`. A defect, not a ruling: it is on the list for the next spec pass.

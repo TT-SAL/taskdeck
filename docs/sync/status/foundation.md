@@ -76,13 +76,13 @@ These are working papers of the stage, not contracts. The exit pull request may 
 |---|---|---|---|
 | 0 | Status file, first pull request | done | this file; TT-SAL/taskdeck#1, merged |
 | 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | **done.** The fourth loop (second session) ran six rounds: rounds 1 and 3 dry, rounds 2 and 4 one low finding each about which invalid `SOURCE_DATE_EPOCH` spellings the date check tries (fixed; rulings 8 and 9 in the brief close that list), rounds 5 and 6 dry on all three lenses: converged. The lead ran the gate after each fix: 265 passed, 1 ignored | commits `6ca1240`, `938e4b9`; `briefs/task-1a.md` |
-| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | implemented; the lead's rulings (D19 and the brief) are applied and verified by the lead: `scripts/supply-chain.sh` exits 0 (cargo-deny, cargo-audit, the cooldown over the nine moved crates), `scripts/cooldown.sh --all` finds no violation in 519 packages, the script tests pass, the server builds and 265 tests pass with the new lockfile. The lockfile differs from before in exactly the nine ruled moves and the dropped duplicate `core-foundation` 0.10.1. Attack loop running | `briefs/supply-chain.md` |
-| 1c | CI: path filters at job level, aggregate `gate` job | implemented and committed; the lead read the workflow and the gate script and ran the script tests (eight test files pass). Next: read the first real run, write it down as evidence, then the attack loop. The lead's rulings on the implementer's four questions are in the brief | `briefs/ci.md`; `scripts/ci/README.md` |
+| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | implemented; the lead's lockfile rulings (D19) are applied and proven in CI on Windows, macOS and Linux. The first loop of six rounds found a real gap in every round (index failures failing open, twice; notices; a lockfile source in another spelling; replaced crates.io sources; a configuration `include`), all fixed and each verified by the lead (script tests, the gate, the cooldown over all 519 packages). Not converged; ruling 8 in the brief makes the gate's five properties a closed list; the loop runs again | `briefs/supply-chain.md` |
+| 1c | CI: path filters at job level, aggregate `gate` job | implemented, committed, and proven on GitHub: the pull-request run on `fee727d` was green in every job on all three systems, with `gate` named `gate` only on the pull-request run. The first loop (five rounds, the sixth cut by the usage limit) found something in every round: the colour defect from the first real run, path-filter gaps, a file-name injection, cancelled push runs losing their changes, and several spellings past the new reads check. All fixed; the lead ran the script tests after each. Closing rulings 10 and 11 in the brief; the loop runs again | `briefs/ci.md`; `scripts/ci/README.md` |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo; brief ready (`briefs/workspace.md`). Today the workspace has the root package and `crates/panic-probe` | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
 | 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge drafted (1,655 lines, 110 clauses). All six are first drafts: 11,635 lines, 852 clauses | `docs/sync/spec/*.md` |
 | 3c | Pairwise interface reviews: the plan's six pairs (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) plus core–device, seal–device, relay–device | **done.** Nine reviews brought 152 findings (26 high, 75 medium, 51 low); nine resolvers turned them into 232 exact changes; the lead ruled on the open points (L1 to L23); one more resolver wrote the rulings as exact text; fixers applied everything spec by spec and a second agent checked each spec against its diff (seal 102 of 102 items exact, core 15 of 15, relay 78 of 79 and the last fixed, engine 179 of 179, device 225 of 226 with the one a placement the lead confirmed, bridge 34 of 34; nothing unrequested). The six specs now hold 899 clauses (7 withdrawn) in 12,237 lines, and the lead's format check finds no problem. Five small follow-ups for the next spec pass are in `resolutions/r1-followups.md` | commits `220f07a` to this one; `resolutions/` |
-| 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
+| 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | round 1 running: the lead wrote one fixed world and six scenarios (`briefs/two-readers.md`), three groups of two; two readers per group work from the specs alone, a comparer per group lists the differences and writes the spec change for each, one fixer per spec applies them. The readers flagged 3 to 9 ambiguities per scenario themselves | `two-readers/r1/` |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
 | 4 | Skeleton crates: public types and traits, toy state machine, fake sealer | todo | |
 | 5 | Fixtures as data: boards, legacy `main` formats, snapshot JSON, transcripts | todo; brief ready (`briefs/fixtures.md`) | |
@@ -94,12 +94,14 @@ These are working papers of the stage, not contracts. The exit pull request may 
 In this order; a resuming session starts at the first open one. Steps 1 and 6 to 8 are the spec
 track, steps 2 to 5 the code track (D15); the two run side by side.
 
-Where the second session stands (2026-11-22 02:40 UTC): step 2 is done. Step 1 is reviewed and
-resolved; applying it is the next spec workflow (`workflows/s2-spec-fixes.js`). Steps 3 and 4 are
-implemented and committed; the next code workflow (`workflows/c2-1b-1c-loops-workspace.js`, to be
-trimmed as D20 says before launch) applies the lead's rulings to task 1b, attacks tasks 1b and 1c,
-and implements task 2. No workflow is running: the owner asked for none before the usage window's
-reset, and a launch at 02:28 UTC was refused by the session's permission check.
+Where the second session stands (2026-11-22 07:25 UTC): steps 1 and 2 are done. Steps 3 and 4
+(tasks 1b and 1c) are implemented, committed and green in CI, but neither attack loop has converged:
+each found something real in every round of its first loop, and each now has a closing ruling in its
+brief (1b ruling 8; 1c rulings 10 and 11). Running: `workflows/c3-1c-rulings-loops-workspace.js`
+(ruling 11, both loops again, then task 2's implementation) and round 1 of the two-readers test
+(`workflows/s3-two-readers.js`, `briefs/two-readers.md`; five of six readers and the follow-ups
+resolver are done and their files are in `two-readers/r1/`). The account's usage limit cut both
+workflows at about 06:45 UTC; they were resumed after the reset at 07:20 UTC.
 
 1. **Interface reviews of the six spec drafts.** Nine pairs, each reviewer also checking that the
    rulings S1 to S31 are reflected; then one resolver per spec, in dependency order, writes the exact
@@ -244,6 +246,14 @@ reset, and a launch at 02:28 UTC was refused by the session's permission check.
   a second automatic check. The lead pushes once per task and reads CI when it needs it. Before a
   launch the lead considers where the usage window stands; the owner sees the meter, the lead does
   not.
+- **D22. A usage budget per window (the owner again, 2026-11-22 07:20 UTC: the limit was hit).** The
+  second window ended with both workflows cut: 2.7, 2.9 and 2.6 million tokens of agents plus the
+  lead's own turns filled it. A five-hour window holds about 8 to 9 million agent tokens. From here
+  on the lead plans at most about 6 million per window, adds up each workflow's reported tokens,
+  and launches nothing that would not fit. A reader in the two-readers test costs about 440,000
+  tokens because it reads nearly all of the specs, whatever its scenarios: rounds 2 to 4 therefore
+  use two readers for all six scenarios, as SYNC_PLAN.md §6.1 words it, instead of six. The lead
+  integrates once per finished workflow, not after every fix, to spend fewer turns of its own.
 - **D21. The spec resolutions are kept in the repository** (`docs/sync/status/foundation/resolutions/`):
   nine files with 232 exact changes and the lead's rulings on them are eighteen agent runs of work
   and existed only in the session's scratch space.
@@ -438,6 +448,8 @@ Rulings on what the bridge draft raised (2026-11-21):
 | Spec workflow 1 (nine reviews, nine resolvers) | 18 agents, 5.9 million tokens, 2 h 19 min; a resolver took about 10 minutes and wrote 30 to 60 KB | 2026-11-21 21:28 to 2026-11-22 00:00 UTC |
 | Code workflow 1 (task 1b, task 1a's loop of six rounds, task 1c) | 28 agents, 3.0 million tokens, 2 h 41 min | 2026-11-21 21:38 to 2026-11-22 00:20 UTC |
 | Spec workflow 2 (rulings as text, ten fixer runs, six checks, two fix-ups) | 19 agents, 2.7 million tokens, 54 minutes: about 140,000 tokens an agent against 330,000 in workflow 1, with short reading lists and medium effort (D20) | 2026-11-22 04:23 to 05:17 UTC |
+| Code workflow 2 (rulings for 1b and 1c, six attack rounds on 1b, five on 1c) | 23 agents finished, 2 cut by the usage limit; 2.9 million tokens; about 125,000 tokens an agent | 2026-11-22 04:23 to 06:27 UTC |
+| Two-readers round 1, first part (follow-ups resolver, five readers) | 6 agents, 2.6 million tokens: about 440,000 a reader | 2026-11-22 05:21 to about 06:45 UTC |
 | The first real run of the new CI (pull request, every area) | 13 minutes; all stage jobs and the toolchain script work on Windows, macOS and Linux runners; `gate` is named `gate` only on the pull-request run and failed because two jobs failed; one real defect found: `scripts/check-build-date.sh` cannot see `build.rs` rerun when the workflow's `CARGO_TERM_COLOR: always` colours cargo's output (a lead finding for task 1c's loop) | run 44976738183 on `3d6ff82`, 2026-11-22 02:35 UTC |
 
 ## Facts found along the way
