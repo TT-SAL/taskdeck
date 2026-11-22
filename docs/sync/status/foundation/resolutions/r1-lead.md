@@ -135,3 +135,16 @@ does not reword them; it adds what is still missing and removes what L1 overrule
 64 KiB/s floor stays a stated client requirement. The relay's deadline constants do not change now: there
 is no measurement yet. The owning specs record the residual under "Open questions", and the lead lists it
 for the owner's rehearsal (SYNC.md §11 "Still to measure").
+
+## L20 to L23. On the four points the lead-changes resolver raised (2026-11-22)
+
+- **L20. No reinstatement across a purge.** As recommended: the recovery tool does not offer reinstatement
+  when the revoking entry lies below `purge_seq`, and L1's "or the epoch in force at `purge_seq`" is dropped.
+  Such a device pairs again, or the owner restores to a new board.
+- **L21. A re-home drops stored wraps.** Accepted as a residual, recorded under relay.md's open questions: a
+  device reinstated but not yet logged in when the board moves pairs again.
+- **L22. The recovery tool's reinstatement steps are missing from device.md (§15.8, `RecoveryLink`).** A gap,
+  not a ruling: the next spec pass writes the steps (compute the wraps, send `reinstate`, append the entry)
+  and `RecoveryLink::reinstate`.
+- **L23. A `reinstate` whose entry never lands** leaves the device revoked again once classification reaches
+  the relay's head with the membership still recording it revoked. Confirmed as written.
