@@ -23,9 +23,13 @@ on:
 permissions:
   contents: read
 
+# A newer run cancels an older one of the same pull request: the newer run
+# diffs the whole pull request against its base, so it tests everything the
+# older one would have. A push run is never cancelled: it tests only the paths
+# changed since `before`, and a superseding push would skip what it changed.
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always

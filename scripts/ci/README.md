@@ -50,8 +50,11 @@ root package embeds must be added to `changes.sh` and to this table.
 
 `reads.sh`, a step of the `changes` job, so it runs on every change, fails the
 run when the code reads a file whose change would not run that code's jobs. A
-read is a path dependency in any `Cargo.toml` (the crate's `src/lib.rs` must
-mark every area the reader's `src/lib.rs` marks), a path in `include!`,
+read is a path dependency in any `Cargo.toml`, written with `path` or inherited
+with `workspace = true` from the root's `[workspace.dependencies]` (the crate's
+`src/lib.rs` must mark every area the reader's `src/lib.rs` marks), a target's
+source (`path` of `[lib]`, `[[bin]]`, `[[test]]`, `[[example]]`, `[[bench]]`;
+`build` of `[package]`), a path in `include!`,
 `include_bytes!`, `include_str!`, `include_image!` or `#[path = ...]` in a `.rs`
 file (an argument that is not a string literal, or `concat!` starting with one,
 cannot be checked and fails), and a symlink's target. In particular, **when the
@@ -103,7 +106,10 @@ already installed when it runs.
 - only `actions/checkout` and the emulator runner, each pinned by full commit
   SHA with the version in a comment;
 - `timeout-minutes` on every job, `fail-fast: false` on every matrix, and the
-  `concurrency` group that cancels superseded runs;
+  `concurrency` group that cancels superseded pull-request runs, never push
+  runs (a push run tests only what changed since `before`, so the changes of a
+  cancelled push would reach no run; a pull-request run tests the whole pull
+  request);
 - every `run:` that calls bash sets `shell: bash` (Windows runners); no
   `${{ }}` inside shell text: event data reaches scripts through `env:`;
 - the toolchain step before anything that runs cargo;

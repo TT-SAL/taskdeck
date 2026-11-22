@@ -42,8 +42,11 @@ try:
     check("permissions: contents: read only", block == ["contents: read"], str(block))
 except ValueError:
     check("permissions: contents: read only", False, "no top-level permissions")
-check("concurrency cancels superseded runs",
-      re.search(r"^concurrency:\n  group: .+\n  cancel-in-progress: true$", text, re.M) is not None, "missing")
+# Only pull-request runs: a push run tests only what changed since `before`,
+# so a cancelled push's changes would reach no run (scripts/ci/README.md).
+check("concurrency cancels superseded pull-request runs, never push runs",
+      re.search(r"^concurrency:\n  group: .+\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$",
+                text, re.M) is not None, "missing")
 
 # Jobs: id -> its lines.
 j0 = lines.index("jobs:")

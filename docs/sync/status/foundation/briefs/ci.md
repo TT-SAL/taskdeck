@@ -154,3 +154,18 @@ Implemented and committed: `.github/workflows/ci.yml`, `scripts/ci/` (`changes.s
    passed on the pull-request run and `gate (push)` on the push run; the Foundation job passed with the colour
    fix; the Supply chain job passed with the lockfile rulings; the desktop job built and tested the moved
    crates on Windows, macOS and Linux.
+- [medium] `scripts/ci/reads.sh` missed a crate linked through `[workspace.dependencies]` and a target's `path` (fixed: inherited dependencies and target and build-script paths are checked like written paths)
+- [medium] A push run cancelled by a newer push left its own changes untested, because a push run only looks at what changed since `before` (fixed: only pull-request runs cancel their predecessors; push runs all run)
+
+9. **Push runs are not cancelled (lead ruling, 2026-11-22; amends ruling 4).** A pull-request run tests the
+   whole pull request, so a newer one may cancel an older one, and the cancelled run's `gate` fails for that
+   run. A push run tests only its own `before` to `after`, so it is never cancelled.
+
+10. **What `scripts/ci/reads.sh` reads is a closed list (lead ruling, 2026-11-22).** It checks: a path
+    dependency in a manifest's dependency tables, written inline or as a table, or inherited from
+    `[workspace.dependencies]`; a target's `path` and a package's `build`; the literal path in `include!`,
+    `include_bytes!`, `include_str!`, `include_image!` and `#[path]`, and the first literal of `concat!`; a
+    tracked symlink's target. Round 4 found one more form, and a parser written in awk can always be met with
+    one more: from here on a finding against this check counts only if one of the listed forms, written the
+    way cargo or rustc accepts it in this repository's files, gets past it. Reads that code makes at run time
+    (opening a file by name, a build script reading the tree) and forms not on the list are left to review.

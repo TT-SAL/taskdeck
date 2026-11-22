@@ -7,10 +7,14 @@
 #   bash scripts/ci/reads.sh [<tree>]      default: this repository
 #
 # The reads, from the files git tracks:
-#   - a path dependency in a Cargo.toml (any dependencies table but
-#     [workspace.dependencies], and [patch]): <dep>/src/lib.rs must mark every
-#     area <manifest's directory>/src/lib.rs marks. So a crate the root package
-#     links must mark root.
+#   - a path dependency in a Cargo.toml (any dependencies table, and [patch]),
+#     written with `path` or inherited with `workspace = true` from the path in
+#     the root Cargo.toml's [workspace.dependencies]: <dep>/src/lib.rs must mark
+#     every area <manifest's directory>/src/lib.rs marks. So a crate the root
+#     package links must mark root.
+#   - a target's source in a Cargo.toml (`path` in [lib], [[bin]], [[test]],
+#     [[example]], [[bench]]; `build` in [package]) must mark every area
+#     <manifest's directory>/src/lib.rs marks.
 #   - the path in include!, include_bytes!, include_str!, include_image! or
 #     #[path = ...] in a .rs file, from the file's directory, must mark every
 #     area the file marks. For concat!("dir/", ...) it is a file in "dir/". Any
@@ -50,14 +54,47 @@ check() {   # check <what> <reader path> <read path>
     fi
 }
 
+# A manifest's reads, one per line: D <dep path>, W <name inherited from the
+# workspace>, T <target source>, P <name> <path> for [workspace.dependencies].
+manifest_reads() {
+    awk 'function str(k,   s) {
+            if (!match($0, k "[[:space:]]*=[[:space:]]*\"[^\"]*\"")) return ""
+            s = substr($0, RSTART, RLENGTH); sub(/^[^"]*"/, "", s); sub(/"$/, "", s); return s }
+        /^[[:space:]]*\[/ {
+            h = $0; sub(/#.*/, "", h); gsub(/[[:space:]"]/, "", h); gsub(/^\[+|\]+$/, "", h)
+            ws = h ~ /^workspace\.dependencies/; on = !ws && (h ~ /dependencies/ || h ~ /^patch/)
+            tgt = h ~ /^(lib|bin|test|example|bench)$/; pkg = h == "package"
+            sub_name = h; if (!sub(/.*dependencies\./, "", sub_name)) sub_name = ""
+            next }
+        /^[[:space:]]*#/ { next }
+        { key = ""; if (match($0, /^[[:space:]]*"?[A-Za-z0-9_-]+/)) { key = substr($0, RSTART, RLENGTH); gsub(/[[:space:]"]/, "", key) }
+          name = (key == "path" || key == "workspace") && sub_name != "" ? sub_name : key; p = str("path") }
+        on && p != "" { print "D\t" p }
+        on && /workspace[[:space:]]*=[[:space:]]*true/ { print "W\t" name }
+        ws && p != "" { print "P\t" name "\t" p }
+        tgt && key == "path" && p != "" { print "T\t" p }
+        pkg && key == "build" && str("build") != "" { print "T\t" str("build") }' "$1"
+}
+
+declare -A WS=()
+if [[ -f "$TREE/Cargo.toml" ]]; then
+    while IFS=$'\t' read -r k name p; do
+        if [[ "$k" == P && -n "$name" ]]; then WS["$name"]="$p"; fi
+    done < <(manifest_reads "$TREE/Cargo.toml")
+fi
+
 while IFS= read -r -d '' m; do
     dir="$(dirname "$m")/"
     [[ "$dir" == ./ ]] && dir=""
-    while IFS= read -r dep; do
-        check "$m depends on $dep" "${dir}src/lib.rs" "$(realpath -m --relative-to="$TREE" "$TREE/$dir$dep")/src/lib.rs"
-    done < <(awk '/^[[:space:]]*\[/ { on = /dependencies|^[[:space:]]*\[patch/ && !/workspace\.dependencies/ }
-        on && !/^[[:space:]]*#/ && match($0, /path[[:space:]]*=[[:space:]]*"[^"]*"/) {
-            s = substr($0, RSTART, RLENGTH); sub(/^[^"]*"/, "", s); sub(/"$/, "", s); print s }' "$TREE/$m")
+    while IFS=$'\t' read -r k a; do
+        case "$k" in
+            D) check "$m depends on $a" "${dir}src/lib.rs" "$(realpath -m --relative-to="$TREE" "$TREE/$dir$a")/src/lib.rs" ;;
+            W) if [[ -n "$a" && -n "${WS[$a]:-}" ]]; then
+                   check "$m depends on ${WS[$a]} (workspace)" "${dir}src/lib.rs" "$(realpath -m --relative-to="$TREE" "$TREE/${WS[$a]}")/src/lib.rs"
+               fi ;;
+            T) check "$m builds $a" "${dir}src/lib.rs" "$(as_file "$dir$a")" ;;
+        esac
+    done < <(manifest_reads "$TREE/$m")
 done < <(git -C "$TREE" ls-files -z -- Cargo.toml '*/Cargo.toml')
 
 lead='(include(_bytes|_str|_image)?!|#\[path) *[(=] *(concat! *\( *)?'

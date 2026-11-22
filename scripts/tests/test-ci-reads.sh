@@ -19,20 +19,34 @@ tree() { git -C "$1" init -q && git -C "$1" add -A; }
 echo "-- reads changes.sh would miss"
 BAD="$TMP/bad"
 mkdir -p "$BAD/src" "$BAD/crates/taskdeck-device/src" "$BAD/crates/taskdeck-core/src" \
-    "$BAD/docs/sync/status" "$BAD/deploy"
+    "$BAD/docs/sync/status" "$BAD/deploy" "$BAD/crates/taskdeck-seal/src" "$BAD/relay/src"
 cat >"$BAD/Cargo.toml" <<'EOF'
+[workspace.dependencies]
+serde = "1"
+taskdeck-core = { path = "crates/taskdeck-core" }
+[workspace.dependencies.taskdeck-seal]
+path = "crates/taskdeck-seal"
+[workspace.dependencies."relay"]
+path = "relay"
 [package]
 name = "app"
+build = "deploy/build.rs"
 [[bin]]
 name = "app"
 path = "src/main.rs"
 [dependencies]
-serde = "1"
+serde.workspace = true
 taskdeck-device = { path = "crates/taskdeck-device" }
+taskdeck-core.workspace = true
+taskdeck-seal = { workspace = true, features = [] }
 EOF
 cat >"$BAD/crates/taskdeck-device/Cargo.toml" <<'EOF'
+[lib]
+path = "../../docs/sync/research/lib.rs"
 [dependencies.taskdeck-core]
 path = "../taskdeck-core"
+[dev-dependencies.relay]
+workspace = true
 EOF
 cat >"$BAD/src/main.rs" <<'EOF'
 const A: &str = include_str!("../docs/sync/status/a.rs");
@@ -48,6 +62,17 @@ output_has "the root package's path dependency on a crate that does not mark roo
     "Cargo.toml depends on crates/taskdeck-device: a change to crates/taskdeck-device/src/lib.rs does not mark root"
 output_lacks "a path dependency whose crate marks the reader's areas passes" "depends on ../taskdeck-core"
 output_lacks "a path outside a dependencies table is not a dependency" "depends on src/main.rs"
+output_has "a dependency inherited from [workspace.dependencies] with name.workspace" \
+    "Cargo.toml depends on crates/taskdeck-core (workspace): a change to crates/taskdeck-core/src/lib.rs does not mark root"
+output_has "a dependency inherited from [workspace.dependencies] with { workspace = true }" \
+    "Cargo.toml depends on crates/taskdeck-seal (workspace): a change to crates/taskdeck-seal/src/lib.rs does not mark root"
+output_has "a dependency table inherited from a [workspace.dependencies] table" \
+    "crates/taskdeck-device/Cargo.toml depends on relay (workspace): a change to relay/src/lib.rs does not mark foundation"
+output_lacks "a registry dependency inherited from the workspace is not a read" "depends on serde"
+output_has "a [lib] path into a path that needs no CI" \
+    "crates/taskdeck-device/Cargo.toml builds ../../docs/sync/research/lib.rs: a change to docs/sync/research/lib.rs does not mark"
+output_has "a build script in a path that needs no CI" \
+    "Cargo.toml builds deploy/build.rs: a change to deploy/build.rs does not mark root"
 output_has "include_str! into a path that needs no CI" \
     "src/main.rs reads ../docs/sync/status/a.rs: a change to docs/sync/status/a.rs does not mark root"
 output_has "#[path] into a path that needs no CI" "src/main.rs reads ../deploy/b.rs: a change to deploy/b.rs does not mark root"
@@ -63,15 +88,18 @@ mkdir -p "$GOOD/src" "$GOOD/weather_svgs_2" "$GOOD/crates/a/src" "$GOOD/crates/b
 cat >"$GOOD/Cargo.toml" <<'EOF'
 [workspace.dependencies]
 a = { path = "crates/a" }
+b = { path = "crates/b" }
 [package]
 name = "app"
+build = "build.rs"
 [[bin]]
 name = "app"
 path = "src/main.rs"
 [dependencies]
 # old = { path = "deploy/old" }
 EOF
-printf '[dev-dependencies]\nb = { path = "../b" }\n' >"$GOOD/crates/a/Cargo.toml"
+printf '[dev-dependencies]\nb = { path = "../b" }\n[dependencies]\nb.workspace = true\n[lib]\npath = "src/lib.rs"\n' \
+    >"$GOOD/crates/a/Cargo.toml"
 cat >"$GOOD/src/main.rs" <<'EOF'
 const I: &[u8] = include_bytes!("../icon.png");
 const F: &[u8] = include_bytes!(r#"../fonts/x.ttf"#);
