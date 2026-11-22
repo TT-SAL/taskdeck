@@ -1022,6 +1022,12 @@ Each is today's function (file:line in today's `src/`) moved into the core with 
 | — | `archive_newest_first(board) -> impl Iterator<Item = &ArchiveRow>` | no | the reverse of the archive order |
 | — | `archive_by_day(board, from, days, zone)` | yes | §14.4 |
 | — | `reminders(board, from, until, defaults)` | no | §14.5 |
+| `TaskApp::summarize_calendar` (ui.rs:2911-2955) | not moved: stays in `desktop`, over a copy | | today it drains and re-sorts `board.items`; ties on (start, id, sid) (SYNC.md §4.5, CORE-READ-006) |
+
+Display order belongs to the caller (SYNC.md §4.5). No read query sorts, drains or reorders `BoardData.items` or any other list of `BoardData`: each orders what it returns in a list of its own, in the order this table states, and the board keeps its own order (items in ascending id, §6). The desktop's calendar summary, today's `summarize_calendar`, stays in the desktop and orders a copy: its entries ascend by (start, id, sid), where start is the instant the entry is drawn at (a block's start, or an event's own span start), id is the item's id, and sid is the block's sid, an event's own span (no block) sorting before every sid of the same item.
+
+- **CORE-READ-005** (core) A read query MUST NOT sort, drain or reorder `BoardData.items` or any other list held by `BoardData`, and MUST order what it returns in a list of its own, as §14.2 states for it.
+- **CORE-READ-006** (desktop) The desktop's calendar summary (today's `summarize_calendar`) MUST order a copy of the items, never `BoardData.items`, and MUST order its entries by ascending (start, id, sid) as §14.2 states.
 
 ### 14.3 The snapshot JSON
 
@@ -1138,6 +1144,9 @@ In order; a step marked **fail** ends the import with no `BoardData` and a repor
 5. **Subscriptions.** Missing, or only White_Space: none. Otherwise a JSON array of today's `Subscription` (subscriptions.rs:137-147); failure: fail `subscriptions_unreadable`.
 6. **Palette.** `colorschemes` missing: six `[0,0,0,0]`. Otherwise parse it as a JSON object from decimal `u32` keys to today's `ColorScheme` (color.rs:11-16); failure: warning `palette_unreadable` and six `[0,0,0,0]`. With the selected id `k` (`selected_colorscheme_id`, default 0): the scheme under key `k` gives `colors`; no such key gives six `[0,0,0,0]` (today's desktop then draws `default_scheme`, which is all zero, utilities.rs:94-103).
 7. **Home.** `coordinates` none: `{0, 0}`. Otherwise `lat = round_half_away_from_zero(c[0] × 100)` and `lon = round_half_away_from_zero(c[1] × 100)` in `f64`; outside the ranges of §6.9: warning `home_out_of_range` and `{0, 0}`.
+
+The first board created from a legacy folder takes its palette from the scheme that `selected_colorscheme_id` of that folder's `userconfig.toml` names in its `colorschemes.json`, and its home place from that file's `coordinates` (SYNC.md §9 step 6). The core does steps 6 and 7 from `LegacyConfig`; the caller fills `LegacyConfig` from the source folder's own `userconfig.toml` (§15.2, `device.md` §18.2).
+
 8. **Plans.** `migrate_legacy_plans` exactly as today (tasks.rs:618-632): an item with a `planned_start`, not an event and without sessions, gains one session `{start: planned_start, minutes: max(duration_minutes or 30, 15)}`; `planned_start` is dropped from every item.
 9. **Ids.** Let `L` be the largest id below 2^40 among items, rows and subscriptions (0 when there is none), and `next = L + 1`. Then, each list in file order:
    1. an item whose id is 0, or equal to an earlier item's id, or at least 2^62 (a temporary id, `adopt_temporaries`, board.rs:697-711) gets `next`, and `next` increases;
@@ -1179,6 +1188,7 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 - **CORE-IMP-006** (core) `import` MUST number sids as §15.3 step 10 states and MUST set the legacy marks as step 14 states, so that `BoardData::check` holds for the result.
 - **CORE-IMP-007** (core) `import` MUST read the `main` build's files and today's files with the same parsers and MUST produce for each `main`-format fixture the genesis board recorded with it (§18.6).
 - **CORE-IMP-008** (core) A function of the core other than `import` MUST NOT perform normalisation: id assignment, plan migration, detab of stored notes, or substitution of defaults for missing stored values.
+- **CORE-IMP-009** (core) `import` MUST set the genesis palette from the scheme under `LegacyConfig.selected_colorscheme_id` (default 0) in `colorschemes`, and the genesis home from `LegacyConfig.coordinates`, exactly as §15.3 steps 6 and 7 state, with the defaults and the warnings `palette_unreadable` and `home_out_of_range` they name, and MUST set `palette_set` and `home_set` in the report accordingly.
 
 ## 16. Error catalogue
 

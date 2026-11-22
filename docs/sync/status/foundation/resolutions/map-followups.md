@@ -24,3 +24,23 @@ spec section, write the clause for the owning stage, and give the map row for it
    engine.md §28.3.
 9. **SYNC.md §9 step 6, the first board.** A board created from a legacy folder takes its palette and home
    place from `userconfig.toml`: core.md §15.3 or device.md §18.2, whichever owns the import of that file.
+
+## State (2026-11-22 14:05 UTC)
+
+The nine items are written as exact changes in `map-followups-changes.md` (TR5-FOLLOW) and applied: 14 new
+clauses (core 3, relay 1, engine 3, device 4, bridge 2 and one more each where two specs share a duty); the
+specs hold 955 clauses. Their map rows are in the table. Rulings on the resolver's open points:
+
+- **T18.** The import budget is checked over the whole import (it spans two days, because the relay stores
+  at most 3,000 new frames an author a day) against one day's limits.
+- **T19.** For a calendar or forecast that could not be refreshed the device publishes the age; the specs
+  fix no line for it (the app stages word it).
+- **T20.** Display order is split: the core never reorders (`CORE-READ-005`), the desktop's summary holds the
+  tie-break (`CORE-READ-006`).
+- **T21.** `MoveReport` keeps what it lists today. Whether it should also carry the seed's first seq, and
+  whether the shared picture is uploaded again after a move, is left to stage `engine` and `device`; the
+  next stages are told.
+- **T22.** `DevicesActivity` sets `FLAG_SECURE` for its whole lifetime.
+
+One public item is new, `Published::overlay_fetched` in device.md §25: the skeleton gains it in the
+skeletons' attack round (a lead finding).

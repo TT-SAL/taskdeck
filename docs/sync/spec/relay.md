@@ -1492,6 +1492,18 @@ Duration, on R3 §6's model (each event 50 ms at 128 MB): about 610 events × 0.
 
 - **RELAY-ROWS-002** (relay) The conformance suite MUST replay the day of §16.2 against the Worker target and MUST fail unless the Worker requests, object requests, rows written and rows read it measures, plus the compaction counted on the core target, each stay below 2% of the daily limit of the table.
 
+SYNC.md §6.2's import: 5,000 commands of another board brought in as ordinary commands (SYNC.md §9 step 3) by one device, as 5,000 new `cmd` frames of one role-1 author over HTTPS `append`, 16 frames per request (the last of 8), the worst case for requests; rows are the same over the socket. The append budget (§14.1) splits them over two UTC days of the relay clock (3,000 frames on the first, 2,000 on the second), each day after one `login-nonce` and `login`; the check sums both days and compares the sum with one day's limit.
+
+| Item | Count | Worker requests | Object requests | Rows written | Rows read |
+|---|---|---|---|---|---|
+| `login-nonce` and `login`, each day | 4 | 4 | 4 | 6 | 138 |
+| appends (188 on the first day, 125 on the second) | 313 | 313 | 313 | 2 × 5,000 + 313 = 10,313 | 3 × 313 + 3 × 5,000 = 15,939 |
+| **total** | | **317** | **317** | **10,319** | **16,077** |
+| free-plan daily limit | | 100,000 | 100,000 | 100,000 | 5,000,000 |
+| **share** | | **0.32%** | **0.32%** | **10.32%** | **0.32%** |
+
+- **RELAY-ROWS-003** (relay) The conformance suite MUST store the import of §16.2 (5,000 new frames of one role-1 author, 16 per `append`, over two UTC days of the relay clock as the append budget allows) against the Worker target and MUST fail unless the Worker requests, object requests, rows written and rows read it measures, summed over both days, each stay below 20% of the daily limit of the table.
+
 ## 17. Deployment and configuration
 
 ### 17.1 The Worker
@@ -1661,6 +1673,7 @@ HTTP refusals carry the JSON body of §4.2; per-frame refusals are results of §
 | generation | 2^32 − 1 | | RELAY-TOKEN-004 |
 | socket attachment | 2,048 | bytes | RELAY-SHAPE-008 |
 | typical day | 2% of every daily limit | | RELAY-ROWS-002 |
+| a 5,000-command import | 20% of every daily limit | | RELAY-ROWS-003 |
 
 ## 21. Test vectors
 

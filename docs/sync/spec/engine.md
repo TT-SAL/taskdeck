@@ -1881,6 +1881,7 @@ A move is never followed automatically (SYNC.md §6.7).
 - **ENG-MOVE-006** (engine) When the old relay sequenced the move's `Fence` at `f`, the moving device MUST NOT send `seed` before its log head has reached `f`.
 - **ENG-MOVE-007** (engine) The moving device MUST upload to the new relay only a snapshot blob it sealed itself in §28.3 stage 3, and MUST NOT upload a blob fetched from another relay.
 - **ENG-MOVE-008** (engine) The engine MUST answer every `UserAction::MoveCode` with exactly one `Notify(MoveCodeResult)` in the same `handle` call, carrying `Ok(())` when the code was accepted and otherwise the code of §28.3 step 2 that refused it.
+- **ENG-MOVE-009** (engine) When the moving device sees its move's `Fence` in its log, it MUST emit exactly one `Notify(MoveReport { carried_through, old_relay_answered })`, with `carried_through` the `last_seq` it seeded and `old_relay_answered` true exactly when the old relay sequenced that `Fence`, so that, when it is false, the entries the old relay sequenced after `carried_through` are reported as not carried over (V2-9).
 
 ### 28.4 Adding a device (the existing device's part of pairing)
 
@@ -1912,11 +1913,15 @@ SYNC.md §5.3, `seal.md` §17.1 step 9 and SEAL-PAIR-010.
 
 ### 28.6 Recovery-key changes
 
-§26.1. `ConfirmRecoveryKey` is offered only as ENG-WINDOW-002 states; the `K`-shape entry is appended as an ordinary entry (stage 2), and `RecoveryRegisterSeq` for it, once this device has classified it `Accept`, is stage 3.
+§26.1. `ConfirmRecoveryKey` is offered only as ENG-WINDOW-002 states; the `K`-shape entry is appended as an ordinary entry (stage 2), and `RecoveryRegisterSeq` for it, once this device has classified it `Accept`, is stage 3. Keys rotate on a revocation (§28.5; a suspected compromise is "Replace device", the same operation), on a purge (§28.2) and on a new recovery key (the `K`-shape entry of §26.1, to which the sealer adds the rotation that wraps to the new key, `seal.md` §12.1), never on a schedule (SYNC.md §5.4).
+
+- **ENG-OPS-011** (engine) The engine MUST send every recovery-key confirmation as a `K`-shape entry carrying the rotation to the new key, and MUST compose an epoch rotation only within a `Revoke` operation (§28.5), a `Purge` (§28.2) or such a confirmation (§26.1), never on a timer, a schedule or the age of an epoch.
 
 ### 28.7 Reset trust
 
-SYNC.md §5.4: a new board from a trusted device's state. The runtime creates the new board from this device's confirmed state (a new recovery seed and sheet, and a genesis carrying the current board bytes as an imported board; `device.md`). Then `Operation::CloseBoard { host, door }` on the old board's engine enqueues `CtlIntent::Fence { host, door, home_gen: M_K.home_gen + 1 }` with `via: Fence`. A device that follows it (§28.3) finds it is no member of the board there (`relay/unauthorized` at login), enters the stop `Closed` (§11.9, ENG-SESS-007), and the engine offers re-pair and resubmit into the new board (§24.5).
+Reset trust starts a new board from this device's confirmed state: a new recovery seed and sheet, new device keys, a new `board_id`, and a genesis carrying the current confirmed board bytes unchanged; the old board is then pointed at the new one by one `Fence` (`CloseBoard`), and its devices re-pair into the new board (SYNC.md §5.4). The runtime creates the new board from this device's confirmed state (a new recovery seed and sheet, and a genesis carrying the current board bytes as an imported board; `device.md`). Then `Operation::CloseBoard { host, door }` on the old board's engine enqueues `CtlIntent::Fence { host, door, home_gen: M_K.home_gen + 1 }` with `via: Fence`. A device that follows it (§28.3) finds it is no member of the board there (`relay/unauthorized` at login), enters the stop `Closed` (§11.9, ENG-SESS-007), and the engine offers re-pair and resubmit into the new board (§24.5).
+
+- **ENG-OPS-010** (engine) On `Operation::CloseBoard { host, door }`, the engine MUST enqueue exactly one `CtlIntent::Fence { host, door, home_gen: M_K.home_gen + 1 }` with `via: Fence`, MUST end the operation with `OpDone` `Ok` only once that `Fence` is accepted in its log, and MUST NOT seed, append to or upload to the relay it names.
 
 ### 28.8 Operation records and failures
 

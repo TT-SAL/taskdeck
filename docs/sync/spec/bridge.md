@@ -1125,7 +1125,7 @@ Exactly these, in the manifest (SYNC.md §2.1, with the calendar permissions dro
 - `res/xml/network_security.xml`: `<network-security-config><base-config cleartextTrafficPermitted="false"><trust-anchors><certificates src="system"/></trust-anchors></base-config></network-security-config>` (no user-installed authorities).
 - Exported components: `MainActivity` (exported, with only the `MAIN`/`LAUNCHER` filter) and `SystemReceiver` (exported; its filter names `android.intent.action.BOOT_COMPLETED`, `android.intent.action.LOCKED_BOOT_COMPLETED`, `android.intent.action.MY_PACKAGE_REPLACED`, `android.intent.action.TIME_SET`, `android.intent.action.TIMEZONE_CHANGED`, `android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`; `onReceive` returns at once for any other action). Every other component has `android:exported="false"`; `SyncJobService` carries `android:permission="android.permission.BIND_JOB_SERVICE"`.
 - Every activity carries `android:taskAffinity=""`; `MainActivity` is `launchMode="singleTask"`.
-- `PairActivity` sets `WindowManager.LayoutParams.FLAG_SECURE` on its window (the code and the SAS are on screen; SYNC.md §5.6: code screens exclude capture).
+- `PairActivity` and `DevicesActivity` set `WindowManager.LayoutParams.FLAG_SECURE` on their windows (§13.1, BRIDGE-SCREEN-003; SYNC.md §5.6: code and seed screens exclude capture).
 - Every `PendingIntent` is made with an explicit component and `FLAG_IMMUTABLE`.
 - The meta-data of §9.2.
 
@@ -1149,7 +1149,10 @@ No Firebase, Play services, WorkManager, CameraX, Compose, AppCompat or Material
 
 `KeyVault.wrap`, when the alias is absent, generates the key with `KeyGenerator.getInstance("AES", "AndroidKeyStore")` and `KeyGenParameterSpec.Builder(alias, PURPOSE_ENCRYPT or PURPOSE_DECRYPT)` with `setKeySize(256)`, `setBlockModes(BLOCK_MODE_GCM)`, `setEncryptionPaddings(ENCRYPTION_PADDING_NONE)`, `setRandomizedEncryptionRequired(true)`, `setUserAuthenticationRequired(false)` (jobs and reminders run while the phone is locked, SYNC.md §5.6), no `setUnlockedDeviceRequired`, and `setIsStrongBoxBacked(true)` when `PackageManager.FEATURE_STRONGBOX_KEYSTORE` is present (API 28 and later), generating again without it on `StrongBoxUnavailableException`. Encryption is `Cipher.getInstance("AES/GCM/NoPadding")` initialised without an IV (the Keystore draws the 12-byte IV, read back with `cipher.iv`), `updateAAD(ad)`, then `doFinal` of the 32 key bytes (48 bytes out: 32 of ciphertext and the 16-byte tag). Decryption initialises with `GCMParameterSpec(128, iv)`. The 60-byte wrap lives in the identity directory as `ld.wrap` (`device.md` §6.1, §12.5), in app-private storage under the backup exclusions of §12.3.
 
+The key is not generated with `setUnlockedDeviceRequired(true)`, the option SYNC.md §5.6 leaves open. With it, the Keystore refuses every use of the key while the phone is locked, so `KeyVault.unwrap` would fail inside a `SyncJobService` run and in the verify sync of a reminder firing (§14.2, §15.4), which must open the sealed store while the phone is locked; and a failed unwrap is the "key that cannot be unwrapped" case (`device.md` §12.6), which must not follow from a locked screen. The protection it would add, against an attacker holding the phone locked and able to run code as the app, is accepted as residual; the storage key stays non-exportable in the Keystore (StrongBox when present).
+
 - **BRIDGE-KEY-004** (android-shell) The key vault MUST generate the Keystore key with exactly the parameters of §12.5 and MUST NOT bind it to user authentication.
+- **BRIDGE-KEY-006** (android-shell) The key vault MUST NOT call `setUnlockedDeviceRequired(true)` when it generates the Keystore key, so that the key can be used while the phone is locked.
 
 ### 12.6 Trust roots per API level
 
@@ -1205,10 +1208,13 @@ The native screens are plain framework views (no AppCompat, no Compose, §12.4) 
 
 Below API 30 the rows that need it are shown with the text "This needs Android 11 or later. Use a desktop." and no button.
 
+The screens that show a pairing code, the SAS or a seed exclude screen capture (SYNC.md §5.6): `PairActivity` (the join and re-pair flows: the typed code and the SAS) and `DevicesActivity` (its "add a device" row shows the relay address, the code and the SAS) set `FLAG_SECURE` on their windows in `onCreate`, before `setContentView`, for their whole lifetime. The phone shows no seed (creating a board and recovery-key changes are desktop-only, below). No other surface (the WebView of `MainActivity`, `HealthActivity`, a notification) shows a pairing code, the SAS or a seed.
+
 **Desktop-only** (SYNC_PLAN.md §2, `device.md` §17): restore to a point, purge history, reset trust, recovery-key changes, moving the board (starting it), creating a board, backups, the shared picture's upload, rules overrides, managing subscriptions, the palette and the home place. The phone offers none of them and the `call` table has none of them.
 
 - **BRIDGE-SCREEN-001** (android) The native screens MUST offer exactly the actions of §13.1's table, each only where its "Needs" column allows, and MUST offer none of the desktop-only operations.
 - **BRIDGE-SCREEN-002** (android) While `status().engine.stops` holds a stop of kind `Rejoin`, the Devices screen MUST show the line "This device was away longer than the relay keeps its history. Rebuild it from the newest checked snapshot? Changes not yet sent stay queued and are sent after the rebuild." with a button "Rebuild" that calls `confirm_rejoin`.
+- **BRIDGE-SCREEN-003** (android) `PairActivity` and `DevicesActivity` MUST set `FLAG_SECURE` on their windows before their first content is shown and keep it for their whole lifetime, and no other activity, the page or a notification MUST show a pairing code, the SAS or a seed.
 
 ### 13.2 Authentication
 

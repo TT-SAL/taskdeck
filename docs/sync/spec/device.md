@@ -936,7 +936,7 @@ The calendars thread fetches every enabled subscription of the published board, 
 5. `304`: reuse the cached body. `200`: a `Content-Length` above 8,388,608 is `device/ics_too_large`; read at most 8,388,609 bytes; more is `device/ics_too_large`. Any other status is `device/ics_status` with the number.
 6. The whole fetch, redirects included, must finish within 20,000 ms (`device/ics_timeout`).
 7. Decode with `String::from_utf8_lossy` and run `taskdeck_core::ics::parse(text, from, until, Limits::default(), zone)` under `catch_unwind`.
-8. On success, build the subscription's events and `FetchOutcome::Ok` as today (subscriptions.rs:593-639); store the body and validators (only after a `200`); on any failure keep the previous events and record `FetchOutcome::Failed { why }`. In both cases `FetchStatus.at` is the device clock (`wall_ms`) as a `chrono::DateTime<chrono::FixedOffset>` whose offset is the device zone's `offset_at` of that instant (`core.md` §14.6), where today's code takes `Local::now()`.
+8. On success, build the subscription's events and `FetchOutcome::Ok` as today (subscriptions.rs:593-639); store the body and validators (only after a `200`); on any failure keep the previous events and record `FetchOutcome::Failed { why }`. In both cases `FetchStatus.at` is the device clock (`wall_ms`) as a `chrono::DateTime<chrono::FixedOffset>` whose offset is the device zone's `offset_at` of that instant (`core.md` §14.6), where today's code takes `Local::now()`. A successful fetch (`200`, or `304` with the cached body) sets the subscription's **last good fetch** to the device clock (`wall_ms`); it is kept in memory and, at `open`, starts from the `fetched_ms` of the subscription's feed body file (the time of its last `200`), absent when there is none. A failed fetch leaves it as it was. The sync thread publishes it with the overlay (`Published::overlay_fetched`, §25).
 
 `why` is one fixed text per code, with no URL, host, header or library message in it:
 
@@ -965,6 +965,8 @@ The sync thread adopts the new overlay as today (`adopt_overlay`: events digest 
 
 **Quarantine.** A panic caught in step 7 quarantines the subscription: `device.tdk` records `(id, url_hash)` in `quarantined`; the calendars thread skips it while the record stands; its status is `device/ics_panic` and its previous events stay. The record is cleared when the subscription's URL changes, when it is disabled and enabled again, or when it is removed (SYNC.md §4.5: "a feed that panics is quarantined").
 
+**Feeds down** (SYNC.md §6.4: "last data kept, labelled with its age"). When an ICS host cannot be reached or answers with a failure, the device keeps the subscription's previous events in the overlay and its last good fetch unchanged, and publishes, per subscription, the time of that last good fetch; when Open-Meteo cannot be reached, the device keeps the last report in `weather.tdk` (or memory, local-only) and in `Published::weather()` with its `fetched_ms`, and `status().weather_age_ms` is `wall_ms − fetched_ms`. The interfaces label kept data with that age; the words are those of stages `desktop` and `android` (§1).
+
 #### 13.1.4 The address guard
 
 **The host.** A host that is an IP literal is refused (`device/ics_address`): a bracketed IPv6 literal; a host whose last dot-separated label consists only of decimal digits, or of `0x` or `0X` followed by hexadecimal digits (so `127.1`, `2130706433`, `0x7f.1` are literals); and the names `localhost` and every name ending in `.localhost`.
@@ -988,6 +990,7 @@ The connection goes to the first allowed address in resolver order, and TLS uses
 - **DEV-ICS-008** (device) A device MUST submit a rename from a feed's own title only for a subscription it added itself, at most once per subscription, and with the title cleaned as §13.1.3 states.
 - **DEV-ICS-009** (device) A subscription whose parse panicked MUST NOT be fetched again until one of the three clearing events of §13.1.3, and its previous events MUST stay in the overlay.
 - **DEV-ICS-010** (device) In synced mode, after each `ViewChanged`, the device MUST remove from its overlay the events and statuses of every subscription id that is absent from the new pending view or has `enabled: false` there, and MUST write `overlay.tdk` and raise the overlay counter when that changed the overlay.
+- **DEV-ICS-011** (device) After a failed ICS fetch, the device MUST keep the subscription's previous events in the overlay and MUST publish, for every subscription with a last good fetch, the device-clock time of that fetch as `Published::overlay_fetched` states, updating it only after a `200` or a `304`.
 
 ### 13.2 Weather
 
@@ -1000,6 +1003,7 @@ The weather thread asks Open-Meteo about one place (SYNC.md §3, R1 §8):
 
 - **DEV-WX-001** (device) The weather request MUST use the place's coordinates with exactly two decimals and MUST NOT send any other location, identifier or board data.
 - **DEV-WX-002** (device) The phone's own place MUST be kept only in `device.tdk` (or `device.json` in local-only mode, §16) and memory, and MUST NOT appear in any intent, command, frame, blob or backup.
+- **DEV-WX-003** (device) After a failed weather round, the device MUST keep the last report with its `fetched_ms` in `weather.tdk` (in memory in local-only mode) and in `Published::weather()`, and MUST publish `status().weather_age_ms` as the device clock minus that `fetched_ms`.
 
 ## 14. Blobs and the shared picture
 
@@ -1512,9 +1516,12 @@ A crash between steps 7 and 10 leaves `pending.tds`: the next `open` opens the o
 
 `source = ThisFolder` (SYNC.md §9 step 6). After step 10 has written `active.tds`, the plain files are moved, untouched, into `taskdeck_data/pre-sync-<YYYYMMDD-HHMMSS>/` (local time): `read_at_startup.json`, `archived.jsonl`, `notepad_text.json`, `subscriptions.json`, `subscribed_cache.json`, `device.json` and `feeds/`, each by one `rename`, then `sync_dir`; `userconfig.toml` and `colorschemes.json` are copied there (they stay in use by the desktop), so an old build opening `pre-sync-…` finds a complete folder (SYNC.md §9 step 8). On a rename failure every earlier rename is undone in reverse order and the facade reports `device/set_aside_failed`; the board is created and active, and the plain files are no longer read (the mode is synced). Deleting the phone token is `desktop`'s (SYNC.md §9 step 6).
 
+The first board created from a legacy folder takes its palette from the scheme that `selected_colorscheme_id` of that folder's `userconfig.toml` names in its `colorschemes.json`, and its home place from that file's `coordinates` (SYNC.md §9 step 6). In §18.1 step 2 the device reads `LegacyConfig` from the source folder's own `userconfig.toml` (this data folder's for `ThisFolder`, the named folder's for `Folder(path)`) with today's parser (initialization.rs:243-362, `core.md` §15.2), reading only and writing nothing to it; `import_check` reads it the same way.
+
 `import_check(folder)` (§17.12) is the dry run: the same steps 1 and 2 with nothing written, the report and the SHA-256 of the genesis bytes, which must repeat on a second run (SYNC.md §9 step 4).
 
 - **DEV-CREATE-004** (device) After creating a board from this folder, the device MUST move the plain files of §18.2 into `pre-sync-<stamp>/` unchanged, and MUST undo every move when one fails.
+- **DEV-CREATE-007** (device) For `ThisFolder`, `Folder(path)` and `import_check`, the device MUST fill `LegacyFolder.config` from the `userconfig.toml` of the source folder itself, with today's parser and its clamp, and MUST NOT take `coordinates` or `selected_colorscheme_id` from any other file or folder.
 
 ### 18.3 Pairing
 
@@ -1570,7 +1577,11 @@ The machine aborts 600,000 ms after its start (SEAL-PAIR-013). A device that cra
 
 ### 18.6 Reset trust (desktop)
 
+Reset trust starts a new board from this device's confirmed state: a new recovery seed and sheet, new device keys, a new `board_id`, and a genesis carrying the current confirmed board bytes unchanged; the old board is then pointed at the new one by one `Fence` (`CloseBoard`), and its devices re-pair into the new board (SYNC.md §5.4).
+
 `reset_trust(request)` is `begin_create` with `source = CurrentBoard`: a new recovery seed and sheet, new device keys, a new `board_id` on the relay `request.relay_host`, and the current confirmed board bytes as an imported genesis (SYNC.md §5.4, `engine.md` §28.7). Between steps 9 and 10 of §18.1, while the old identity is still active, the device sends `Op(CloseBoard { host, door })` naming the new board's relay and waits for it (`wait_op`, at most 600,000 ms; a failure stops the flow before activation with `device/close_failed`, leaving the new board pending). Then step 10 activates the new identity. The old identity directory stays until `forget_identity`. Devices of the old board follow the `Fence`, find they are not members, and re-pair into the new board (§18.4).
+
+- **DEV-CREATE-006** (device) `reset_trust` MUST create the new board by every step of §18.1 with `source = CurrentBoard`, drawing a new recovery seed, new device keys and a new `board_id` and taking the engine's confirmed board bytes unchanged as the genesis board, and MUST NOT activate the new identity (step 10) before the old board's `Op(CloseBoard)` naming the new board's relay and door has ended with `OpDone` `Ok`; on its failure or after 600,000 ms it MUST stop with `device/close_failed` and leave the new board pending.
 
 ### 18.7 "Export legacy"
 
@@ -2043,6 +2054,7 @@ impl Published {
         -> Vec<taskdeck_core::reminders::Reminder>;
     pub fn overlay(&self) -> &taskdeck_core::overlay::Overlay;
     pub fn weather(&self) -> Option<(&taskdeck_core::weather::Report, i64, WeatherSource)>;   // (report, fetched_ms, the place it is for)
+    pub fn overlay_fetched(&self) -> &[(u64, i64)];   // (subscription id, wall_ms of its last good fetch), ascending id; a subscription with none is absent (§13.1.2 step 8)
     pub fn picture(&self) -> Option<PictureView>;
     pub fn pending_marks(&self) -> &[taskdeck_sync::PendingMark];
     pub fn notices(&self) -> &[NoticeView];
