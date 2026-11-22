@@ -8,7 +8,8 @@
 # Compares the working tree's Cargo.lock with Cargo.lock at the base revision
 # (default: the merge base of HEAD and origin/day-planner). Every crates.io
 # package version that is new must have been published at least 7 days before
-# the check, must not be yanked and must be in the index; --all checks every
+# the check, must not be yanked, must be in the index and must have the
+# index's checksum (a changed checksum makes a package new); --all checks every
 # crates.io package in the lockfile. Exemptions: scripts/cooldown-exemptions.txt.
 # --index-dir reads index files laid out like https://index.crates.io/ from a
 # local directory, and --base-lockfile compares with a file instead of a

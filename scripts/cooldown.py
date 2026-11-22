@@ -4,6 +4,10 @@ Every crates.io package (name, version) in the working tree's Cargo.lock that
 is absent from the base revision's Cargo.lock must have been published at least
 seven days (604800 seconds) before now, must not be yanked, and must exist in
 the crates.io index. Publish times come from the sparse index's "pubtime" field.
+Its lockfile checksum must equal the index's "cksum": the lockfile says
+crates.io even when a cargo configuration replaces crates.io with a mirror or
+a vendored directory, and the checksum is what shows the code came from
+crates.io. A package counts as new when its name, version or checksum is.
 Git and path packages are not checked here: cargo-deny's sources check owns
 those. Any other source that is not crates.io written exactly as cargo writes
 it is a violation, never a skip: cargo accepts variants of the crates.io URL
@@ -47,8 +51,9 @@ def parse_time(text, what):
 
 
 def crates_io_packages(lock_text, what):
-    """(name, version) pairs from crates.io, the count of git and path
-    packages, and the (name, version, source) of every other package."""
+    """(name, version, checksum) of each crates.io package (checksum None when
+    the lockfile gives none), the count of git and path packages, and the
+    (name, version, source) of every other package."""
     try:
         lock = tomllib.loads(lock_text)
     except tomllib.TOMLDecodeError as e:
@@ -57,7 +62,7 @@ def crates_io_packages(lock_text, what):
     for pkg in lock.get("package", []):
         source = pkg.get("source")
         if source in CRATES_IO_SOURCES:
-            found.add((pkg["name"], pkg["version"]))
+            found.add((pkg["name"], pkg["version"], pkg.get("checksum")))
         elif source is None or source.startswith("git+"):
             other += 1
         else:
@@ -230,7 +235,7 @@ def main(argv):
         to_check = current - before
         scope = f"new since {base[:12]}"
 
-    names = {name for name, _ in to_check}
+    names = {name for name, _, _ in to_check}
     if args.index_dir:
         files = load_index_local(args.index_dir, names)
     else:
@@ -242,7 +247,7 @@ def main(argv):
             f"{name} {version}: source {source!r} is not crates.io as cargo writes it, "
             f"nor git or path; cannot check"
         )
-    for name, version in sorted(to_check):
+    for name, version, checksum in sorted(to_check, key=lambda p: p[:2]):
         text = files.get(name)
         if text is None:
             violations.append(f"{name} {version}: crate not found in the crates.io index")
@@ -260,6 +265,12 @@ def main(argv):
                 entry = e
         if entry is None:
             violations.append(f"{name} {version}: version not found in the crates.io index")
+            continue
+        if checksum is None or entry.get("cksum") != checksum:
+            violations.append(
+                f"{name} {version}: lockfile checksum {checksum} is not the crates.io "
+                f"index's {entry.get('cksum')}"
+            )
             continue
         if entry.get("yanked"):
             violations.append(f"{name} {version}: yanked")

@@ -11,14 +11,17 @@ SPARSE="sparse+https://index.crates.io/"
 NO_EXEMPTIONS="$TMP/no-exemptions.txt"
 : >"$NO_EXEMPTIONS"
 
-# pkg <name> <version> [source]: one [[package]] table. An empty source writes
-# a path package (no source line).
+# pkg <name> <version> [source] [checksum]: one [[package]] table. An empty
+# source writes a path package (no source line). The checksum defaults to 64
+# zeros, the made-up index's cksum; "none" writes no checksum line.
 pkg() {
     printf '\n[[package]]\nname = "%s"\nversion = "%s"\n' "$1" "$2"
     local src="${3-$REG}"
     if [[ -n "$src" ]]; then
         printf 'source = "%s"\n' "$src"
-        [[ "$src" == git+* ]] || printf 'checksum = "%064d"\n' 0
+        if [[ "$src" != git+* && "${4-}" != none ]]; then
+            printf 'checksum = "%s"\n' "${4:-$(printf '%064d' 0)}"
+        fi
     fi
 }
 
@@ -101,9 +104,32 @@ output_has "missing crate is reported" "VIOLATION: alpha 1.1.0: crate not found"
 
 # --- a version without a publish time fails ----------------------------------
 d="$TMP/idx-nopub"
-index_put "$d" alpha <<<'{"name":"alpha","vers":"1.1.0","deps":[],"yanked":false}'
+index_put "$d" alpha <<<"{\"name\":\"alpha\",\"vers\":\"1.1.0\",\"deps\":[],\"cksum\":\"$(printf '%064d' 0)\",\"yanked\":false}"
 expect "no publish time fails" 1 run_cool --base-lockfile "$BASE" --lockfile "$TMP/young.lock" --index-dir "$d"
 output_has "no publish time is reported" "no publish time"
+
+# --- the lockfile checksum must be the crates.io index's -----------------------
+# A cargo configuration that replaces crates.io (a mirror, a vendored
+# directory) leaves the lockfile's source saying crates.io; the checksum shows
+# where the code came from.
+OTHER_SUM="$(printf 'ab%.0s' {1..32})"
+{ pkg oldie 0.1.0; pkg alpha 1.1.0 "$REG" "$OTHER_SUM"; } | lock "$TMP/sum.lock"
+expect "a new crate with another checksum fails" 1 run_cool --base-lockfile "$BASE" --lockfile "$TMP/sum.lock" --index-dir "$TMP/idx-seven"
+output_has "the checksum is reported" "VIOLATION: alpha 1.1.0: lockfile checksum $OTHER_SUM is not the crates.io index's"
+{ pkg oldie 0.1.0; pkg alpha 1.1.0 "$REG" none; } | lock "$TMP/nosum.lock"
+expect "a new crate without a checksum fails" 1 run_cool --base-lockfile "$BASE" --lockfile "$TMP/nosum.lock" --index-dir "$TMP/idx-seven"
+output_has "the missing checksum is reported" "VIOLATION: alpha 1.1.0: lockfile checksum None"
+# oldie 0.1.0 is in the base with the zero checksum: a changed checksum makes it new.
+{ pkg oldie 0.1.0 "$REG" "$OTHER_SUM"; } | lock "$TMP/resum.lock"
+d="$TMP/idx-oldie"
+index_put "$d" oldie <<<"$(index_line oldie 0.1.0 2020-01-01T00:00:00Z)"
+expect "a known version whose checksum changed is checked" 1 run_cool --base-lockfile "$BASE" --lockfile "$TMP/resum.lock" --index-dir "$d"
+output_has "the changed checksum is reported" "VIOLATION: oldie 0.1.0: lockfile checksum $OTHER_SUM"
+expect "--all checks every checksum" 1 run_cool --all --lockfile "$TMP/resum.lock" --index-dir "$d"
+expect "the matching checksum passes" 0 run_cool --all --lockfile "$BASE" --index-dir "$d"
+ex="$TMP/ex-sum.txt"
+printf 'alpha 1.1.0 2026-12-01 does not cover a checksum\n' >"$ex"
+expect "an exemption does not cover a checksum" 1 bash "$COOL" --now "$NOW" --exemptions "$ex" --base-lockfile "$BASE" --lockfile "$TMP/sum.lock" --index-dir "$TMP/idx-young"
 
 # --- exemptions --------------------------------------------------------------
 d="$TMP/idx-young"

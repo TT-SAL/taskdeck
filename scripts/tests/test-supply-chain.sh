@@ -4,7 +4,9 @@
 # <rev> reaches the cooldown unchanged, no option means the cooldown's default
 # base, any other argument is refused before anything runs, and all three
 # checks run even when one fails, and an "error:" or an index-failure warning
-# from cargo-audit fails the run even when it exits 0.
+# from cargo-audit fails the run even when it exits 0. A cargo configuration
+# that replaces or overrides crates.io fails the run, and a tool that is not
+# usable is reported with dev-setup's own words.
 set -uo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -14,13 +16,15 @@ LOG="$TMP/log"
 export FAKE_LOG="$LOG"
 mkdir -p "$R/scripts" "$TMP/tools"
 cp "$SCRIPTS_DIR/supply-chain.sh" "$R/scripts/supply-chain.sh"
-printf 'echo "ok       cargo-deny 0.20.2"\necho "ok       cargo-audit 0.23.0"\n' >"$R/scripts/dev-setup.sh"
+printf '[ -z "${DEVSETUP_OUT:-}" ] || { printf "%%s\\n" "$DEVSETUP_OUT"; exit 1; }\necho "ok       cargo-deny 0.20.2"\necho "ok       cargo-audit 0.23.0"\n' >"$R/scripts/dev-setup.sh"
 printf 'echo "cooldown${*:+ $*}" >>"$FAKE_LOG"\nexit "${CD_EXIT:-0}"\n' >"$R/scripts/cooldown.sh"
 printf '#!/bin/sh\necho "cargo-deny $*" >>"$FAKE_LOG"\nexit "${DENY_EXIT:-0}"\n' >"$TMP/tools/cargo-deny"
 printf '#!/bin/sh\necho "cargo-audit $*" >>"$FAKE_LOG"\n[ -z "${AUDIT_ERR:-}" ] || echo "$AUDIT_ERR" >&2\nexit "${AUDIT_EXIT:-0}"\n' >"$TMP/tools/cargo-audit"
 chmod +x "$TMP/tools/cargo-deny" "$TMP/tools/cargo-audit"
 
-run() { : >"$LOG"; env TASKDECK_TOOLS_DIR="$TMP/tools" "$@" bash "$R/scripts/supply-chain.sh" "${ARGS[@]}"; }
+HOME_C="$TMP/cargo-home"
+mkdir -p "$HOME_C"
+run() { : >"$LOG"; env TASKDECK_TOOLS_DIR="$TMP/tools" CARGO_HOME="$HOME_C" "$@" bash "$R/scripts/supply-chain.sh" "${ARGS[@]}"; }
 log_is() {
     if [[ "$(cat "$LOG")" == "$2" ]]; then
         PASSES=$((PASSES + 1)); echo "ok    $1"
@@ -82,5 +86,43 @@ expect "cargo audit unable to open the index, exiting 0" 1 run \
 output_has "names cargo audit (open)" "FAILED: cargo audit"
 expect "cargo audit's lock-wait warning alone passes" 0 run \
     AUDIT_ERR="warning: directory /x/advisory-db is locked, waiting for up to 300 seconds for it to become available"
+
+echo "-- a cargo configuration that replaces or overrides crates.io fails"
+ARGS=()
+mkdir -p "$R/.cargo"
+replaces() { # <case> <file> <content>: the file fails the run, all three still run
+    printf '%s\n' "$3" >"$2"
+    expect "$1 fails" 1 run
+    log_is "$1: all three still ran" "$ALL3
+cooldown"
+    output_has "$1 is named" "supply-chain: crates.io replaced or overridden: $2: "
+    output_has "$1: the failure is listed" "FAILED: cargo configuration (crates.io replaced)"
+    rm -f "$2"
+}
+replaces "a vendored directory in .cargo/config.toml" "$R/.cargo/config.toml" '[source.crates-io]
+replace-with = "elsewhere"
+[source.elsewhere]
+directory = "vendor"'
+replaces "a dotted source key in .cargo/config" "$R/.cargo/config" 'source.crates-io.replace-with = "m"'
+replaces "a [patch] in CARGO_HOME" "$HOME_C/config.toml" '[patch.crates-io]
+itoa = { path = "x" }'
+replaces "a paths override" "$R/.cargo/config.toml" 'paths = ["x"]'
+replaces "a configuration that is not TOML" "$R/.cargo/config.toml" '[source'
+expect "the environment variable fails" 1 run CARGO_SOURCE_CRATES_IO_REPLACE_WITH=m
+output_has "the environment variable is named" "the environment sets CARGO_SOURCE_CRATES_IO_REPLACE_WITH"
+printf '[build]\njobs = 2\n[registries.crates-io]\nprotocol = "sparse"\n' >"$R/.cargo/config.toml"
+expect "a configuration that leaves crates.io alone passes" 0 run
+rm -f "$R/.cargo/config.toml"
+
+echo "-- a tool that is not usable is reported in dev-setup's words"
+expect "an unsupported platform fails" 1 run DEVSETUP_OUT="dev-setup: error: only Linux x86_64 is supported for now (this is Linux aarch64)"
+output_has "the reason is printed" "supply-chain:   dev-setup: error: only Linux x86_64 is supported"
+output_lacks "it does not say not installed" "not installed"
+log_is "the cooldown still ran" "cooldown"
+expect "a missing tool fails" 1 run DEVSETUP_OUT="ok       cargo-deny 0.20.2
+missing  cargo-audit 0.23.0
+dev-setup: run: bash scripts/dev-setup.sh foundation"
+output_has "what to install is printed" "supply-chain:   dev-setup: run: bash scripts/dev-setup.sh foundation"
+output_has "only the missing tool fails" "FAILED: cargo audit (pinned tool not usable)"
 
 finish

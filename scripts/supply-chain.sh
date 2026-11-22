@@ -12,7 +12,9 @@
 # and exits non-zero if any of them failed (2, before running anything, on an
 # unknown argument; --base is the only option). A crate whose registry index
 # entry cargo-deny or cargo-audit cannot fetch or read fails that tool's check,
-# so a yanked crate cannot pass through an index failure. cargo-deny and cargo-audit must be
+# so a yanked crate cannot pass through an index failure. Step 1 also fails
+# when a cargo configuration replaces or overrides crates.io code (see there).
+# cargo-deny and cargo-audit must be
 # the versions scripts/dev-setup.sh pins, installed by it; the script runs
 # those binaries from the directory dev-setup installs into.
 set -uo pipefail
@@ -43,13 +45,51 @@ banner() { printf '\n==== supply-chain: %s ====\n' "$1"; }
 # Which pinned tools are installed, by hash (dev-setup.sh --check).
 check_out="$(bash "$here/dev-setup.sh" --check foundation 2>&1)"
 tool_ok() { grep -q "^ok  *$1 " <<<"$check_out"; }
+# All of dev-setup's report: it names what is missing and how to install it,
+# or why it cannot check (an unsupported platform, say).
 missing_hint() {
-    echo "supply-chain: $1 (the pinned version) is not installed in $TOOLS_DIR:"
-    grep " $1" <<<"$check_out" | sed 's/^/supply-chain:   /'
-    echo "supply-chain: install it with: bash scripts/dev-setup.sh foundation"
+    echo "supply-chain: $1, the pinned version, is not usable from $TOOLS_DIR; dev-setup.sh --check says:"
+    sed 's/^/supply-chain:   /' <<<"$check_out"
 }
 
 banner "1/3 cargo deny check advisories bans sources"
+# Cargo.lock still says crates.io when a cargo configuration replaces crates.io
+# with a mirror or a vendored directory ([source]), or overrides its crates
+# ([patch], paths), and cargo-deny and cargo-audit read only the lockfile. So
+# any of those keys in a configuration file cargo reads here (.cargo/config and
+# .cargo/config.toml in this directory, every parent and CARGO_HOME), or the
+# environment variables that set them, fails this step.
+cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+configs=("$cargo_home/config" "$cargo_home/config.toml")
+d="$root"
+while :; do
+    configs+=("$d/.cargo/config" "$d/.cargo/config.toml")
+    [[ "$d" == / ]] && break
+    d="$(dirname "$d")"
+done
+replaced="$(python3 -I -c '
+import os, re, sys, tomllib
+for p in sys.argv[1:]:
+    try:
+        with open(p, "rb") as f:
+            config = tomllib.load(f)
+    except FileNotFoundError:
+        continue
+    except Exception as e:
+        print(f"{p}: cannot read: {e}")
+        continue
+    for k in ("source", "patch", "paths"):
+        if k in config:
+            print(f"{p}: sets {k}")
+for k in sorted(os.environ):
+    if re.match(r"CARGO_(SOURCE|PATCH|PATHS)(_|$)", k):
+        print(f"the environment sets {k}")
+' "${configs[@]}" 2>&1)"
+if [[ -n "$replaced" ]]; then
+    sed 's/^/supply-chain: crates.io replaced or overridden: /' <<<"$replaced"
+    echo "supply-chain: cargo configuration: FAILED (only crates.io code may be built)"
+    failed+=("cargo configuration (crates.io replaced)")
+fi
 if tool_ok cargo-deny; then
     # A crate whose index entry cannot be fetched or read is only a warning to
     # cargo-deny (its yanked check is then skipped): -D makes it an error, so
@@ -66,7 +106,7 @@ if tool_ok cargo-deny; then
     fi
 else
     missing_hint cargo-deny
-    failed+=("cargo deny (not installed)")
+    failed+=("cargo deny (pinned tool not usable)")
 fi
 
 banner "2/3 cargo audit"
@@ -87,7 +127,7 @@ if tool_ok cargo-audit; then
     fi
 else
     missing_hint cargo-audit
-    failed+=("cargo audit (not installed)")
+    failed+=("cargo audit (pinned tool not usable)")
 fi
 
 if [[ ${#cooldown_args[@]} -gt 0 ]]; then
