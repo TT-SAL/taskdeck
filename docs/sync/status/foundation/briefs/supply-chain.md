@@ -82,3 +82,4 @@ pass. `scripts/tests/test-supply-chain.sh` (the `--base` option) joined the test
 
 - [medium] An index lookup failure made the yanked check fail open: cargo-deny only warned, cargo-audit printed an error and exited 0, and the gate passed with a yanked crate in the lockfile (fixed: `scripts/supply-chain.sh` makes cargo-deny's index failures errors and fails on any `error:` line of cargo-audit; a test covers it)
 - [low] cargo-deny's yanked check and a stale local index cache (dropped: with a cache that is really stale, cargo-deny refreshes it; not reproduced)
+- [medium] cargo-audit skips the yanked check with only a warning when it cannot update or open the whole index, and the gate passed (fixed: the gate also fails on those two warnings; tests cover both and the harmless lock-wait warning)

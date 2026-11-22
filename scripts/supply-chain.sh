@@ -70,12 +70,14 @@ fi
 banner "2/3 cargo audit"
 if tool_ok cargo-audit; then
     # cargo-audit exits 0 when it cannot check a crate for yanking (it prints
-    # "error: couldn't check if the package is yanked"), so any "error:" line
-    # fails the check too: an index failure fails closed.
+    # "error: couldn't check if the package is yanked"), and when it cannot
+    # update or open the crates.io index at all (it prints only "warning:
+    # couldn't update/open crates.io index" and checks no crate), so either
+    # line fails the check too: an index failure fails closed.
     audit_out="$("$TOOLS_DIR/cargo-audit" audit --color never 2>&1)"
     audit_rc=$?
     printf '%s\n' "$audit_out"
-    if [[ $audit_rc -eq 0 ]] && ! grep -q '^error:' <<<"$audit_out"; then
+    if [[ $audit_rc -eq 0 ]] && ! grep -Eq "^(error:|warning: couldn't (update|open) crates\.io index)" <<<"$audit_out"; then
         echo "supply-chain: cargo audit: passed"
     else
         echo "supply-chain: cargo audit: FAILED"

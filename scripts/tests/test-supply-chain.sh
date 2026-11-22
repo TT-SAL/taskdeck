@@ -3,8 +3,8 @@
 # cooldown.sh, cargo-deny and cargo-audit that log how they were run: --base
 # <rev> reaches the cooldown unchanged, no option means the cooldown's default
 # base, any other argument is refused before anything runs, and all three
-# checks run even when one fails, and an "error:" from cargo-audit fails
-# the run even when it exits 0.
+# checks run even when one fails, and an "error:" or an index-failure warning
+# from cargo-audit fails the run even when it exits 0.
 set -uo pipefail
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -70,5 +70,15 @@ echo "-- an index failure fails closed"
 expect "cargo audit printing an error but exiting 0" 1 run \
     AUDIT_ERR="error: couldn't check if the package is yanked: registry: invalid type"
 output_has "names cargo audit" "FAILED: cargo audit"
+# cargo-audit 0.23.0 also exits 0, with only a warning, when it cannot update
+# or open the crates.io index at all; it then checks no crate for yanking.
+expect "cargo audit unable to update the index, exiting 0" 1 run \
+    AUDIT_ERR="warning: couldn't update crates.io index: unable to acquire filesystem lock"
+output_has "names cargo audit (update)" "FAILED: cargo audit"
+expect "cargo audit unable to open the index, exiting 0" 1 run \
+    AUDIT_ERR="warning: couldn't open crates.io index: not found"
+output_has "names cargo audit (open)" "FAILED: cargo audit"
+expect "cargo audit's lock-wait warning alone passes" 0 run \
+    AUDIT_ERR="warning: directory /x/advisory-db is locked, waiting for up to 300 seconds for it to become available"
 
 finish
