@@ -1,6 +1,6 @@
 # TaskDeck sync: the build plan
 
-*2026-11-21. How to build the design in [`SYNC.md`](SYNC.md) with parallel cloud sessions, each led by Fable 5.2 and running workflows of Opus 5.5 agents. Where this plan and `SYNC.md` disagree, this plan wins; §2 lists every difference. Nothing here is built yet except the CI in `.github/workflows/ci.yml`.*
+*2026-11-21. How to build the design in [`SYNC.md`](SYNC.md) with parallel cloud sessions, each led by Fable 5.2 and running workflows of Opus 5.5 agents. Where this plan and `SYNC.md` disagree, this plan wins; §2 lists every difference. Wave 0 (`foundation`) is merged. Revised 2026-11-22 for the remaining waves: a task is written once, checked once and fixed once (§3.1, §3.3, §3.5, §6.3, §6.12, §7), so that tokens go to building.*
 
 The plan goes straight to the end state: every device a full replica, syncing through a free blind relay. There is no interim milestone. Today's app keeps working on `day-planner` at every merge, and the owner's running copy is untouched until a one-sitting cutover (§1.4).
 
@@ -82,9 +82,10 @@ Defaults taken for SYNC.md's open questions: device-local time zones (3); overwr
 ### 3.1 Orchestration
 
 - **The lead orchestrates and verifies; agents write.** Every `agent()` call sets `model: 'opus'`. The lead runs each gate itself and reads CI itself. An agent's claim that something passes is not evidence.
-- **Two agents run at a time** in one container. Plan workflows for that: one writer at a time in a given crate, readers and attackers in parallel. Agents that compile at the same time each set their own `CARGO_TARGET_DIR`.
+- **Two agents run at a time** in one container. Plan workflows for that: one writer at a time in a given crate; a verifier may run beside the writer of another task. Agents that compile at the same time each set their own `CARGO_TARGET_DIR`.
 - **Work in small tasks, each ending green and pushed.** A container can be reclaimed; anything unpushed is lost.
-- **Use the shapes in §7.** Implementation is always followed by an attack round by agents that did not write the code. A task whose loop did not converge is not done.
+- **Use the shapes in §7.** One agent writes a task; one agent that did not write it checks it once; one pass fixes what that found. There is no loop until dry. A security pass follows only where §7 names one.
+- **Spend tokens on building.** Agents never read a spec in full: they use the clause index (`python3 docs/sync/status/foundation/tools/clause-index.py docs/sync/spec <file>` writes every clause, one line each, under its section heading) and the sections their task names. The lead integrates once per finished workflow, not after every agent. Each stage records in its status file the tokens each task took.
 
 ### 3.2 Repository
 
@@ -99,6 +100,7 @@ Defaults taken for SYNC.md's open questions: device-local time zones (3); overwr
 
 - **The specs in `docs/sync/spec/` are the contract** once `foundation` merges. A stage that finds a spec wrong or ambiguous does not improvise: it opens a spec-change pull request (spec, vectors, and a line in `docs/sync/spec/CHANGES.md`), merges it, and names the affected stages in its status file and to the owner.
 - **Every MUST clause has an id and a test.** `scripts/spec-coverage.sh <stage>` fails if a clause owned by the stage appears in no test.
+- **No new checker or scanner scripts.** A stage writes none beyond those this plan names; the ones under `scripts/` stay as `foundation` left them unless a gate is wrong. A scanner guards the ordinary forms only: it is there to catch an honest mistake, and review covers the rest.
 - **Never weaken a gate to pass it.** No skipped, ignored or loosened tests, no `unimplemented!()` left in owned paths. Tests are deleted only together with the code they test. If a gate is wrong, change it in its own pull request and say why.
 - **Budgets are limits.** Measure in a dedicated CI job, as the median of five runs, and record the baseline in the status file. A baseline that misses the limit is a question for the owner, not a reason to edit the limit. After that, a result more than 25% worse than the baseline fails.
 - **Keep read-side names.** The new core answers the questions the UI and the phone page already ask (`ranked_ids`, `behind_minutes`, the snapshot JSON) under the same names, with the device's time zone passed in.
@@ -114,7 +116,7 @@ Defaults taken for SYNC.md's open questions: device-local time zones (3); overwr
 
 ### 3.5 Status, hand-off, and when to ask
 
-- **`docs/sync/status/<stage>.md`** is the stage's memory: tasks done, decisions with reasons, deviations, measurements, open questions for the owner. Update it with every task. A fresh session must be able to resume from it alone.
+- **`docs/sync/status/<stage>.md`** is the stage's memory: tasks done, the tokens each took, decisions with reasons, deviations, measurements, the low findings left as they are (§7), open questions for the owner. Update it with every task. A fresh session must be able to resume from it alone.
 - **Exit:** the stage's gate is green, the status file says `final`, and the exit pull request's body lists what was built, what was measured, and what the next stages need to know. Then merge and tell the owner which sessions to start.
 - **Ask the owner only for:** spending money; adding a service, or a dependency §3.4 does not pre-approve; weakening a MUST or a budget; removing a feature; touching DOC §14; anything this plan marks as the owner's.
 
@@ -226,7 +228,7 @@ Gate:
 - parsers never panic under property tests; `#![forbid(unsafe_code)]`;
 - compiles for the Android targets; budget: 256 entries verified and opened within 100 ms.
 
-Attack lenses (§7): protocol misuse; parsing and resource exhaustion; membership and rollback logic; pairing.
+Security passes (§7): two for every task of this crate. What they try: protocol misuse; parsing and resource exhaustion; membership and rollback logic; pairing.
 
 ### 6.4 `relay` (wave 1)
 
@@ -341,7 +343,7 @@ Gate: the dry run produces every artifact and each verifies; the nightly jobs ru
 Read everything in `docs/sync/status/`.
 
 1. The whole system in CI: the Windows and macOS apps' headless paths, the emulator app and the Worker under `wrangler dev`, through pair, edit, offline, revoke, restore.
-2. A whole-system attack round with three lenses: get code onto a device, read the data, lose or corrupt the data. A finding counts only with a reproduction. Fix, one pull request per fix, and repeat until two rounds are dry.
+2. One whole-system security pass: three agents, one for each aim: get code onto a device, read the data, lose or corrupt the data. A finding counts only with a reproduction. Fix what is of high or medium severity, one pull request per fix; list the low findings in the status file. An aim gets a second pass only if its first found something of high severity.
 3. Requirements check against the owner's four: full function on all three devices, a free server, uptime, protection from malware and theft. Every row of SYNC.md §3 and §7 is marked done, deferred to §6.13, or failed.
 4. Name the release candidate: the commit, and the hashes the release dry run produced for it. The owner reviews, signs and pushes the tag; agents do not.
 
@@ -351,65 +353,84 @@ Phone extras (archive search, Forget, managing subscriptions, home place, palett
 
 ## 7. Workflow shapes
 
-**The task loop**, for every implementation task. Adapt it; keep its properties: the writer does not judge its own work, a finding needs a reproduction that is checked before anyone acts on it, a failed agent never counts as a clean result, and the loop reports whether it converged.
+**The task shape**, for every implementation task. A task is written once, checked once and fixed once; tokens go to building, not to repeated checking.
+
+1. **Implement.** One agent writes the code and the tests that cite its clauses, and runs the task's gate.
+2. **Verify, once.** One agent that did not write the code checks it against the task's brief and the spec, and reproduces whatever it reports. A finding without a reproduction does not count.
+3. **Fix, once.** One pass fixes the findings of high and medium severity, each with its reproduction as a test.
+4. **The lead** runs the gate, commits, pushes and reads CI.
+
+There is no loop until dry. A second verify pass, with its own fix pass, runs only if the first found something of high severity; nothing runs a third time. Keep these properties when you adapt the shape: the writer does not judge its own work, a finding needs a reproduction that is checked before anyone acts on it, and a failed agent never counts as a clean result.
+
+**Severity.** High: a rule of §3.4 or a MUST of a spec is broken, or today's app stops working. Medium: the work does something other than its brief or its spec says, in ordinary use. Low: everything else, robustness outside ordinary use included. Only high and medium findings are fixed. Low findings are listed in the status file, not chased.
+
+**Security pass.** After the fix, one agent tries to break the task, and only where the task touches cryptography, authentication, pairing, relay credentials, the Android bridge or the WebView, or the parsing of untrusted input. Every task of the seal crate and the relay's authentication get two such passes, by two agents. The same rules hold: reproduce, fix high and medium once, list low.
+
+**Once per stage.** One hygiene pass (secrets, anything from a real board, stray files, dependencies §3.4 does not approve), and the exit review below.
 
 ```js
 export const meta = {
-  name: 'task-loop',
-  description: 'Implement one plan task, attack it from several lenses, fix until dry',
+  name: 'task',
+  description: 'Implement one plan task, verify it once, fix once, then the security passes it needs',
   phases: [
     { title: 'Implement', model: 'opus' },
-    { title: 'Attack', model: 'opus' },
+    { title: 'Verify', model: 'opus' },
     { title: 'Fix', model: 'opus' },
   ],
 }
-// args: { id, brief, paths, gate, lenses: [...] }
+// args: { id, brief, paths, gate, security }   security: 0, 1, or 2 (the seal crate, the relay's authentication)
 const FINDINGS = {
   type: 'object',
   properties: { findings: { type: 'array', items: {
     type: 'object',
-    properties: { title: { type: 'string' }, clause: { type: 'string' }, repro: { type: 'string' } },
-    required: ['title', 'repro'],
+    properties: { title: { type: 'string' }, severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+                  clause: { type: 'string' }, repro: { type: 'string' } },
+    required: ['title', 'severity', 'repro'],
   } } },
   required: ['findings'],
 }
-phase('Implement')
-const built = await agent(`${args.brief}\nChange only: ${args.paths}.\nDone means \`${args.gate}\` exits 0. ` +
-  `Never weaken or skip a test; delete one only together with the code it tests.`,
-  { label: `impl:${args.id}`, model: 'opus' })
-if (built === null) return { id: args.id, converged: false, rounds: 0 }
-
-let dry = 0, round = 0
-while (dry < 2 && round < 6) {
-  round++
-  const reports = await parallel(args.lenses.map((lens, i) => () =>
-    agent(`Try to break task ${args.id} through this lens: ${lens}. Read the spec clauses and the code. ` +
-      `Report only what you reproduced, with the failing test or command as text. Do not edit tracked files: ` +
-      `run with CARGO_TARGET_DIR=target/attack-${i} and keep scratch files under that directory.`,
-      { label: `attack:${lens}:${round}`, phase: 'Attack', model: 'opus', schema: FINDINGS })
-  ))
-  const found = reports.filter(Boolean).flatMap(r => r.findings)
-  // A round is dry only if every attacker reported and none found anything.
-  if (found.length === 0) { if (reports.every(Boolean)) dry++; continue }
-  dry = 0
+const RULES = `Report only what you reproduced, with the failing test or command as text. Do not edit tracked files: ` +
+  `run with CARGO_TARGET_DIR=target/check and keep scratch files under that directory. Do not read a spec in full: ` +
+  `use the clause index and the sections the brief names.`
+const lows = []
+// One pass by an agent that did not write the code, then one fix pass for what is high or medium.
+const pass = async (label, task) => {
+  const r = await agent(`${task} ${RULES}`, { label, phase: 'Verify', model: 'opus', schema: FINDINGS })
+  if (r === null) return null                       // a failed agent never counts as a clean result
+  lows.push(...r.findings.filter(f => f.severity === 'low'))
+  const serious = r.findings.filter(f => f.severity !== 'low')
+  if (serious.length === 0) return { high: false }
   const fixed = await agent(`For task ${args.id}: first add each reproduction below as a test and run it. ` +
     `Name and drop any that does not fail. Then fix the rest, keeping \`${args.gate}\` green.\n` +
-    JSON.stringify(found, null, 2), { label: `fix:${round}`, phase: 'Fix', model: 'opus' })
-  if (fixed === null) break
+    JSON.stringify(serious, null, 2), { label: `fix:${label}`, phase: 'Fix', model: 'opus' })
+  return fixed === null ? null : { high: serious.some(f => f.severity === 'high') }
 }
-log(`task ${args.id}: ${round} attack rounds, ${dry >= 2 ? 'converged' : 'NOT converged'}`)
-return { id: args.id, converged: dry >= 2, rounds: round }
+
+phase('Implement')
+const built = await agent(`${args.brief}\nChange only: ${args.paths}.\nWrite the tests that cite the clauses you implement. ` +
+  `Done means \`${args.gate}\` exits 0. Never weaken or skip a test; delete one only together with the code it tests.`,
+  { label: `impl:${args.id}`, model: 'opus' })
+if (built === null) return { id: args.id, done: false }
+
+const verify = `You did not write task ${args.id}. Check it once against its brief and the spec clauses it names: ${args.brief}`
+const first = await pass(`verify:${args.id}`, verify)
+if (first === null) return { id: args.id, done: false }
+if (first.high && await pass(`verify-2:${args.id}`, verify) === null) return { id: args.id, done: false }
+for (let n = 1; n <= (args.security || 0); n++) {
+  const broke = await pass(`security-${n}:${args.id}`, `You did not write task ${args.id} (${args.brief}). Try to break ` +
+    `it: its cryptography, authentication, pairing, credentials, bridge and parsing of untrusted input.`)
+  if (broke === null) return { id: args.id, done: false }
+}
+return { id: args.id, done: true, lows }
 ```
 
-After it returns, the lead runs the gate, commits, pushes, and reads CI. `converged: false` means the task is not done: run it again or split it.
-
-**Lenses.** Choose three per task from: spec conformance clause by clause; adversarial inputs and resource exhaustion; concurrency, crash and ordering; cryptographic misuse; determinism across devices; privacy and leakage; performance against the budgets; what an older or newer version of the app would do.
+After it returns, the lead runs the gate, commits, pushes and reads CI, and writes the low findings and the task's tokens into the status file. `done: false` means an agent failed: run the task again.
 
 **Other shapes.**
 - *Spec work:* drafters, pairwise interface reviews, the two-readers test (§6.1).
 - *Porting:* copy the code, then test it against the recorded transcripts, before changing behaviour.
 - *Choosing between designs* inside a stage: two or three independent attempts, judged against the spec and the gate, the best one kept.
-- *Stage exit:* one agent that did no work in the stage reads the status file, the diff and the spec, and lists what is missing. What it finds is the next round of work.
+- *Stage exit:* one agent that did no work in the stage reads the status file, the diff and the spec's clause index, and lists what is missing. What it finds of high or medium severity is the next work; the rest is listed.
 
 ## 8. Where SYNC.md's phases went
 
@@ -424,6 +445,6 @@ After it returns, the lead runs the gate, commits, pushes, and reads CI. `conver
 | 5r Recovery and backups | `recovery`, `device` |
 | 5b Phone replica | `android` |
 | 6 Reminders | `android` |
-| 7 Operations and hardening | `engine` and `device` (operations), `release` (nightly simulator, fuzzing, rehearsals), `rc` (attack round) |
+| 7 Operations and hardening | `engine` and `device` (operations), `release` (nightly simulator, fuzzing, rehearsals), `rc` (whole-system security pass) |
 | Documentation | `release` |
 | 8, 9 Optional | §6.13 |
