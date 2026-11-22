@@ -1,0 +1,9 @@
+# Gate of stage recovery (SYNC_PLAN.md §6.8). Format: scripts/gates/README.md.
+# Each target may sit in either package; cargo runs it wherever it is.
+run | restore          | "every backup kind restores to an identical state hash" (§6.8 gate) | cargo test --locked -p taskdeck-backup -p taskdeck-recover --test restore
+run | forged           | "forged, truncated and re-signed backups are refused" (§6.8 gate) | cargo test --locked -p taskdeck-backup -p taskdeck-recover --test forged
+run | drill            | "a restore drill on a made-up board" (§6.8 gate) | cargo test --locked -p taskdeck-backup -p taskdeck-recover --test drill
+ci  | drill-ci         | "a restore drill on a made-up board runs in CI" (§6.8 gate) | recovery (ubuntu-latest, windows-latest, macos-latest)
+run | spec-coverage    | every clause recovery owns is cited by a recovery test (§3.3) | bash scripts/spec-coverage.sh recovery
+run | no-unimplemented | no unimplemented!() or todo!() left in recovery's paths, tests included (§3.3) | bash scripts/gate-lib.sh no-unimplemented recovery
+run | no-skipped-tests | no skipped or ignored test in recovery's paths (§3.3) | bash scripts/gate-lib.sh no-skipped-tests recovery

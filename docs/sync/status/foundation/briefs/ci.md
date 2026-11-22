@@ -107,3 +107,150 @@ bash script sets `shell: bash` so it works on Windows runners.
   run `scripts/ci/changes.sh` in its test mode against the real diff of this branch, and simulate
   `scripts/ci/stage.sh` for each stage in this checkout. The lead will read the real CI run.
 - Report precisely what you could not verify locally.
+
+## State after the implementation (2026-11-22, second session)
+
+Implemented and committed: `.github/workflows/ci.yml`, `scripts/ci/` (`changes.sh`, `toolchain.sh`, `stage.sh`,
+`gate.sh`, `supply-chain.sh`, `README.md`) and six test files `scripts/tests/test-ci-*.sh`.
+`bash scripts/tests/run.sh` passes. Owned paths for the attack loop: those files.
+
+# Lead rulings for task baseline-1c (2026-11-22)
+
+1. **`scripts/supply-chain.sh` gains `--base <rev>`, passed through to `scripts/cooldown.sh`** (a change to the
+   supply-chain task's script, made with that task's rulings). `scripts/ci/supply-chain.sh` stays as the place
+   that works out the base from the event, and then makes one call instead of running the cooldown twice.
+2. **`deploy/**` needs no CI.** It holds the install script and the unit file of today's server; no job reads it.
+3. **`.cargo/audit.toml` belongs to the area `supply`; any other path under `.cargo/` is a shared file** (every
+   area): a `.cargo/config.toml` would change every build.
+4. **A run cancelled by the concurrency group makes `gate` fail for that run.** That is the plan's wording
+   ("fails if any job failed or was cancelled") and it stays; the superseding run is the one that counts.
+5. **Real runs are the evidence.** What GitHub actually did with this workflow is written down by the lead in
+   the session scratchpad (`ci-evidence/1c.md`) and, in short, in the status file. A finding that contradicts
+   an observed run needs its own observation.
+
+## Already raised and handled (do not re-report)
+
+- [high] `scripts/check-build-date.sh` failed under the workflow's `CARGO_TERM_COLOR: always`, so the Foundation job and `gate` failed on GitHub (the lead's finding from the first real run; fixed: the script switches cargo's colour off for its own calls, and `scripts/tests/test-check-build-date.sh` runs it with colour on)
+- [medium] A change to `build.rs` did not run the foundation job, which holds the one check that guards it (fixed: `build.rs` marks `root` and `foundation`)
+- [medium] Changes to `scripts/check-release-panic.sh` or `crates/panic-probe/**` skipped the desktop matrix, where that check runs on Windows and macOS (fixed: they also mark `root`)
+- [medium] The area dependencies left out relay to device, vectors to relay and recovery to device (ruled by the lead: ruling 6)
+
+6. **More area dependencies (lead ruling, 2026-11-22).** `relay` true makes `device` true (the device's
+   end-to-end tests run against the standby relay), and so `android`; `docs/sync/vectors/**` also marks `relay`
+   (the relay's suite takes seal's published vectors); `recovery` true makes `device` true (the device runtime
+   links the backup crate). Each only makes more jobs run. The lead confirms the two additions of round 1:
+   `build.rs` marks `root` and `foundation`; `scripts/check-release-panic.sh` and `crates/panic-probe/**` also
+   mark `root`.
+- [medium] A changed file name holding a line break could inject a workflow command through the path filter's log and make jobs skip (fixed: everything the script logs has control characters replaced, and a path holding one means "everything")
+- [medium] No area marked `root` for a crate the desktop app will link, and [low] a file under a no-CI path that the build reads (an include, a symlink) could change with every job skipped (fixed by `scripts/ci/reads.sh`, run by the `changes` job: a path dependency, an include or a symlink target must mark every area its reader marks)
+
+7. **The area rules are a checked contract (lead ruling, 2026-11-22).** `scripts/ci/reads.sh` stays: when a
+   later stage adds a path dependency, an include or a symlink that the rules do not cover, the run fails until
+   that stage adds the rule to `scripts/ci/changes.sh`, in a small pull request of its own (SYNC_PLAN.md §3.2).
+   No `device` to `root` rule is added now: the check will ask for it when the root package links the device
+   crate.
+
+8. **Observed (lead, 2026-11-22 06:06 UTC).** The pull-request run on `fee727d` was green in every job: `gate`
+   passed on the pull-request run and `gate (push)` on the push run; the Foundation job passed with the colour
+   fix; the Supply chain job passed with the lockfile rulings; the desktop job built and tested the moved
+   crates on Windows, macOS and Linux.
+- [medium] `scripts/ci/reads.sh` missed a crate linked through `[workspace.dependencies]` and a target's `path` (fixed: inherited dependencies and target and build-script paths are checked like written paths)
+- [medium] A push run cancelled by a newer push left its own changes untested, because a push run only looks at what changed since `before` (fixed: only pull-request runs cancel their predecessors; push runs all run)
+
+9. **Push runs are not cancelled (lead ruling, 2026-11-22; amends ruling 4).** A pull-request run tests the
+   whole pull request, so a newer one may cancel an older one, and the cancelled run's `gate` fails for that
+   run. A push run tests only its own `before` to `after`, so it is never cancelled.
+
+10. **What `scripts/ci/reads.sh` reads is a closed list (lead ruling, 2026-11-22).** It checks: a path
+    dependency in a manifest's dependency tables, written inline or as a table, or inherited from
+    `[workspace.dependencies]`; a target's `path` and a package's `build`; the literal path in `include!`,
+    `include_bytes!`, `include_str!`, `include_image!` and `#[path]`, and the first literal of `concat!`; a
+    tracked symlink's target. Round 4 found one more form, and a parser written in awk can always be met with
+    one more: from here on a finding against this check counts only if one of the listed forms, written the
+    way cargo or rustc accepts it in this repository's files, gets past it. Reads that code makes at run time
+    (opening a file by name, a build script reading the tree) and forms not on the list are left to review.
+- [medium] Push runs still lost changes: GitHub cancels a pending run of a concurrency group when a newer one is queued, whatever `cancel-in-progress` says (fixed: each push run has a group of its own)
+- [medium, medium, low] `scripts/ci/reads.sh` missed a single-quoted path, an include written with `[]` or `{}` or a `#[path]` inside `cfg_attr`, and `workspace = true` after a multi-line array (fixed, each with a test)
+
+11. **`scripts/ci/reads.sh` reads manifests with a real TOML parser (lead ruling, 2026-11-22).** Three rounds
+    in a row found one more spelling that the script's own awk reader of `Cargo.toml` did not understand.
+    That reader goes: the manifest part uses python3's `tomllib` (as `scripts/ci/gate.sh` and
+    `scripts/cooldown.py` already do; the `changes` job runs on Ubuntu, which has python3 3.11 or later), so
+    every spelling TOML allows is read the same way, and a manifest that does not parse fails the check. The
+    Rust-source part stays a search over the whitespace-squeezed text for the listed macros and attributes
+    with any of the three delimiters; ruling 10's closed list stands for it. After this change a finding of
+    the form "another TOML spelling" cannot arise, and "another Rust spelling of a listed form" counts only
+    for `include!`, `include_bytes!`, `include_str!`, `include_image!`, `concat!` and `path =` in an attribute.
+
+12. **The Rust-source part of `scripts/ci/reads.sh` fails closed, and that ends the list of spellings (lead
+    ruling, 2026-11-22 08:25 UTC).** The second loop's rounds 1, 2 and 4 each found one more way to write a
+    read that the search did not follow (an escape in a literal, a second literal of `concat!`, a module in
+    a file not named `*.rs`, a `#[path]` inside an inline module). The check guards against honest mistakes:
+    a file this repository's code embeds or compiles, kept where the path rules say no CI is needed. It is
+    not a defence against a contributor who hides a read on purpose, and no search of sources can be one
+    (a build script, a procedural macro or a test may read any file); such a change runs CI and is reviewed
+    when it is made. So:
+    - a read (`include!`, `include_bytes!`, `include_str!`, `include_image!`, `#[path]`) that the check
+      cannot work out as written fails the check and is named ("cannot be checked: write a plain literal");
+    - a read whose path does not name a tracked file of the repository fails the check; a path that leaves
+      the tree, or that no rule knows, never passes by "marking every area";
+    - a `#[path]` or `include!` that names a file the check does not scan fails the check, or that file is
+      scanned too; a `#[path]` inside an inline module fails the check;
+    - one form cannot be resolved to a single file and still passes, because today's `src/weather.rs` uses
+      it and `src/` is not this stage's to change: `concat!` whose leading string literals are followed by
+      something that is not a literal (a macro variable). Its joined leading literals must name a tracked
+      directory (or a prefix inside one), and every tracked file under that directory must mark at least
+      the reader's areas; otherwise the check fails;
+    - the fixers build this in the simplest way and delete special cases it makes unnecessary.
+
+    From here on a finding against `reads.sh` counts only in two cases: a read written the ordinary way
+    (one string literal, or `concat!` of string literals, in a tracked `*.rs` file) names a tracked file
+    that marks fewer areas than its reader, and the check passes; or the check passes a read it could not
+    resolve to a tracked file. Any other spelling is either refused by the rule above or left to review.
+
+13. **The hand-written readers of TOML in `scripts/ci/` read the plain spelling and fail on any other (lead
+    ruling, 2026-11-22 09:00 UTC).** `stage.sh` reads a package's name; `toolchain.sh` reads the channel, the
+    profile, the components and the targets. Both run on Windows and macOS runners, where no TOML parser can
+    be relied on, so they stay small bash readers. After the second loop each of them either reads a value
+    correctly or fails with a message that names the file and the key. From here on a finding against
+    these readers counts only if a script goes on, without failing, with a value it read wrongly or did not
+    read. A spelling that makes the script fail loudly is not a finding.
+
+Second loop (2026-11-22, six rounds, every finding fixed in the round that raised it; do not re-report):
+
+- [second loop, round 1, medium] scripts/ci/reads.sh takes an include!/#[path] string literal verbatim, so an escape sequence or a Windows backslash path gets past the check (fixed, with a test)
+- [second loop, round 2, medium] A change to scripts/dev-setup.sh never runs the stage jobs whose ci.sh hooks stage.sh tells to call it (fixed, with a test)
+- [second loop, round 2, low] A case variant of an embedded root image is classified 'no CI' but replaces the embedded file on Windows and macOS checkouts (fixed, with a test)
+- [second loop, round 2, low] reads.sh passes without checking anything when its tree is not a git work tree (fixed, with a test)
+- [second loop, round 3, medium] A clippy.toml directly under crates/ changes every stage crate's `cargo clippy -D warnings` result, but marks only the foundation area, so no stage job runs (fixed, with a test)
+- [second loop, round 3, low] stage.sh rejects a valid single-quoted package name (`name = 'x'`) as 'has no [package] name' (fixed, with a test)
+- [second loop, round 3, low] `[ci full]` is now matched case-sensitively; today's workflow matched it in any case (fixed, with a test)
+- [second loop, round 4, medium] reads.sh checks only the first literal of concat!, so concat!("", "../docs/sync/status/x.txt") or concat!("../", "docs/sync/status/x.txt") gets past it (fixed, with a test)
+- [second loop, round 4, low] reads.sh misses listed reads that rustc compiles from a non-.rs module file, and resolves #[path] inside an inline module from the wrong directory (fixed, with a test)
+- [second loop, round 5, medium] reads.sh passes an include that goes through a tracked symlink under a no-CI path, so the embedded content can change with only changes and gate running (fixed, with a test)
+- [second loop, round 5, medium] reads.sh passes a read that does not name a tracked file, and a read of a path no rule knows passes by 'marking every area', contrary to ruling 12 (fixed, with a test)
+- [second loop, round 6, low] scripts/ci/toolchain.sh reports success when `rustup toolchain install` and `rustup component add` both failed, because set -e is off inside the `( ... ) || die` subshell (fixed, with a test)
+- [second loop, round 6, low] scripts/ci/toolchain.sh silently drops single-quoted (TOML literal string) components and targets from rust-toolchain.toml and still passes (fixed, with a test)
+
+14. **A path dependency on the root package, and what follows for the areas (lead ruling, 2026-11-22
+    10:35 UTC).** `fixtures/generator` depends on the root package by path, because the fixtures are what
+    today's code writes. Three rules:
+    - `fixtures/generator/**` marks `foundation` only. The rest of `fixtures/**` marks what it marked
+      before (its data is read by later stages' tests; the generator's code is not).
+    - Whatever marks the area `root` also marks `foundation`: a change to today's code changes what the
+      generator writes, and `scripts/check-fixtures.sh` (run by `scripts/tests/run.sh` in the foundation
+      job) compares the committed fixtures with it.
+    - In `scripts/ci/reads.sh`, a path dependency whose directory is the top of the tree is a dependency on
+      the root package, and its files are the tracked files under `src/` plus `build.rs` and the root
+      `Cargo.toml`, not every tracked file of the repository.
+
+15. **The last CI wiring (lead ruling, 2026-11-22; changes the design text above where they differ).** The
+    supply-chain job has no step of its own for tools: `scripts/ci/supply-chain.sh` installs the row
+    `supply-chain`. The foundation job runs `scripts/spec-lint.sh`. The android job runs on the three systems
+    on wide runs like the other stage jobs, so that `taskdeck-android` compiles on Windows and macOS; its
+    hooks decide by `CI_OS` what they do. `SYNC.md` and `SYNC_PLAN.md` mark the foundation area, because
+    spec-lint reads both; `scripts/wrangler/**` is a shared path like `scripts/dev-setup.sh`.
+
+Third loop (2026-11-22, three rounds, converged): round 1 confirmed the lead's three findings above and found
+the two path-rule gaps of ruling 15 (all fixed); round 2 found nothing; round 3 found one low (stage.sh reads
+a `name = "..."` line inside a multi-line string of `[package]` as the package name), left as it is.

@@ -1,0 +1,11 @@
+# Gate of stage release (SYNC_PLAN.md §6.11). Format: scripts/gates/README.md.
+# "Gate: the dry run produces every artifact and each verifies; the nightly
+# jobs run green once; every runbook step that can run in a container has been
+# run." Only the last is a container's; the verifier scripts' tests run too.
+run | verifier-tests   | the scripts that verify an artifact the way SYNC.md §8 says and prove it lacks the test-only trust feature pass their tests (§6.11 item 1) | bash scripts/tests/run.sh
+run | runbooks         | "every runbook step that can run in a container has been run": each runbook's container steps, run literally (§6.11 gate, item 3) | bash scripts/release/check-runbooks.sh
+ci  | dry-run          | "the dry run produces every artifact and each verifies" (§6.11 gate) | release.yml in dry-run mode, started from a pull request
+ci  | nightly          | "the nightly jobs run green once": the simulator at 10,000 seeds, the fuzz targets, the move-board rehearsal (§6.11 gate, item 2) | nightly.yml, one full run
+run | spec-coverage    | every clause release owns is cited by a release test (§3.3) | bash scripts/spec-coverage.sh release
+run | no-unimplemented | no unimplemented!() or todo!() left in release's paths (§3.3) | bash scripts/gate-lib.sh no-unimplemented release
+run | no-skipped-tests | no skipped or ignored test in release's paths (§3.3) | bash scripts/gate-lib.sh no-skipped-tests release

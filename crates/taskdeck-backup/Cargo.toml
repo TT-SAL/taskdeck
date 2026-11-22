@@ -1,0 +1,13 @@
+[package]
+name = "taskdeck-backup"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The backup format, writer and reader (spec: docs/sync/spec/seal.md §21, device.md §15)."
+
+[dependencies]
+taskdeck-core = { workspace = true }
+taskdeck-seal = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+flate2 = { workspace = true }

@@ -1,0 +1,90 @@
+# What crates/taskdeck-core/clippy.toml must keep disallowing (SYNC_PLAN.md §6.2
+# purity; CORE-GEN-003): every entry foundation put there, the clock, chrono::Local,
+# file, network, thread, random-source and environment paths. One `<table> <path>` per line,
+# <table> being disallowed-types or disallowed-methods. Checked by
+# `bash scripts/gate-lib.sh clippy-config` in the core gate. The list names every
+# entry of that clippy.toml (scripts/tests/test-gate-lib.sh checks it): an entry
+# the core adds is added here too; removing one is a change to the gate (§3.3).
+
+disallowed-types chrono::Local
+disallowed-types chrono::offset::Local
+disallowed-types std::fs::File
+disallowed-types std::fs::OpenOptions
+disallowed-types std::fs::DirBuilder
+disallowed-types std::net::TcpStream
+disallowed-types std::net::TcpListener
+disallowed-types std::net::UdpSocket
+disallowed-types std::thread::Builder
+disallowed-types std::thread::LocalKey
+disallowed-methods chrono::Utc::now
+disallowed-methods chrono::Local::now
+disallowed-methods std::time::SystemTime::now
+disallowed-methods std::time::Instant::now
+disallowed-methods std::time::SystemTime::elapsed
+disallowed-methods std::time::Instant::elapsed
+disallowed-methods std::fs::read
+disallowed-methods std::fs::read_to_string
+disallowed-methods std::fs::write
+disallowed-methods std::fs::read_dir
+disallowed-methods std::fs::create_dir
+disallowed-methods std::fs::create_dir_all
+disallowed-methods std::fs::remove_file
+disallowed-methods std::fs::remove_dir
+disallowed-methods std::fs::remove_dir_all
+disallowed-methods std::fs::rename
+disallowed-methods std::fs::copy
+disallowed-methods std::fs::hard_link
+disallowed-methods std::fs::metadata
+disallowed-methods std::fs::symlink_metadata
+disallowed-methods std::fs::canonicalize
+disallowed-methods std::fs::read_link
+disallowed-methods std::fs::set_permissions
+disallowed-methods std::fs::exists
+disallowed-methods std::fs::File::open
+disallowed-methods std::fs::File::create
+disallowed-methods std::fs::File::create_new
+disallowed-methods std::fs::File::options
+disallowed-methods std::fs::OpenOptions::new
+disallowed-methods std::path::Path::exists
+disallowed-methods std::path::Path::metadata
+disallowed-methods std::path::Path::read_dir
+disallowed-methods std::path::Path::try_exists
+disallowed-methods std::path::Path::is_file
+disallowed-methods std::path::Path::is_dir
+disallowed-methods std::path::Path::is_symlink
+disallowed-methods std::path::Path::canonicalize
+disallowed-methods std::path::Path::read_link
+disallowed-methods std::path::Path::symlink_metadata
+disallowed-methods std::net::TcpStream::connect
+disallowed-methods std::net::TcpStream::connect_timeout
+disallowed-methods std::net::TcpListener::bind
+disallowed-methods std::net::UdpSocket::bind
+disallowed-methods std::net::ToSocketAddrs::to_socket_addrs
+disallowed-methods std::thread::spawn
+disallowed-methods std::thread::scope
+disallowed-methods std::thread::sleep
+disallowed-methods std::thread::park
+disallowed-methods std::thread::Builder::new
+disallowed-methods std::thread::Builder::spawn
+disallowed-methods std::thread::available_parallelism
+disallowed-methods std::thread::park_timeout
+disallowed-methods std::thread::yield_now
+disallowed-methods std::thread::current
+disallowed-methods std::collections::hash_map::RandomState::new
+disallowed-methods std::hash::RandomState::new
+disallowed-methods std::os::unix::fs::symlink
+disallowed-methods std::os::windows::fs::symlink_file
+disallowed-methods std::os::windows::fs::symlink_dir
+disallowed-methods std::env::var
+disallowed-methods std::env::var_os
+disallowed-methods std::env::vars
+disallowed-methods std::env::vars_os
+disallowed-methods std::env::set_var
+disallowed-methods std::env::remove_var
+disallowed-methods std::env::args
+disallowed-methods std::env::args_os
+disallowed-methods std::env::current_dir
+disallowed-methods std::env::set_current_dir
+disallowed-methods std::env::current_exe
+disallowed-methods std::env::temp_dir
+disallowed-methods std::env::home_dir

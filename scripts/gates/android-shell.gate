@@ -1,0 +1,11 @@
+# Gate of stage android-shell (SYNC_PLAN.md §6.6). Format: scripts/gates/README.md.
+run | unit             | "unit tests": the Gradle unit tests (§6.6 gate) | bash android/ci.sh unit
+run | link-armv7       | "the armeabi-v7a build links" (§6.6 gate) | bash android/ci.sh link
+run | apk-size         | "universal APK under 25 MB": building and measuring the APK needs no emulator, so it runs here too (§6.6 gate; stricter reading) | bash android/ci.sh apk-size
+ci  | instrumented     | "instrumented tests in CI, WebView tests on a recent image, the rest also at API 26" (§6.6 gate) | emulator (API 26 and API 36)
+ci  | exfil-sink       | "the harness's sink stays empty" (§6.6 gate) | emulator (API 36)
+ci  | budgets          | "cold start to first painted day within 2.5 s, bridge round trip within 60 ms at the 95th percentile" on the API 36 emulator, median of five (§6.6 gate, §3.3) | emulator (API 36), android's budget step
+ci  | ci-jobs          | the stage's CI jobs green (§6) | android, emulator
+run | spec-coverage    | every clause android-shell owns is cited by one of its tests (§3.3) | bash scripts/spec-coverage.sh android-shell
+run | no-unimplemented | no unimplemented!() or todo!() left in android-shell's paths, tests included (§3.3) | bash scripts/gate-lib.sh no-unimplemented android-shell
+run | no-skipped-tests | no @Ignore, @Disabled, assumeTrue(false or skipped page test in android-shell's paths (§3.3) | bash scripts/gate-lib.sh no-skipped-tests android-shell

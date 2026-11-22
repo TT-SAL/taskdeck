@@ -135,3 +135,78 @@ for the gate runner (a made-up gate file with a passing, a failing and a CI item
 for the two scans. All run by `bash scripts/tests/run.sh`.
 
 Report: every gate item per stage (the table), every place you had to interpret the plan, what you ran.
+
+## State after the implementation (2026-11-22)
+
+Built: `spec-lint.sh`, `spec-coverage.sh`, `gate.sh` with one gate file per stage, the gate scans,
+`check-android-targets.sh`, and `dev-setup.sh` for every stage (the Android SDK and NDK, cargo-ndk and
+wrangler were installed once in the container: 3.0 GB). The foundation gate passed 13 of its 14 run items
+in the implementer's run; spec-lint fails on two real defects of core.md and on the empty requirement map.
+
+## Lead rulings for task tooling
+
+1. **wrangler stays at 4.166.0**, the version SYNC_PLAN.md names, although it and its pinned dependencies
+   were younger than seven days when pinned. It runs only in cloud containers and CI, from a lockfile with
+   integrity hashes and without install scripts. Stage `relay` may move the pin.
+2. **`dev-setup.sh` accepts the Android SDK licences** for its own SDK directory and says so when it does;
+   the lead tells the owner.
+3. **The map rules of spec-lint stand** (rows in SYNC.md's order, a row for every section of §3 to §9 that
+   has no subsections, a `plan §2:` topic equal to the first cell of a row of that table). The requirement
+   map is written to meet them.
+4. **Two rows of their own in the stage table of `dev-setup.sh`**, so that CI installs only what a job
+   needs: `supply-chain` (cargo-deny, cargo-audit), used by `scripts/ci/supply-chain.sh`; and
+   `android-targets` (the Rust toolchain and cargo-ndk, and the NDK only when neither `ANDROID_NDK_HOME`
+   nor `ANDROID_NDK_LATEST_HOME` names a usable one), used by `crates/taskdeck-android/ci.sh`, the hook of
+   CI's android job, before it runs `scripts/check-android-targets.sh`. GitHub's Ubuntu runners carry an
+   NDK; a container does not.
+5. **spec-lint joins the foundation CI job last**, once the requirement map is filled and core.md's two
+   defects are fixed (the lead makes that change with the exit).
+
+## Already raised and handled (do not re-report)
+
+(none yet)
+
+6. **The two scans guard against honest mistakes, and their list of spellings is closed (lead ruling,
+   2026-11-22 13:55 UTC).** Three attack rounds in a row found one more way to write a skipped test that
+   `no-skipped-tests` did not see. A developer who wants to hide a skipped test can always find a spelling;
+   review and the stage's own tests are the defence against that. From here a finding against
+   `no-skipped-tests` or `no-unimplemented` counts only when the ORDINARY form passes: Rust `#[ignore]`,
+   `#[ignore = "..."]`, `#[cfg_attr(..., ignore)]`, `#![ignore]`, `unimplemented!(`, `todo!(`; node:test
+   `it.skip(`, `test.skip(`, `describe.skip(`, `{ skip: true }` and `t.skip(`; JUnit `@Ignore`, `@Disabled`,
+   `assumeTrue(false)`. Any other spelling, split across lines or fully qualified, is not a finding. The
+   same holds for `spec-lint` and `spec-coverage`: a finding counts when a clause, a citation or a map row
+   written the way the README shows passes or fails wrongly, not for forms the README does not show.
+7. **The requirement map may name the plan's backlog.** SYNC_PLAN.md §6.13, "After cutover (backlog, not
+   planned here)", stands under "6. Stages"; a requirement the plan defers there maps to `stage: backlog`.
+   `spec-lint` accepts `backlog` as a stage name in the map (and nowhere else: no clause has that owner).
+8. **CI wiring comes in one change at the end** (the lead's, with the exit): the supply-chain job's "Pinned
+   tools" step goes, the foundation job runs `spec-lint`, and the android job gets the three-system matrix
+   on wide runs so that `taskdeck-android` compiles on Windows and macOS too. Until then these are not
+   findings.
+
+9. **spec-coverage checks that a clause is cited, not that the citing test runs (lead ruling, 2026-11-22
+   20:20 UTC).** The plan's words are that the script "fails if a clause owned by the stage appears in no
+   test". The second loop's rounds 2 to 6 each found one more way in which a citation can stand next to a
+   test that does not run (commented out, inside a block comment, beside a call that only looks like a test),
+   and each fix made the next finding. From here the rule is the plan's and no more: **a clause is covered
+   when its id occurs, as a whole token, in a file under the stage's test paths.** The script does not try to
+   tell whether a test is live or which test a marker belongs to: a skipped test is `no-skipped-tests`'
+   business, a commented-out one is review's. The fixer removes the code that decides liveness or
+   attachment (comment tracking, test-declaration matching) and the tests that pin it. What stays: whole-id
+   matching (an id that is a prefix of another does not match it); a token shaped like a clause id that
+   names no live clause is an error; the per-stage test paths; the tools' own fixtures do not count; `rc`
+   runs every stage's check. A finding against spec-coverage counts only if a clause whose id stands in a
+   file under the stage's test paths is reported uncovered, or a clause whose id stands in none is reported
+   covered.
+10. **The android-shell gate leaves stage `android`'s part of the crate out.** For this one change the
+    tooling task may edit `crates/taskdeck-android/src/**`: every item compiled only with the feature
+    `backend-device` moves into one module file (`src/device_backend.rs`), re-exported so that each public
+    path stays exactly as bridge.md's "Public API" section writes it; `android-shell`'s owned paths in
+    `scripts/gate-lib.sh` leave that file out and `android`'s include it; the gates README says so.
+11. **`spec-coverage.sh rc` runs every stage's check** (the stricter reading the second loop took): kept.
+
+Third loop (2026-11-22, three rounds, converged): round 1 confirmed the lead's two findings (ruling 9 for
+spec-coverage; ruling 10 for the android-shell gate), both fixed; round 2 found nothing; round 3 found one
+low, left as it is: a case of `scripts/tests/test-gate-lib.sh` reads `crates/taskdeck-core/clippy.toml` and
+the required list by paths relative to the current directory, so that test file passes only when run from
+the repository root (which is how `scripts/tests/run.sh` is run by CI and by the gate).

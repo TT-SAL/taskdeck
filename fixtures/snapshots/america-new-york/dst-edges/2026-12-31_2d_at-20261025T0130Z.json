@@ -1,0 +1,791 @@
+{
+  "version": 0,
+  "today": "2026-10-24",
+  "now_minutes": 1290,
+  "palette": [
+    [
+      10,
+      20,
+      30,
+      40
+    ],
+    [
+      200,
+      60,
+      60,
+      120
+    ],
+    [
+      60,
+      200,
+      60,
+      104
+    ],
+    [
+      60,
+      60,
+      200,
+      88
+    ],
+    [
+      180,
+      180,
+      40,
+      74
+    ],
+    [
+      120,
+      40,
+      160,
+      136
+    ]
+  ],
+  "labels": {
+    "severity": [
+      "Not important",
+      "Mildly important",
+      "Important",
+      "Highly important",
+      "Lethally important"
+    ],
+    "horizon": [
+      "Within a month",
+      "Within a week",
+      "Within days",
+      "Whenever"
+    ],
+    "horizon_order": [
+      2,
+      1,
+      0,
+      3
+    ],
+    "weekdays": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat",
+      "Sun"
+    ]
+  },
+  "days": [
+    {
+      "date": "2026-12-31",
+      "weekday": "Thursday",
+      "label": "31 December 2026",
+      "is_today": false,
+      "summary": "1h planned · 1 block · 2 due · 30m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 14,
+          "session": null,
+          "name": "DST fixture: routine at 02:30 every day",
+          "kind": "routine",
+          "color": 0,
+          "start": 150,
+          "minutes": 30,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 18,
+          "session": null,
+          "name": "Edge fixture: due at the last minute of 2026",
+          "kind": "task",
+          "color": 2,
+          "start": 1079,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 0,
+          "columns": 2
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Edge fixture: new year's first minute",
+          "kind": "event",
+          "color": 5,
+          "start": 1080,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 2
+        },
+        {
+          "id": 20,
+          "session": null,
+          "name": "Edge fixture: due in New York's 2026, Berlin's 2027",
+          "kind": "task",
+          "color": 2,
+          "start": 1410,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2027-01-01",
+      "weekday": "Friday",
+      "label": "1 January 2027",
+      "is_today": false,
+      "summary": "30m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 14,
+          "session": null,
+          "name": "DST fixture: routine at 02:30 every day",
+          "kind": "routine",
+          "color": 0,
+          "start": 150,
+          "minutes": 30,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    }
+  ],
+  "tray": {
+    "due": [
+      {
+        "id": 9,
+        "name": "DST fixture: due at New York's spring-forward instant",
+        "color": 3,
+        "deadline": "2026-03-08T03:00",
+        "due_in": "overdue",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 5,
+        "name": "DST fixture: due at a naive time in the gap",
+        "color": 1,
+        "deadline": "2026-03-28T21:30",
+        "due_in": "overdue",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 7,
+        "name": "DST fixture: due at the first 02:30 of the fold",
+        "color": 2,
+        "deadline": "2026-10-24T20:30",
+        "due_in": "overdue",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 8,
+        "name": "DST fixture: due at the second 02:30 of the fold",
+        "color": 2,
+        "deadline": "2026-10-24T21:30",
+        "due_in": "0m",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 22,
+        "name": "Edge fixture: due at local 1970-01-01 00:30 (1969 in UTC)",
+        "color": 0,
+        "deadline": "1969-12-31T18:30",
+        "due_in": "overdue",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 10,
+        "name": "DST fixture: due at New York's first 01:30 of the fold",
+        "color": 3,
+        "deadline": "2026-11-01T01:30",
+        "due_in": "7d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 11,
+        "name": "DST fixture: due at New York's second 01:30 of the fold",
+        "color": 3,
+        "deadline": "2026-11-01T01:30",
+        "due_in": "7d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 6,
+        "name": "DST fixture: due at a naive time in the fold",
+        "color": 1,
+        "deadline": "2026-10-24T21:30",
+        "due_in": "0m",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 18,
+        "name": "Edge fixture: due at the last minute of 2026",
+        "color": 2,
+        "deadline": "2026-12-31T17:59",
+        "due_in": "67d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 20,
+        "name": "Edge fixture: due in New York's 2026, Berlin's 2027",
+        "color": 2,
+        "deadline": "2026-12-31T23:30",
+        "due_in": "68d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      }
+    ],
+    "later": [
+      {
+        "id": 24,
+        "name": "Edge fixture: due at 9999-12-31 23:59 local",
+        "color": 4,
+        "deadline": "9999-12-31T17:59",
+        "due_in": "2912145d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      }
+    ]
+  },
+  "items": [
+    {
+      "id": 1,
+      "name": "DST fixture: block in the spring-forward gap",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 60,
+      "planned": 150,
+      "remaining": 0,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-03-28",
+          "start": 1260,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-03-28",
+          "start": 1290,
+          "minutes": 90
+        }
+      ],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 2,
+      "name": "DST fixture: event at 02:30 on the spring-forward day",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-03-28T21:30",
+      "duration": 60,
+      "planned": 0,
+      "remaining": 60,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 3,
+      "name": "DST fixture: event at 02:30 on the fall-back day",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-24T21:30",
+      "duration": 60,
+      "planned": 0,
+      "remaining": 60,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 4,
+      "name": "DST fixture: block across the repeated hour",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 120,
+      "planned": 240,
+      "remaining": 0,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-24",
+          "start": 1260,
+          "minutes": 120
+        },
+        {
+          "index": 1,
+          "day": "2026-10-24",
+          "start": 960,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 5,
+      "name": "DST fixture: due at a naive time in the gap",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-03-28T21:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 6,
+      "name": "DST fixture: due at a naive time in the fold",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-10-24T21:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 7,
+      "name": "DST fixture: due at the first 02:30 of the fold",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-10-24T20:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 8,
+      "name": "DST fixture: due at the second 02:30 of the fold",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-10-24T21:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 9,
+      "name": "DST fixture: due at New York's spring-forward instant",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-03-08T03:00",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 10,
+      "name": "DST fixture: due at New York's first 01:30 of the fold",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-11-01T01:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 11,
+      "name": "DST fixture: due at New York's second 01:30 of the fold",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-11-01T01:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 12,
+      "name": "DST fixture: event at 01:30 on New York's fall-back day",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-31T20:30",
+      "duration": 60,
+      "planned": 0,
+      "remaining": 60,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 13,
+      "name": "DST fixture: event at 02:30 on New York's spring-forward day",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-03-07T20:30",
+      "duration": 60,
+      "planned": 0,
+      "remaining": 60,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 14,
+      "name": "DST fixture: routine at 02:30 every day",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": {
+        "days": 127,
+        "summary": "every day",
+        "start": 150,
+        "minutes": 30
+      },
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 15,
+      "name": "Edge fixture: block running past midnight",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 120,
+      "planned": 120,
+      "remaining": 0,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 960,
+          "minutes": 120
+        }
+      ],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 16,
+      "name": "Edge fixture: event at midnight",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-20T18:00",
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 17,
+      "name": "Edge fixture: last minute of the day",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-21T17:45",
+      "duration": 15,
+      "planned": 0,
+      "remaining": 15,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 18,
+      "name": "Edge fixture: due at the last minute of 2026",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-12-31T17:59",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 19,
+      "name": "Edge fixture: new year's first minute",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-12-31T18:00",
+      "duration": 60,
+      "planned": 0,
+      "remaining": 60,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 20,
+      "name": "Edge fixture: due in New York's 2026, Berlin's 2027",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-12-31T23:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 21,
+      "name": "Edge fixture: the first day of 1970",
+      "kind": "event",
+      "color": 5,
+      "deadline": "1969-12-31T18:00",
+      "duration": 60,
+      "planned": 0,
+      "remaining": 60,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 22,
+      "name": "Edge fixture: due at local 1970-01-01 00:30 (1969 in UTC)",
+      "kind": "task",
+      "color": 0,
+      "deadline": "1969-12-31T18:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 23,
+      "name": "Edge fixture: the last block of 9999",
+      "kind": "event",
+      "color": 5,
+      "deadline": "9999-12-31T17:45",
+      "duration": 15,
+      "planned": 0,
+      "remaining": 15,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    },
+    {
+      "id": 24,
+      "name": "Edge fixture: due at 9999-12-31 23:59 local",
+      "kind": "task",
+      "color": 4,
+      "deadline": "9999-12-31T17:59",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-11-02"
+    }
+  ],
+  "ranked": [
+    9,
+    5,
+    7,
+    8,
+    22,
+    10,
+    11,
+    6,
+    4,
+    15,
+    1,
+    18,
+    20,
+    24
+  ],
+  "done": [
+    {
+      "id": 9000,
+      "archived_at": "9999-12-31T17:59:00-05:00",
+      "name": "Edge archive fixture: archived at 9999-12-31 23:59 local",
+      "kind": "task",
+      "color": 1,
+      "finished": true,
+      "when": "Fri 31 Dec 17:59",
+      "verdict": "finished 59m late  ·  45m estimated, 45m in one sitting  ·  97071mo on the board"
+    },
+    {
+      "id": 30,
+      "archived_at": "2026-11-03T05:00:00-05:00",
+      "name": "Edge archive fixture: finished at the turn of the year",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Tue 3 Nov 05:00",
+      "verdict": "finished  ·  no time set aside  ·  1d on the board"
+    },
+    {
+      "id": 29,
+      "archived_at": "2026-11-01T01:30:00-05:00",
+      "name": "DST archive fixture: finished in New York's second 01:30",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Sun 1 Nov 01:30",
+      "verdict": "finished  ·  no time set aside  ·  a moment on the board"
+    },
+    {
+      "id": 28,
+      "archived_at": "2026-11-01T01:30:00-04:00",
+      "name": "DST archive fixture: finished in New York's first 01:30",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Sun 1 Nov 01:30",
+      "verdict": "finished  ·  no time set aside  ·  a moment on the board"
+    },
+    {
+      "id": 32,
+      "archived_at": "2026-10-24T21:45:00-04:00",
+      "name": "DST archive fixture: event deleted in the fold",
+      "kind": "event",
+      "color": 5,
+      "finished": false,
+      "when": "Sat 24 Oct 21:45",
+      "verdict": "event removed  ·  was set for 24 Oct 21:30  ·  a moment on the board"
+    },
+    {
+      "id": 26,
+      "archived_at": "2026-10-24T21:30:00-04:00",
+      "name": "DST archive fixture: finished in the second 02:30 of Berlin's fold",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Sat 24 Oct 21:30",
+      "verdict": "finished  ·  no time set aside  ·  a moment on the board"
+    },
+    {
+      "id": 25,
+      "archived_at": "2026-10-24T20:30:00-04:00",
+      "name": "DST archive fixture: finished in the first 02:30 of Berlin's fold",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Sat 24 Oct 20:30",
+      "verdict": "finished  ·  no time set aside  ·  a moment on the board"
+    },
+    {
+      "id": 27,
+      "archived_at": "2026-03-28T21:00:00-04:00",
+      "name": "DST archive fixture: finished just after Berlin's gap",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Sat 28 Mar 21:00",
+      "verdict": "finished  ·  no time set aside  ·  a moment on the board"
+    },
+    {
+      "id": 31,
+      "archived_at": "1969-12-31T18:15:00-05:00",
+      "name": "Edge archive fixture: finished on 1970-01-01 local",
+      "kind": "task",
+      "color": 0,
+      "finished": true,
+      "when": "Wed 31 Dec 18:15",
+      "verdict": "finished  ·  no time set aside  ·  a moment on the board"
+    }
+  ],
+  "notes": "DST and edge fixture notes.",
+  "dials": {
+    "blur": 11,
+    "light": 39
+  }
+}

@@ -1,10 +1,19 @@
 # What the cloud sessions building SYNC.md cannot do for themselves: run the
 # code on Windows and macOS, and boot an Android emulator. This is their test
-# bench. No secrets, read-only token, actions pinned by commit.
+# bench. No secrets, read-only token, actions pinned by commit, no caches.
 #
-# Every push runs the Linux job. The full matrix (desktop builds on all three
-# systems, the emulator) runs on pull requests, and on any push whose commit
-# message contains "[ci full]".
+# The `changes` job decides from the event and the changed paths which jobs
+# run (scripts/ci/changes.sh; the rules are in scripts/ci/README.md). Pushes
+# run only Linux jobs. The full matrix (desktop builds on all three systems,
+# the emulator, the stage jobs on all three systems) runs on pull requests,
+# and on any push whose commit message contains "[ci full]". The `gate` job
+# always runs and passes only if no job failed or was cancelled; it is the
+# check a branch rule requires, and only the pull-request run is named `gate`.
+#
+# This file only wires events to scripts: every decision is a script under
+# scripts/ci/ that runs and is tested in a container (scripts/tests/). A later
+# stage adds its own checks in <its directory>/ci.sh (scripts/ci/stage.sh), not
+# here.
 name: ci
 
 on:
@@ -14,25 +23,70 @@ on:
 permissions:
   contents: read
 
+# A newer run cancels an older one of the same pull request, running or
+# pending: the newer run diffs the whole pull request against its base, so it
+# tests everything the older one would have. A push run tests only the paths
+# changed since `before`, so it must never be cancelled or replaced: each push
+# run has a group of its own (GitHub cancels a pending run of a group when a
+# newer one is queued there, whatever cancel-in-progress says).
 concurrency:
-  group: ci-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.event_name == 'push' && format('-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changes:
+    name: Which areas changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      root: ${{ steps.decide.outputs.root }}
+      supply: ${{ steps.decide.outputs.supply }}
+      foundation: ${{ steps.decide.outputs.foundation }}
+      core: ${{ steps.decide.outputs.core }}
+      seal: ${{ steps.decide.outputs.seal }}
+      engine: ${{ steps.decide.outputs.engine }}
+      device: ${{ steps.decide.outputs.device }}
+      recovery: ${{ steps.decide.outputs.recovery }}
+      relay: ${{ steps.decide.outputs.relay }}
+      android: ${{ steps.decide.outputs.android }}
+      wide: ${{ steps.decide.outputs.wide }}
+      oses: ${{ steps.decide.outputs.oses }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide
+        id: decide
+        shell: bash
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BEFORE: ${{ github.event.before }}
+          CI_AFTER: ${{ github.sha }}
+          CI_HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+        run: bash scripts/ci/changes.sh
+      # Fails the run (and so gate) when code reads a file whose changes would
+      # not run that code's jobs: a path dependency, an include, a symlink.
+      - name: What the code reads
+        shell: bash
+        run: bash scripts/ci/reads.sh
+
   linux:
     name: Linux · headless tests
+    needs: changes
+    if: needs.changes.outputs.root == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Toolchain
-        run: |
-          rustup update stable --no-self-update
-          rustup default stable
-          rustc --version && cargo --version && nproc
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
       - name: Library tests without the window
         run: cargo test --locked --no-default-features --lib
       - name: The server still builds
@@ -40,7 +94,8 @@ jobs:
 
   desktop:
     name: Desktop · ${{ matrix.os }}
-    if: github.event_name == 'pull_request' || contains(github.event.head_commit.message, '[ci full]')
+    needs: changes
+    if: needs.changes.outputs.root == 'true' && needs.changes.outputs.wide == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -49,20 +104,23 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Toolchain
         shell: bash
-        run: |
-          rustup update stable --no-self-update
-          rustup default stable
-          rustc --version && cargo --version
+        run: bash scripts/ci/toolchain.sh
       - name: Library tests with the window compiled in
         run: cargo test --locked --lib
       - name: The app builds
         run: cargo build --locked --bin TaskDeck
+      - name: Release builds unwind on panic
+        shell: bash
+        run: bash scripts/check-release-panic.sh
 
   emulator:
     name: Android emulator · API ${{ matrix.api }}
-    if: github.event_name == 'pull_request' || contains(github.event.head_commit.message, '[ci full]')
+    needs: changes
+    if: needs.changes.outputs.android == 'true' && needs.changes.outputs.wide == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -90,3 +148,251 @@ jobs:
             adb shell getprop ro.product.cpu.abi
             adb shell dumpsys package com.google.android.webview | grep -m1 versionName || adb shell dumpsys package com.android.webview | grep -m1 versionName || true
             adb shell cat /proc/meminfo | head -1
+
+  supply-chain:
+    name: Supply chain
+    needs: changes
+    if: needs.changes.outputs.supply == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Full history: the cooldown compares Cargo.lock with a base commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
+      # scripts/ci/supply-chain.sh installs its pinned tools itself
+      # (`bash scripts/dev-setup.sh supply-chain`).
+      - name: cargo deny, cargo audit, the seven-day cooldown
+        shell: bash
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_PR_BASE: ${{ github.event.pull_request.base.sha }}
+          CI_BEFORE: ${{ github.event.before }}
+        run: bash scripts/ci/supply-chain.sh
+
+  foundation:
+    name: Foundation · scripts and gates
+    needs: changes
+    if: needs.changes.outputs.foundation == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
+      - name: The scripts' own tests
+        shell: bash
+        run: bash scripts/tests/run.sh
+      - name: Release builds unwind on panic
+        shell: bash
+        run: bash scripts/check-release-panic.sh
+      - name: The build date follows SOURCE_DATE_EPOCH
+        shell: bash
+        run: bash scripts/check-build-date.sh
+      # ---- LATER FOUNDATION TASKS: add their steps here, below this line ----
+      - name: Spec lint
+        shell: bash
+        run: bash scripts/spec-lint.sh
+      # Spec lint, the fixture check, and the Android and wasm32 skeleton
+      # checks, each a `bash scripts/<name>.sh` step with `shell: bash`.
+      # ---- end of the place for later foundation tasks ----
+
+  # One job per later stage. Each runs scripts/ci/stage.sh <stage>, which tests
+  # and lints the stage's crates and runs the stage's own <dir>/ci.sh hooks
+  # (scripts/ci/README.md), so a stage rarely needs to edit this file.
+  core:
+    name: Stage core · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.oses) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
+      - name: Stage checks
+        shell: bash
+        env:
+          CI_WIDE: ${{ needs.changes.outputs.wide }}
+        run: bash scripts/ci/stage.sh core
+
+  seal:
+    name: Stage seal · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.seal == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.oses) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
+      - name: Stage checks
+        shell: bash
+        env:
+          CI_WIDE: ${{ needs.changes.outputs.wide }}
+        run: bash scripts/ci/stage.sh seal
+
+  engine:
+    name: Stage engine · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.oses) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
+      - name: Stage checks
+        shell: bash
+        env:
+          CI_WIDE: ${{ needs.changes.outputs.wide }}
+        run: bash scripts/ci/stage.sh engine
+
+  device:
+    name: Stage device · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.device == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.oses) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
+      - name: Stage checks
+        shell: bash
+        env:
+          CI_WIDE: ${{ needs.changes.outputs.wide }}
+        run: bash scripts/ci/stage.sh device
+
+  recovery:
+    name: Stage recovery · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.recovery == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.oses) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
+      - name: Stage checks
+        shell: bash
+        env:
+          CI_WIDE: ${{ needs.changes.outputs.wide }}
+        run: bash scripts/ci/stage.sh recovery
+
+  relay:
+    name: Stage relay
+    needs: changes
+    if: needs.changes.outputs.relay == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
+      - name: Stage checks
+        shell: bash
+        env:
+          CI_WIDE: ${{ needs.changes.outputs.wide }}
+        run: bash scripts/ci/stage.sh relay
+
+  android:
+    name: Stage android · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.oses) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        shell: bash
+        run: bash scripts/ci/toolchain.sh
+      - name: Stage checks
+        shell: bash
+        env:
+          CI_WIDE: ${{ needs.changes.outputs.wide }}
+        run: bash scripts/ci/stage.sh android
+
+  # The one check a branch rule requires. It needs every other job, one per
+  # line (scripts/tests/test-ci-workflow.sh fails if one is missing). Only the
+  # pull-request run is named `gate`, so the narrow push run on the same commit
+  # can never satisfy a rule that requires `gate`.
+  gate:
+    name: ${{ github.event_name == 'pull_request' && 'gate' || 'gate (push)' }}
+    if: always()
+    needs:
+      - changes
+      - linux
+      - desktop
+      - emulator
+      - supply-chain
+      - foundation
+      - core
+      - seal
+      - engine
+      - device
+      - recovery
+      - relay
+      - android
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Every job passed or was skipped
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bash scripts/ci/gate.sh

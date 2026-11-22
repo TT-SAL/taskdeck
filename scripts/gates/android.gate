@@ -1,0 +1,12 @@
+# Gate of stage android (SYNC_PLAN.md §6.10). Format: scripts/gates/README.md.
+run | unit             | the Gradle unit tests, on the real core (§6.10, §6.6 gate) | bash android/ci.sh unit
+run | link-armv7       | the armeabi-v7a build still links with the real runtime (§6.10 "the budgets from §6.6 hold", §6.6 gate) | bash android/ci.sh link
+run | apk-size         | "the budgets from §6.6 hold with the real core": the universal APK under 25 MB (§6.10 gate; stricter reading, it needs no emulator) | bash android/ci.sh apk-size
+ci  | instrumented     | "instrumented tests for offline edit, process death, reboot, forced Doze, a zone change, and a 10,000-row archive" (§6.10 gate) | emulator (API 26 and API 36)
+ci  | exfil-sink       | "the exfiltration harness still empty" (§6.10 gate) | emulator (API 36)
+ci  | budgets          | "the budgets from §6.6 hold with the real core": cold start 2.5 s, bridge round trip 60 ms at p95 (§6.10 gate, §3.3) | emulator (API 36), android's budget step
+ci  | three-devices    | "a three-device end-to-end test in CI with the emulator as one device" (§6.10 gate) | emulator (API 36) with the standby relay
+ci  | ci-jobs          | the stage's CI jobs green (§6) | android, emulator
+run | spec-coverage    | every clause android owns is cited by one of its tests (§3.3) | bash scripts/spec-coverage.sh android
+run | no-unimplemented | no unimplemented!() or todo!() left in android's paths, tests included (§3.3) | bash scripts/gate-lib.sh no-unimplemented android
+run | no-skipped-tests | no skipped or ignored test in android's paths (§3.3) | bash scripts/gate-lib.sh no-skipped-tests android

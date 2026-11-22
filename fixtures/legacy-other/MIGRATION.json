@@ -1,0 +1,62 @@
+[
+  {
+    "board": "empty",
+    "opened": {
+      "archive_events_marked_finished": 0,
+      "archive_rows": 0,
+      "archive_rows_finished": 0,
+      "archive_rows_with_id_0": 0,
+      "archive_unreadable_lines": 0,
+      "calendar_weeks_to_show": 100,
+      "home_place_found": 1,
+      "items": 0,
+      "items_given_sessions_from_planned_start": 0,
+      "items_with_planned_start_left": 0,
+      "notes_placeholder": 1,
+      "notes_tabs_left": 0,
+      "palette_found": 1,
+      "problems": 0,
+      "selected_colorscheme_id": 1,
+      "ui_scale_percent": 0
+    },
+    "written": {
+      "archive_rows_left_out": 0,
+      "archive_rows_without_id": 0,
+      "blocks_left_out": 0,
+      "items_with_planned_start": 0,
+      "items_without_id": 0,
+      "notepad_tabs": 0,
+      "routines_left_out": 0
+    }
+  },
+  {
+    "board": "small",
+    "opened": {
+      "archive_events_marked_finished": 1,
+      "archive_rows": 4,
+      "archive_rows_finished": 4,
+      "archive_rows_with_id_0": 1,
+      "archive_unreadable_lines": 0,
+      "calendar_weeks_to_show": 100,
+      "home_place_found": 1,
+      "items": 19,
+      "items_given_sessions_from_planned_start": 3,
+      "items_with_planned_start_left": 0,
+      "notes_placeholder": 0,
+      "notes_tabs_left": 0,
+      "palette_found": 1,
+      "problems": 0,
+      "selected_colorscheme_id": 1,
+      "ui_scale_percent": 0
+    },
+    "written": {
+      "archive_rows_left_out": 2,
+      "archive_rows_without_id": 1,
+      "blocks_left_out": 3,
+      "items_with_planned_start": 3,
+      "items_without_id": 6,
+      "notepad_tabs": 3,
+      "routines_left_out": 3
+    }
+  }
+]

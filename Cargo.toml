@@ -3,13 +3,85 @@
 # building the app alone, as before the workspace existed.
 [workspace]
 resolver = "3"
-members = ["crates/panic-probe"]
+members = [
+    "crates/panic-probe",
+    "crates/taskdeck-core",
+    "crates/taskdeck-seal",
+    "crates/taskdeck-sync",
+    "crates/taskdeck-device",
+    "crates/taskdeck-backup",
+    "crates/taskdeck-recover",
+    "crates/taskdeck-android",
+    "fixtures/generator",
+]
 default-members = ["."]
 # A standalone package unpacked under target/ (an older build for the legacy
 # fixtures, an attack round's copy of the tree) builds on its own instead of
 # being claimed by this workspace. Elsewhere in the checkout a nested package
 # must be a member, be excluded here, or carry its own [workspace] table.
 exclude = ["target"]
+
+# Every version the sync crates use, declared once (SYNC_PLAN.md §3.2, §3.4).
+# Later stages add at most one dependency per pull request, so this table is
+# what they build with. The root package does not inherit from it: its own
+# [dependencies] below are unchanged.
+#
+# - Versions SYNC.md §2.3 and §5.1 name are exact pins (`=x.y.z`).
+# - A crate that was already in Cargo.lock is declared at the version the
+#   lockfile holds, so nothing existing moves.
+# - `default-features = false` wherever a crate's defaults reach further than
+#   the sync crates need (chrono's clock, the TLS stack, the cryptography,
+#   image's formats, windows); each crate then names the features it needs in
+#   its own Cargo.toml. That keeps TLS on the ring provider only:
+#   rustls, ureq and the platform verifier never pull aws-lc-rs, and nothing
+#   here pulls openssl, native-tls or a cmake-built crate.
+[workspace.dependencies]
+# The workspace crates (SYNC_PLAN.md §4).
+taskdeck-core = { path = "crates/taskdeck-core" }
+taskdeck-seal = { path = "crates/taskdeck-seal" }
+taskdeck-sync = { path = "crates/taskdeck-sync" }
+taskdeck-device = { path = "crates/taskdeck-device" }
+taskdeck-backup = { path = "crates/taskdeck-backup" }
+
+# Already in Cargo.lock: the version it holds.
+serde = "1.0.228"
+serde_json = "1.0.150"
+flate2 = "1.1.9"
+image = { version = "0.25.10", default-features = false }
+tempfile = "3.27.0"
+base64 = "0.22.1"
+url = "2.5.8"
+subtle = "2.6.1"
+windows = { version = "0.62.2", default-features = false }
+# SYNC.md §5.1 names zeroize 1.9.2, published 2026-11-17: inside the seven-day
+# cooldown until 2026-11-24. Cargo.lock keeps the 1.9.0 it already holds; the
+# lead moves it to 1.9.2 (and this line to "=1.9.2") once the cooldown has
+# passed.
+zeroize = "1.9"
+
+# SYNC.md §2.3: the core and the runtime.
+chrono = { version = "=0.4.45", default-features = false }
+ureq = { version = "=3.5.2", default-features = false }
+tungstenite = { version = "=0.30.0", default-features = false }
+rustls = { version = "=0.23.46", default-features = false }
+rustls-platform-verifier = { version = "=0.7.1", default-features = false }
+jni = { version = "=0.22.4", default-features = false }
+
+# SYNC.md §5.1: one RustCrypto generation.
+chacha20poly1305 = { version = "=0.11.0", default-features = false }
+ed25519-dalek = { version = "=3.0.0", default-features = false }
+x25519-dalek = { version = "=3.0.0", default-features = false }
+hpke = { version = "=0.15.1", default-features = false }
+hkdf = { version = "=0.13.0", default-features = false }
+sha2 = { version = "=0.11.1", default-features = false }
+getrandom = { version = "=0.4.3", default-features = false }
+
+# SYNC_PLAN.md §3.4: the macOS Keychain, at the version the platform verifier
+# already pulls (no second one).
+security-framework = { version = "3.7.0", default-features = false }
+
+# Tests only (SYNC_PLAN.md §3.4).
+proptest = "1.12.0"
 
 [package]
 name = "task_deck"

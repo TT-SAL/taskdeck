@@ -1,0 +1,2233 @@
+{
+  "version": 0,
+  "today": "2026-10-20",
+  "now_minutes": 615,
+  "palette": [
+    [
+      10,
+      20,
+      30,
+      40
+    ],
+    [
+      200,
+      60,
+      60,
+      120
+    ],
+    [
+      60,
+      200,
+      60,
+      104
+    ],
+    [
+      60,
+      60,
+      200,
+      88
+    ],
+    [
+      180,
+      180,
+      40,
+      74
+    ],
+    [
+      120,
+      40,
+      160,
+      136
+    ]
+  ],
+  "labels": {
+    "severity": [
+      "Not important",
+      "Mildly important",
+      "Important",
+      "Highly important",
+      "Lethally important"
+    ],
+    "horizon": [
+      "Within a month",
+      "Within a week",
+      "Within days",
+      "Whenever"
+    ],
+    "horizon_order": [
+      2,
+      1,
+      0,
+      3
+    ],
+    "weekdays": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat",
+      "Sun"
+    ]
+  },
+  "days": [
+    {
+      "date": "2026-10-05",
+      "weekday": "Monday",
+      "label": "5 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-06",
+      "weekday": "Tuesday",
+      "label": "6 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-07",
+      "weekday": "Wednesday",
+      "label": "7 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-08",
+      "weekday": "Thursday",
+      "label": "8 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine · 1h done",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": [
+        {
+          "name": "Archived fixture: finished before its deadline",
+          "finished": true,
+          "color": 2,
+          "start": 600,
+          "minutes": 60,
+          "column": 0,
+          "columns": 1
+        }
+      ]
+    },
+    {
+      "date": "2026-10-09",
+      "weekday": "Friday",
+      "label": "9 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-10",
+      "weekday": "Saturday",
+      "label": "10 October 2026",
+      "is_today": false,
+      "summary": "8h routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-11",
+      "weekday": "Sunday",
+      "label": "11 October 2026",
+      "is_today": false,
+      "summary": "8h routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-12",
+      "weekday": "Monday",
+      "label": "12 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-13",
+      "weekday": "Tuesday",
+      "label": "13 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-14",
+      "weekday": "Wednesday",
+      "label": "14 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-15",
+      "weekday": "Thursday",
+      "label": "15 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-16",
+      "weekday": "Friday",
+      "label": "16 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-17",
+      "weekday": "Saturday",
+      "label": "17 October 2026",
+      "is_today": false,
+      "summary": "8h routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-18",
+      "weekday": "Sunday",
+      "label": "18 October 2026",
+      "is_today": false,
+      "summary": "8h routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-10-19",
+      "weekday": "Monday",
+      "label": "19 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 480,
+          "end": 1200,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": true,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture club open day (a twelve-hour span)",
+          "color": "#78af6e",
+          "calendar": "Fixture club (renamed)"
+        },
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "weekday": "Tuesday",
+      "label": "20 October 2026",
+      "is_today": true,
+      "summary": "3h 15m planned · 3 blocks · 8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 14,
+          "session": 0,
+          "name": "Fixture plan: draft the moon-garden layout",
+          "kind": "task",
+          "color": 1,
+          "start": 765,
+          "minutes": 90,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 3,
+          "session": 0,
+          "name": "Fixture task, severity 2: polish the pretend trophy",
+          "kind": "task",
+          "color": 2,
+          "start": 855,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 2
+        },
+        {
+          "id": 17,
+          "session": null,
+          "name": "Fictional event: tea with the robot",
+          "kind": "event",
+          "color": 5,
+          "start": 1035,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 2
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        },
+        {
+          "start": 840,
+          "end": 900,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture free-time block",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "weekday": "Wednesday",
+      "label": "21 October 2026",
+      "is_today": false,
+      "summary": "1h planned · 1 block · 1 due · 8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 14,
+          "session": 1,
+          "name": "Fixture plan: draft the moon-garden layout",
+          "kind": "task",
+          "color": 1,
+          "start": 600,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 2
+        },
+        {
+          "id": 1,
+          "session": null,
+          "name": "Fixture task, severity 0: polish the pretend trophy",
+          "kind": "task",
+          "color": 0,
+          "start": 1020,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 1,
+          "columns": 2
+        },
+        {
+          "id": 13,
+          "session": null,
+          "name": "Fixture event: widget guild meetup",
+          "kind": "event",
+          "color": 5,
+          "start": 1110,
+          "minutes": 0,
+          "marker": true,
+          "due": false,
+          "column": 1,
+          "columns": 2
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-22",
+      "weekday": "Thursday",
+      "label": "22 October 2026",
+      "is_today": false,
+      "summary": "4h planned · 3 blocks · 1 due · 8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 2
+        },
+        {
+          "id": 16,
+          "session": 0,
+          "name": "Fixture plan with a block removed",
+          "kind": "task",
+          "color": 1,
+          "start": 480,
+          "minutes": 30,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 2
+        },
+        {
+          "id": 14,
+          "session": 2,
+          "name": "Fixture plan: draft the moon-garden layout",
+          "kind": "task",
+          "color": 1,
+          "start": 780,
+          "minutes": 90,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 2
+        },
+        {
+          "id": 2,
+          "session": null,
+          "name": "Fixture task, severity 1: polish the pretend trophy",
+          "kind": "task",
+          "color": 1,
+          "start": 1020,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 1,
+          "columns": 2
+        },
+        {
+          "id": 18,
+          "session": null,
+          "name": "Fictional event: lantern talk",
+          "kind": "event",
+          "color": 5,
+          "start": 1140,
+          "minutes": 120,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 2
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 480,
+          "end": 1200,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": true,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture club open day (a twelve-hour span)",
+          "color": "#78af6e",
+          "calendar": "Fixture club (renamed)"
+        },
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-23",
+      "weekday": "Friday",
+      "label": "23 October 2026",
+      "is_today": false,
+      "summary": "45m planned · 1 block · 1 due · 9h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 21,
+          "session": null,
+          "name": "Example one-off: the window cleaner visits",
+          "kind": "routine",
+          "color": 0,
+          "start": 600,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 3,
+          "session": 1,
+          "name": "Fixture task, severity 2: polish the pretend trophy",
+          "kind": "task",
+          "color": 2,
+          "start": 930,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 2
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 2
+        },
+        {
+          "id": 3,
+          "session": null,
+          "name": "Fixture task, severity 2: polish the pretend trophy",
+          "kind": "task",
+          "color": 2,
+          "start": 1020,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 0,
+          "columns": 2
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-24",
+      "weekday": "Saturday",
+      "label": "24 October 2026",
+      "is_today": false,
+      "summary": "1 due · 8h routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 2
+        },
+        {
+          "id": 4,
+          "session": null,
+          "name": "Fixture task, severity 3: polish the pretend trophy",
+          "kind": "task",
+          "color": 3,
+          "start": 1020,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 1,
+          "columns": 2
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-25",
+      "weekday": "Sunday",
+      "label": "25 October 2026",
+      "is_today": false,
+      "summary": "1 due · 8h routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 2
+        },
+        {
+          "id": 5,
+          "session": null,
+          "name": "Fixture task, severity 4: polish the pretend trophy",
+          "kind": "task",
+          "color": 4,
+          "start": 1020,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 1,
+          "columns": 2
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 480,
+          "end": 1200,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": true,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture club open day (a twelve-hour span)",
+          "color": "#78af6e",
+          "calendar": "Fixture club (renamed)"
+        },
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-26",
+      "weekday": "Monday",
+      "label": "26 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 0,
+          "end": 1440,
+          "column": 0,
+          "columns": 1,
+          "all_day": true,
+          "background": true,
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture holiday",
+          "color": "#5a8cc8",
+          "calendar": "Fixture holidays"
+        },
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-27",
+      "weekday": "Tuesday",
+      "label": "27 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-28",
+      "weekday": "Wednesday",
+      "label": "28 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 480,
+          "end": 1200,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": true,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture club open day (a twelve-hour span)",
+          "color": "#78af6e",
+          "calendar": "Fixture club (renamed)"
+        },
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-29",
+      "weekday": "Thursday",
+      "label": "29 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-30",
+      "weekday": "Friday",
+      "label": "30 October 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-31",
+      "weekday": "Saturday",
+      "label": "31 October 2026",
+      "is_today": false,
+      "summary": "8h routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 480,
+          "end": 1200,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": true,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture club open day (a twelve-hour span)",
+          "color": "#78af6e",
+          "calendar": "Fixture club (renamed)"
+        },
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-01",
+      "weekday": "Sunday",
+      "label": "1 November 2026",
+      "is_today": false,
+      "summary": "8h routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": [],
+      "subscribed": [
+        {
+          "start": 600,
+          "end": 660,
+          "column": 0,
+          "columns": 1,
+          "all_day": false,
+          "background": false,
+          "where": "Room 0 (invented)",
+          "note": "Synthetic description for a fixture event.",
+          "name": "Fixture stand-up",
+          "color": "#c87828",
+          "calendar": "Fixture team calendar"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-02",
+      "weekday": "Monday",
+      "label": "2 November 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-11-03",
+      "weekday": "Tuesday",
+      "label": "3 November 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    },
+    {
+      "date": "2026-11-04",
+      "weekday": "Wednesday",
+      "label": "4 November 2026",
+      "is_today": false,
+      "summary": "8h 45m routine",
+      "behind_minutes": 0,
+      "entries": [
+        {
+          "id": 20,
+          "session": null,
+          "name": "Example routine: commute",
+          "kind": "routine",
+          "color": 0,
+          "start": 465,
+          "minutes": 45,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        },
+        {
+          "id": 19,
+          "session": null,
+          "name": "Example routine: sleep",
+          "kind": "routine",
+          "color": 0,
+          "start": 960,
+          "minutes": 480,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 1
+        }
+      ],
+      "ghosts": []
+    }
+  ],
+  "tray": {
+    "due": [],
+    "later": [
+      {
+        "id": 10,
+        "name": "Fixture task with nothing said about it",
+        "color": 4,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 5,
+        "name": "Fixture task, severity 4: polish the pretend trophy",
+        "color": 4,
+        "deadline": "2026-10-25T17:00",
+        "due_in": "5d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 8,
+        "name": "Fixture task, horizon 2: sort the imaginary buttons",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 4,
+        "name": "Fixture task, severity 3: polish the pretend trophy",
+        "color": 3,
+        "deadline": "2026-10-24T17:00",
+        "due_in": "4d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 12,
+        "name": "Quick add, dated: return the invented book",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 29,
+        "name": "Archived fixture: finished, then put back",
+        "color": 2,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 15,
+        "name": "Fixture plan that will be unplanned",
+        "color": 1,
+        "deadline": null,
+        "due_in": null,
+        "duration": 30,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 7,
+        "name": "Fixture task, horizon 1: sort the imaginary buttons",
+        "color": 1,
+        "deadline": null,
+        "due_in": null,
+        "duration": 120,
+        "planned": 0,
+        "drop_minutes": 120
+      },
+      {
+        "id": 2,
+        "name": "Fixture task, severity 1: polish the pretend trophy",
+        "color": 1,
+        "deadline": "2026-10-22T17:00",
+        "due_in": "2d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 1,
+        "name": "Fixture task, severity 0: polish the pretend trophy",
+        "color": 0,
+        "deadline": "2026-10-21T17:00",
+        "due_in": "1d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 9,
+        "name": "Fixture task, horizon 3: sort the imaginary buttons",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 11,
+        "name": "Quick add, renamed: oil the made-up tricycle",
+        "color": 0,
+        "deadline": null,
+        "due_in": null,
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      },
+      {
+        "id": 6,
+        "name": "Fixture task, horizon 0: sort the imaginary buttons",
+        "color": 2,
+        "deadline": "2026-11-05T09:00",
+        "due_in": "15d",
+        "duration": null,
+        "planned": 0,
+        "drop_minutes": 30
+      }
+    ]
+  },
+  "items": [
+    {
+      "id": 1,
+      "name": "Fixture task, severity 0: polish the pretend trophy",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-10-21T17:00",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 0,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 2,
+      "name": "Fixture task, severity 1: polish the pretend trophy",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-10-22T17:00",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 1,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 3,
+      "name": "Fixture task, severity 2: polish the pretend trophy",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-10-23T17:00",
+      "duration": null,
+      "planned": 90,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 855,
+          "minutes": 45
+        },
+        {
+          "index": 1,
+          "day": "2026-10-23",
+          "start": 930,
+          "minutes": 45
+        }
+      ],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 4,
+      "name": "Fixture task, severity 3: polish the pretend trophy",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-24T17:00",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 3,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 5,
+      "name": "Fixture task, severity 4: polish the pretend trophy",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-10-25T17:00",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 4,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 6,
+      "name": "Fixture task, horizon 0: sort the imaginary buttons",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-11-05T09:00",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 2,
+      "horizon": 0,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 7,
+      "name": "Fixture task, horizon 1: sort the imaginary buttons",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 120,
+      "planned": 0,
+      "remaining": 120,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 8,
+      "name": "Fixture task, horizon 2: sort the imaginary buttons",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 2,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 9,
+      "name": "Fixture task, horizon 3: sort the imaginary buttons",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 10,
+      "name": "Fixture task with nothing said about it",
+      "kind": "task",
+      "color": 4,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 4,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 11,
+      "name": "Quick add, renamed: oil the made-up tricycle",
+      "kind": "task",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 12,
+      "name": "Quick add, dated: return the invented book",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 13,
+      "name": "Fixture event: widget guild meetup",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-21T18:30",
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 14,
+      "name": "Fixture plan: draft the moon-garden layout",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 240,
+      "planned": 240,
+      "remaining": 0,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 765,
+          "minutes": 90
+        },
+        {
+          "index": 1,
+          "day": "2026-10-21",
+          "start": 600,
+          "minutes": 60
+        },
+        {
+          "index": 2,
+          "day": "2026-10-22",
+          "start": 780,
+          "minutes": 90
+        }
+      ],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 15,
+      "name": "Fixture plan that will be unplanned",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 30,
+      "planned": 0,
+      "remaining": 30,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 16,
+      "name": "Fixture plan with a block removed",
+      "kind": "task",
+      "color": 1,
+      "deadline": null,
+      "duration": 30,
+      "planned": 30,
+      "remaining": 0,
+      "severity": null,
+      "horizon": 1,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-22",
+          "start": 480,
+          "minutes": 30
+        }
+      ],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 17,
+      "name": "Fictional event: tea with the robot",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-20T17:15",
+      "duration": 60,
+      "planned": 0,
+      "remaining": 60,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 18,
+      "name": "Fictional event: lantern talk",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-22T19:00",
+      "duration": 120,
+      "planned": 0,
+      "remaining": 120,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 19,
+      "name": "Example routine: sleep",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": {
+        "days": 127,
+        "summary": "every day",
+        "start": 960,
+        "minutes": 480
+      },
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 20,
+      "name": "Example routine: commute",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": {
+        "days": 31,
+        "summary": "weekdays",
+        "start": 465,
+        "minutes": 45
+      },
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 21,
+      "name": "Example one-off: the window cleaner visits",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": null,
+      "repeat": {
+        "days": 0,
+        "summary": "just this day",
+        "start": 600,
+        "minutes": 60
+      },
+      "sessions": [],
+      "created": "2026-10-01"
+    },
+    {
+      "id": 29,
+      "name": "Archived fixture: finished, then put back",
+      "kind": "task",
+      "color": 2,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": 2,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-10-12"
+    }
+  ],
+  "ranked": [
+    10,
+    5,
+    8,
+    4,
+    3,
+    12,
+    29,
+    14,
+    15,
+    7,
+    2,
+    1,
+    16,
+    9,
+    11,
+    6
+  ],
+  "done": [
+    {
+      "id": 28,
+      "archived_at": "2026-10-12T11:30:00+02:00",
+      "name": "Archived fixture: dropped routine",
+      "kind": "routine",
+      "color": 0,
+      "finished": false,
+      "when": "Mon 12 Oct 11:30",
+      "verdict": "routine dropped  ·  every day at 06:00 for 30m  ·  a moment on the board"
+    },
+    {
+      "id": 26,
+      "archived_at": "2026-10-12T11:30:00+02:00",
+      "name": "Archived fixture: dropped task",
+      "kind": "task",
+      "color": 2,
+      "finished": false,
+      "when": "Mon 12 Oct 11:30",
+      "verdict": "dropped 18d early  ·  no time set aside  ·  a moment on the board"
+    },
+    {
+      "id": 25,
+      "archived_at": "2026-10-12T11:30:00+02:00",
+      "name": "Archived fixture: undated and finished",
+      "kind": "task",
+      "color": 2,
+      "finished": true,
+      "when": "Mon 12 Oct 11:30",
+      "verdict": "finished  ·  no time set aside  ·  1h on the board"
+    },
+    {
+      "id": 23,
+      "archived_at": "2026-10-08T11:00:00+02:00",
+      "name": "Archived fixture: finished before its deadline",
+      "kind": "task",
+      "color": 2,
+      "finished": true,
+      "when": "Thu 8 Oct 11:00",
+      "verdict": "finished 2d early  ·  1h in one sitting  ·  a moment on the board"
+    },
+    {
+      "id": 24,
+      "archived_at": "2026-10-05T09:15:00+02:00",
+      "name": "Archived fixture: finished after its deadline",
+      "kind": "task",
+      "color": 2,
+      "finished": true,
+      "when": "Mon 5 Oct 09:15",
+      "verdict": "finished 2d late  ·  no time set aside  ·  a moment on the board"
+    },
+    {
+      "id": 27,
+      "archived_at": "2026-10-03T12:00:00+02:00",
+      "name": "Archived fixture: removed event",
+      "kind": "event",
+      "color": 5,
+      "finished": false,
+      "when": "Sat 3 Oct 12:00",
+      "verdict": "event removed  ·  was set for 3 Oct 10:00  ·  a moment on the board"
+    }
+  ],
+  "notes": "Fixture notes (invented).\n    A tab, which the notepad turns into spaces.\nUnicode: été, ☃, 🧪.",
+  "known": {
+    "from": "2026-08-21",
+    "until": "2027-11-24"
+  },
+  "dials": {
+    "blur": 11,
+    "light": 39
+  }
+}

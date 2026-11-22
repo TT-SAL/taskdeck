@@ -1,0 +1,4 @@
+# Every file here is kept as committed bytes on every checkout (no line-ending
+# conversion under core.autocrlf): the data is compared byte for byte, and
+# some archive lines are meant to stay exactly as they are. Not generated.
+* -text

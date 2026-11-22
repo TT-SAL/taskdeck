@@ -14,7 +14,7 @@ This spec fixes everything the `core` crate (`crates/taskdeck-core/`) computes: 
 
 Non-goals, each owned elsewhere:
 
-- the confirmed and pending states, rebasing, the outbox, trial apply under `catch_unwind`, the naming hold, the persistent lists of notices and refusals, the skew-corrected clock, halts: `engine.md`;
+- the confirmed and pending states, rebasing, the outbox, trial apply under `catch_unwind`, the naming hold, the persistent lists of notices and refusals, the clock-skew guard, halts: `engine.md`;
 - frames, membership, the assignment of `device_no`, `RulesUpgrade` validity, the state-hash composition's inputs other than the board bytes: `seal.md` (and `engine.md` for the composition);
 - files, the `Store` that writes today's files in local-only mode, the sealed checkpoint, overlay fetching, where a device's zone comes from, the `.lock` check: `device.md`;
 - the phone page's routes, its parsing of replies, the changes to the forked page: `bridge.md`;
@@ -47,7 +47,7 @@ These hold for all code in `crates/taskdeck-core/` except its tests, benches and
 - **CORE-GEN-003** (core) The `core` crate MUST NOT read a clock, the file system, the network, environment variables, thread-local state or a random source, and MUST NOT spawn threads; every instant and zone it uses MUST be an argument of the call.
 - **CORE-GEN-004** (core) The crate's clippy configuration MUST list `chrono::Local` and `chrono::offset::Local` under `disallowed-types`, and `chrono::Utc::now`, `chrono::Local::now`, `std::time::SystemTime::now` and `std::time::Instant::now` under `disallowed-methods`, and clippy MUST pass with these as errors.
 - **CORE-GEN-005** (core) The `core` crate's non-development dependencies MUST be exactly `serde`, `serde_json` and `chrono` at the workspace's pinned versions.
-- **CORE-GEN-006** (core) The functions `apply`, `upgrade_rules`, the canonical encoder and parser, `BoardData::check` and the id functions of §7 MUST NOT use `f32` or `f64` values, MUST NOT iterate a `HashMap` or `HashSet`, and MUST NOT depend on the order of any collection other than the orders this spec defines.
+- **CORE-GEN-006** (core) The functions `apply`, `upgrade_rules`, `reset`, `ids::rebind`, the canonical encoder and parser, `BoardData::check` and the id functions of §7 MUST NOT use `f32` or `f64` values, MUST NOT iterate a `HashMap` or `HashSet`, and MUST NOT depend on the order of any collection other than the orders this spec defines.
 - **CORE-GEN-007** (core) Every public function that parses bytes or text (the canonical parser, the log-command parser, the board-bytes parser, the intent parser, the legacy import) MUST return an error, never panic, for any input; a property test over random and mutated inputs MUST prove it for each.
 - **CORE-GEN-008** (core) `apply` MUST NOT panic for any `LogCommand` the parser of §9.1 returns and any `BoardData` that passes `BoardData::check` (§6.12); the fuzz target `command_apply` of §18.6 MUST prove it.
 - **CORE-GEN-009** (core) Every parser MUST compare the input's length with the limit of §17 that applies to it before allocating anything for it, and MUST compute a base64 field's decoded length and check it against its limit before decoding it.
@@ -142,7 +142,7 @@ Step 5 makes the encoding unique: whitespace, key order, escapes, a field writte
 
 ### 5.1 Instants
 
-An `Instant` is a UTC time with nanosecond resolution: a count of seconds since 1970-01-01T00:00:00Z (`i64`, leap seconds ignored) and a nanosecond part (`u32`, 0 to 999,999,999). Its range is 1970-01-01T00:00:00.000000000Z to 9999-12-31T23:59:59.999999999Z, both inclusive; nothing in the core constructs an instant outside it. Instants are ordered by seconds, then nanoseconds. An instant from a plaintext's `at_ms` (`seal.md` §10.1, 0 to 2^53 − 1) is `seconds = at_ms div 1000`, `nanos = (at_ms mod 1000) × 1,000,000`. "Plus one day" adds 86,400 seconds.
+An `Instant` is a UTC time with nanosecond resolution: a count of seconds since 1970-01-01T00:00:00Z (`i64`, leap seconds ignored) and a nanosecond part (`u32`, 0 to 999,999,999). Its range is 1970-01-01T00:00:00.000000000Z to 9999-12-31T23:59:59.999999999Z, both inclusive; nothing in the core constructs an instant outside it. Instants are ordered by seconds, then nanoseconds. An instant from a plaintext's `at_ms` (`seal.md` §10.1: 0 to 253,402,300,799,999, which is 9999-12-31T23:59:59.999Z, so the `at_ms` of every opened entry converts) is `seconds = at_ms div 1000`, `nanos = (at_ms mod 1000) × 1,000,000`. "Plus one day" adds 86,400 seconds; a sum after 9999-12-31T23:59:59.999999999Z is that instant (`Instant::MAX`).
 
 ### 5.2 Zones
 
@@ -166,7 +166,7 @@ The core provides three implementations:
 | `TableZone` | tests, vectors, a platform that hands over its rules | an `initial` offset and a list of transitions `(utc_ms, offset_s)` strictly ascending by `utc_ms`; the offset at `t` is that of the last transition with `utc_ms ≤ t`, else `initial`; `from_local(l)` returns, ascending, every instant `l − o` (with `o` the offset of a period) that falls inside the period whose offset is `o` |
 | `ChronoZone<Z: chrono::TimeZone>` | devices | delegates to `chrono`: `offset_at` is `Z::offset_from_utc_datetime(..).fix().local_minus_utc()`, `from_local` maps `Z::from_local_datetime` (`LocalResult::None`, `Single`, `Ambiguous(a, b)`) |
 
-A device passes `ChronoZone(chrono::Local)` or a `TableZone`; `device.md` chooses. Inside the core the type `chrono::Local` never appears (CORE-GEN-004).
+A device passes `ChronoZone(chrono::Local)` or a `TableZone`; `device.md` chooses, at run time, and may pass it as `&dyn Zone`: every zone parameter of this crate is `&(impl Zone + ?Sized)` or a generic `Z: Zone + ?Sized` (§20). Inside the core the type `chrono::Local` never appears (CORE-GEN-004).
 
 ### 5.3 Local day and minutes
 
@@ -361,13 +361,16 @@ A replica loads `BoardData` only from canonical board bytes, exactly as stored: 
 
 ### 7.1 Item ids
 
-An item id, a subscription id and a non-zero archive-row id each have the form `h × 2^40 + n`, with `h` from 0 to 8191 and `n` from 1 to 2^40 − 1, so every id is below 2^53 and exact in JavaScript (SYNC.md §4.4, README §5.6). `h ≥ 1` is the `device_no` of the device that minted it (`seal.md` §13.7). `h = 0` is the legacy space: ids from today's data, below 2^40, kept unchanged by the import except where §15.3 renumbers them. Items and subscriptions share one numbering (today's shared `next_id`, board.rs:1332), so a number is minted once for either.
+An item id, a subscription id and a non-zero archive-row id each have the form `h × 2^40 + n`, with `h` from 0 to 8191 and `n` from 1 to 2^40 − 1, so every id is below 2^53 and exact in JavaScript (SYNC.md §4.4, README §5.6). `h ≥ 1` is the `device_no` of the device that minted it (`seal.md` §13.7). `h = 0` is the legacy space: ids from today's data, below 2^40, kept unchanged by the import except where §15.3 renumbers them. Ids with `h ≥ 1` in today's files, written there by local-only mode (`device.md` §9.2), "Export legacy" (`device.md` §18.7) or the recovery tool (`device.md` §15.8), are kept unchanged by the import as well (§15.3 step 9.4). Items and subscriptions share one numbering (today's shared `next_id`, board.rs:1332), so a number is minted once for either.
 
 ### 7.2 Marks
 
-`marks` records, per `device_no`, the highest item number and the highest block number accepted from that device. A creating command carries the id it creates; `apply` accepts a newly minted id only if its high part is the author's `device_no` and its `n` is above that device's mark, and then raises the mark to `n` (SYNC.md §4.4, V2-3). So no id is ever issued twice, even after Forget, after a refused entry, or from a restored folder whose own counter went back. The legacy space's mark (`device_no` 0) is set by the import to the highest legacy numbers and never moves again, because no author has `device_no` 0.
+`marks` records, per `device_no`, the highest item number and the highest block number accepted from that device. A creating command carries the id it creates; `apply` accepts a newly minted id only if its high part is the author's `device_no` and its `n` is above that device's mark, and then raises the mark to `n` (SYNC.md §4.4, V2-3). So no id is ever issued twice, even after Forget, after a refused entry, or from a restored folder whose own counter went back. (Local-only mode stores no marks: it rebuilds them from today's files at each open, `device.md` §9.2.) The legacy space's mark (`device_no` 0) is set by the import to the highest legacy numbers and never moves again, because no author has `device_no` 0.
 
 The origin mints with an `IdMinter`: the next item number is `max(minter.next_item, mark(view, device_no).item + 1)`, and after minting `minter.next_item` becomes that number plus one; blocks likewise with `next_block`. The device persists the minter with its outbox (`device.md`), so a number is never minted twice locally even when the entry that carried it is later refused.
+
+`IdMinter::new(device_no)` (§20) is `{ device_no, next_item: 1, next_block: 1 }`: the minter a device starts
+with when it creates a board or joins one, so its first numbers are `mark + 1` of the view.
 
 ### 7.3 Block ids
 
@@ -381,7 +384,20 @@ A `restore` carries the row key and a `fallback` id minted by the origin. `apply
 - **CORE-ID-002** (core) `apply` MUST refuse with `core/bad_id` a command that mints an item, subscription or block id whose high part differs from `Ctx.device_no` or whose low part is not above the author's mark for that kind.
 - **CORE-ID-003** (core) `apply` MUST raise the author's mark to the low part of every id it accepts as newly minted, including a `restore`'s `fallback` whether or not the restore used it.
 - **CORE-ID-004** (core) The compile step MUST mint each number as `max(minter.next, mark + 1)` of §7.2 and MUST advance the minter past it, so that one minter never yields the same number twice.
+- **CORE-ID-007** (core) `IdMinter::new(device_no)` MUST return a minter with that `device_no`, `next_item = 1` and `next_block = 1`.
 - **CORE-ID-005** (core) `apply` MUST restore a row under its own id when that id is not 0 and not held by a live item, and under the command's `fallback` otherwise, without applying the range check to the row's own id.
+
+### 7.5 Rebinding
+
+When a device pairs again as a new identity, the commands its old identity left unsent are resubmitted under the new `device_no` (`engine.md` §24.5). `rebind(commands, from_device_no, view, minter)` rewrites them; `minter` is the new identity's current `IdMinter` (its `device_no` is the new one) and `view` its pending state. Two maps start empty: the item map (item and subscription ids) and the block map (sids). For each command in order:
+
+1. **Minting fields**, in this order: `create_task`: `id`, then each `blocks[].sid` in array order; `create_event` and `create_routine`: `id`; `add_block`: `sid`; `restore`: `fallback`; `add_subscription`: `id`. Each value whose high part is `from_device_no` is replaced by a new number, `minter.mint_item(view)` for `id` and `fallback`, `minter.mint_block(view)` for a sid, and the pair is added to the item map or the block map. A value with another high part is kept.
+2. **Referring fields.** Every value equal to a key of the matching map is replaced by its value. Item-space references: the `id` of `rename`, `complete`, `delete`, `forget`, `move_block`, `add_block`, `set_estimate`, `set_deadline`, `set_severity`, `set_horizon`, `set_repeat`, `move_routine`, `set_event_span`, `restore`, `forget_archived`, `remove_subscription`, `rename_subscription`, `set_subscription_color` and `set_subscription_enabled`; `moves[].id` of `move_blocks`; `blocks[].id` of `remove_blocks`. Sid references: the `sid` of `move_block`; `moves[].sid` of `move_blocks`; `blocks[].sid` of `remove_blocks`.
+3. The arrays that §9 orders by sid (`create_task.blocks`, `remove_blocks.blocks`) are sorted again ascending by sid. Every other value is kept, so each returned command parses (§9.1).
+
+An id the old identity minted in an entry that was accepted is not in either map, so references to it are kept. `rebind` returns `core/bad_id` when the minter has no number left (§7.1); the minter is then unchanged.
+
+- **CORE-ID-006** (core) `rebind` MUST replace, in command order, every value a minting field of §7.5 holds with high part `from_device_no` by a number from `minter` (`mint_item` for item-space values, `mint_block` for sids), MUST replace every referring field of §7.5 that equals a value replaced so far in the same space by its replacement, and MUST leave every other value unchanged.
 
 ## 8. `Ctx` and `apply`
 
@@ -395,7 +411,7 @@ pub struct Ctx { pub seq: u64, pub device_no: u16, pub at: Instant, pub based_on
 |---|---|---|---|
 | `seq` | the entry's seq; for an entry applied to the pending state, the provisional seq `engine.md` assigns | 2 to 2^53 − 1 | every stamp it writes (§10.1); a notice's `seq` |
 | `device_no` | the author's `device_no` in the membership before the entry (`seal.md` §13.7) | 1 to 8191 | minted-id checks and marks (§7); stamps; whether a stamp is another device's (§10.2) |
-| `at` | the plaintext's `at_ms` (§5.1): the origin's clock when it compiled the command | | `created` of a created item; the archive clamp of `complete` and `delete` |
+| `at` | the plaintext's `at_ms` (§5.1): the origin's clock when it compiled the command | within §5.1's range; every opened entry's `at_ms` converts (`seal.md` §10.1) | `created` of a created item; the archive clamp of `complete` and `delete` |
 | `based_on` | the plaintext's `based_on_seq`: the origin's confirmed head when it compiled (V2-5) | below `seq` | which stamps are "since the origin's view" (§10.2, §10.3) |
 
 ### 8.2 What `apply` reads
@@ -428,7 +444,7 @@ pub struct Refusal { pub code: &'static str, pub op: &'static str, pub target: O
 pub struct NotesConflict { pub base: u64, pub current: u64 }
 ```
 
-The change set lets `device.md`'s local-only `Store` write today's files in today's order (archive first, then items, R1 §3), and tells a device to drop the overlay events of a removed or disabled subscription: today's `overlay.forget` inside `apply` (board.rs:1355, 1393) becomes this effect (V2 audit item 13).
+The change set lets `device.md`'s local-only `Store` write today's files in today's order (archive first, then items, R1 §3), and tells a device to drop the overlay events of a removed or disabled subscription: today's `overlay.forget` inside `apply` (board.rs:1355, 1393) becomes this effect (V2 audit item 13). In synced mode `apply` runs inside the engine, which does not pass the change set on (`engine.md` §5.1 `Applied`); the device then drops the overlay of every subscription that is absent or disabled in the new pending view (`device.md` §13.1.3), which is the same set.
 
 ### 8.4 Evaluation
 
@@ -665,7 +681,7 @@ Schema rule for `set_picture`: `parts = ceil(size / 1,048,576)`. None of them ha
 - **CORE-CMD-002** (core) `parse_command` MUST accept exactly the 29 commands of §9.3 with the fields, types, presences and constraints of §9.4 to §9.24, and MUST reject every other `op` with `core/unknown_op`.
 - **CORE-CMD-003** (core) `parse_command` MUST reject with `core/schema` an instant in any form other than §4.4's, including a naive local time and an offset other than `Z` (V2-4).
 - **CORE-CMD-004** (core) For each command, `apply` MUST perform exactly the checks its section lists, in that order, and on success exactly the effects it lists.
-- **CORE-CMD-005** (core) `apply` of `complete` and `delete` MUST set `archived_at` to `min(at, ctx.at + 86,400 s)`.
+- **CORE-CMD-005** (core) `apply` of `complete` and `delete` MUST set `archived_at` to `min(at, ctx.at + 86,400 s)`, the sum taken as `Instant::MAX` when it would be later (§5.1).
 - **CORE-CMD-006** (core) `apply` MUST NOT trim, detab, default, round, snap, clamp or resolve any value of a command; every such policy belongs to the compile step (§13), and `apply` MUST only check the ranges, lengths, existence and uniqueness its sections list (V2-1).
 - **CORE-CMD-007** (core) `apply` of `move_routine`, `create_routine` and `set_repeat` MUST NOT consult any zone or resolve any local time (V2-4).
 - **CORE-CMD-008** (core) `apply` of `set_notes` MUST refuse with `core/notes_stale` when `base` differs from `notes_rev`, and on success MUST increase `notes_rev` by exactly 1.
@@ -683,7 +699,7 @@ A stamp `(s, d)` is **another device's change since the origin's view** for an e
 
 ### 10.2 Overwrite notices
 
-A command that changes a field group, a block or (for `complete`, `delete`, `forget`) a whole item whose stamp (for an item, its latest stamp) is another device's change since the origin's view still applies, and `apply` produces one **overwrite notice** for it (SYNC.md §4.6, V2-5; SYNC_PLAN.md §2 takes notices rather than refusals). The notice names the overwriting entry (`seq`, `author = ctx.device_no`), the overwritten change (`other`, `other_seq` from the stamp), the item, the sid for a block, and the group (`name`, `time`, `levels`, `estimate`, `repeat`, `block` or `item`). It is shown on two devices: the author's and the `other` device's ("changed on Desk since you last synced"). A command produces at most one notice per group and block it touches.
+A command that changes a field group, a block or (for `complete`, `delete`, `forget`) a whole item whose stamp (for an item, its latest stamp) is another device's change since the origin's view still applies, and `apply` produces one **overwrite notice** for it (SYNC.md §4.6, V2-5; SYNC_PLAN.md §2 takes notices rather than refusals). The notice names the overwriting entry (`seq`, `author = ctx.device_no`), the overwritten change (`other`, `other_seq` from the stamp), the item, the sid for a block, and the group (`name`, `time`, `levels`, `estimate`, `repeat`, `block` or `item`). It concerns two devices, the author's and the `other` device's, and each of them records it (`engine.md` §13.4). The core defines the record (§10.7), not the words a device shows for it: those are the interface's, `bridge.md` A-04 on the phone and `device.md` §17.7 on a desktop, and they differ between the author's device and the `other` device's. A command produces at most one notice per group and block it touches.
 
 ### 10.3 `move_blocks` skips
 
@@ -695,7 +711,7 @@ Unplan compiles to `remove_blocks` with exactly the sids the origin saw (§13.4)
 
 ### 10.5 Notes and their base
 
-The notes carry a revision `notes_rev`, raised by 1 by every accepted `set_notes`. The **base** of a `set_notes` is the `notes_rev` of the text the origin's user started editing from. A `set_notes` whose base is not the current revision is refused (`core/notes_stale`) on every device, the author's included, with `NotesConflict{base, current}`; nothing changes. The origin still holds its draft (the refused command's `text` is in its outbox entry), so it can show its draft beside the current notes and let the user merge (stage `desktop`, `bridge.md`); the merged text is a new `set_notes` with `base = current`. Two `set_notes` from one device in a row work: the second is compiled on the view in which the first already raised the revision. A counter is used rather than a hash of the text so that the core needs no hash function and a base never matches by coincidence (decided here, §21).
+The notes carry a revision `notes_rev`, raised by 1 by every accepted `set_notes`. The **base** of a `set_notes` is the `notes_rev` of the text the origin's user started editing from. A `set_notes` whose base is not the current revision is refused (`core/notes_stale`) on every device, the author's included, with `NotesConflict{base, current}`; nothing changes. The origin still holds its draft (the device keeps the unsaved draft, `device.md` §17.6; the outbox record is dropped when its refusal is recorded, `engine.md` §7.4), so it can show its draft beside the current notes and let the user merge (stage `desktop`, `bridge.md`); the merged text is a new `set_notes` with `base = current`. Two `set_notes` from one device in a row work: the second is compiled on the view in which the first already raised the revision. A counter is used rather than a hash of the text so that the core needs no hash function and a base never matches by coincidence (decided here, §21).
 
 ### 10.6 Benign repeats
 
@@ -736,7 +752,7 @@ Notices and refusals live per device, outside `BoardData`, in the device's seale
 |---|---|---|---|---|
 | `author` | `int[1..8191]` | required | | the refused entry's author |
 | `base` | `u53` | optional | `set_notes` only | the command's base |
-| `code` | string | required | a code of §16 or of `seal.md` §22 | why |
+| `code` | string | required | a code of §16, a code of `seal.md` §22, or `engine/skipped` or `engine/reseal_limit` (`engine.md` §33) | why |
 | `current` | `u53` | optional | `set_notes` only | `notes_rev` when it was applied |
 | `op` | string | optional | absent when the payload did not parse | the command's `op` |
 | `seq` | `u53` | required | | the refused entry's seq |
@@ -777,6 +793,20 @@ The compile step emits only ops in the op table of `view.rules`, so a writer nev
 - **CORE-RULES-003** (core) Once a rules version is released, replaying its golden logs (§18) MUST give the recorded results and canonical board bytes in every later build.
 - **CORE-RULES-004** (core) The compile step MUST NOT emit a command whose `op` is not in the op table of `view.rules`.
 
+### 11.3 Reset
+
+A `ResetTo` (`seal.md` §13.6, `engine.md` §28.1) installs an earlier state of the board and leaves the membership unchanged. `reset(target, current)` computes the board it installs; `target` is the board at the reset's target seq and `current` the board just before the `ResetTo` entry. In order:
+
+1. `target.rules ≤ current.rules`, else `core/unknown_rules`;
+2. the result `b` is `target` with every field kept, except:
+   - `marks`: one mark for each `device_no` that has a mark in `target` or in `current`, its `item` and its `block` each the larger of the two boards' values (an absent mark counts as 0), ascending by `device_no`;
+   - `notes_rev = max(target.notes_rev, current.notes_rev) + 1`;
+3. when `b.rules < current.rules`: `upgrade_rules(&mut b, current.rules)` (§11.2); its error is returned.
+
+The marks keep every number minted since the target from being minted again (§7.2); the raised revision makes every `set_notes` based on a revision of either board stale (§10.5); and `b.rules` mirrors the unchanged membership. `reset` produces no notices and, like `apply`, is a function of its arguments alone (CORE-CTX-002).
+
+- **CORE-RULES-005** (core) `reset` MUST return `target` unchanged except that its marks are the elementwise maximum of both boards' marks, its `notes_rev` is one above the larger of the two, and its rules version is raised to `current.rules` by `upgrade_rules`, and MUST return `core/unknown_rules` when `target.rules` exceeds `current.rules`.
+
 ## 12. Intents
 
 ### 12.1 What an intent is
@@ -804,7 +834,7 @@ Every failure is `core/intent_json` with HTTP status 400 and the parser's messag
 |---|---|---|---|
 | `add` | `name` String; `deadline` wire time; `importance` u8 (none); `is_event` bool (false); `time_importance` u8 (none) | desk | `create_task` or `create_event` |
 | `quick_add` | `name` String; `deadline` wire time | phone, desk | `create_task` |
-| `create` | `kind` `task`/`event`/`routine`; `name` String; `day` date; `start` i32; `minutes` u32 | phone, desk | `create_task`, `create_event` or `create_routine` |
+| `create` | `kind` `board::Kind` (JSON `"task"`, `"event"` or `"routine"`); `name` String; `day` date; `start` i32; `minutes` u32 | phone, desk | `create_task`, `create_event` or `create_routine` |
 | `rename` | `id` u64; `name` String | phone, desk | `rename` |
 | `complete` | `id` u64; `at` wire time | phone, desk | `complete` |
 | `delete` | `id` u64; `at` wire time | phone, desk | `delete` |
@@ -843,16 +873,16 @@ The snapshot query is answered by the read side (§14.3), not compiled; `feed` a
 ### 13.1 Inputs and output
 
 ```rust
-pub struct CompileCtx<'a, Z: Zone> {
+pub struct CompileCtx<'a, Z: Zone + ?Sized> {
     pub view: &'a BoardData,     // the origin's pending state
     pub zone: &'a Z,             // the origin's zone
-    pub now: Instant,            // the origin's (skew-corrected) clock, in whole milliseconds
+    pub now: Instant,            // the origin's own wall clock, in whole milliseconds, never corrected by a relay-derived offset (engine.md §27.3)
     pub device_no: u16,          // the origin's device_no
     pub overlay: &'a Overlay,    // the origin's overlay: its anchors for Reflow
 }
 pub struct Compiled { pub command: Option<LogCommand>, pub reply: Reply }
 pub struct Reply { pub id: Option<u64>, pub session: Option<u64>, pub moved: Option<u32> }
-pub fn compile<Z: Zone>(intent: &Intent, cx: &CompileCtx<Z>, minter: &mut IdMinter) -> Result<Compiled, CompileError>;
+pub fn compile<Z: Zone + ?Sized>(intent: &Intent, cx: &CompileCtx<Z>, minter: &mut IdMinter) -> Result<Compiled, CompileError>;
 ```
 
 The engine puts `now` (as `at_ms`) and its confirmed head (as `based_on`) into the entry's plaintext, so that `apply` sees the same clock the compile step used (`engine.md`). `Reply` is today's reply (board.rs:524-535) with `session` now a sid; the bridge turns it into the page's `{"ok": true, ...}` (`bridge.md`). A `CompileError` carries a code of §16, today's HTTP status (400 or 410) and today's message text; it changes nothing, and the minter is advanced only when `compile` returns `Ok`.
@@ -876,7 +906,7 @@ Policy lives here and nowhere else (thin apply, SYNC.md §4.5, V2-1): default na
 
 ### 13.4 Per intent
 
-Each row's steps run in order; the first failure is the result. "Missing" means no live item in `view` has `id` (`core/gone`, 410 "That item is no longer on the board."). `item` is that live item. `L(t)` is the local minutes of instant `t` and `D(t)` its local day, in the origin's zone. `clamp_block`, `resolve_on_day`, `snap` are §5.4 and §5.5, all in the origin's zone. "Cap" is the live-item cap of §9.5 (`core/cap_items`), checked on `view`; for a `create` of a task it includes the block caps of §9.4 (`core/cap_blocks`).
+Each row's steps run in order; the first failure is the result. "Missing" means no live item in `view` has `id` (`core/item_gone`, 410 "That item is no longer on the board."). `item` is that live item. `L(t)` is the local minutes of instant `t` and `D(t)` its local day, in the origin's zone. `clamp_block`, `resolve_on_day`, `snap` are §5.4 and §5.5, all in the origin's zone. "Cap" is the live-item cap of §9.5 (`core/cap_items`), checked on `view`; for a `create` of a task it includes the block caps of §9.4 (`core/cap_blocks`).
 
 | Intent | Steps | Command | Reply |
 |---|---|---|---|
@@ -966,7 +996,7 @@ Read queries answer what the desktop UI and the phone page ask today, under toda
 
 ### 14.2 The queries
 
-Each is today's function (file:line in today's `src/`) moved into the core with these changes only: a `zone: &impl Zone` parameter wherever today's code reads a local date, hour or minute; `Item` and `ArchiveRow` in place of `Active` and `Archived`; sids in place of session indices; and the order changes of §14.3.
+Each is today's function (file:line in today's `src/`) moved into the core with these changes only: a `zone: &(impl Zone + ?Sized)` parameter wherever today's code reads a local date, hour or minute (§5.2); `Item` and `ArchiveRow` in place of `Active` and `Archived`; sids in place of session indices; and the order changes of §14.3.
 
 | Today | In the core | Zone | Notes |
 |---|---|---|---|
@@ -979,7 +1009,8 @@ Each is today's function (file:line in today's `src/`) moved into the core with 
 | `planner::placements_for`, `placements_of`, `appears_on` (planner.rs:153-225) | same names, `(…, day, zone)` | yes | `DayPlacement.session` is `Option<u64>`, a sid; blocks in ascending sid |
 | `planner::lay_out`, `summarize`, `summary_text`, `format_minutes`, `format_duration`, `drop_length_for`, `duration_options`, `relative_due`, `reflow`, `behind_minutes` | same | no | `relative_due(deadline, now)` takes instants |
 | `planner::backlog_group(deadline, day)` | `backlog_group(deadline, day, zone)` | yes | `Due` when `D(deadline) ≤ day` |
-| `planner::now_marker(day, now)` | `now_marker(day, now, zone)` | yes | §5.5 |
+| `planner::now_marker(day, now)` | `time::now_marker(day, now, zone)` | yes | §5.5; in `time`, not `planner` (§20) |
+| `planner::snap`, `clamp_block`, `resolve_on_day` (planner.rs:296-311 for the last) | `time::snap(m)`, `time::clamp_block(start, minutes)`, `time::resolve_on_day(day, minutes, zone)` | `resolve_on_day` only | §5.4, §5.5; in `time`, not `planner` (§20) |
 | `Active::is_planned`, `planned_minutes`, `remaining_minutes`, `wants_planning`, `planner_anchor`, `calendar_item_color`, `is_routine` | `Item::` same | no | |
 | `Recurrence::falls_on`, `repeats`, `includes`, `summary`, `summary_dated` | same | no | `toggle` stays in the UI |
 | `Archived::verdict`, `timing`, `was_finished`, `was_judged`, `mark`, `lifetime`, `booked_minutes`, `sittings`, `color_id` | `ArchiveRow::` same; `verdict(zone)` | `verdict` only | |
@@ -991,11 +1022,17 @@ Each is today's function (file:line in today's `src/`) moved into the core with 
 | — | `archive_newest_first(board) -> impl Iterator<Item = &ArchiveRow>` | no | the reverse of the archive order |
 | — | `archive_by_day(board, from, days, zone)` | yes | §14.4 |
 | — | `reminders(board, from, until, defaults)` | no | §14.5 |
+| `TaskApp::summarize_calendar` (ui.rs:2911-2955) | not moved: stays in `desktop`, over a copy | | today it drains and re-sorts `board.items`; ties on (start, id, sid) (SYNC.md §4.5, CORE-READ-006) |
+
+Display order belongs to the caller (SYNC.md §4.5). No read query sorts, drains or reorders `BoardData.items` or any other list of `BoardData`: each orders what it returns in a list of its own, in the order this table states, and the board keeps its own order (items in ascending id, §6). The desktop's calendar summary, today's `summarize_calendar`, stays in the desktop and orders a copy: its entries ascend by (start, id, sid), where start is the instant the entry is drawn at (a block's start, or an event's own span start), id is the item's id, and sid is the block's sid, an event's own span (no block) sorting before every sid of the same item.
+
+- **CORE-READ-005** (core) A read query MUST NOT sort, drain or reorder `BoardData.items` or any other list held by `BoardData`, and MUST order what it returns in a list of its own, as §14.2 states for it.
+- **CORE-READ-006** (desktop) The desktop's calendar summary (today's `summarize_calendar`) MUST order a copy of the items, never `BoardData.items`, and MUST order its entries by ascending (start, id, sid) as §14.2 states.
 
 ### 14.3 The snapshot JSON
 
 ```rust
-pub struct SnapshotInput<'a, Z: Zone> {
+pub struct SnapshotInput<'a, Z: Zone + ?Sized> {
     pub board: &'a BoardData, pub overlay: &'a Overlay, pub zone: &'a Z, pub now: Instant,
     pub from: chrono::NaiveDate, pub days: u32,
     pub version: u64,            // the device's view counter (engine.md)
@@ -1062,7 +1099,7 @@ A reminder's Done compiles the `complete` intent, its Tomorrow the `move_block` 
 
 ### 14.6 ICS parser, overlay and weather types
 
-`ics::parse(text, from, until, limits, zone)` is today's parser (ics.rs:182-214) with `zone` where it converts UTC and `TZID` times to `Local` (ics.rs:904, 1218, 740-749) and reads an undefined `TZID` as local wall time; everything else is unchanged, including `Limits::default()`. The overlay types (`OverlayEvent`, `FetchOutcome`, `FetchStatus`, `Covered`, `Overlay` with `sealed`, `covering`, `digest`, `anchors_on`, `events_on`, `forget`, `status_for`, `better_name`, `is_unnamed`; subscriptions.rs:184-484) and the weather report types (`Report`, `Hour`, `Day`, `Now`, `build_report`, `sky_symbol`, the cities; weather.rs) are copied unchanged. The overlay is per device and never enters `apply` (SYNC.md §3, R1 §7); a device keeps it in its own sealed file (`device.md`).
+`ics::parse(text, from, until, limits, zone)` is today's parser (ics.rs:182-214) with `zone` where it converts UTC and `TZID` times to `Local` (ics.rs:904, 1218, 740-749) and reads an undefined `TZID` as local wall time; everything else is unchanged, including `Limits::default()`. The overlay types (`OverlayEvent`, `FetchOutcome`, `FetchStatus`, `Covered`, `Overlay` with `sealed`, `covering`, `digest`, `anchors_on`, `events_on`, `forget`, `status_for`, `better_name`, `is_unnamed`; subscriptions.rs:184-484) and the weather report types (`Report`, `Hour`, `Day`, `Now`, `build_report`, `sky_symbol`, the cities; weather.rs) are copied unchanged, except that `FetchStatus.at` is `chrono::DateTime<chrono::FixedOffset>` (today `DateTime<Local>`, subscriptions.rs:337-339, a type CORE-GEN-004 forbids). Its `serde` form is RFC 3339 with the offset, which today's `DateTime<Local>` also writes and reads, so `subscribed_cache.json` keeps today's format in both directions. The caller fills it from its own clock and zone (`device.md` §13.1.2 step 8); none of the copied functions reads a clock (CORE-GEN-003). The overlay is per device and never enters `apply` (SYNC.md §3, R1 §7); a device keeps it in its own sealed file (`device.md`).
 
 - **CORE-READ-001** (core) Every read query of §14.2 MUST take the caller's zone as a parameter wherever it needs a local day or local minutes, and MUST give the result today's function gives for the same board when the zone equals that function's process zone, except for the changes §14.2 and §14.3 list.
 - **CORE-READ-002** (core) A read query MUST NOT change `BoardData`.
@@ -1107,18 +1144,21 @@ In order; a step marked **fail** ends the import with no `BoardData` and a repor
 5. **Subscriptions.** Missing, or only White_Space: none. Otherwise a JSON array of today's `Subscription` (subscriptions.rs:137-147); failure: fail `subscriptions_unreadable`.
 6. **Palette.** `colorschemes` missing: six `[0,0,0,0]`. Otherwise parse it as a JSON object from decimal `u32` keys to today's `ColorScheme` (color.rs:11-16); failure: warning `palette_unreadable` and six `[0,0,0,0]`. With the selected id `k` (`selected_colorscheme_id`, default 0): the scheme under key `k` gives `colors`; no such key gives six `[0,0,0,0]` (today's desktop then draws `default_scheme`, which is all zero, utilities.rs:94-103).
 7. **Home.** `coordinates` none: `{0, 0}`. Otherwise `lat = round_half_away_from_zero(c[0] × 100)` and `lon = round_half_away_from_zero(c[1] × 100)` in `f64`; outside the ranges of §6.9: warning `home_out_of_range` and `{0, 0}`.
+
+The first board created from a legacy folder takes its palette from the scheme that `selected_colorscheme_id` of that folder's `userconfig.toml` names in its `colorschemes.json`, and its home place from that file's `coordinates` (SYNC.md §9 step 6). The core does steps 6 and 7 from `LegacyConfig`; the caller fills `LegacyConfig` from the source folder's own `userconfig.toml` (§15.2, `device.md` §18.2).
+
 8. **Plans.** `migrate_legacy_plans` exactly as today (tasks.rs:618-632): an item with a `planned_start`, not an event and without sessions, gains one session `{start: planned_start, minutes: max(duration_minutes or 30, 15)}`; `planned_start` is dropped from every item.
-9. **Ids.** Let `L` be the largest id below 2^62 among items, rows and subscriptions (0 when there is none), and `next = L + 1`. Then, each list in file order:
+9. **Ids.** Let `L` be the largest id below 2^40 among items, rows and subscriptions (0 when there is none), and `next = L + 1`. Then, each list in file order:
    1. an item whose id is 0, or equal to an earlier item's id, or at least 2^62 (a temporary id, `adopt_temporaries`, board.rs:697-711) gets `next`, and `next` increases;
    2. a row whose id is at least 2^62 gets `next` likewise; a row with id 0 keeps it (a pre-id row);
    3. a subscription whose id is 0, or equal to an earlier subscription's id, or at least 2^62 gets `next` likewise (today's seeding bug can leave two subscriptions with one id, R1 §2);
-   4. any item, row or subscription id from 2^40 to 2^62 − 1, or any `next` that reaches 2^40: fail `id_range`, listing the ids.
+   4. an item, row or subscription id from 2^40 to 2^62 − 1 whose high part (`id div 2^40`) is from 1 to 8191 and whose low part (`id mod 2^40`) is at least 1 is **device-minted** (§7.1) and is kept unchanged; any other id from 2^40 to 2^62 − 1 (a high part of 8192 or more, which is an id of at least 2^53, or a low part of 0), or any `next` that reaches 2^40: fail `id_range`, listing the ids.
    Every renumbering is reported as `(list, old id, new id)`. Ids held both by a live item and by an archive row are reported as `live_and_archived` (a warning; both are kept, and a later `restore` of such a row uses its fallback; V2-11).
 10. **Kinds and sids.** Each item and row gets `kind`: `routine` when it has a `recurrence`, else `event` when `is_event`, else `task`. Sids are numbered from 1 by one counter: first the live items in ascending (new) id, each item's sessions in file order; then the rows in file line order, each row's sessions in order.
 11. **Instants.** Every `DateTime<Local>` value becomes the instant it denotes, keeping every fraction digit (a nine-digit fraction holds them all); an instant outside §5.1's range: fail `instant_range`, listing the item or row ids.
 12. **Fields.** Every value is checked against the schema of §6: names at most 4,096 bytes, levels, durations, recurrence fields, block minutes, URLs, at most 20 subscriptions with distinct URLs, notes at most 1,048,576 bytes, and the caps of §17; a violation: fail `field_range`, listing the ids, or `cap`.
 13. **Notes cap.** Notes over 20,000 scalars after detab: warning `notes_over_cap`; they are kept, and the next `set_notes` must fit the cap.
-14. **Assembly.** `rules = 1`; every stamp `(1, 0)`; the mark of `device_no` 0 is `{item: the largest low part of every id now present, block: the last sid numbered}`, and no other marks; `notes_rev = 0`; no picture; the archive in archive order; the unreadable lines in their order (§6.1).
+14. **Assembly.** `rules = 1`; every stamp `(1, 0)`; the marks, ascending by `device_no`: for `device_no` 0, `{item: the largest low part among the item, row and subscription ids now present whose high part is 0, block: the last sid numbered}`; for each high part `h` from 1 to 8191 that some item, row or subscription id now present has, `{device_no: h, item: the largest low part among those ids with high part h, block: 0}`; no other marks, and a mark whose two numbers are 0 is not stored (§6.10); `notes_rev = 0`; no picture; the archive in archive order; the unreadable lines in their order (§6.1).
 15. **Check.** `BoardData::check` must hold; otherwise fail `invariant` (an error in the import itself).
 
 The genesis of an empty board (no folder) is `BoardData::empty()`: `rules = 1` and every other field at its default; its canonical bytes are `{"rules":1}`.
@@ -1144,10 +1184,11 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 - **CORE-IMP-002** (core) `import` MUST give equal canonical board bytes and equal reports for equal inputs.
 - **CORE-IMP-003** (core, desktop) The import report MUST contain no name, notes text, URL or other text from the board, only the counts, ids and kinds of §15.4.
 - **CORE-IMP-004** (core) `import` MUST keep every archive line that is not UTF-8 or does not parse as an unreadable line, byte for byte, and MUST NOT discard any line except one that is empty after trim.
-- **CORE-IMP-005** (core) `import` MUST renumber ids exactly as §15.3 step 9 states, MUST report each renumbering, and MUST fail with `id_range` when any id would remain at or above 2^40.
+- **CORE-IMP-005** (core) `import` MUST renumber ids exactly as §15.3 step 9 states, MUST report each renumbering, MUST keep every device-minted id of step 9.4 unchanged, and MUST fail with `id_range` exactly when step 9.4 names an id or `next` reaches 2^40.
 - **CORE-IMP-006** (core) `import` MUST number sids as §15.3 step 10 states and MUST set the legacy marks as step 14 states, so that `BoardData::check` holds for the result.
 - **CORE-IMP-007** (core) `import` MUST read the `main` build's files and today's files with the same parsers and MUST produce for each `main`-format fixture the genesis board recorded with it (§18.6).
 - **CORE-IMP-008** (core) A function of the core other than `import` MUST NOT perform normalisation: id assignment, plan migration, detab of stored notes, or substitution of defaults for missing stored values.
+- **CORE-IMP-009** (core) `import` MUST set the genesis palette from the scheme under `LegacyConfig.selected_colorscheme_id` (default 0) in `colorschemes`, and the genesis home from `LegacyConfig.coordinates`, exactly as §15.3 steps 6 and 7 state, with the defaults and the warnings `palette_unreadable` and `home_out_of_range` they name, and MUST set `palette_set` and `home_set` in the report accordingly.
 
 ## 16. Error catalogue
 
@@ -1160,7 +1201,7 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 | `core/unknown_op` | `op` missing or not a command of §9.3 | §9.1 step 4 | as `core/too_large` |
 | `core/schema` | unknown, duplicate or missing field, `null`, float, wrong type, value out of range, broken schema rule | §4.5 steps 3–4, §9.1 steps 3, 5 and 7 | as `core/too_large` |
 | `core/not_canonical` | bytes are not the canonical encoding of their value | §4.5 step 5 | as `core/too_large` |
-| `core/invariant` | board bytes parse but break a rule of §6.12 (the rule number is reported) | `from_canonical_bytes`; import step 15 | engine: raise an integrity alarm and do not use the bytes (`engine.md`); import: report a failure |
+| `core/invariant` | board bytes parse but break a rule of §6.12 (the rule number is reported) | `from_canonical_bytes`; import step 15 | engine: a snapshot whose board fails is passed over with the alarm `BlobFailure` (`engine.md` §19.7, §19.9, §22.3); its own checkpoint or base is the local fault `engine/local_fault` (`engine.md` §7.10); import: report a failure |
 
 **Apply refusals.** Returned by `apply` (§8, §9) as `Refusal.code`; the entry is refused on every device and reported to its author (§10.7).
 
@@ -1180,46 +1221,46 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 
 | Code | Meaning | Raised when | What the caller does |
 |---|---|---|---|
-| `core/unknown_rules` | `upgrade_rules` to a version that is not newer or not supported | §11.2 | engine: halt with the rules halt (`seal.md` §14.5, `engine.md`) |
+| `core/unknown_rules` | `upgrade_rules` to a version that is not newer or not supported; `reset` with a target newer than the current board | §11.2, §11.3 | engine: halt with the rules halt (`seal.md` §14.5, `engine.md`); from `reset`, the local fault `engine/local_fault` (`engine.md` §28.1) |
 
-**Intent and compile errors.** Returned by `parse_intent` (§12) and `compile` (§13) as `CompileError{code, status, message}`; nothing is queued. The UI shows `message`; the bridge returns it as today's `{"error": message}` with `status` (`bridge.md`). Messages are today's (board.rs, subscriptions.rs) except where marked new.
+**Intent and compile errors.** Returned by `parse_intent` (§12) and `compile` (§13) as `CompileError{code, status, message}`; nothing is queued. The UI shows `message`; the bridge returns it as today's `{"error": message}` with `status` (`bridge.md`). Messages are today's (board.rs, subscriptions.rs) except where the status parentheses say new.
 
-| Code | Status | Message | Raised when | What the caller does |
-|---|---|---|---|---|
-| `core/intent_json` | 400 | the parser's message, e.g. `` not a time: `<text>` `` | §12.2; §13.3 G3 | show it |
-| `core/query` | 400 | That is a query, not a command. | `snapshot`, `feed`, `board` | the bridge answers queries itself |
-| `core/name_long` | 400 | A name is at most 200 characters. | G2 | show it |
-| `core/name_empty` | 400 | `add`: It needs a name. `quick_add`: A task needs a name. `rename`: A name cannot be empty. | §13.4 | show it |
-| `core/event_time` | 400 | An event needs a time. | `add` | show it |
-| `core/date_range` | 400 | That date is out of range (1970–9999). | G4, G5 | show it |
-| `core/severity` | 400 | No such severity. | `add`, `set_severity` | show it |
-| `core/horizon` | 400 | No such horizon. | `add`, `set_horizon` | show it |
-| `core/gone` | 410 | That item is no longer on the board. | missing (§13.4) | show it; refresh |
-| `core/block_gone` | 410 | That block is no longer there. | `move_block`, `remove_block` | show it; refresh |
-| `core/bad_time` | 400 | That time doesn't exist on this day (daylight saving). | `create`, `move_block`, `add_block` | show it |
-| `core/finish_kind` | 400 | Only a task can be finished — an event or a routine is deleted instead. | `complete` | show it |
-| `core/block_kind` | 400 | Only a task can be given a block of time. | `add_block` | show it |
-| `core/unplan_kind` | 400 | Only a task can be unplanned. | `unplan` | show it |
-| `core/length_range` | 400 | A length is between fifteen minutes and a day. | `set_estimate` | show it |
-| `core/deadline_kind` | 400 | Only a task has a due date; an event's time is its time. | `set_deadline` | show it |
-| `core/severity_kind` | 400 | Only a task has a severity. | `set_severity` | show it |
-| `core/horizon_kind` | 400 | Only a task has a horizon. | `set_horizon` | show it |
-| `core/repeat_kind` | 400 | Only a routine repeats. | `set_repeat` | show it |
-| `core/notes_long` | 400 | Those notes are too long for the notepad. | `set_notes` | show it; keep the draft |
-| `core/archive_gone` | 410 | That is no longer in the archive. | `restore`, `forget_archived` | show it; refresh |
-| `core/calendars_full` | 400 | That is already 20 calendars, which is as many as this keeps. | `add_subscription` | show it |
-| `core/url_empty` | 400 | An address is needed. | `checked_url` | show it |
-| `core/url_long` | 400 | That address is too long. | `checked_url` | show it |
-| `core/url_http` | 400 | Use https — a calendar link is a password, and http sends it in clear. | `checked_url` | show it |
-| `core/url_scheme` | 400 | An address should start with https:// | `checked_url` | show it |
-| `core/url_host` | 400 | That address has no host in it. | `checked_url` | show it |
-| `core/url_duplicate` | 400 | That calendar is already subscribed to. | `add_subscription` | show it |
-| `core/calendar_gone` | 410 | That calendar is no longer subscribed to. | subscription intents | show it; refresh |
-| `core/cap_items` | 400 | That is as many items as a board can hold. (new) | creating intents, `restore` | show it |
-| `core/cap_blocks` | 400 | That is as many blocks as a board can hold. (new) | `create` (task), `add_block` | show it |
-| `core/cap_archive` | 400 | The archive is full. (new) | `complete`, `delete` | show it |
-| `core/place` | 400 | That place is off the map. (new) | `set_home` | show it |
-| `core/picture` | 400 | That picture could not be shared. (new) | `set_picture` | a fault of the uploading code: log it |
+| Code | Meaning (status) | Raised when | What the caller does |
+|---|---|---|---|
+| `core/intent_json` | the parser's message, e.g. `` not a time: `<text>` `` (400) | §12.2; §13.3 G3 | show it |
+| `core/query` | "That is a query, not a command." (400) | `snapshot`, `feed`, `board` | the bridge answers queries itself |
+| `core/name_long` | "A name is at most 200 characters." (400) | G2 | show it |
+| `core/name_empty` | `add`: "It needs a name."; `quick_add`: "A task needs a name."; `rename`: "A name cannot be empty." (400) | §13.4 | show it |
+| `core/event_time` | "An event needs a time." (400) | `add` | show it |
+| `core/date_range` | "That date is out of range (1970–9999)." (400) | G4, G5 | show it |
+| `core/severity` | "No such severity." (400) | `add`, `set_severity` | show it |
+| `core/horizon` | "No such horizon." (400) | `add`, `set_horizon` | show it |
+| `core/item_gone` | "That item is no longer on the board." (410) | missing (§13.4) | show it; refresh |
+| `core/block_gone` | "That block is no longer there." (410) | `move_block`, `remove_block` | show it; refresh |
+| `core/bad_time` | "That time doesn't exist on this day (daylight saving)." (400) | `create`, `move_block`, `add_block` | show it |
+| `core/finish_kind` | "Only a task can be finished — an event or a routine is deleted instead." (400) | `complete` | show it |
+| `core/block_kind` | "Only a task can be given a block of time." (400) | `add_block` | show it |
+| `core/unplan_kind` | "Only a task can be unplanned." (400) | `unplan` | show it |
+| `core/length_range` | "A length is between fifteen minutes and a day." (400) | `set_estimate` | show it |
+| `core/deadline_kind` | "Only a task has a due date; an event's time is its time." (400) | `set_deadline` | show it |
+| `core/severity_kind` | "Only a task has a severity." (400) | `set_severity` | show it |
+| `core/horizon_kind` | "Only a task has a horizon." (400) | `set_horizon` | show it |
+| `core/repeat_kind` | "Only a routine repeats." (400) | `set_repeat` | show it |
+| `core/notes_long` | "Those notes are too long for the notepad." (400) | `set_notes` | show it; keep the draft |
+| `core/archive_gone` | "That is no longer in the archive." (410) | `restore`, `forget_archived` | show it; refresh |
+| `core/calendars_full` | "That is already 20 calendars, which is as many as this keeps." (400) | `add_subscription` | show it |
+| `core/url_empty` | "An address is needed." (400) | `checked_url` | show it |
+| `core/url_long` | "That address is too long." (400) | `checked_url` | show it |
+| `core/url_http` | "Use https — a calendar link is a password, and http sends it in clear." (400) | `checked_url` | show it |
+| `core/url_scheme` | "An address should start with https://" (400) | `checked_url` | show it |
+| `core/url_host` | "That address has no host in it." (400) | `checked_url` | show it |
+| `core/url_duplicate` | "That calendar is already subscribed to." (400) | `add_subscription` | show it |
+| `core/calendar_gone` | "That calendar is no longer subscribed to." (410) | subscription intents | show it; refresh |
+| `core/cap_items` | "That is as many items as a board can hold." (400; new) | creating intents, `restore` | show it |
+| `core/cap_blocks` | "That is as many blocks as a board can hold." (400; new) | `create` (task), `add_block` | show it |
+| `core/cap_archive` | "The archive is full." (400; new) | `complete`, `delete` | show it |
+| `core/place` | "That place is off the map." (400; new) | `set_home` | show it |
+| `core/picture` | "That picture could not be shared." (400; new) | `set_picture` | a fault of the uploading code: log it |
 
 **Import.**
 
@@ -1233,7 +1274,7 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 |---|---|---|---|
 | JSON nesting depth | 32 | levels | CORE-ENC-004 |
 | log command | 1 to 257,979 | bytes | CORE-CMD-001 |
-| canonical board bytes | 62,914,560 | bytes (60 MiB, so a snapshot body with membership stays under 64 MiB) | CORE-DATA-004 |
+| canonical board bytes | 62,914,560 | bytes (60 MiB, so that a snapshot body, which holds the board, the membership and the control history, `seal.md` §20.4, stays under 64 MiB inflated) | CORE-DATA-004 |
 | intent JSON | 84,096 | bytes | CORE-INT-001 |
 | legacy input file | 268,435,456 | bytes | CORE-IMP-001 |
 | live items | 10,000 | items | CORE-CMD-004 |
@@ -1294,10 +1335,12 @@ Conventions inside core vectors:
 | `commands.json` | §9 | command texts | parsed or the code of §9.1; per op one valid case at each boundary and one invalid case per field constraint and schema rule |
 | `board-bytes.json` | §6 | board texts | accepted with `board_sha256`, or `core/invariant` with the rule number of §6.12; one case per rule |
 | `golden/rules-1/*.json` | §8–§11 | a start board, entries | §18.3 |
+| `reset.json` | §11.3 | target and current board texts | the result board text and its `board_sha256`, or the code; cases with a mark in only one board, with each board's `notes_rev` the larger, and with equal rules |
+| `rebind.json` | §7.5 | command texts, `from_device_no`, view board text, minter | the rebound command texts and the minter after, or `core/bad_id`; cases for every minting and referring field, a reference to an accepted id, and a re-sorted `remove_blocks` |
 | `intents.json` | §12 | the page's and the desktop's JSON shapes (every op of §12.3, every wire-time form) | the parsed intent, or `core/intent_json` |
 | `compile.json` | §13 | intent text, view board text, zone, `now`, `device_no`, minter, overlay anchors | command text and reply, or code, status and message; the minter after |
 | `reminders.json` | §14.5 | board text, `from`, `until`, defaults | reminder records |
-| `import.json` | §15 | a folder under `fixtures/` (today's format and `main`'s), the config values | genesis `board_sha256` and the report, or the failure |
+| `import.json` | §15 | a folder under `fixtures/` (today's format and `main`'s), or the file bytes given in the case; the config values | genesis `board_sha256` and the report, or the failure; cases with device-minted ids (items, rows and subscriptions with ids `2^40 + 3` and `5 × 2^40 + 1`, a duplicate device-minted item id, a temporary id at or above 2^62 next to them) and the marks step 14 gives them; `id_range` for an id with high part 8192 and for the id `3 × 2^40` |
 
 ### 18.3 Golden logs
 
@@ -1316,7 +1359,7 @@ One file per topic (for example `create.json`, `blocks.json`, `archive.json`, `n
    "end_text": "<canonical board bytes>"}]}
 ```
 
-`code` is present for `refused` and `parse_error`; `notices`, `moved`, `skipped` and `restored_as` when they apply; `board_sha256` always (unchanged for a refusal). Rules version 1's golden logs, which CORE-RULES-003 requires, cover: every check of every op of §9 with a refused case; every row of §10.6; every notice kind and group; skips for both reasons; and the boundary values 200 and 201 scalars, 14, 15, 1,440 and 1,441 minutes, levels 4 and 5 (severity) and 3 and 4 (horizon), notes of 20,000 and 20,001 scalars, ids at and above the mark, `device_no` 8191, the id 2^53 − 1, instants at both ends of the range, every cap at its value and one above, `based_on` equal to a stamp's seq and one below it. Golden logs contain no zone, so they hold under any `TZ` (V2-4).
+`code` is present for `refused` and `parse_error`; `notices`, `moved`, `skipped` and `restored_as` when they apply; `board_sha256` always (unchanged for a refusal). Rules version 1's golden logs, which CORE-RULES-003 requires, cover: every check of every op of §9 with a refused case; every row of §10.6; every notice kind and group; skips for both reasons; and the boundary values 200 and 201 scalars, 14, 15, 1,440 and 1,441 minutes, levels 4 and 5 (severity) and 3 and 4 (horizon), notes of 20,000 and 20,001 scalars, ids at and above the mark, `device_no` 8191, the id 2^53 − 1, instants at both ends of the range, every cap at its value and one above, `based_on` equal to a stamp's seq and one below it, and a `complete` whose `ctx.at` is less than a day before the end of the instant range (the saturating clamp). Golden logs contain no zone, so they hold under any `TZ` (V2-4).
 
 ### 18.4 Transcripts
 
@@ -1349,19 +1392,21 @@ Fuzz targets under `crates/taskdeck-core/fuzz/` (SYNC_PLAN.md §6.2 item 9): `co
 - Requires: the engine seals each compiled command with `at_ms` equal to `CompileCtx.now` in milliseconds and `based_on` equal to its confirmed head when it compiled (V2-5), so that `apply`'s `Ctx.at` is the clock `compile` used (CORE-COMP-007).
 - Requires: the engine calls `parse_command` only on a payload that `seal` has authenticated and opened (SYNC_PLAN.md §3.4: nothing parsed before it is authenticated), and maps its failure to the `Refuse` outcome (`seal.md` §14.4).
 - Requires: the engine calls `upgrade_rules` when the entry activating a version is accepted, before applying any later entry, and halts on `core/unknown_rules`.
-- Requires: the engine records notices only from applies to the confirmed state, keeps a notice for its own `device_no` as `author` or `other`, and a refusal of its own entries, as the records of §10.7 in the sealed notices file.
+- Requires: the engine records notices only from applies to the confirmed state, keeps a notice for its own `device_no` as `author` or `other`, and a refusal of its own entries, as the records of §10.7 in the sealed notices file, and records each seq's records once however often it applies the entry, a Skip replay or an adoption replacing those it changes (`engine.md` §13.4).
 - Requires: the engine's naming hold (V2-17) coalesces a held `create_*` with a following `rename` into one create by `LogCommand::with_name`, and drops a held create followed by `forget` together with the forget.
 - Requires: rebase re-applies the pending log commands, never re-compiles their intents, so a pending command's ids and instants are fixed at compile time.
+- Requires: a resubmit after a re-pair (`engine.md` §24.5) rebinds the commands with `ids::rebind` (§7.5) from the new identity's current minter against its pending view, and applies them with the resubmitting device's `at_ms` and head, so their `created` instants, archive clamps and overwrite notices follow that clock and head.
 - Requires: the state hash is composed as ruling S7 with this spec's canonical board bytes for hash version 1; the snapshot's `version` is the engine's view counter, which changes whenever the pending state does.
-- Provides: §8 to §11 as pure functions; `compile` for the trial apply at enqueue.
+- Provides: §8 to §11 as pure functions, including `reset` (§11.3) behind `SM::reset` and `ids::rebind` (§7.5) behind `SM::rebind`; `RefusalRecord::to_canonical` (§10.7) behind `SM::refusal_bytes`; `compile` for the trial apply at enqueue.
 
 **`device.md`.**
 - Requires: the device persists the `IdMinter` with the outbox entry that consumed its numbers, in the same fsynced write (§7.2), and raises it to `mark + 1` after a catch-up that shows a higher mark.
-- Requires: the device supplies the zone (`ChronoZone(chrono::Local)` or a `TableZone`) and its overlay to compile and read calls, and keeps the overlay outside `BoardData`.
-- Requires: the local-only `Store` writes today's files from the `ChangeSet`, archive changes before item changes (R1 §3), and drops overlay events for every id in `overlay_forget`.
+- Requires: the device supplies the zone (`ChronoZone(chrono::Local)` or a `TableZone`, which it may pass as `&dyn Zone`, §5.2) and its overlay to compile and read calls, and keeps the overlay outside `BoardData`.
+- Requires: the local-only `Store` writes today's files from the `ChangeSet`, archive changes before item changes (R1 §3), and drops overlay events for every id in `overlay_forget`; in synced mode the device drops the overlay of every subscription absent or disabled in the new pending view (`device.md` §13.1.3).
 - Requires: checkpoints, bases and backups hold the canonical board bytes, loaded with `from_canonical_bytes` (§6.14).
 - Requires: for the import, the device or desktop reads the legacy files, refuses a held `.lock`, and fills `LegacyConfig` with today's `userconfig.toml` parser (§15.2).
-- I assume `device.md` stores the §10.7 records in the sealed file of kind 8 (`seal.md` §19.2) one record per append.
+- Provides: `import` keeps every device-minted id and sets the mark of each high part it keeps (§15.3 steps 9.4 and 14), so the plain files that `device.md`'s local-only mode (§9.2), "Export legacy" (§18.7) and the recovery tool (§15.8) write read back with their ids unchanged.
+- Relies on: `device.md` §6.4.5 carries each §10.7 record, at most 4,096 bytes, as the record of one `Add` op in the sealed file of kind 8 (`notices.tdk`, `seal.md` §19.2), up to 1,024 ops per sealed record.
 
 **`bridge.md`.**
 - Requires: the bridge parses the page's command JSON with `parse_intent`, compiles it, and answers with today's reply shape `{"ok": true, "version": …, "id"?, "session"?, "moved"?}`, `session` being the sid, or `{"error": message}` with the `CompileError`'s status.
@@ -1421,10 +1466,10 @@ pub mod time {
     impl TableZone { pub fn new(initial: i32, transitions: Vec<(i64, i32)>) -> Result<Self, super::CoreError>; }
     pub struct ChronoZone<Z: chrono::TimeZone>(pub Z);
     impl Zone for FixedZone {} impl Zone for TableZone {} impl<Z: chrono::TimeZone> Zone for ChronoZone<Z> {}
-    pub fn local_day(t: Instant, z: &impl Zone) -> chrono::NaiveDate;
-    pub fn local_minutes(t: Instant, z: &impl Zone) -> i32;
-    pub fn resolve_on_day(day: chrono::NaiveDate, minutes: i32, z: &impl Zone) -> Option<Instant>;
-    pub fn now_marker(day: chrono::NaiveDate, now: Instant, z: &impl Zone) -> Option<i32>;
+    pub fn local_day(t: Instant, z: &(impl Zone + ?Sized)) -> chrono::NaiveDate;
+    pub fn local_minutes(t: Instant, z: &(impl Zone + ?Sized)) -> i32;
+    pub fn resolve_on_day(day: chrono::NaiveDate, minutes: i32, z: &(impl Zone + ?Sized)) -> Option<Instant>;
+    pub fn now_marker(day: chrono::NaiveDate, now: Instant, z: &(impl Zone + ?Sized)) -> Option<i32>;
     pub fn snap(m: i64) -> i32;
     pub fn clamp_block(start: i64, minutes: i64) -> (i32, u32);
     pub fn snap_up(m: i32) -> i32;
@@ -1476,6 +1521,8 @@ pub mod ids {
     impl IdMinter { pub fn new(device_no: u16) -> Self;
                     pub fn mint_item(&mut self, view: &super::board::BoardData) -> Option<u64>;
                     pub fn mint_block(&mut self, view: &super::board::BoardData) -> Option<u64>; }
+    pub fn rebind(commands: &[super::command::LogCommand], from_device_no: u16, view: &super::board::BoardData,
+                  minter: &mut IdMinter) -> Result<Vec<super::command::LogCommand>, super::CoreError>;   // §7.5
 }
 
 // ---------- log commands (§9)
@@ -1529,50 +1576,200 @@ pub mod apply {
     pub const HASH_VERSIONS: &[u32] = &[1];
     pub fn apply(board: &mut BoardData, command: &LogCommand, ctx: &Ctx) -> Result<Applied, Refusal>;
     pub fn upgrade_rules(board: &mut BoardData, v: u32) -> Result<(), super::CoreError>;
+    pub fn reset(target: &BoardData, current: &BoardData) -> Result<BoardData, super::CoreError>;   // §11.3
 }
 
 // ---------- intents and compile (§12, §13)
 pub mod intent {
     pub enum WireTime { Exact(chrono::DateTime<chrono::FixedOffset>), Naive(chrono::NaiveDateTime, String) }
-    pub enum Intent { /* one variant per row of §12.3, fields as its table */ }
+    pub enum Intent { /* one variant per row of §12.3, fields as its table; Create { kind: super::board::Kind, name: String, day: chrono::NaiveDate, start: i32, minutes: u32 } */ }
     pub fn parse_intent(text: &str) -> Result<Intent, super::CompileError>;
 }
 pub mod compile {
-    pub struct CompileCtx<'a, Z: Zone> { /* §13.1 */ }
+    pub struct CompileCtx<'a, Z: Zone + ?Sized> { /* §13.1 */ }
     pub struct Compiled { pub command: Option<LogCommand>, pub reply: Reply }
     pub struct Reply { pub id: Option<u64>, pub session: Option<u64>, pub moved: Option<u32> }
-    pub fn compile<Z: Zone>(intent: &Intent, cx: &CompileCtx<Z>, minter: &mut IdMinter) -> Result<Compiled, CompileError>;
+    pub fn compile<Z: Zone + ?Sized>(intent: &Intent, cx: &CompileCtx<Z>, minter: &mut IdMinter) -> Result<Compiled, CompileError>;
     pub fn checked_url(url: &str) -> Result<String, CompileError>;
     pub fn trim(text: &str) -> &str;                                       // White_Space only
     pub fn detab(text: &str) -> String;
 }
 
-// ---------- read side (§14), copied modules with the zone parameter
-pub mod planner;   // Placement, DayPlacement { session: Option<u64>, .. }, placements_for, lay_out, summarize, reflow, …
-pub mod tasks;     // scoring: importance_score, tables, tie_break_jitter; IMPORTANCE_LABELS, HORIZON_LABELS, …
-pub mod archive;   // verdicts, Filter, Summary, group_by_month
-pub mod ics;       // parse(text, from, until, limits, zone)
-pub mod overlay;   // OverlayEvent, Overlay, FetchOutcome, FetchStatus, Covered
-pub mod weather;   // Report, Hour, Day, Now, build_report, sky_symbol
+// ---------- read side (§14), copied modules with the zone parameter; every zone parameter, here and in planner, archive, ics and the snapshot builders, is &(impl Zone + ?Sized) or Z: Zone + ?Sized (§5.2)
+// Each module carries exactly the items below: those of §14.2's table and of today's src/, without UI-only items and file I/O.
+// "today's fields" and "today's variants" are those of the type of that name in today's src/, with §14.2's changes.
+pub mod planner {
+    pub const DAY_MINUTES: i32 = 24 * 60;
+    pub const SNAP_MINUTES: i32 = 15;
+    pub const MIN_BLOCK_MINUTES: u32 = 15;
+    pub const DEFAULT_BLOCK_MINUTES: u32 = 30;
+    pub enum Placement { /* today's variants */ }
+    impl Placement { pub fn start(&self) -> i32; pub fn end(&self) -> i32; }
+    pub struct DayPlacement { /* today's fields; session: Option<u64>, a sid */ }
+    pub struct Placeable<'a> { /* today's fields, borrowed from an &'a Item */ }
+    impl<'a> Placeable<'a> { pub fn of(item: &'a Item) -> Self; }
+    pub fn placements_for(item: &Item, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized)) -> Vec<DayPlacement>;
+    pub fn placements_of(item: Placeable, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized)) -> Vec<DayPlacement>;
+    pub fn appears_on(item: &Item, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized)) -> bool;
+    pub struct Lane { /* today's fields */ }
+    pub fn lay_out(placements: &[Placement]) -> Vec<Lane>;
+    pub struct DaySummary { /* today's fields */ }
+    pub fn summarize(placements: &[Placement]) -> DaySummary;
+    pub fn summary_text(planned: DaySummary, routine: DaySummary, done: DaySummary) -> String;
+    pub fn format_minutes(minutes: i32) -> String;
+    pub fn format_duration(minutes: u32) -> String;
+    pub fn drop_length_for(item: &Item) -> u32;
+    pub fn duration_options(current: Option<u32>) -> Vec<u32>;
+    pub enum BacklogGroup { /* today's variants */ }
+    pub fn backlog_group(deadline: Option<Instant>, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized)) -> BacklogGroup;
+    pub fn relative_due(deadline: Instant, now: Instant) -> String;
+    pub struct Flowable<K> { /* today's fields */ }
+    pub fn behind_minutes(blocks: &[Placement], now: i32) -> i32;
+    pub fn reflow<K: Copy>(blocks: &[Flowable<K>], anchors: &[(i32, i32)], now: i32) -> Vec<(K, i32)>;
+}   // now_marker, snap, clamp_block and resolve_on_day are in time, not here (§14.2)
+pub mod tasks {
+    pub const WEEKDAY_NAMES: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    pub const EVERY_DAY: u8 = 0b0111_1111;
+    pub const WEEKDAYS: u8 = 0b0001_1111;
+    pub const IMPORTANCE_LABELS: [&str; 5];                       // today's labels
+    pub const HORIZON_LABELS: [&str; 4] = ["Within a month", "Within a week", "Within days", "Whenever"];
+    pub const HORIZON_DISPLAY_ORDER: [u8; 4] = [2, 1, 0, 3];
+    pub const ROUTINE_COLOR_INDEX: usize = 0;
+    pub const PALETTE_LEN: usize = 6;
+    pub const HORIZON_WHENEVER: u8 = 3;
+    pub const WEIGHT_BY_IMPORTANCE: [f32; 5] = [1.0, 2.0, 4.0, 8.0, 16.0];
+    pub const LEAD_DAYS_BY_IMPORTANCE: [f32; 5] = [0.5, 1.0, 2.0, 4.0, 8.0];
+    pub const WEIGHT_BY_HORIZON: [f32; 4] = [1.0, 2.0, 4.0, 0.5];
+    pub const RIPEN_DAYS_BY_HORIZON: [f32; 4] = [30.0, 10.0, 3.0, 90.0];
+    pub const PLANNED_LEAD_DAYS: f32 = 0.5;
+    pub const OVERDUE_DOUBLING_DAYS: f32 = 1.0;
+    pub const OVERDUE_PRESSURE_CAP: f32 = 4.0;
+    pub const ASSUMED_IMPORTANCE: u8 = 2;
+    pub const MALFORMED_SCORE: f32 = 1.0e6;
+    pub const JITTER: f32 = 0.08;
+    pub fn weekday_bit(day: chrono::NaiveDate) -> u8;
+    pub fn calendar_item_color(is_event: bool, importance: Option<u8>, time_importance: Option<u8>) -> usize;
+    impl Recurrence { pub fn falls_on(&self, day: chrono::NaiveDate) -> bool; pub fn repeats(&self) -> bool;
+                      pub fn includes(&self, index: u32) -> bool; pub fn summary(&self) -> String;
+                      pub fn summary_dated(&self) -> String; }
+    impl Item { pub fn importance_score(&self, now: Instant, seed: u64) -> f32;
+                pub fn tie_break_jitter(&self, seed: u64) -> f32;
+                pub fn is_routine(&self) -> bool;
+                pub fn calendar_item_color(&self) -> usize;
+                pub fn planner_anchor(&self) -> Option<Instant>;
+                pub fn is_planned(&self) -> bool;
+                pub fn planned_minutes(&self) -> u32;
+                pub fn remaining_minutes(&self) -> Option<u32>;
+                pub fn wants_planning(&self) -> bool; }
+}
+pub mod archive {
+    pub enum Timing { /* today's variants */ }
+    impl ArchiveRow { pub fn verdict(&self, zone: &(impl Zone + ?Sized)) -> String;
+                      pub fn timing(&self) -> Timing;
+                      pub fn was_finished(&self) -> bool;
+                      pub fn was_judged(&self) -> bool;
+                      pub fn mark(&self) -> &'static str;
+                      pub fn lifetime(&self) -> chrono::TimeDelta;
+                      pub fn booked_minutes(&self) -> u32;
+                      pub fn sittings(&self) -> usize;
+                      pub fn color_id(&self) -> usize;
+                      pub fn is_routine(&self) -> bool; }
+    pub fn format_span(span: chrono::TimeDelta) -> String;
+    pub fn format_total(minutes: u64) -> String;
+    pub struct Filter { /* today's fields */ }
+    pub enum OutcomeFilter { /* today's variants */ }
+    pub enum KindFilter { /* today's variants */ }
+    impl Filter { pub fn admits(&self, row: &ArchiveRow) -> bool; pub fn is_open(&self) -> bool; }
+    pub struct Summary { /* today's fields */ }
+    impl Summary { pub fn headline(&self) -> String; }
+    pub fn summarize<'a>(rows: impl IntoIterator<Item = &'a ArchiveRow>) -> Summary;
+    pub struct MonthRun { /* today's fields */ }
+    pub fn group_by_month(rows: &[&ArchiveRow], zone: &(impl Zone + ?Sized)) -> Vec<MonthRun>;   // rows newest first
+}
+pub mod ics {
+    pub struct Occurrence { /* today's fields */ }
+    impl Occurrence { pub fn is_busy(&self) -> bool; }
+    pub struct Parsed { /* today's fields */ }
+    pub struct Limits { /* today's fields */ }
+    impl Default for Limits {}
+    pub fn parse(text: &str, from: chrono::NaiveDate, until: chrono::NaiveDate, limits: Limits,
+                 zone: &(impl Zone + ?Sized)) -> Result<Parsed, String>;
+}
+pub mod overlay {
+    pub struct Covered { /* today's fields */ }
+    impl Covered { pub fn holds(&self, day: chrono::NaiveDate) -> bool; }
+    pub struct OverlayEvent { /* today's fields */ }
+    pub const LONG_EVENT_MINUTES: i32 = 12 * 60;
+    impl OverlayEvent { pub fn minutes(&self) -> i32; pub fn is_background(&self) -> bool; pub fn is_busy(&self) -> bool; }
+    pub enum FetchOutcome { /* today's variants */ }
+    pub fn placeholder_name(id: u64) -> String;
+    pub fn name_from_url(url: &str) -> Option<String>;
+    pub fn better_name(subscription: &Subscription, overlay: &Overlay) -> Option<String>;
+    pub fn is_unnamed(subscription: &Subscription) -> bool;
+    pub struct FetchStatus { /* today's fields; at: chrono::DateTime<chrono::FixedOffset> (§14.6) */ }
+    pub struct Overlay { /* today's fields */ }
+    impl Overlay { pub fn covering(self, covers: Option<Covered>) -> Overlay;
+                   pub fn sealed(events: Vec<OverlayEvent>, status: Vec<FetchStatus>) -> Overlay;
+                   pub fn digest(&self) -> u64;
+                   pub fn anchors_on(&self, day: chrono::NaiveDate) -> Vec<(i32, i32)>;
+                   pub fn events_on(&self, day: chrono::NaiveDate) -> impl Iterator<Item = &OverlayEvent>;
+                   pub fn forget(&mut self, subscription: u64);
+                   pub fn status_for(&self, subscription: u64) -> Option<&FetchStatus>; }
+}
+pub mod weather {
+    // The response types that today's code keeps private are public here, so that build_report can be called.
+    pub struct WeatherResponse { /* today's fields */ }
+    pub struct HourlyData { /* today's fields */ }
+    pub struct CurrentData { /* today's fields */ }
+    pub struct DailyData { /* today's fields */ }
+    pub struct Hour { /* today's fields */ }
+    pub struct Day { /* today's fields */ }
+    pub struct Now { /* today's fields */ }
+    pub struct Report { /* today's fields */ }
+    pub fn build_report(json: &WeatherResponse, coordinates: [f32; 2]) -> Report;
+    pub fn sky_symbol(code: i32, is_day: bool) -> &'static str;
+    pub struct City { /* today's fields */ }
+    pub fn nearest_city(latitude: f32, longitude: f32) -> Option<&'static City>;
+    pub static CITIES: &[City];                                   // today's table
+}
 pub mod read {
-    pub fn ranked_ids(board: &BoardData, now: Instant, zone: &impl Zone) -> Vec<u64>;
-    pub fn shuffle_seed(now: Instant, zone: &impl Zone) -> u64;
-    pub fn behind_minutes(board: &BoardData, day: chrono::NaiveDate, now: Instant, zone: &impl Zone) -> i32;
-    pub fn next_free_start(board: &BoardData, day: chrono::NaiveDate, zone: &impl Zone) -> i32;
-    pub fn reflow_inputs(board: &BoardData, overlay: &Overlay, day: chrono::NaiveDate, zone: &impl Zone)
+    pub fn ranked_ids(board: &BoardData, now: Instant, zone: &(impl Zone + ?Sized)) -> Vec<u64>;
+    pub fn shuffle_seed(now: Instant, zone: &(impl Zone + ?Sized)) -> u64;
+    pub fn behind_minutes(board: &BoardData, day: chrono::NaiveDate, now: Instant, zone: &(impl Zone + ?Sized)) -> i32;
+    pub fn next_free_start(board: &BoardData, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized)) -> i32;
+    pub fn reflow_inputs(board: &BoardData, overlay: &Overlay, day: chrono::NaiveDate, zone: &(impl Zone + ?Sized))
         -> (Vec<planner::Flowable<(u64, u64)>>, Vec<(i32, i32)>);
     pub fn archive_newest_first(board: &BoardData) -> impl Iterator<Item = &ArchiveRow>;
-    pub fn archive_by_day<'a>(board: &'a BoardData, from: chrono::NaiveDate, days: u32, zone: &impl Zone)
+    pub fn archive_by_day<'a>(board: &'a BoardData, from: chrono::NaiveDate, days: u32, zone: &(impl Zone + ?Sized))
         -> Vec<Vec<(&'a ArchiveRow, &'a RowBlock)>>;
 }
 pub mod snapshot {
-    pub struct SnapshotInput<'a, Z: Zone> { /* §14.3 */ }
+    pub struct SnapshotInput<'a, Z: Zone + ?Sized> { /* §14.3 */ }
     pub struct Snapshot { /* today's fields, plus notes_base: u64 */ }
     pub struct Look { pub id: String, pub aspect: f32, pub top: String }
     pub struct Dials { pub blur: u32, pub light: u32 }
-    pub fn snapshot<Z: Zone>(input: &SnapshotInput<Z>) -> Snapshot;
-    pub fn answer_snapshot<Z: Zone>(input: &SnapshotInput<Z>) -> serde_json::Value;
-    // build_day, build_tray, item_detail, done_rows, with_subscribed: today's, with the zone
+    pub struct DoneRow { /* today's fields */ }
+    pub struct Labels { /* today's fields */ }
+    impl Labels { pub fn current() -> Self; }
+    pub struct DaySnapshot { /* today's fields */ }
+    pub struct SubscribedSnapshot { /* today's fields */ }
+    pub struct EntrySnapshot { /* today's fields */ }
+    pub struct GhostSnapshot { /* today's fields */ }
+    pub struct Tray { /* today's fields */ }
+    pub struct TrayCard { /* today's fields */ }
+    pub struct ItemDetail { /* today's fields */ }
+    pub struct RepeatDetail { /* today's fields */ }
+    pub struct SessionDetail { /* today's fields */ }
+    pub fn snapshot<Z: Zone + ?Sized>(input: &SnapshotInput<Z>) -> Snapshot;
+    pub fn answer_snapshot<Z: Zone + ?Sized>(input: &SnapshotInput<Z>) -> serde_json::Value;
+    pub fn build_day(items: &[Item], ghosts: &[(&ArchiveRow, &RowBlock)], day: chrono::NaiveDate, now: Instant,
+                     zone: &(impl Zone + ?Sized)) -> DaySnapshot;                       // §14.3
+    pub fn build_tray(items: &[Item], day: chrono::NaiveDate, now: Instant, shuffle_seed: u64,
+                      zone: &(impl Zone + ?Sized)) -> Tray;                             // §14.3 item 4
+    pub fn item_detail(item: &Item, zone: &(impl Zone + ?Sized)) -> ItemDetail;        // §14.3 item 6
+    pub fn done_rows<'a>(rows: impl IntoIterator<Item = &'a ArchiveRow>, zone: &(impl Zone + ?Sized)) -> Vec<DoneRow>;   // newest first, §14.3 items 7 and 8
+    pub fn with_subscribed(days: Vec<DaySnapshot>, subscriptions: &[Subscription], overlay: &Overlay,
+                           zone: &(impl Zone + ?Sized)) -> Vec<DaySnapshot>;             // §14.3 item 11
 }
 pub mod reminders {
     pub struct ReminderDefaults { pub event_lead_minutes: u32, pub block_lead_minutes: u32, pub due_lead_minutes: u32 }

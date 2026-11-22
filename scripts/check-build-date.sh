@@ -13,6 +13,9 @@
 # CARGO_TARGET_DIR (a relative value is taken from the caller's directory, as
 # cargo would) and cargo's own target-dir configuration.
 set -euo pipefail
+# The rerun check below greps cargo's human-readable output, which colour
+# would break (CI sets CARGO_TERM_COLOR=always): colour off for every call.
+export CARGO_TERM_COLOR=never
 
 # Make a relative target dir from the environment absolute against the
 # caller's directory before moving to the repository root. `pwd -W` gives the
@@ -110,15 +113,18 @@ expect_refused "-18446744072009551616"   # -2^64 + 1700000000
 expect_refused "253402300800"        # 10000-01-01, not a four-digit year
 expect_refused "-62167219201"        # -0001-12-31, not a four-digit year
 expect_refused "+1700000000"         # digits and an optional '-' only
-expect_refused " 1700000000"         # not trimmed, at either end
-expect_refused "1700000000 "
-expect_refused $'1700000000\n'
+# Whitespace is not trimmed, at either end: each of space, tab, LF and CR.
+for ws in ' ' $'\t' $'\n' $'\r'; do
+    expect_refused "${ws}1700000000"
+    expect_refused "1700000000${ws}"
+done
 expect_refused "1700000000.5"        # not a float
-# Not UTF-8: must be refused, not taken as unset. Windows keeps the
+# Not UTF-8: must be refused, not taken as unset nor read with the bad byte
+# dropped (digits around it, so either mistake builds). Windows keeps the
 # environment as UTF-16, so the byte may not survive there.
 case "$(uname -s)" in
     MINGW* | MSYS* | CYGWIN*) ;;
-    *) expect_refused $'\xff' ;;
+    *) expect_refused $'1700000000\xff' ;;
 esac
 
 # expect_date VALUE DATE: the build must succeed with BUILD_DATE=DATE.

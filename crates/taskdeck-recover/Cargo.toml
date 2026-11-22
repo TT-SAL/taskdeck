@@ -1,0 +1,18 @@
+[package]
+name = "taskdeck-recover"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The offline recovery tool (spec: docs/sync/spec/seal.md §18, §21; device.md §15.8)."
+
+[[bin]]
+name = "taskdeck-recover"
+path = "src/main.rs"
+
+[dependencies]
+taskdeck-backup = { workspace = true }
+taskdeck-seal = { workspace = true }
+taskdeck-core = { workspace = true }
+# Its online steps use `taskdeck_device::recovery_online::RecoveryLink`
+# (device.md §15.8).
+taskdeck-device = { workspace = true }

@@ -1,0 +1,68 @@
+[package]
+name = "taskdeck-device"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The device runtime: store, transport, key stores, fetchers, blobs, backups, the facade (spec: docs/sync/spec/device.md)."
+
+[features]
+# Test-only trust: a relay on loopback, a test certificate, the test key stores
+# and clock (device.md §11, DEV-TRUST-001). Off by default; release builds
+# never enable it (SYNC_PLAN.md §3.4). It enables nothing yet: the device stage
+# adds what sits behind it.
+test-trust = []
+
+# The headless CLI the end-to-end suite drives (device.md §19, DEV-CTL-001).
+[[bin]]
+name = "taskdeck-devicectl"
+path = "src/bin/taskdeck-devicectl.rs"
+required-features = ["test-trust"]
+
+# DEV-GEN-011: exactly these outside the dev-dependencies.
+[dependencies]
+taskdeck-core = { workspace = true }
+taskdeck-seal = { workspace = true }
+taskdeck-sync = { workspace = true }
+taskdeck-backup = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# The device may read the clock and the local zone (`ChronoZone(chrono::Local)`).
+chrono = { workspace = true, features = ["clock", "serde", "std"] }
+# `derive`: `CreateFlow` and `RecoveryChangeFlow` are `ZeroizeOnDrop` (device.md §25).
+zeroize = { workspace = true, features = ["derive"] }
+subtle = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+flate2 = { workspace = true }
+# Pictures: `jpeg` and `png` only (DEV-GEN-011; V1-14).
+image = { workspace = true, features = ["jpeg", "png"] }
+# HTTPS over rustls with no crypto provider of ureq's choosing and the platform
+# verifier (device.md §10.1). No gzip, cookies, proxy or webpki roots.
+ureq = { workspace = true, features = ["rustls-no-provider", "platform-verifier"] }
+# The socket. `handshake` is the client handshake; the TLS stream underneath is
+# the device's own rustls connection, so no TLS feature of tungstenite's.
+tungstenite = { workspace = true, features = ["handshake"] }
+# The ring provider only; TLS 1.2 and 1.3 (device.md §10.1; SYNC.md §5.1).
+rustls = { workspace = true, features = ["ring", "std", "tls12", "logging"] }
+rustls-platform-verifier = { workspace = true }
+url = { workspace = true }
+
+# DPAPI and the replace step of the file layer (device.md §12.3, §7.1;
+# DEV-GEN-001: CryptProtectData, CryptUnprotectData, LocalFree, MoveFileExW).
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "std",
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+] }
+
+# The login Keychain (device.md §12.4).
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { workspace = true }
+
+[dev-dependencies]
+# Temporary data folders for the store's tests. Dev-only: DEV-GEN-011.
+tempfile = { workspace = true }
+# Dev-only: DEV-GEN-003 draws every random byte through taskdeck_seal::OsEntropy.
+getrandom = { workspace = true }

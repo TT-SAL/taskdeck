@@ -1,0 +1,36 @@
+[package]
+name = "taskdeck-seal"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Frames, contexts, envelope, keys, membership, chain, pairing, HPKE, sealed files and backups (spec: docs/sync/spec/seal.md)."
+
+[features]
+# Deterministic entropy for the test vectors (seal.md §26, SEAL-GEN-005,
+# SEAL-GEN-014). Off by default; release builds never enable it. It declares
+# `FixedEntropy` and `TEST_ENTROPY_MARKER`; stage `seal` fills their bodies.
+test-entropy = []
+
+# The pinned crates of SYNC.md §5.1 (SEAL-GEN-003), with only the features
+# seal.md asks for. Random bytes enter only through `Entropy` (SEAL-GEN-004,
+# SEAL-GEN-012), so no crate gets a `getrandom` feature of its own.
+[dependencies]
+chacha20poly1305 = { workspace = true, features = ["alloc", "zeroize"] }
+ed25519-dalek = { workspace = true, features = ["fast", "zeroize"] }
+# Static secrets: the device and recovery X25519 keys are long-lived (§6).
+x25519-dalek = { workspace = true, features = ["static_secrets", "precomputed-tables", "zeroize"] }
+# DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20-Poly1305 (SYNC.md §5.1).
+hpke = { workspace = true, features = ["alloc", "x25519", "chacha"] }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+# `OsEntropy` (SEAL-GEN-005).
+getrandom = { workspace = true }
+zeroize = { workspace = true, features = ["derive"] }
+subtle = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# Snapshot bodies and backups are raw DEFLATE (§20.4).
+flate2 = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

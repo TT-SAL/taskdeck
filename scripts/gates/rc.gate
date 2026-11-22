@@ -1,0 +1,16 @@
+# Gate of stage rc (SYNC_PLAN.md §6.12). Format: scripts/gates/README.md.
+# §6.12 has no "Gate:" line; its items are the gate. The container re-runs
+# every suite it can (the stricter reading: a release candidate is only as good
+# as the whole system's tests on its commit); the rest is CI's or the record's.
+run | workspace-tests  | every Rust test of the workspace on the candidate commit (§6.12 item 1) | cargo test --locked --workspace
+run | relay-suites     | the relay's conformance suite on all three targets (§6.12 item 1, "the Worker under wrangler dev") | bash relay/test/run.sh core && bash relay/test/run.sh standby && bash relay/test/run.sh worker
+run | android-unit     | the Android unit tests and the armeabi-v7a link (§6.12 item 1) | bash android/ci.sh unit && bash android/ci.sh link
+run | spec-lint        | the specs and the requirement map still lint (§6.12 item 3) | bash scripts/spec-lint.sh
+run | script-tests     | the scripts' own tests (§6.12) | bash scripts/tests/run.sh
+ci  | whole-system     | "The whole system in CI: the Windows and macOS apps' headless paths, the emulator app and the Worker under wrangler dev, through pair, edit, offline, revoke, restore" (§6.12 item 1) | gate (pull_request run), device, desktop, emulator, relay
+ci  | attack-rounds    | "a whole-system attack round ... repeat until two rounds are dry", each finding with a reproduction (§6.12 item 2) | no CI job: each fix's regression test runs in its stage's job; the rounds are recorded in docs/sync/status/rc.md
+ci  | requirements     | "Every row of SYNC.md §3 and §7 is marked done, deferred to §6.13, or failed" (§6.12 item 3) | no CI job: the table in docs/sync/status/rc.md, read in the exit pull request
+ci  | candidate        | "Name the release candidate: the commit, and the hashes the release dry run produced for it" (§6.12 item 4) | release.yml in dry-run mode on the candidate commit
+run | spec-coverage    | every live clause is still cited by a test of each stage that owns it (§3.3; stricter reading: rc owns no clause, so it runs every stage's check) | bash scripts/spec-coverage.sh rc
+run | no-unimplemented | no unimplemented!() or todo!() anywhere but docs/ (§3.3; rc may touch any path; docs/ holds records, not code) | bash scripts/gate-lib.sh no-unimplemented rc
+run | no-skipped-tests | no skipped or ignored test anywhere but docs/ (§3.3) | bash scripts/gate-lib.sh no-skipped-tests rc

@@ -1,0 +1,11 @@
+# Exemptions from the seven-day cooldown (scripts/cooldown.sh).
+#
+# One per line, four fields separated by spaces:
+#
+#   <crate name> <exact version> <expiry YYYY-MM-DD> <reason, to the end of the line>
+#
+# An exemption covers only the age rule: a yanked or missing version still
+# fails. It holds through its expiry day (UTC); a line that is past its expiry,
+# or lacks any of the four fields, makes the cooldown fail until it is removed.
+# Every line needs a written reason from the lead or the owner, for example an
+# advisory fix that cannot wait seven days; name who gave it in the reason.

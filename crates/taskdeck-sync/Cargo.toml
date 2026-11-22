@@ -1,0 +1,27 @@
+[package]
+name = "taskdeck-sync"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The sans-IO replica engine and its simulator, generic over traits it defines (spec: docs/sync/spec/engine.md)."
+
+[features]
+# Compiles the modules `toy` (the toy state machine, engine.md §5.3), `fake`
+# (the fake sealer and membership, §6.3) and `sim` (the simulator, §31;
+# ENG-TOY-002). No default feature enables it; release builds never do.
+sim = []
+
+# ENG-GEN-005: exactly sha2 and zeroize outside the dev-dependencies, and
+# neither taskdeck-core nor taskdeck-seal (decision D6).
+[dependencies]
+# The state hash (engine.md §18.3, ENG-HASH-001).
+sha2 = { workspace = true }
+# The identity export (engine.md §7.11 `WriteIdentity`).
+zeroize = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+# The JSON test vectors (engine.md §35). Dev-only: ENG-GEN-005 keeps them out
+# of the crate's own dependencies.
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

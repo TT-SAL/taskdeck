@@ -10,7 +10,7 @@ This spec fixes everything under `android/` (the Gradle project, the Kotlin shel
 - R1 §6 (the page's features and seams), R2 in full (as amended by SYNC.md and SYNC_PLAN.md);
 - the verifier findings V1-9 (frames, `RTC*`, link hints, the harness, the two-app fallback), V1-14 (synced pictures decoded only as JPEG, in Rust), V1-19 (lock-screen actions behind authentication; no notification delegation), V3-6 (preferences, staleness, asynchronous refusals, notes conflicts, "will be refused" marks), V3-12 (the shared picture re-encoded before the WebView sees it), V3-13 (the Doze budget and the SDK gaps), V3-16 (the full Gradle dependency set, the platform verifier's Android part), V3-17 (what `libtaskdeck.so` links), V3-19 (desk-only features on the phone), and V3's smaller notes (`/api/wait` as a push, the StrongBox cost against the cold start);
 - SYNC_PLAN.md §2 (minSdk 26, the forked page, limited administration from the phone, reminders in `android`, no `.ics` feed, separate crates), §3.4, §5 (WebView 58 on the API 26 image against 133 on API 36; no emulator in containers), §6.6 (`android-shell`) and §6.10 (`android`);
-- the rulings S4 (the relay address may be pasted), S8 (the phone may take every duty), S9, S19 (reminder leads), S26 (`unsafe` only in the JNI entry points) of `docs/sync/status/foundation.md`.
+- the rulings S4 (the relay address may be pasted), S8 (the phone may take every duty), S9, S19 (reminder leads), S26 (`unsafe` only in the JNI entry points), S29 (the phone's own picture), S30 (device authentication on the phone needs API 30), S31 (`ACCESS_NETWORK_STATE`) of `docs/sync/status/foundation.md`.
 
 Non-goals, each owned elsewhere:
 
@@ -89,20 +89,21 @@ Every row that reaches the core does it through the core host (§4.3). No compon
 
 ### 4.3 The core instance
 
-`CoreHost` is a Kotlin `object` holding the state `Closed`, `Opening`, `Open(mode)` or `Failed(code)`, guarded by one `java.util.concurrent.locks.ReentrantLock`. The native library keeps the matching Rust state: a `static CORE: std::sync::Mutex<Option<std::sync::Arc<dyn Backend>>>`, where the `full` flavour's backend holds the one `taskdeck_device::Device` of the process.
+`CoreHost` is a Kotlin `object` holding the state `Closed`, `Opening`, `Open` or `Failed(code)`, guarded by one `java.util.concurrent.locks.ReentrantLock`. The native library keeps the matching Rust state: a `static CORE: std::sync::Mutex<Option<std::sync::Arc<dyn Backend>>>`, where the `full` flavour's backend holds the one `taskdeck_device::Device` of the process. `Open` carries no mode: the mode is the facade's and changes while the core is open (`device.md` DEV-FACADE-009), so the shell reads it from `DeviceStatus.mode` whenever it needs it (§5.8).
 
 `CoreHost.ensureOpen(context)`, in order:
 
 1. If the state is `Open` or `Failed`, return it.
 2. If `UserManager.isUserUnlocked()` is false, return `Locked` without changing the state: the data folder lives in credential-encrypted storage, which is unreadable before the first unlock after a reboot.
 3. Take the lock; if another thread is `Opening`, wait for it (at most 20,000 ms, then return `Failed("bridge/open_timeout")` without changing the state).
-4. Set `Opening`; call `Native.initPlatform(context)` once per process (§11.2); build the configuration of §11.3; call `Native.open(config)`; set `Open(mode)` or `Failed(code)` from its result.
+4. Set `Opening`; call `Native.initPlatform(context)` once per process (§11.2); build the configuration of §11.3; call `Native.open(config)`. On success set `Open`. On a failure with `device/keystore_unavailable` (the Keystore is not ready yet, `device.md` §12.1) set `Closed` and return `Failed(code)` for this call only, so that the next `ensureOpen` opens again; on any other failure set `Failed(code)`.
 
 The core is never closed while the process lives: Android ends the process without notice, and the device runtime loses nothing durable when it is killed (`device.md` §7.6). `Native.close` exists for tests only (§11.2).
 
 - **BRIDGE-PROC-003** (android-shell, android) Every component of §4.2 that reaches the core MUST obtain it only through `CoreHost.ensureOpen`, and the process MUST hold at most one open native core.
 - **BRIDGE-PROC-004** (android) `CoreHost.ensureOpen` MUST NOT open the core while `UserManager.isUserUnlocked()` is false, and `TaskDeckApp.onCreate` MUST NOT open the core.
 - **BRIDGE-PROC-005** (android-shell) The Rust side MUST keep the open backend in one process-wide `Mutex<Option<…>>`, MUST hold that mutex only to clone the handle or to change it, and MUST call no facade method while holding it.
+- **BRIDGE-PROC-008** (android) After `Native.open` failed with `device/keystore_unavailable`, `CoreHost.ensureOpen` MUST return `Failed` with that code and MUST leave the state `Closed`, so that the next call opens again; after any other failure it MUST keep the state `Failed(code)`.
 
 ### 4.4 Threads
 
@@ -214,7 +215,7 @@ Events replace the long poll: today's `/api/wait` held a request until the board
 
 | `ev` | Sent when | `data` |
 |---|---|---|
-| `hello` | after the load's `ready`, as soon as the core host's state is `Open` or `Failed` (§5.8) | `{"mode": "local" \| "synced" \| "key_lost" \| "failed" \| "echo", "code": string (with `failed` only), "api": integer (the SDK level), "flavour": "echo" \| "full", "sync": <sync data> (absent in `echo`)}` |
+| `hello` | after the load's `ready`, as soon as `CoreHost.ensureOpen` has returned `Open` or `Failed` (§5.8) | `{"mode": "local" \| "synced" \| "key_lost" \| "failed" \| "echo", "code": string (with `failed` only), "api": integer (the SDK level), "flavour": "echo" \| "full", "sync": <sync data> (absent in `echo`)}` |
 | `changed` | `Changes.view` moved | `{"version": <Published::version()>}` |
 | `sync` | `Changes.status` moved, or `Changes.view` moved while `pending_marks()` changed (`android` only) | the sync data below |
 | `notices` | `Changes.notices` moved (`android` only) | the notices data below |
@@ -243,9 +244,9 @@ Events replace the long poll: today's `/api/wait` held a request until the board
 |---|---|---|---|
 | `self` | integer | optional | this device's `device_no` |
 | `devices` | object | required | `device_no` in decimal → device name, for every device of `Status.devices` |
-| `records` | array | required | every record of `Published::notices()` that is not dismissed, in its order, each `{"seq": integer, "index": integer, "record": <the canonical record of core.md §10.7 as a JSON object>, "type": "notice" \| "refusal"}` |
+| `records` | array | required | every `NoticeView` of `Published::notices()` whose `dismissed` is false, in its order, each `{"seq": integer, "index": integer, "record": <the canonical record of core.md §10.7 as a JSON object>, "type": "notice" \| "refusal"}`: `seq` and `index` the `NoticeView`'s, `type` from its `NoticeRecord` variant |
 
-`index` is the position of the record among the records of the same `seq` in `notices()`, counting from 0 (an assumption about `device.md`, §20).
+`seq` and `index` are the engine's own (`engine.md` `NoticeEntry`, copied by `device.md` §17.5), the pair `dismiss_notice` takes.
 
 - **BRIDGE-EVT-001** (android-shell) The shell MUST send `hello` exactly once per page load, after its `ready`, and before any other event to that load.
 - **BRIDGE-EVT-002** (android-shell) The watcher MUST post a `changed` event to the current page load no later than 50 ms after `Native.waitForChange` returned counters whose `view` is above the last one it pushed, with `version` equal to the published version of that moment.
@@ -284,21 +285,24 @@ The page posts the picture it cropped (phone.html:4695-4716) as `body_b64`: stan
 
 ### 5.8 Before the core is open
 
-`MainActivity.onCreate` creates the WebView and loads the page at once, and in parallel runs `CoreHost.ensureOpen` on `lifecycle`, so the page's own start and the core's open (key unwrap, reading the store, `device.md` §5.4) overlap. The page sends `ready` at the start of its script and waits for `hello` (S-12). Until `hello` arrives it shows nothing of the board. If 500 ms pass without `hello`, it shows the panel (the element that was the token gate, S-06) with the text "Opening the board…". The shell sends `hello`:
+`MainActivity.onCreate` creates the WebView and loads the page at once, and in parallel runs `CoreHost.ensureOpen` on `lifecycle`, so the page's own start and the core's open (key unwrap, reading the store, `device.md` §5.4) overlap. The page sends `ready` at the start of its script and waits for `hello` (S-12). Until `hello` arrives it shows nothing of the board. If 500 ms pass without `hello`, it shows the panel (the element that was the token gate, S-06) with the text "Opening the board…". The shell sends `hello`, its `mode` read from `DeviceStatus.mode` when it is sent:
 
 | Core host state | `hello.mode` | What the page shows |
 |---|---|---|
-| `Open(LocalOnly)` | `local` | the board (an empty local board before pairing); in `android` the sync line says the phone is not paired |
-| `Open(Synced)` | `synced` | the board |
-| `Open(KeyLost)` | `key_lost` | the panel: "This phone can no longer unlock its copy of the board. Pair it again to carry on." with a button "Open Devices" (`POST /api/screen`, §6.4.7) |
-| `Failed(code)` | `failed` | the panel: "TaskDeck could not open the board (<code>). Close the app and open it again." |
+| `Open`, `DeviceStatus.mode` `LocalOnly` | `local` | the board (an empty local board before pairing); in `android` the sync line says the phone is not paired |
+| `Open`, `DeviceStatus.mode` `Synced` | `synced` | the board |
+| `Open`, `DeviceStatus.mode` `KeyLost` | `key_lost` | the panel: "This phone can no longer unlock its copy of the board. Pair it again to carry on." with a button "Open Devices" (`POST /api/screen`, §6.4.7) |
+| `Failed(code)`, as `ensureOpen` returned it | `failed` | the panel: "TaskDeck could not open the board (<code>). Close the app and open it again." |
 | `Locked` | not sent; the activity cannot run before the first unlock, because Android does not start a non-direct-boot activity then | — |
 | echo flavour | `echo` | the board from the fixtures |
 
 When 20,000 ms pass without `hello`, the page shows "TaskDeck is taking too long to open the board. Close the app and open it again." and keeps waiting.
 
-- **BRIDGE-MSG-013** (android-shell) The shell MUST start loading the page before `CoreHost.ensureOpen` returns, and MUST send `hello` to the current page load within 50 ms of the core host reaching `Open` or `Failed`.
+When the mode changes while a page load is current (a join or re-pair finished, a lost identity forgotten, `device.md` DEV-FACADE-009), the watcher sees `Changes.status` move and `DeviceStatus.mode` differ from the `mode` that load's `hello` carried, and reloads the WebView (`WebView.reload()`); the new page load boots with a fresh `hello` (§5.6).
+
+- **BRIDGE-MSG-013** (android-shell) The shell MUST start loading the page before `CoreHost.ensureOpen` returns, and MUST send `hello` to the current page load within 50 ms of `ensureOpen` returning `Open` or `Failed`.
 - **BRIDGE-MSG-014** (android-shell) The page MUST NOT send any `req` before it has received `hello`, and MUST show the panel texts of §5.8 at 500 ms and 20,000 ms without `hello`.
+- **BRIDGE-EVT-005** (android) When `DeviceStatus.mode` differs from the `mode` of the current page load's `hello`, the watcher MUST reload the WebView.
 
 ## 6. The allow-list
 
@@ -328,7 +332,7 @@ Replies are today's shapes (digest §3.2) unless the row says otherwise. "Thread
 | 2 | `GET /api/weather` | none | today's `weather::Report` JSON plus `for`, `via`, `here` (§6.4.2) | Rust, then Kotlin adds `here.at` | `Published::weather()`, `PageFacade::weather_place()` | io | android-shell, android |
 | 3 | `POST /api/command` | `body`: one of the 17 verbs (§6.3); optional `headers.request_key` | `{"ok": true, "version": N}` plus `id`, `session`, `moved` when the compile step's `Reply` has them | Rust | `submit_json(body)` | io | android-shell, android |
 | 4 | `POST /api/look` | `body` `{"blur": int, "light": int}` | `{"ok": true, "id": <picture id or null>, "kept": <bool>}` | Rust | `set_look_dials` | io | android-shell, android |
-| 5 | `POST /api/background` | `body_b64` (a JPEG), or `headers.clear` and no body | `{"ok": true, "id": <picture id or null>}` | Rust | `set_own_picture`, `clear_own_picture` (§20) | slow | android-shell, android |
+| 5 | `POST /api/background` | `body_b64` (a JPEG), or `headers.clear` and no body | `{"ok": true, "id": <picture id or null>}` | Rust | `set_own_picture`, `clear_own_picture` (`device.md` §14.3) | slow | android-shell, android |
 | 6 | `POST /api/place` | `body` `{"source": "own"}` or `{"source": "home"}` | `{"ok": true, "here": {"latitude": number, "longitude": number, "at": int} or null}` | Kotlin | `set_weather_place` through `Native.call` (§11.4) | slow | android-shell, android |
 | 7 | `POST /api/prefs` | `body` `{"key": string, "value": …}` (§8.4) | `{"ok": true}` | Kotlin | none | io | android-shell |
 | 8 | `POST /api/notice` | `body` `{"seq": int, "index": int}` | `{"ok": true}` | Rust | `dismiss_notice(seq, index)` | io | android |
@@ -366,6 +370,8 @@ Rows 8 to 12 do not exist in the `echo` flavour; row 13 exists only in it. The p
 
 `session` in requests and replies is a sid (`core.md` §12.3, CORE-SNAP-002); the page treats it as an opaque number it read from the snapshot or a reply, so no change follows.
 
+**Wire times the page sends.** The page sends `at` of `complete` and `delete` as the instant of the tap in UTC, RFC 3339 with whole seconds and `Z` (today's `stamp()`, `new Date().toISOString()` with its fraction removed, phone.html:4825), for example `"2026-11-22T08:00:00Z"`, which `core.md` §12.2 step 4 reads as `WireTime::Exact`. It sends `deadline` of `quick_add` as `null` when the user gave no due date (phone.html:5300), and otherwise as the value of its date-time field, `YYYY-MM-DDTHH:MM` local (`WireTime::Naive`). The members of every body are in the order the table lists them, and the request key travels in the `X-TaskDeck-Request` header (`headers.request_key`, §5.2), not in the body.
+
 **The request key.** The bridge keeps, per process, the replies of the last 1,024 verbs that carried a `request_key`, in insertion order. A verb whose key is held is answered with the held reply and is not submitted again; a key is held only after a 2xx reply (errors are not held, as today, digest §3.6). Two verbs with the same key never run at once, because `bridge-io` runs one request at a time. A reply is held as its status and body.
 
 - **BRIDGE-VERB-001** (android-shell) The bridge MUST answer `POST /api/command` whose `op` is not one of the 17 of §6.3 with `403 bridge/verb_refused` and the body `{"error":"That is not something this phone can do."}`, without calling the facade.
@@ -384,22 +390,22 @@ With no report (`Published::weather()` is `None`): `503` with today's `{"error":
 
 | Member | Value |
 |---|---|
-| `for` | `"here"` when `weather_place()` is `(Own, Some(place))`, else `"desk"` |
+| `for` | `"here"` when the third element of `Published::weather()` (the place the report was fetched for) is `Own`, else `"desk"` |
 | `via` | `"phone"`: the phone always asks Open-Meteo itself (`device.md` §13.2) |
-| `here` | `{"latitude": lat / 100, "longitude": lon / 100, "at": <ms or null>}` when the own place is set, else `null`; the two numbers are JSON numbers with at most two decimals, written from the integers exactly (`5237` → `52.37`, `-12` → `-0.12`) |
+| `here` | `{"latitude": lat / 100, "longitude": lon / 100, "at": <ms or null>}` when `weather_place().1` is `Some`, else `null`; the two numbers are JSON numbers with at most two decimals, written from the integers exactly (`5237` → `52.37`, `-12` → `-0.12`) |
 
 `taskdeck-android` writes `"at": null`; the shell replaces it with the value of `own_place_at_ms` from its `shell` preferences (§8.4) when that is present. The page keeps the name `desk` for the board's home place (its words change, S-11).
 
 #### 6.4.3 `POST /api/look`
 
-The body is a JSON object with integer members `blur` and `light`, each 0 to 4,294,967,295; other members are ignored (today's `serde`, phone.rs:837-851). Anything else: `400 {"error":"That is not a pair of dials."}`. The facade gets `set_look_dials(min(blur, 100), min(light, 100))`. The reply's `id` is the id of the picture now shown (§7.4) or `null`, and `kept` is whether a picture is shown.
+The body is a JSON object with integer members `blur` and `light`, each 0 to 4,294,967,295; other members are ignored (today's `serde`, phone.rs:837-851). Anything else: `400 {"error":"That is not a pair of dials."}`. The facade gets `set_look_dials(min(blur, 100), min(light, 100))`. The reply's `id` is the value `set_look_dials` returned (the id of the look now shown, §7.4, or `null`), and `kept` is `true` exactly when it is not `null`.
 
 #### 6.4.4 `POST /api/background`
 
 | Request | Checks, in order | Facade | Reply |
 |---|---|---|---|
-| `headers.clear` and no body | none | `clear_own_picture()` | `{"ok": true, "id": <id of the shared picture's look, or null>}` |
-| `body_b64` | decoded length 1 to 6,291,456 bytes, else `400 bridge/picture_too_large` `{"error":"That request is too large."}`; the first three bytes `FF D8 FF`, else `400 bridge/picture_format` `{"error":"That file is not a picture this can read."}` | `set_own_picture(bytes)` | `{"ok": true, "id": <id of the new look>}` |
+| `headers.clear` and no body | none | `clear_own_picture()` | `{"ok": true, "id": <the id clear_own_picture returned, or null>}` |
+| `body_b64` | decoded length 1 to 6,291,456 bytes, else `400 bridge/picture_too_large` `{"error":"That request is too large."}`; the first three bytes `FF D8 FF`, else `400 bridge/picture_format` `{"error":"That file is not a picture this can read."}` | `set_own_picture(bytes)` | `{"ok": true, "id": <the id set_own_picture returned>}` |
 | neither, or both | — | none | `400 bridge/picture_format` as above |
 
 Facade errors map as §6.5 states; `device/needs_sync` (a phone not yet paired) answers `400 {"error":"Pair this phone with the board first; then it can keep a picture of its own."}`. The own picture is the phone's own Look (SYNC.md §3: "its own Look"); it never syncs. "Use the desk's picture" clears it, and the phone shows the board's shared picture again.
@@ -450,7 +456,7 @@ Every error reply's body is `{"error": <message>}` (today's `json_error`, digest
 | `device/needs_sync` | 400 | Pair this phone with the board first; then it can keep a picture of its own. |
 | `device/picture_too_large` | 400 | That request is too large. |
 | `device/picture_format`, `device/picture_decode` | 400 | That file is not a picture this can read. |
-| `device/closed`, `device/reopen_needed`, `device/wrong_mode` | 503 | TaskDeck's board is not open. Close the app and open it again. |
+| `device/closed`, `device/wrong_mode` | 503 | TaskDeck's board is not open. Close the app and open it again. |
 | any other code | 500 | TaskDeck could not do that (`<code>`). |
 
 The bridge's own codes (§17) answer with the status and message §6 gives them. When the core host is not `Open` (the request came before the core opened, or it failed), every Rust row answers `503 bridge/not_open` `{"error":"TaskDeck's board is not open. Close the app and open it again."}`.
@@ -470,7 +476,7 @@ Everything not in §6.2 is refused. By name, so that a test lists each:
 
 ### 6.7 The echo backend (`android-shell`)
 
-The `echo` flavour links `taskdeck-android` with the feature `backend-echo` instead of `backend-device`, and no `taskdeck-device`. It exists so that the shell, the fork, the WebView hardening, the bridge and the timing harness are tested before the device runtime exists (SYNC_PLAN.md §6.6: "the bridge answers from the fixtures and an in-memory echo"). It holds, in memory:
+The `echo` flavour builds `taskdeck-android` with `--no-default-features --features backend-echo` (so without the default `backend-device`, §11.1), and links no `taskdeck-device`. It exists so that the shell, the fork, the WebView hardening, the bridge and the timing harness are tested before the device runtime exists (SYNC_PLAN.md §6.6: "the bridge answers from the fixtures and an in-memory echo"). It holds, in memory:
 
 | State | Initial value | Changed by |
 |---|---|---|
@@ -931,7 +937,9 @@ If an attempt reaches the sink and no change to the page, the CSP, `PAGE_GUARD` 
 
 ### 11.1 Library and loading
 
-`crates/taskdeck-android` builds a `cdylib` named `taskdeck` (`libtaskdeck.so`) with `jni` 0.22.4. Features: exactly one of `backend-echo` (`android-shell`; no `taskdeck-device`) and `backend-device` (`android`; links `taskdeck-device` with its default features, and so `taskdeck-core`, `taskdeck-seal`, `taskdeck-sync`, `taskdeck-backup`; no code of the root package, V3-17). Building with both or neither is a `compile_error!`. The Gradle `echo` flavour builds with `backend-echo`, `full` with `backend-device`.
+`crates/taskdeck-android` builds a `cdylib` named `taskdeck` (`libtaskdeck.so`) with `jni` 0.22.4. Features: `backend-echo` (`android-shell`; no `taskdeck-device`) and `backend-device` (`android`; links `taskdeck-device` with its default features, and so `taskdeck-core`, `taskdeck-seal`, `taskdeck-sync`, `taskdeck-backup`; no code of the root package, V3-17), with `default = ["backend-device"]` (ruling S32). A build has exactly one of them: building with both or with neither is a `compile_error!`. The Gradle `echo` flavour builds with `--no-default-features --features backend-echo`; the `full` flavour builds with the default features, and so with `backend-device`. A build that passes no feature arguments (a workspace-wide cargo command, `cargo test -p taskdeck-android`) gets `backend-device`, never `backend-echo`.
+
+- **BRIDGE-GEN-011** (android-shell) `crates/taskdeck-android` MUST declare `default = ["backend-device"]` and MUST fail to compile with both `backend-echo` and `backend-device` or with neither; the `echo` flavour MUST build it with `--no-default-features --features backend-echo`, and the `full` flavour MUST build it with the default features and MUST NOT pass `--no-default-features`.
 
 `TaskDeckApp.onCreate` calls `System.loadLibrary("taskdeck")` (BRIDGE-PROC-002). `JNI_OnLoad` stores the `JavaVM`, finds the class `app/taskdeck/phone/KeyVault` and its three static methods (§11.5) and keeps a `GlobalRef` to the class and the method ids: a thread the Rust runtime started cannot find an app class by name later, because it has no app class loader.
 
@@ -996,9 +1004,12 @@ The administration and platform surface. Only the shell calls it, from native sc
 | `dismiss_alarm` | `{"id": int}` | `null` | `dismiss_alarm` | — | android |
 | `confirm_clock` | `{}` | `null` | `confirm_clock` | — | android |
 | `confirm_rejoin` | `{}` | `null` | `confirm_rejoin` | — | android |
-| `use_this_copy` | `{}` | `null` | `use_this_copy` | auth | android |
-| `adopt` | `{"dev": hex32, "typed_fp": string}` | `null` | `adopt` | auth | android |
-| `skip` | `{"seq": int}` | ticket (int) | `skip` | auth | android |
+| `ack_continuity` | `{}` | `null` | `ack_continuity` | — | android |
+| `ack_restored_copy` | `{}` | `null` | `ack_restored_copy` | — | android |
+| `ack_based_on_unchecked` | `{}` | `null` | `ack_based_on_unchecked` | — | android |
+| `use_this_copy` | `{}` | `null` | `use_this_copy` | auth, API 30 | android |
+| `adopt` | `{"dev": hex32, "typed_fp": string}` | ticket | `adopt` | auth, API 30 | android |
+| `skip` | `{"seq": int}` | ticket (int) | `skip` | auth, API 30 | android |
 | `revoke` | `{"dev": hex32, "replace": bool}` | ticket | `revoke` | auth, API 30 | android |
 | `pair_start` | `{}` | `{"address_display": string, "code_display": string}` | `pair_start` | auth, API 30 | android |
 | `pair_confirm` | `{}` | `null` | `pair_confirm` | —, API 30 | android |
@@ -1008,7 +1019,8 @@ The administration and platform surface. Only the shell calls it, from native sc
 | `follow_address` | `{"address": 1..512 bytes, "code": 1..64 bytes}` | ticket | `follow_address` | — | android |
 | `wait_op` | `{"ticket": int, "timeout_ms": 1..60000}` | `null` (timeout), `{"ok": true}` or `{"ok": false, "code": string}` | `wait_op` | — | android |
 | `ops` | `{}` | array of `{"ticket", "kind", "stage", "started_ms"}` | `ops` | — | android |
-| `forget_identity` | `{"board": hex32, "dev": hex32}` | `null` | `forget_identity` | auth | android |
+| `identities` | `{}` | array of `{"board_id": hex32, "dev": hex32, "key_store": int, "created_ms": int, "active": bool}` | `identities()` | — | android |
+| `forget_identity` | `{"board": hex32, "dev": hex32}` | `null` | `forget_identity` | auth, API 30 | android |
 | `callSecret` `join` | `{"address": 1..512 bytes, "device_name": string}` + code | `null` | `join` | — | android |
 | `callSecret` `re_pair` | as `join` | `null` | `re_pair` | — | android |
 
@@ -1028,9 +1040,9 @@ The only calls from Rust into Java besides the platform verifier's own (which it
 
 | Trait method | Does |
 |---|---|
-| `create(board, dev, key)` | `KeyVault.wrap(alias, AD_L, key)`; on status 0 writes the 60 returned bytes to `<data_dir>/sync/id-<board hex>-<dev hex>/ld.wrap` by `device.md`'s replace procedure (`ld.wrap.tmp`, `sync`, `rename`, `sync_dir`) |
+| `create(board, dev, key)` | `KeyVault.wrap(alias, AD_L, key)`; on status 0 creates `<data_dir>/sync/` and `<data_dir>/sync/id-<board hex>-<dev hex>/` when they are missing (`create_dir`, then `sync_dir` of its parent, for each), then writes the 60 returned bytes as `ld.wrap` in that directory: `ld.wrap.tmp`, `sync`, `rename`, `sync_dir` |
 | `load(board, dev)` | reads `ld.wrap`: missing is `NotFound`; a length other than 60 is `CannotUnwrap`; else `KeyVault.unwrap(alias, AD_L, wrap)` |
-| `delete(board, dev)` | `KeyVault.delete(alias)`, then removes `ld.wrap` |
+| `delete(board, dev)` | `KeyVault.delete(alias)`, then removes `ld.wrap` and calls `sync_dir`; a missing `ld.wrap` is not an error |
 
 `alias` is `taskdeck.ld.<board hex>.<dev hex>`; `AD_L` is `device.md` §12.1's associated data. The Kotlin side:
 
@@ -1042,13 +1054,14 @@ The only calls from Rust into Java besides the platform verifier's own (which it
 
 Status bytes: `0` ok; `1` not found (the alias is missing) → `NotFound`; `2` cannot unwrap (`AEADBadTagException`, `KeyPermanentlyInvalidatedException`, `UnrecoverableKeyException`) → `CannotUnwrap`; `3` unavailable (a `KeyStoreException` or `ProviderException` while `UserManager.isUserUnlocked()` is false) → `Unavailable`; `4` failed (anything else, a Java exception left pending, a result of the wrong length) → `Failed`. The key parameters are §12.5's.
 
-**Threading.** `load` runs on the thread that called `open` (`lifecycle`, a Java thread); `create` and `delete` run on the device's sync thread (`device.md` §4.2), which `AndroidKeyStore` attaches to the JVM with `JavaVM::attach_current_thread_as_daemon` on its first call. After each call Rust checks for a pending Java exception, clears it, and maps it to `Failed`.
+**Threading.** `Device::open` calls `load` on its calling thread (`lifecycle`, or a job or receiver worker); `create`, `delete` and any other `load` run on the device's sync thread (`device.md` §12.1). Every trait method first attaches its thread to the JVM with `JavaVM::attach_current_thread_as_daemon` when it is not attached. After each call Rust checks for a pending Java exception, clears it, and maps it to `Failed`.
 
 **Secrets.** Rust passes `key` in a new Java `ByteArray` and overwrites it with zeros (`SetByteArrayRegion`) after the call; it copies the result of `unwrap` into `Zeroizing` and overwrites that Java array with zeros. Kotlin overwrites with zeros every `ByteArray` it made that held key bytes (the plaintext given to `Cipher.doFinal`, the result of `doFinal` in `unwrap`) before returning (BRIDGE-GEN-007).
 
 - **BRIDGE-KEY-001** (android) `AndroidKeyStore` MUST implement the three trait methods exactly as the table of §11.5 states, with the alias and associated data given there.
 - **BRIDGE-KEY-002** (android) `AndroidKeyStore` MUST map the key vault's status bytes to `KeyStoreError` as §11.5 states, and MUST map a pending Java exception to `Failed` after clearing it.
 - **BRIDGE-KEY-003** (android-shell) The key vault and `AndroidKeyStore` MUST overwrite with zeros every array that held key bytes, on both sides of the call, before the call returns.
+- **BRIDGE-KEY-005** (android) Every trait method of `AndroidKeyStore` MUST attach its calling thread to the JVM as a daemon thread when it is not attached, before its first JNI call.
 
 ### 11.6 Panics, exceptions and threading
 
@@ -1082,7 +1095,7 @@ The panic's message is never included (it may hold data). The backend stays usab
 | page size | 16 KB: every `LOAD` segment of each `libtaskdeck.so` aligned to at least `0x4000` (NDK r28's default, also passed as `-C link-arg=-Wl,-z,max-page-size=16384`); `packaging.jniLibs.useLegacyPackaging = false`; the APK passes `zipalign -c -P 16 4` |
 | Rust profile | the workspace's `release` profile with `panic = "unwind"` (SYNC.md §8: `catch_unwind` at every JNI entry) |
 
-Build variants: `echoDebug` (`android-shell`'s tests, `backend-echo`), `echoTiming` and `fullTiming` (the timing harness, §16: built as release, with R8 and the optimised Rust profile, signed with the debug key, never published), `fullDebug` (`backend-device`, `taskdeck-device` with `test-trust` for the end-to-end tests against a relay on loopback, reached through `adb reverse`), `fullRelease` (`backend-device` without `test-trust`; the only variant `release` builds and the only one a phone runs). `echoRelease` does not exist.
+Build variants: `echoDebug` (`android-shell`'s tests, `--no-default-features --features backend-echo`), `echoTiming` and `fullTiming` (the timing harness, §16: built as release, with R8 and the optimised Rust profile, signed with the debug key, never published; each with its flavour's features), `fullDebug` (the default features, so `backend-device`, and `taskdeck-device` with `test-trust` for the end-to-end tests against a relay on loopback, reached through `adb reverse`), `fullRelease` (the default features, so `backend-device`, without `test-trust`; the only variant `release` builds and the only one a phone runs). `echoRelease` does not exist.
 
 - **BRIDGE-PLAT-001** (android-shell) The app MUST build with the levels, tools and ABIs of §12.1, and CI MUST check every `LOAD` segment of each ABI's `libtaskdeck.so` for an alignment of at least `0x4000` and the APK with `zipalign -c -P 16 4`.
 - **BRIDGE-PLAT-002** (android-shell) The `armeabi-v7a` build MUST link, in CI, on every pull request that changes `android/` or `crates/taskdeck-android/`.
@@ -1112,7 +1125,7 @@ Exactly these, in the manifest (SYNC.md §2.1, with the calendar permissions dro
 - `res/xml/network_security.xml`: `<network-security-config><base-config cleartextTrafficPermitted="false"><trust-anchors><certificates src="system"/></trust-anchors></base-config></network-security-config>` (no user-installed authorities).
 - Exported components: `MainActivity` (exported, with only the `MAIN`/`LAUNCHER` filter) and `SystemReceiver` (exported; its filter names `android.intent.action.BOOT_COMPLETED`, `android.intent.action.LOCKED_BOOT_COMPLETED`, `android.intent.action.MY_PACKAGE_REPLACED`, `android.intent.action.TIME_SET`, `android.intent.action.TIMEZONE_CHANGED`, `android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED`; `onReceive` returns at once for any other action). Every other component has `android:exported="false"`; `SyncJobService` carries `android:permission="android.permission.BIND_JOB_SERVICE"`.
 - Every activity carries `android:taskAffinity=""`; `MainActivity` is `launchMode="singleTask"`.
-- `PairActivity` sets `WindowManager.LayoutParams.FLAG_SECURE` on its window (the code and the SAS are on screen; SYNC.md §5.6: code screens exclude capture).
+- `PairActivity` and `DevicesActivity` set `WindowManager.LayoutParams.FLAG_SECURE` on their windows (§13.1, BRIDGE-SCREEN-003; SYNC.md §5.6: code and seed screens exclude capture).
 - Every `PendingIntent` is made with an explicit component and `FLAG_IMMUTABLE`.
 - The meta-data of §9.2.
 
@@ -1126,7 +1139,7 @@ Exactly these, in the manifest (SYNC.md §2.1, with the calendar permissions dro
 |---|---|
 | app, run time | `org.jetbrains.kotlin:kotlin-stdlib`; `androidx.webkit:webkit:1.18.0` and its transitive set (`androidx.core` and the rest, each listed in the verification metadata, V3-16); the platform verifier's Android component (`rustls-platform-verifier-android`, the version `rustls-platform-verifier` 0.7.1 requires), vendored as an AAR under `android/vendor/` with its SHA-256 recorded (SYNC_PLAN.md §3.4) |
 | app, tests | `junit:junit`, `androidx.test:runner`, `androidx.test:rules`, `androidx.test.ext:junit`, `androidx.test.uiautomator:uiautomator`, `androidx.test.espresso:espresso-core`, `androidx.test.espresso:espresso-web` |
-| `taskdeck-android` | `jni` 0.22.4, `serde`, `serde_json`, `base64`, `sha2`, `zeroize`; with `backend-device` also `taskdeck-core`, `taskdeck-device`, `rustls-platform-verifier` (for its Android initialiser); all at the workspace's pins |
+| `taskdeck-android` | `jni` 0.22.4, `serde`, `serde_json`, `base64`, `sha2`, `zeroize`; with `backend-device` (the default feature, §11.1) also `taskdeck-core`, `taskdeck-device`, `chrono` (for `PageFacade::answer_snapshot` and `PageFacade::today`, §21), `rustls-platform-verifier` (for its Android initialiser); all at the workspace's pins |
 
 No Firebase, Play services, WorkManager, CameraX, Compose, AppCompat or Material (SYNC.md §2.1). Gradle verifies every artifact, plugins included, against `android/gradle/verification-metadata.xml` (SHA-256), and the wrapper carries `distributionSha256Sum`.
 
@@ -1136,7 +1149,10 @@ No Firebase, Play services, WorkManager, CameraX, Compose, AppCompat or Material
 
 `KeyVault.wrap`, when the alias is absent, generates the key with `KeyGenerator.getInstance("AES", "AndroidKeyStore")` and `KeyGenParameterSpec.Builder(alias, PURPOSE_ENCRYPT or PURPOSE_DECRYPT)` with `setKeySize(256)`, `setBlockModes(BLOCK_MODE_GCM)`, `setEncryptionPaddings(ENCRYPTION_PADDING_NONE)`, `setRandomizedEncryptionRequired(true)`, `setUserAuthenticationRequired(false)` (jobs and reminders run while the phone is locked, SYNC.md §5.6), no `setUnlockedDeviceRequired`, and `setIsStrongBoxBacked(true)` when `PackageManager.FEATURE_STRONGBOX_KEYSTORE` is present (API 28 and later), generating again without it on `StrongBoxUnavailableException`. Encryption is `Cipher.getInstance("AES/GCM/NoPadding")` initialised without an IV (the Keystore draws the 12-byte IV, read back with `cipher.iv`), `updateAAD(ad)`, then `doFinal` of the 32 key bytes (48 bytes out: 32 of ciphertext and the 16-byte tag). Decryption initialises with `GCMParameterSpec(128, iv)`. The 60-byte wrap lives in the identity directory as `ld.wrap` (`device.md` §6.1, §12.5), in app-private storage under the backup exclusions of §12.3.
 
+The key is not generated with `setUnlockedDeviceRequired(true)`, the option SYNC.md §5.6 leaves open. With it, the Keystore refuses every use of the key while the phone is locked, so `KeyVault.unwrap` would fail inside a `SyncJobService` run and in the verify sync of a reminder firing (§14.2, §15.4), which must open the sealed store while the phone is locked; and a failed unwrap is the "key that cannot be unwrapped" case (`device.md` §12.6), which must not follow from a locked screen. The protection it would add, against an attacker holding the phone locked and able to run code as the app, is accepted as residual; the storage key stays non-exportable in the Keystore (StrongBox when present).
+
 - **BRIDGE-KEY-004** (android-shell) The key vault MUST generate the Keystore key with exactly the parameters of §12.5 and MUST NOT bind it to user authentication.
+- **BRIDGE-KEY-006** (android-shell) The key vault MUST NOT call `setUnlockedDeviceRequired(true)` when it generates the Keystore key, so that the key can be used while the phone is locked.
 
 ### 12.6 Trust roots per API level
 
@@ -1175,21 +1191,30 @@ The native screens are plain framework views (no AppCompat, no Compose, §12.4) 
 | Devices | the sync state in full (session, last synced, unreachable since, paused until, queued, the request count when above 4,000), the sync fingerprint (`engine.fingerprint`), this device's key fingerprint, the device list (name, short key fingerprint, status, last seen = the later of `last_beat_ms` and `last_entry_ms`; never an alarm, V2-10) | — | all |
 | Devices: banners | each unacknowledged banner with its author's name and key fingerprint | Acknowledge (`ack_banner`) | all |
 | Devices: alarms | each alarm with its evidence, as text | Dismiss (`dismiss_alarm`) for one that does not stop the engine; the stop's action: `ConfirmRejoin` (`confirm_rejoin`), `RePair` (opens Pair in re-pair mode), `Adopt` (type the fingerprint, `adopt`), `UseThisCopy` (`use_this_copy`); `RestoreTail`, `ReHome`, `ReplaceDevice` show "Do this from a desktop."; `Restart` shows "Close TaskDeck and open it again."; `Wait` shows the stop's kind | `Adopt`, `UseThisCopy`: API 30 and auth |
+| Devices: rejoin | while `status().engine.stops` holds the stop of kind `Rejoin` (`engine.md` §19.7 step 1), the line "This device was away longer than the relay keeps its history. Rebuild it from the newest checked snapshot? Changes not yet sent stay queued and are sent after the rebuild." | Rebuild (`confirm_rejoin`) | all |
 | Devices: the clock | the skew when `clock.warning` | Confirm the clock (`confirm_clock`) | all |
+| Devices: continuity | `ContinuityUnchecked { from }` of `status().warnings`, with its seq | Acknowledge (`ack_continuity`) | all |
+| Devices: restored copy | `RestoredCopy { entries }` of `status().warnings`, with its count | Acknowledge (`ack_restored_copy`) | all |
+| Devices: unchecked history | `BasedOnUnchecked { count }` of `status().warnings`, with its count | Acknowledge (`ack_based_on_unchecked`) | all |
 | Devices: the halted view | the halt's kind, since when, the entry's author and key fingerprint, the Skip offer | Skip (`skip`) when `skip_offer.here` | API 30 and auth |
 | Devices: add a device | — | Add a device (`pair_start`, then the address and code shown, then the SAS shown, then `pair_confirm`; `pair_cancel`) | API 30 and auth |
 | Devices: per device | — | Remove (`revoke` with `replace: false`), Replace (`revoke` with `replace: true`) | API 30 and auth |
 | Devices: moving | `moving` (host, tries left, locked until) | Enter the move code (`enter_move_code`), Follow an address (`follow_address`) | all |
 | Devices: reminders | the three leads | Change (`set_reminder_leads`) | all |
-| Devices: a lost key | the old identity (key lost, `device.md` §12.6) | Forget the old copy (`forget_identity`) | API 30 and auth |
+| Devices: a lost key | the old identity (the `identities()` entry with `active`, key lost, `device.md` §12.6) | Forget the old copy (`forget_identity`; the phone then opens as an unpaired phone, `device.md` §17.2) | API 30 and auth |
+| Devices: old copies | every `identities()` entry that is not `active` (board, device id, created) | Forget (`forget_identity`) | API 30 and auth |
 | Pair | the join flow: relay address, code, device name; then the SAS entry; progress from `status().pairing` | Join (`callSecret join`), re-pair (`callSecret re_pair`), digits (`join_sas`), Cancel (`pair_cancel`) | all |
 | Health | notifications enabled (`NotificationManager.areNotificationsEnabled`), exact alarms (`AlarmManager.canScheduleExactAlarms`, API 31 and later), battery optimisation (`PowerManager.isIgnoringBatteryOptimizations`), the standby bucket (`UsageStatsManager.appStandbyBucket`, API 28 and later), the WebView version | Notification settings; the app's battery settings (`ACTION_APPLICATION_DETAILS_SETTINGS`); on a phone whose `Build.MANUFACTURER` is `samsung` in any case, "Never sleeping apps" (action `com.samsung.android.sm.ACTION_OPEN_CHECKABLE_LISTACTIVITY`, package `com.samsung.android.lool`, extra `activity_type` = 2, falling back to `ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`) | all |
 
 Below API 30 the rows that need it are shown with the text "This needs Android 11 or later. Use a desktop." and no button.
 
+The screens that show a pairing code, the SAS or a seed exclude screen capture (SYNC.md §5.6): `PairActivity` (the join and re-pair flows: the typed code and the SAS) and `DevicesActivity` (its "add a device" row shows the relay address, the code and the SAS) set `FLAG_SECURE` on their windows in `onCreate`, before `setContentView`, for their whole lifetime. The phone shows no seed (creating a board and recovery-key changes are desktop-only, below). No other surface (the WebView of `MainActivity`, `HealthActivity`, a notification) shows a pairing code, the SAS or a seed.
+
 **Desktop-only** (SYNC_PLAN.md §2, `device.md` §17): restore to a point, purge history, reset trust, recovery-key changes, moving the board (starting it), creating a board, backups, the shared picture's upload, rules overrides, managing subscriptions, the palette and the home place. The phone offers none of them and the `call` table has none of them.
 
 - **BRIDGE-SCREEN-001** (android) The native screens MUST offer exactly the actions of §13.1's table, each only where its "Needs" column allows, and MUST offer none of the desktop-only operations.
+- **BRIDGE-SCREEN-002** (android) While `status().engine.stops` holds a stop of kind `Rejoin`, the Devices screen MUST show the line "This device was away longer than the relay keeps its history. Rebuild it from the newest checked snapshot? Changes not yet sent stay queued and are sent after the rebuild." with a button "Rebuild" that calls `confirm_rejoin`.
+- **BRIDGE-SCREEN-003** (android) `PairActivity` and `DevicesActivity` MUST set `FLAG_SECURE` on their windows before their first content is shown and keep it for their whole lifetime, and no other activity, the page or a notification MUST show a pairing code, the SAS or a seed.
 
 ### 13.2 Authentication
 
@@ -1479,13 +1504,13 @@ Example of a case of `routes-echo.json` (illustrative):
 ## 20. Interfaces
 
 **`device.md`.**
-- Provides what `device.md` §24 asks of the bridge: facade writes only from worker threads (BRIDGE-PROC-006, BRIDGE-PROC-007); `wait_for_change` in the watcher (§4.4, §5.4); verbs through `submit_json` with today's reply (BRIDGE-VERB-002); `/api/state` through `answer_snapshot` (§6.4.1); the `look` bytes as `/bg-<id>.jpg` (BRIDGE-ASSET-003); the Keystore wrap and unwrap (§11.5, §12.5); `set_zone` at start and on every zone change (BRIDGE-ZONE-001); `set_foreground` on `onStart` and `onStop` and `notify_resume` on a network change (BRIDGE-BG-003); `background_sync` from the jobs (BRIDGE-BG-001); the platform verifier initialised before `open` and `TrustRoots` per API level (§11.2, §12.6); BIOMETRIC_STRONG before "auth" calls (BRIDGE-AUTH-001, DEV-FACADE-003).
-- Requires, new: `Device::set_own_picture(bytes: Vec<u8>) -> Result<(), DeviceError>` and `Device::clear_own_picture() -> Result<(), DeviceError>`, Android only and synced mode only (`device/needs_sync` otherwise): JPEG only (first bytes `FF D8 FF`), 1 to 6,291,456 bytes, decoded with `ImageFormat::Jpeg` under the limits of `device.md` §14.1 step 3, cropped and encoded as §14.2 step 6, its look made as step 7, the clean picture kept in a sealed file of its own (a new file kind) and never uploaded; `Published::picture()` returns the own picture's look when one is set, else the shared picture's; `set_look_dials` re-makes the look of whichever is shown.
-- Requires, new: a read `Device::weather_place() -> (WeatherSource, Option<taskdeck_core::board::Home>)` from `device.tdk` (§6.4.2).
-- Requires: `notes_merge()` is also present after a `core/notes_stale` refusal of a `set_notes` that came through `submit_json` with no facade draft, with `mine` the refused command's text, until `resolve_notes` or `discard_notes_draft` (A-06).
-- Requires: `AndroidKeyStore` (in `taskdeck-android`) reads and writes `ld.wrap` in the identity directory itself, by the replace procedure, during `KeyStore::create`, `load` and `delete`: an exception to DEV-THREAD-001 that `device.md` names (the `KeyStore` trait has no argument for the wrap).
-- Requires: `Published::notices()` lists records in an order in which "the position among the records of the same seq" is the `index` `dismiss_notice` takes (§5.4).
-- Assumes: `DeviceStatus`, `taskdeck_sync::Status` and the types inside them have public fields named as `engine.md` §30.1 and `device.md` §25 name them (§11.4.1); `Published::zone()` returns the zone of the last `set_zone`; `Platform::Android { api }` gates the "API 30" calls (DEV-FACADE-007); `Device::open` calls `KeyStore::load` on the calling thread.
+- Provides what `device.md` §24 asks of the bridge: facade writes only from worker threads (BRIDGE-PROC-006, BRIDGE-PROC-007); `wait_for_change` in the watcher (§4.4, §5.4); verbs through `submit_json` with today's reply (BRIDGE-VERB-002); `/api/state` through `answer_snapshot` (§6.4.1); the `look` bytes as `/bg-<id>.jpg` (BRIDGE-ASSET-003); the Keystore wrap and unwrap (§11.5, §12.5); `set_zone` at start and on every zone change (BRIDGE-ZONE-001); `set_foreground` on `onStart` and `onStop` and `notify_resume` on a network change (BRIDGE-BG-003); `background_sync` from the jobs (BRIDGE-BG-001); the platform verifier initialised before `open` and `TrustRoots` per API level (§11.2, §12.6); BIOMETRIC_STRONG before "auth" calls (BRIDGE-AUTH-001, which `device.md` §17.1 names for Android).
+- Requires: `Device::set_own_picture(bytes)` and `clear_own_picture()` (`device.md` §14.3, §17.12, DEV-PIC-005; ruling S29) and `set_look_dials`, each returning `Result<Option<String>, DeviceError>`, the id of the look now shown after it is published; `Published::picture()` and the snapshot's `look` are the own picture's while the phone has one.
+- Requires: `Device::weather_place()`, and the report's source as the third element of `Published::weather()` (`device.md` §17.12, §25; §6.4.2); `set_weather_place` with `home` clears the own place.
+- Requires: a `set_notes` the page sends through `submit_json` becomes the facade's notes draft (`device.md` §17.6, DEV-FACADE-008), so that after a `core/notes_stale` refusal `notes_merge()` offers its text as `mine` until `resolve_notes` or `discard_notes_draft` (A-06).
+- Provides: `AndroidKeyStore`, which writes and removes `ld.wrap` itself, outside the store, on the threads `device.md` §12.1 names (`device.md` §12.5, DEV-THREAD-001; BRIDGE-KEY-001, BRIDGE-KEY-004, BRIDGE-KEY-005).
+- Requires: `NoticeView` carries `seq`, `index` and `dismissed` (`device.md` §17.5, §25), and `dismiss_notice` takes that `seq` and `index` (§5.4).
+- Assumes: `DeviceStatus`, `taskdeck_sync::Status` and the types inside them have public fields named as `engine.md` §30.1 and `device.md` §25 name them (§11.4.1); `Published::zone()` returns the zone of the last `set_zone`; `Platform::Android { api }` gates the "API 30" calls (DEV-FACADE-007).
 
 **`core.md`.**
 - Requires: `notes_base` in the snapshot (`core.md` §14.3 change 9), `parse_intent` ignoring unknown fields and taking `base` (`core.md` §12.2, §12.3), the reminder records (`core.md` §14.5), `TableZone::new` (`core.md` §20).
@@ -1506,6 +1531,8 @@ Example of a case of `routes-echo.json` (illustrative):
 **Rust, `crates/taskdeck-android`** (`#![deny(unsafe_code)]`, BRIDGE-GEN-001):
 
 ```rust
+// Cargo features (§11.1, ruling S32): default = ["backend-device"]; the echo flavour builds with
+// --no-default-features --features backend-echo.
 #[cfg(all(feature = "backend-echo", feature = "backend-device"))] compile_error!("choose one backend");
 #[cfg(not(any(feature = "backend-echo", feature = "backend-device")))] compile_error!("choose a backend");
 
@@ -1533,6 +1560,8 @@ pub struct BridgeError { pub code: &'static str, pub message: Option<String> }
 #[cfg(feature = "backend-echo")]   impl EchoBackend { pub fn from_fixtures() -> Self; }
 #[cfg(feature = "backend-device")] pub struct DeviceBackend { /* Device, the request-key cache */ }
 #[cfg(feature = "backend-device")] impl DeviceBackend { pub fn open(config: &OpenConfig) -> Result<(Self, serde_json::Value), BridgeError>; }
+// impl Backend for EchoBackend (stage android-shell, §6.7) and impl Backend for DeviceBackend (stage android) are
+// those stages' to write; the skeleton carries the two structs without them.
 #[cfg(feature = "backend-device")] pub struct PageFacade { /* wraps taskdeck_device::Device */ }
 #[cfg(feature = "backend-device")] impl PageFacade {
     pub fn answer_snapshot(&self, from: chrono::NaiveDate, days: u32, now_ms: i64) -> serde_json::Value;
@@ -1541,9 +1570,9 @@ pub struct BridgeError { pub code: &'static str, pub message: Option<String> }
     pub fn weather_place(&self) -> (taskdeck_device::WeatherSource, Option<taskdeck_core::board::Home>);
     pub fn picture_id(&self) -> Option<String>;
     pub fn submit_json(&self, text: &str) -> Result<taskdeck_device::Submitted, taskdeck_device::DeviceError>;
-    pub fn set_look_dials(&self, blur: u8, light: u8) -> Result<(), taskdeck_device::DeviceError>;
-    pub fn set_own_picture(&self, bytes: Vec<u8>) -> Result<(), taskdeck_device::DeviceError>;
-    pub fn clear_own_picture(&self) -> Result<(), taskdeck_device::DeviceError>;
+    pub fn set_look_dials(&self, blur: u8, light: u8) -> Result<Option<String>, taskdeck_device::DeviceError>;
+    pub fn set_own_picture(&self, bytes: Vec<u8>) -> Result<Option<String>, taskdeck_device::DeviceError>;
+    pub fn clear_own_picture(&self) -> Result<Option<String>, taskdeck_device::DeviceError>;
     pub fn dismiss_notice(&self, seq: u64, index: u32) -> Result<(), taskdeck_device::DeviceError>;
     pub fn notes_merge(&self) -> Option<taskdeck_device::NotesMerge>;
     pub fn resolve_notes(&self, text: String) -> Result<taskdeck_device::Submitted, taskdeck_device::DeviceError>;
@@ -1558,7 +1587,7 @@ pub fn parse_open_config(text: &str) -> Result<OpenConfig, BridgeError>;     // 
 pub fn parse_zone(value: &serde_json::Value) -> Result<ZoneJson, BridgeError>; // §12.7 step 4
 #[cfg(feature = "backend-device")] pub struct AndroidKeyStore { /* JavaVM, KeyVault refs, data_dir */ }
 #[cfg(feature = "backend-device")] impl taskdeck_device::KeyStore for AndroidKeyStore {}
-pub mod reminders {                                                          // §15.2
+#[cfg(feature = "backend-device")] pub mod reminders {                       // §15.2; it names taskdeck_core, which the crate has only with backend-device
     pub fn record_json(r: &taskdeck_core::reminders::Reminder, zone: &dyn taskdeck_core::time::Zone) -> serde_json::Value;
 }
 mod jni_entry;   // the nine entry points and JNI_OnLoad (§11.2); the only module with `unsafe`
@@ -1584,7 +1613,7 @@ object KeyVault {                                                    // §11.5, 
     @JvmStatic fun delete(alias: String): ByteArray
 }
 sealed interface CoreState { object Closed : CoreState; object Opening : CoreState; object Locked : CoreState
-    data class Open(val mode: String) : CoreState; data class Failed(val code: String) : CoreState }
+    object Open : CoreState; data class Failed(val code: String) : CoreState }
 object CoreHost {                                                     // §4.3
     fun ensureOpen(context: android.content.Context): CoreState
     fun state(): CoreState
@@ -1636,13 +1665,13 @@ class TaskDeckApp : android.app.Application()
 
 Non-normative. Each states the default this spec takes.
 
-1. **The phone's own picture.** SYNC.md §3 gives the phone "its own Look" and the desk's picture as one sealed blob; `device.md` offers only the desktop's shared-picture upload. Decided here: the phone keeps a picture of its own, never synced, processed in Rust like the shared one, which needs two facade calls `device.md` does not have yet (§20). If `device` declines them, the default is that `android` removes "Choose picture…" and Save from the Look sheet and keeps the dials and "Use the desk's picture" (which then always shows the shared picture).
+1. **The phone's own picture.** Ruled S29: the phone keeps a picture of its own, never synced, processed in Rust like the shared one (`device.md` §14.3, file kind 19 `own-picture.tdk`).
 2. **Binary bodies as base64** in the JSON envelope (§5.7), not `ArrayBuffer` messages: one message format on every accepted WebView, and strings across JNI. Decided here (SYNC.md is silent). The cost is about a third more bytes for one upload of at most 6 MiB. V3's note that natively answered Open-Meteo responses would need `Access-Control-Allow-Origin` no longer applies: the page asks no other origin (S-09).
 3. **The minimum WebView is 120** (§9.1). Decided here: it has every feature used, and a phone that takes WebView updates is far above it. If the owner's phone cannot reach it, `android-shell` records the version and asks.
 4. **Trust roots per API level** (§12.6): bundled roots below API 34, the platform's from 34. Decided here for `android-shell` to confirm (SYNC_PLAN.md §6.6 item 7). SYNC.md §7 says "TLS from the OS trust store everywhere"; old phones' stores cannot be updated.
 5. **No freshness alarm.** SYNC.md §4.9 offers an optional hourly one; decided here: none, so reminders never compete for the Doze budget (V3-13), and only "fresh on open" is promised.
 6. **Reminders fold forward**: a firing posts everything due in the next 9 minutes, so a folded reminder may come up to 9 minutes early. Decided here (R2 §5 says "fold"; early is the safer side of a reminder). Missed reminders within the hour fire at once after a reboot or a late alarm; older ones are dropped. Snooze is 10 minutes. An event's reminder offers only Snooze, because Done does not apply to an event and moving it a day is not what a reminder is for.
-7. **Every "auth" call on the phone needs API 30** (§13.2), also those `device.md` lists for "all" platforms (`adopt`, `use_this_copy`, `skip`, `forget_identity`): the framework offers BIOMETRIC_STRONG without a PIN fallback only from API 30, and the app may use no `androidx.biometric` (§12.4). Decided here.
+7. **Every "auth" call on the phone needs API 30** (§13.2). Ruled S30: the framework offers BIOMETRIC_STRONG without a PIN fallback only from API 30, and the app may use no `androidx.biometric` (§12.4); `device.md` §17 marks these calls "desktops; API 30", so the facade refuses them below.
 8. **The way from the page to the native screens** is a Tray button and the panel's button, not the masthead, whose rule is that nothing in it is tappable (phone.html:864-869). Decided here.
 9. **`setBlockNetworkLoads(true)` together with the asset loader** is assumed to load the page (V3's notes mark it unverified). Default: `android-shell` tests it first; if the page does not load, it records the finding and a spec-change pull request replaces the setting by the CSP and the 403 interception alone.
 10. **StrongBox and the cold start.** The key uses StrongBox when present (§12.5); its unwrap is inside the cold-start budget (§16.2). Default: if a StrongBox phone's measurement misses the budget because of it, `android` records it and asks the owner, rather than dropping StrongBox on its own.

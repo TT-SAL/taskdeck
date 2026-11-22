@@ -1,0 +1,2850 @@
+{
+  "version": 0,
+  "today": "2026-10-20",
+  "now_minutes": 615,
+  "palette": [
+    [
+      10,
+      20,
+      30,
+      40
+    ],
+    [
+      200,
+      60,
+      60,
+      120
+    ],
+    [
+      60,
+      200,
+      60,
+      104
+    ],
+    [
+      60,
+      60,
+      200,
+      88
+    ],
+    [
+      180,
+      180,
+      40,
+      74
+    ],
+    [
+      120,
+      40,
+      160,
+      136
+    ]
+  ],
+  "labels": {
+    "severity": [
+      "Not important",
+      "Mildly important",
+      "Important",
+      "Highly important",
+      "Lethally important"
+    ],
+    "horizon": [
+      "Within a month",
+      "Within a week",
+      "Within days",
+      "Whenever"
+    ],
+    "horizon_order": [
+      2,
+      1,
+      0,
+      3
+    ],
+    "weekdays": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat",
+      "Sun"
+    ]
+  },
+  "days": [
+    {
+      "date": "2026-10-20",
+      "weekday": "Tuesday",
+      "label": "20 October 2026",
+      "is_today": true,
+      "summary": "46h planned · 124 blocks · 4 due · 24h routine",
+      "behind_minutes": 615,
+      "entries": [
+        {
+          "id": 1,
+          "session": 0,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 0,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 0,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 0,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 0,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 0,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 0,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 0,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 0,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 0,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 1,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 60,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 1,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 60,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 1,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 60,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 1,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 60,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 1,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 60,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 2,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 120,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 2,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 120,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 2,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 120,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 2,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 120,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 2,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 120,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 3,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 180,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 3,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 180,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 3,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 180,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 3,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 180,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 3,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 180,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 4,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 240,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 4,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 240,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 4,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 240,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 4,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 240,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 4,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 240,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 5,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 300,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 5,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 300,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 5,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 300,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 5,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 300,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 5,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 300,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 6,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 360,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 6,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 360,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 6,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 360,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 6,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 360,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 6,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 360,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 7,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 420,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 7,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 420,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 7,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 420,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 7,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 420,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 7,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 420,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 8,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 480,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 8,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 480,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 8,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 480,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 8,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 480,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 8,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 480,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 9,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 540,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 9,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 540,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 9,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 540,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 9,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 540,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 9,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 540,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 10,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 600,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 10,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 600,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 10,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 600,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 10,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 600,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 10,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 600,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": 11,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 660,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 5
+        },
+        {
+          "id": 1099511627777,
+          "session": 11,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 660,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 5
+        },
+        {
+          "id": 9007199254740993,
+          "session": 11,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 660,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 5
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 11,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 660,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 5
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 11,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 660,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 5
+        },
+        {
+          "id": 1,
+          "session": null,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 720,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 5,
+          "columns": 6
+        },
+        {
+          "id": 1,
+          "session": 12,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 720,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 6
+        },
+        {
+          "id": 1099511627777,
+          "session": 12,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 720,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 6
+        },
+        {
+          "id": 9007199254740993,
+          "session": 12,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 720,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 6
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 12,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 720,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 6
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 12,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 720,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 6
+        },
+        {
+          "id": 1,
+          "session": 13,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 780,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 14
+        },
+        {
+          "id": 1099511627775,
+          "session": null,
+          "name": "🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪",
+          "kind": "event",
+          "color": 5,
+          "start": 780,
+          "minutes": 1440,
+          "marker": false,
+          "due": false,
+          "column": 0,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 13,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 780,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 13,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 780,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 13,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 780,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 13,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 780,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 14,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 840,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 14,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 840,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 14,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 840,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 14,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 840,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 14,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 840,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 15,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 900,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": null,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 900,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 6,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 15,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 900,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 15,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 900,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 15,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 900,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 15,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 900,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 16,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 960,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 16,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 960,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740991,
+          "session": null,
+          "name": "Limit fixture item 9007199254740991",
+          "kind": "event",
+          "color": 5,
+          "start": 960,
+          "minutes": 1440,
+          "marker": false,
+          "due": false,
+          "column": 1,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 16,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 960,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 16,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 960,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 16,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 960,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 6,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 17,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 1020,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 17,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 1020,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 17,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 1020,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 17,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 1020,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 17,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 1020,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 6,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 18,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 1080,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 18,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 1080,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": null,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 1080,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 7,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 18,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 1080,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 18,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 1080,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 18,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 1080,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 6,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 19,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 1140,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 19,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 1140,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 19,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 1140,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387903,
+          "session": null,
+          "name": "Limit fixture item 4611686018427387903",
+          "kind": "event",
+          "color": 5,
+          "start": 1140,
+          "minutes": 1440,
+          "marker": false,
+          "due": false,
+          "column": 2,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 19,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 1140,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 6,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 19,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 1140,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 7,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 20,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 1200,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 20,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 1200,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 20,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 1200,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 20,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 1200,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 6,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 20,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 1200,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 7,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 21,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 1260,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 21,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 1260,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 21,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 1260,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": null,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 1260,
+          "minutes": 0,
+          "marker": true,
+          "due": true,
+          "column": 8,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 21,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 1260,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 6,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 21,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 1260,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 7,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 22,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 1320,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 22,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 1320,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 22,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 1320,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 6,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 22,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 1320,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 7,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387906,
+          "session": null,
+          "name": "Limit fixture item 4611686018427387906",
+          "kind": "event",
+          "color": 5,
+          "start": 1320,
+          "minutes": 1440,
+          "marker": false,
+          "due": false,
+          "column": 3,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 22,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 1320,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 8,
+          "columns": 14
+        },
+        {
+          "id": 1,
+          "session": 23,
+          "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "task",
+          "color": 0,
+          "start": 1380,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 4,
+          "columns": 14
+        },
+        {
+          "id": 1099511627777,
+          "session": 23,
+          "name": "Limit fixture item 1099511627777",
+          "kind": "task",
+          "color": 3,
+          "start": 1380,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 5,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740993,
+          "session": 23,
+          "name": "Limit fixture item 9007199254740993",
+          "kind": "task",
+          "color": 1,
+          "start": 1380,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 6,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387905,
+          "session": 23,
+          "name": "Limit fixture item 4611686018427387905",
+          "kind": "task",
+          "color": 4,
+          "start": 1380,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 7,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775808,
+          "session": 23,
+          "name": "Limit fixture item 9223372036854775808",
+          "kind": "task",
+          "color": 2,
+          "start": 1380,
+          "minutes": 60,
+          "marker": false,
+          "due": false,
+          "column": 8,
+          "columns": 14
+        },
+        {
+          "id": 1099511627776,
+          "session": null,
+          "name": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+          "kind": "routine",
+          "color": 0,
+          "start": 1439,
+          "minutes": 1440,
+          "marker": false,
+          "due": false,
+          "column": 9,
+          "columns": 14
+        },
+        {
+          "id": 9007199254740992,
+          "session": null,
+          "name": "Limit fixture item 9007199254740992",
+          "kind": "routine",
+          "color": 0,
+          "start": 1439,
+          "minutes": 1440,
+          "marker": false,
+          "due": false,
+          "column": 10,
+          "columns": 14
+        },
+        {
+          "id": 4611686018427387904,
+          "session": null,
+          "name": "Limit fixture item 4611686018427387904",
+          "kind": "routine",
+          "color": 0,
+          "start": 1439,
+          "minutes": 1440,
+          "marker": false,
+          "due": false,
+          "column": 11,
+          "columns": 14
+        },
+        {
+          "id": 9223372036854775807,
+          "session": null,
+          "name": "Limit fixture item 9223372036854775807",
+          "kind": "routine",
+          "color": 0,
+          "start": 1439,
+          "minutes": 1440,
+          "marker": false,
+          "due": false,
+          "column": 12,
+          "columns": 14
+        },
+        {
+          "id": 18446744073709551615,
+          "session": null,
+          "name": "Limit fixture item 18446744073709551615",
+          "kind": "routine",
+          "color": 0,
+          "start": 1439,
+          "minutes": 1440,
+          "marker": false,
+          "due": false,
+          "column": 13,
+          "columns": 14
+        }
+      ],
+      "ghosts": []
+    }
+  ],
+  "tray": {
+    "due": [],
+    "later": []
+  },
+  "items": [
+    {
+      "id": 1,
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "kind": "task",
+      "color": 0,
+      "deadline": "2026-10-20T12:00",
+      "duration": 1440,
+      "planned": 1440,
+      "remaining": 0,
+      "severity": 0,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 0,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-20",
+          "start": 60,
+          "minutes": 60
+        },
+        {
+          "index": 2,
+          "day": "2026-10-20",
+          "start": 120,
+          "minutes": 60
+        },
+        {
+          "index": 3,
+          "day": "2026-10-20",
+          "start": 180,
+          "minutes": 60
+        },
+        {
+          "index": 4,
+          "day": "2026-10-20",
+          "start": 240,
+          "minutes": 60
+        },
+        {
+          "index": 5,
+          "day": "2026-10-20",
+          "start": 300,
+          "minutes": 60
+        },
+        {
+          "index": 6,
+          "day": "2026-10-20",
+          "start": 360,
+          "minutes": 60
+        },
+        {
+          "index": 7,
+          "day": "2026-10-20",
+          "start": 420,
+          "minutes": 60
+        },
+        {
+          "index": 8,
+          "day": "2026-10-20",
+          "start": 480,
+          "minutes": 60
+        },
+        {
+          "index": 9,
+          "day": "2026-10-20",
+          "start": 540,
+          "minutes": 60
+        },
+        {
+          "index": 10,
+          "day": "2026-10-20",
+          "start": 600,
+          "minutes": 60
+        },
+        {
+          "index": 11,
+          "day": "2026-10-20",
+          "start": 660,
+          "minutes": 60
+        },
+        {
+          "index": 12,
+          "day": "2026-10-20",
+          "start": 720,
+          "minutes": 60
+        },
+        {
+          "index": 13,
+          "day": "2026-10-20",
+          "start": 780,
+          "minutes": 60
+        },
+        {
+          "index": 14,
+          "day": "2026-10-20",
+          "start": 840,
+          "minutes": 60
+        },
+        {
+          "index": 15,
+          "day": "2026-10-20",
+          "start": 900,
+          "minutes": 60
+        },
+        {
+          "index": 16,
+          "day": "2026-10-20",
+          "start": 960,
+          "minutes": 60
+        },
+        {
+          "index": 17,
+          "day": "2026-10-20",
+          "start": 1020,
+          "minutes": 60
+        },
+        {
+          "index": 18,
+          "day": "2026-10-20",
+          "start": 1080,
+          "minutes": 60
+        },
+        {
+          "index": 19,
+          "day": "2026-10-20",
+          "start": 1140,
+          "minutes": 60
+        },
+        {
+          "index": 20,
+          "day": "2026-10-20",
+          "start": 1200,
+          "minutes": 60
+        },
+        {
+          "index": 21,
+          "day": "2026-10-20",
+          "start": 1260,
+          "minutes": 60
+        },
+        {
+          "index": 22,
+          "day": "2026-10-20",
+          "start": 1320,
+          "minutes": 60
+        },
+        {
+          "index": 23,
+          "day": "2026-10-20",
+          "start": 1380,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 1099511627775,
+      "name": "🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪🧪",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-20T13:00",
+      "duration": 1440,
+      "planned": 0,
+      "remaining": 1440,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 1099511627776,
+      "name": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": {
+        "days": 127,
+        "summary": "every day",
+        "start": 1439,
+        "minutes": 1440
+      },
+      "sessions": [],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 1099511627777,
+      "name": "Limit fixture item 1099511627777",
+      "kind": "task",
+      "color": 3,
+      "deadline": "2026-10-20T15:00",
+      "duration": 1440,
+      "planned": 1440,
+      "remaining": 0,
+      "severity": 3,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 0,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-20",
+          "start": 60,
+          "minutes": 60
+        },
+        {
+          "index": 2,
+          "day": "2026-10-20",
+          "start": 120,
+          "minutes": 60
+        },
+        {
+          "index": 3,
+          "day": "2026-10-20",
+          "start": 180,
+          "minutes": 60
+        },
+        {
+          "index": 4,
+          "day": "2026-10-20",
+          "start": 240,
+          "minutes": 60
+        },
+        {
+          "index": 5,
+          "day": "2026-10-20",
+          "start": 300,
+          "minutes": 60
+        },
+        {
+          "index": 6,
+          "day": "2026-10-20",
+          "start": 360,
+          "minutes": 60
+        },
+        {
+          "index": 7,
+          "day": "2026-10-20",
+          "start": 420,
+          "minutes": 60
+        },
+        {
+          "index": 8,
+          "day": "2026-10-20",
+          "start": 480,
+          "minutes": 60
+        },
+        {
+          "index": 9,
+          "day": "2026-10-20",
+          "start": 540,
+          "minutes": 60
+        },
+        {
+          "index": 10,
+          "day": "2026-10-20",
+          "start": 600,
+          "minutes": 60
+        },
+        {
+          "index": 11,
+          "day": "2026-10-20",
+          "start": 660,
+          "minutes": 60
+        },
+        {
+          "index": 12,
+          "day": "2026-10-20",
+          "start": 720,
+          "minutes": 60
+        },
+        {
+          "index": 13,
+          "day": "2026-10-20",
+          "start": 780,
+          "minutes": 60
+        },
+        {
+          "index": 14,
+          "day": "2026-10-20",
+          "start": 840,
+          "minutes": 60
+        },
+        {
+          "index": 15,
+          "day": "2026-10-20",
+          "start": 900,
+          "minutes": 60
+        },
+        {
+          "index": 16,
+          "day": "2026-10-20",
+          "start": 960,
+          "minutes": 60
+        },
+        {
+          "index": 17,
+          "day": "2026-10-20",
+          "start": 1020,
+          "minutes": 60
+        },
+        {
+          "index": 18,
+          "day": "2026-10-20",
+          "start": 1080,
+          "minutes": 60
+        },
+        {
+          "index": 19,
+          "day": "2026-10-20",
+          "start": 1140,
+          "minutes": 60
+        },
+        {
+          "index": 20,
+          "day": "2026-10-20",
+          "start": 1200,
+          "minutes": 60
+        },
+        {
+          "index": 21,
+          "day": "2026-10-20",
+          "start": 1260,
+          "minutes": 60
+        },
+        {
+          "index": 22,
+          "day": "2026-10-20",
+          "start": 1320,
+          "minutes": 60
+        },
+        {
+          "index": 23,
+          "day": "2026-10-20",
+          "start": 1380,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 9007199254740991,
+      "name": "Limit fixture item 9007199254740991",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-20T16:00",
+      "duration": 1440,
+      "planned": 0,
+      "remaining": 1440,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 9007199254740992,
+      "name": "Limit fixture item 9007199254740992",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": {
+        "days": 127,
+        "summary": "every day",
+        "start": 1439,
+        "minutes": 1440
+      },
+      "sessions": [],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 9007199254740993,
+      "name": "Limit fixture item 9007199254740993",
+      "kind": "task",
+      "color": 1,
+      "deadline": "2026-10-20T18:00",
+      "duration": 1440,
+      "planned": 1440,
+      "remaining": 0,
+      "severity": 1,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 0,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-20",
+          "start": 60,
+          "minutes": 60
+        },
+        {
+          "index": 2,
+          "day": "2026-10-20",
+          "start": 120,
+          "minutes": 60
+        },
+        {
+          "index": 3,
+          "day": "2026-10-20",
+          "start": 180,
+          "minutes": 60
+        },
+        {
+          "index": 4,
+          "day": "2026-10-20",
+          "start": 240,
+          "minutes": 60
+        },
+        {
+          "index": 5,
+          "day": "2026-10-20",
+          "start": 300,
+          "minutes": 60
+        },
+        {
+          "index": 6,
+          "day": "2026-10-20",
+          "start": 360,
+          "minutes": 60
+        },
+        {
+          "index": 7,
+          "day": "2026-10-20",
+          "start": 420,
+          "minutes": 60
+        },
+        {
+          "index": 8,
+          "day": "2026-10-20",
+          "start": 480,
+          "minutes": 60
+        },
+        {
+          "index": 9,
+          "day": "2026-10-20",
+          "start": 540,
+          "minutes": 60
+        },
+        {
+          "index": 10,
+          "day": "2026-10-20",
+          "start": 600,
+          "minutes": 60
+        },
+        {
+          "index": 11,
+          "day": "2026-10-20",
+          "start": 660,
+          "minutes": 60
+        },
+        {
+          "index": 12,
+          "day": "2026-10-20",
+          "start": 720,
+          "minutes": 60
+        },
+        {
+          "index": 13,
+          "day": "2026-10-20",
+          "start": 780,
+          "minutes": 60
+        },
+        {
+          "index": 14,
+          "day": "2026-10-20",
+          "start": 840,
+          "minutes": 60
+        },
+        {
+          "index": 15,
+          "day": "2026-10-20",
+          "start": 900,
+          "minutes": 60
+        },
+        {
+          "index": 16,
+          "day": "2026-10-20",
+          "start": 960,
+          "minutes": 60
+        },
+        {
+          "index": 17,
+          "day": "2026-10-20",
+          "start": 1020,
+          "minutes": 60
+        },
+        {
+          "index": 18,
+          "day": "2026-10-20",
+          "start": 1080,
+          "minutes": 60
+        },
+        {
+          "index": 19,
+          "day": "2026-10-20",
+          "start": 1140,
+          "minutes": 60
+        },
+        {
+          "index": 20,
+          "day": "2026-10-20",
+          "start": 1200,
+          "minutes": 60
+        },
+        {
+          "index": 21,
+          "day": "2026-10-20",
+          "start": 1260,
+          "minutes": 60
+        },
+        {
+          "index": 22,
+          "day": "2026-10-20",
+          "start": 1320,
+          "minutes": 60
+        },
+        {
+          "index": 23,
+          "day": "2026-10-20",
+          "start": 1380,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 4611686018427387903,
+      "name": "Limit fixture item 4611686018427387903",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-20T19:00",
+      "duration": 1440,
+      "planned": 0,
+      "remaining": 1440,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 4611686018427387904,
+      "name": "Limit fixture item 4611686018427387904",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": {
+        "days": 127,
+        "summary": "every day",
+        "start": 1439,
+        "minutes": 1440
+      },
+      "sessions": [],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 4611686018427387905,
+      "name": "Limit fixture item 4611686018427387905",
+      "kind": "task",
+      "color": 4,
+      "deadline": "2026-10-20T21:00",
+      "duration": 1440,
+      "planned": 1440,
+      "remaining": 0,
+      "severity": 4,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 0,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-20",
+          "start": 60,
+          "minutes": 60
+        },
+        {
+          "index": 2,
+          "day": "2026-10-20",
+          "start": 120,
+          "minutes": 60
+        },
+        {
+          "index": 3,
+          "day": "2026-10-20",
+          "start": 180,
+          "minutes": 60
+        },
+        {
+          "index": 4,
+          "day": "2026-10-20",
+          "start": 240,
+          "minutes": 60
+        },
+        {
+          "index": 5,
+          "day": "2026-10-20",
+          "start": 300,
+          "minutes": 60
+        },
+        {
+          "index": 6,
+          "day": "2026-10-20",
+          "start": 360,
+          "minutes": 60
+        },
+        {
+          "index": 7,
+          "day": "2026-10-20",
+          "start": 420,
+          "minutes": 60
+        },
+        {
+          "index": 8,
+          "day": "2026-10-20",
+          "start": 480,
+          "minutes": 60
+        },
+        {
+          "index": 9,
+          "day": "2026-10-20",
+          "start": 540,
+          "minutes": 60
+        },
+        {
+          "index": 10,
+          "day": "2026-10-20",
+          "start": 600,
+          "minutes": 60
+        },
+        {
+          "index": 11,
+          "day": "2026-10-20",
+          "start": 660,
+          "minutes": 60
+        },
+        {
+          "index": 12,
+          "day": "2026-10-20",
+          "start": 720,
+          "minutes": 60
+        },
+        {
+          "index": 13,
+          "day": "2026-10-20",
+          "start": 780,
+          "minutes": 60
+        },
+        {
+          "index": 14,
+          "day": "2026-10-20",
+          "start": 840,
+          "minutes": 60
+        },
+        {
+          "index": 15,
+          "day": "2026-10-20",
+          "start": 900,
+          "minutes": 60
+        },
+        {
+          "index": 16,
+          "day": "2026-10-20",
+          "start": 960,
+          "minutes": 60
+        },
+        {
+          "index": 17,
+          "day": "2026-10-20",
+          "start": 1020,
+          "minutes": 60
+        },
+        {
+          "index": 18,
+          "day": "2026-10-20",
+          "start": 1080,
+          "minutes": 60
+        },
+        {
+          "index": 19,
+          "day": "2026-10-20",
+          "start": 1140,
+          "minutes": 60
+        },
+        {
+          "index": 20,
+          "day": "2026-10-20",
+          "start": 1200,
+          "minutes": 60
+        },
+        {
+          "index": 21,
+          "day": "2026-10-20",
+          "start": 1260,
+          "minutes": 60
+        },
+        {
+          "index": 22,
+          "day": "2026-10-20",
+          "start": 1320,
+          "minutes": 60
+        },
+        {
+          "index": 23,
+          "day": "2026-10-20",
+          "start": 1380,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 4611686018427387906,
+      "name": "Limit fixture item 4611686018427387906",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-20T22:00",
+      "duration": 1440,
+      "planned": 0,
+      "remaining": 1440,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 9223372036854775807,
+      "name": "Limit fixture item 9223372036854775807",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": {
+        "days": 127,
+        "summary": "every day",
+        "start": 1439,
+        "minutes": 1440
+      },
+      "sessions": [],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 9223372036854775808,
+      "name": "Limit fixture item 9223372036854775808",
+      "kind": "task",
+      "color": 2,
+      "deadline": "2026-10-21T00:00",
+      "duration": 1440,
+      "planned": 1440,
+      "remaining": 0,
+      "severity": 2,
+      "horizon": 3,
+      "repeat": null,
+      "sessions": [
+        {
+          "index": 0,
+          "day": "2026-10-20",
+          "start": 0,
+          "minutes": 60
+        },
+        {
+          "index": 1,
+          "day": "2026-10-20",
+          "start": 60,
+          "minutes": 60
+        },
+        {
+          "index": 2,
+          "day": "2026-10-20",
+          "start": 120,
+          "minutes": 60
+        },
+        {
+          "index": 3,
+          "day": "2026-10-20",
+          "start": 180,
+          "minutes": 60
+        },
+        {
+          "index": 4,
+          "day": "2026-10-20",
+          "start": 240,
+          "minutes": 60
+        },
+        {
+          "index": 5,
+          "day": "2026-10-20",
+          "start": 300,
+          "minutes": 60
+        },
+        {
+          "index": 6,
+          "day": "2026-10-20",
+          "start": 360,
+          "minutes": 60
+        },
+        {
+          "index": 7,
+          "day": "2026-10-20",
+          "start": 420,
+          "minutes": 60
+        },
+        {
+          "index": 8,
+          "day": "2026-10-20",
+          "start": 480,
+          "minutes": 60
+        },
+        {
+          "index": 9,
+          "day": "2026-10-20",
+          "start": 540,
+          "minutes": 60
+        },
+        {
+          "index": 10,
+          "day": "2026-10-20",
+          "start": 600,
+          "minutes": 60
+        },
+        {
+          "index": 11,
+          "day": "2026-10-20",
+          "start": 660,
+          "minutes": 60
+        },
+        {
+          "index": 12,
+          "day": "2026-10-20",
+          "start": 720,
+          "minutes": 60
+        },
+        {
+          "index": 13,
+          "day": "2026-10-20",
+          "start": 780,
+          "minutes": 60
+        },
+        {
+          "index": 14,
+          "day": "2026-10-20",
+          "start": 840,
+          "minutes": 60
+        },
+        {
+          "index": 15,
+          "day": "2026-10-20",
+          "start": 900,
+          "minutes": 60
+        },
+        {
+          "index": 16,
+          "day": "2026-10-20",
+          "start": 960,
+          "minutes": 60
+        },
+        {
+          "index": 17,
+          "day": "2026-10-20",
+          "start": 1020,
+          "minutes": 60
+        },
+        {
+          "index": 18,
+          "day": "2026-10-20",
+          "start": 1080,
+          "minutes": 60
+        },
+        {
+          "index": 19,
+          "day": "2026-10-20",
+          "start": 1140,
+          "minutes": 60
+        },
+        {
+          "index": 20,
+          "day": "2026-10-20",
+          "start": 1200,
+          "minutes": 60
+        },
+        {
+          "index": 21,
+          "day": "2026-10-20",
+          "start": 1260,
+          "minutes": 60
+        },
+        {
+          "index": 22,
+          "day": "2026-10-20",
+          "start": 1320,
+          "minutes": 60
+        },
+        {
+          "index": 23,
+          "day": "2026-10-20",
+          "start": 1380,
+          "minutes": 60
+        }
+      ],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 18446744073709551614,
+      "name": "Limit fixture item 18446744073709551614",
+      "kind": "event",
+      "color": 5,
+      "deadline": "2026-10-21T01:00",
+      "duration": 1440,
+      "planned": 0,
+      "remaining": 1440,
+      "severity": null,
+      "horizon": null,
+      "repeat": null,
+      "sessions": [],
+      "created": "2026-09-01"
+    },
+    {
+      "id": 18446744073709551615,
+      "name": "Limit fixture item 18446744073709551615",
+      "kind": "routine",
+      "color": 0,
+      "deadline": null,
+      "duration": null,
+      "planned": 0,
+      "remaining": null,
+      "severity": null,
+      "horizon": 3,
+      "repeat": {
+        "days": 127,
+        "summary": "every day",
+        "start": 1439,
+        "minutes": 1440
+      },
+      "sessions": [],
+      "created": "2026-09-01"
+    }
+  ],
+  "ranked": [
+    4611686018427387905,
+    1099511627777,
+    9223372036854775808,
+    9007199254740993,
+    1
+  ],
+  "done": [
+    {
+      "id": 18446744073709551613,
+      "archived_at": "2026-09-04T10:00:00.493827156+02:00",
+      "name": "Limit archive fixture 18446744073709551613",
+      "kind": "task",
+      "color": 4,
+      "finished": true,
+      "when": "Fri 4 Sep 10:00",
+      "verdict": "finished 1d late  ·  no time set aside  ·  2d on the board"
+    },
+    {
+      "id": 4611686018427387907,
+      "archived_at": "2026-09-04T10:00:00.370370367+02:00",
+      "name": "Limit archive fixture 4611686018427387907",
+      "kind": "task",
+      "color": 4,
+      "finished": true,
+      "when": "Fri 4 Sep 10:00",
+      "verdict": "finished 1d late  ·  no time set aside  ·  2d on the board"
+    },
+    {
+      "id": 9007199254740993,
+      "archived_at": "2026-09-04T10:00:00.246913578+02:00",
+      "name": "Limit archive fixture 9007199254740993",
+      "kind": "task",
+      "color": 4,
+      "finished": true,
+      "when": "Fri 4 Sep 10:00",
+      "verdict": "finished 1d late  ·  no time set aside  ·  2d on the board"
+    },
+    {
+      "id": 1099511627777,
+      "archived_at": "2026-09-04T10:00:00.123456789+02:00",
+      "name": "Limit archive fixture 1099511627777",
+      "kind": "task",
+      "color": 4,
+      "finished": true,
+      "when": "Fri 4 Sep 10:00",
+      "verdict": "finished 1d late  ·  no time set aside  ·  2d on the board"
+    }
+  ],
+  "notes": "Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit fixture notes. Limit 🧪é",
+  "dials": {
+    "blur": 11,
+    "light": 39
+  }
+}

@@ -1,0 +1,11 @@
+start_in_fullscreen = false
+coordinates = [-41.25, -132.5]
+background = ""
+enable_fps_counter = false
+window_size_startup = [1280.0, 720.0]
+calendar_weeks_to_show = 100
+selected_monitor_name = ""
+selected_colorscheme_id = 1
+three_day_weather = false
+background_image_tint_percent = 30
+ui_scale_percent = 0

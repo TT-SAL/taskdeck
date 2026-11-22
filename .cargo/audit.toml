@@ -1,0 +1,60 @@
+# cargo-audit configuration (SYNC.md §8 "Supply chain"; R4 §4.2). Read by
+# cargo-audit 0.23.0, the version scripts/dev-setup.sh pins, when run from the
+# repository root (scripts/supply-chain.sh does). It keeps the same reviewed
+# ignores as deny.toml (cargo-audit takes ids only, so each reason lives in the
+# comment above its id).
+
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0543: chrono is unmaintained. Reviewed: the design keeps
+    # chrono for now and plans a move to jiff later (SYNC.md sections 8 and 11).
+    # The notice is informational, not a vulnerability. Remove this ignore when
+    # chrono leaves the tree.
+    "RUSTSEC-2026-0543",
+    # The four below have no fixed release (the lead's rulings for task
+    # baseline-1b, ruling 2).
+    # RUSTSEC-2024-0436: paste is unmaintained. Reviewed: a build-time macro
+    # under rav1e, which the image crate's avif feature pulls in; no runtime
+    # code. Stage desktop removes the AVIF encoder with the phone server
+    # (SYNC.md section 2.1); remove this ignore then.
+    "RUSTSEC-2024-0436",
+    # RUSTSEC-2024-0370: proc-macro-error is unmaintained. Reviewed: used only by
+    # structopt, the command-line helper that kmeans_colors enables by default;
+    # the app never calls it. Stage desktop turns that default feature off when
+    # it reworks the root package's dependencies; remove this ignore then.
+    "RUSTSEC-2024-0370",
+    # RUSTSEC-2022-0104: structopt is unmaintained. Reviewed: the command-line
+    # helper that kmeans_colors enables by default; the app never calls it.
+    # Stage desktop turns that default feature off when it reworks the root
+    # package's dependencies; remove this ignore then.
+    "RUSTSEC-2022-0104",
+    # RUSTSEC-2026-0192: ttf-parser is unmaintained. Reviewed: used for Wayland
+    # title-bar fonts on the Linux desktop only, read from local font files,
+    # under the pinned winit. Remove this ignore when the pinned winit no
+    # longer pulls it in.
+    "RUSTSEC-2026-0192",
+    # A fixed release exists but is inside the seven-day cooldown (the lead's
+    # ruling of 2026-11-22).
+    # RUSTSEC-2026-0592: url 2.5.8, Url::origin() overflows the stack on a
+    # deeply nested blob: URL (a crash, no more). Reviewed 2026-11-22: no code
+    # in the tree calls Url::origin() or url::quirks::origin(). The fixed
+    # release 2.5.9 was published 2026-11-20 and is inside the seven-day
+    # cooldown until 2026-11-27. From 2026-11-28: cargo update -p url
+    # --precise 2.5.9, and remove this ignore here and in deny.toml.
+    "RUSTSEC-2026-0592",
+]
+# Report unmaintained, unsound and notice advisories (a notice is printed but,
+# see [output], does not fail the run).
+informational_warnings = ["unmaintained", "unsound", "notice"]
+
+[output]
+# Vulnerabilities fail the run, and so do unmaintained, unsound and yanked
+# crates; a notice does not (the lead's rulings for task baseline-1b, ruling 4).
+# cargo-deny agrees only because scripts/supply-chain.sh passes it -W notice.
+deny = ["unmaintained", "unsound", "yanked"]
+quiet = false
+show_tree = true
+
+[yanked]
+enabled = true
+update_index = true

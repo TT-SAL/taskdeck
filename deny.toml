@@ -1,0 +1,81 @@
+# cargo-deny configuration (SYNC.md §8 "Supply chain"; R4 §4.2).
+# Run through scripts/supply-chain.sh, which checks advisories, bans and
+# sources. Written for cargo-deny 0.20.2, the version scripts/dev-setup.sh pins;
+# check the syntax against that version's documentation before changing it.
+# The licence check is not configured: the plan does not ask for it.
+
+[graph]
+# No `targets`: every platform's dependencies are in the graph (Windows, macOS,
+# Linux, Android, wasm32), so a crate used on one platform only is still seen.
+# Every feature of every workspace member, so test-only and optional code is
+# checked too.
+all-features = true
+
+[advisories]
+# Fail on unmaintained and unsound notices anywhere in the graph, not only in
+# workspace crates.
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+# A crate whose index entry cannot be fetched or read skips the yanked check
+# with only a warning; scripts/supply-chain.sh passes -D index-failure and
+# -D index-cache-load-failure, so there it is an error.
+# A notice advisory is an error to cargo-deny, with no key here to change it;
+# scripts/supply-chain.sh passes -W notice, so there it is printed and does not
+# fail, as in cargo-audit (the lead's rulings for task baseline-1b, ruling 4).
+# An ignore that no longer matches is reported, so a stale one gets removed.
+unused-ignored-advisory = "deny"
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained. Reviewed: the design keeps chrono for now and plans a move to jiff later (SYNC.md sections 8 and 11). The notice is informational, not a vulnerability. Remove this ignore when chrono leaves the tree." },
+    # The four below have no fixed release (the lead's rulings for task baseline-1b, ruling 2).
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained. Reviewed: a build-time macro under rav1e, which the image crate's avif feature pulls in; no runtime code. Stage desktop removes the AVIF encoder with the phone server (SYNC.md section 2.1); remove this ignore then." },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained. Reviewed: used only by structopt, the command-line helper that kmeans_colors enables by default; the app never calls it. Stage desktop turns that default feature off when it reworks the root package's dependencies; remove this ignore then." },
+    { id = "RUSTSEC-2022-0104", reason = "structopt is unmaintained. Reviewed: the command-line helper that kmeans_colors enables by default; the app never calls it. Stage desktop turns that default feature off when it reworks the root package's dependencies; remove this ignore then." },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained. Reviewed: used for Wayland title-bar fonts on the Linux desktop only, read from local font files, under the pinned winit. Remove this ignore when the pinned winit no longer pulls it in." },
+    # A fixed release exists but is inside the seven-day cooldown (the lead's ruling of 2026-11-22).
+    { id = "RUSTSEC-2026-0592", reason = "url 2.5.8: Url::origin() overflows the stack on a deeply nested blob: URL (a crash, no more). Reviewed 2026-11-22: no code in the tree calls Url::origin() or url::quirks::origin() (the app, reqwest, tower-http, webbrowser and the device crate were searched). The fixed release 2.5.9 was published 2026-11-20 and is inside the seven-day cooldown until 2026-11-27. From 2026-11-28: cargo update -p url --precise 2.5.9, and remove this ignore here and in .cargo/audit.toml." },
+]
+
+[bans]
+# Duplicate versions in general are allowed, not reported: the pinned egui,
+# wgpu and winit tree carries dozens, and their warnings buried the errors
+# (the lead's rulings for task baseline-1b, ruling 3). The per-crate
+# deny-multiple-versions entries below still fail.
+multiple-versions = "allow"
+multiple-versions-include-dev = true
+wildcards = "allow"
+# One RustCrypto generation (SYNC.md §5.1): two versions of any crate below in
+# the graph is an error, so no later change can pull in a second generation of
+# the cryptographic stack. Most are not in the lockfile yet; the ban applies as
+# soon as they arrive.
+deny = [
+    { crate = "chacha20poly1305", deny-multiple-versions = true },
+    { crate = "chacha20", deny-multiple-versions = true },
+    { crate = "poly1305", deny-multiple-versions = true },
+    { crate = "universal-hash", deny-multiple-versions = true },
+    { crate = "aead", deny-multiple-versions = true },
+    { crate = "cipher", deny-multiple-versions = true },
+    { crate = "ed25519-dalek", deny-multiple-versions = true },
+    { crate = "ed25519", deny-multiple-versions = true },
+    { crate = "curve25519-dalek", deny-multiple-versions = true },
+    { crate = "x25519-dalek", deny-multiple-versions = true },
+    { crate = "signature", deny-multiple-versions = true },
+    { crate = "hpke", deny-multiple-versions = true },
+    { crate = "hkdf", deny-multiple-versions = true },
+    { crate = "hmac", deny-multiple-versions = true },
+    { crate = "sha2", deny-multiple-versions = true },
+    { crate = "digest", deny-multiple-versions = true },
+    { crate = "crypto-common", deny-multiple-versions = true },
+    { crate = "zeroize", deny-multiple-versions = true },
+    { crate = "subtle", deny-multiple-versions = true },
+    { crate = "rustls", deny-multiple-versions = true },
+    { crate = "rustls-webpki", deny-multiple-versions = true },
+    { crate = "ring", deny-multiple-versions = true },
+]
+
+[sources]
+# crates.io only: any other registry and every git source is an error.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

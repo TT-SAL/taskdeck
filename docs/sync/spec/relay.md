@@ -11,7 +11,7 @@ It realises:
 - SYNC.md §2.1 (the relay row), §2.2, §4.1 (relay storage), §4.3 (append, sequencing, idempotency, one live socket per device), §4.7 (catch-up pages, snapshot retention, compaction, purge at the relay), §4.8 (restore tail, the `/v1` path, additive deploys), §4.9 (push, free pings), §5.2 (tokens, admin operations, backup-read tokens), §5.3 (tickets and slots at the relay), §5.4 (what revocation does at the relay), §5.5 (the recovery identity at the relay), §6 (hosting, quota math, EUR 0, failure modes, exit plan), §7 (the relay, DoS and theft rows), §8 (the relay paragraph);
 - R3 §2, §5, §6, §7, §8; the verifier findings V1-1, V1-5, V1-10, V1-16, V2-3, V2-9, V2-15, V2-21;
 - SYNC_PLAN.md §2 (no hub, no forwarding, no always-on device), §3.4 (security rules), §5 (wrangler, `node:sqlite`), §6.4 (the `relay` stage and its gate), §6.5 (the model relay), §6.7;
-- the rulings S1–S4, S9, S13–S15 of `docs/sync/status/foundation.md`.
+- the rulings S1–S4, S9, S13 to S15 (S15 in its settled form: the Skip floor `max(purge_seq, s − 16,384)`, kept fetchable by RELAY-COMPACT-007), S21 to S23, S24 (the `reinstate` wraps, stored on the target's row and returned by `login`: §12.5, §10.3), S25 (the typical day of §16.2) and S27 (§13.3) of `docs/sync/status/foundation.md`.
 
 Non-goals, each owned elsewhere:
 
@@ -153,6 +153,9 @@ Every request body is binary, with a layout table in this spec; the relay contai
 | `until` | integer | optional; present exactly for `relay/budget` and `relay/delete_budget` | ms since the epoch | when the budget resets: `(UTC day + 1) × 86,400,000` |
 | `index` | integer | optional; present exactly when one frame of a `seed-tail` or `restore_tail` request refused the whole request (§12.7, §12.9) | 0 to 255 | the 0-based position of that frame in the request |
 | `head` | object | optional; present exactly for `relay/not_next` | `{"seq": integer, "chain": hex32}` | the relay head (§7.3), so that a device whose earlier answer was lost learns where to resume |
+| `read_epoch` | integer | optional; present exactly for `relay/stale_epoch` | 1 to 2^32 − 1 | the board's `read_epoch` (§12.11), so that a recovery tool, which can read nothing before it mints, learns the epoch to mint for |
+| `last_ctr` | integer | optional; present exactly for `relay/gap` and `relay/conflict` refusing a `register` or `fence` request because of the frame it carries (§12.3, §12.6) | 0 to 2^53 − 1 | the stored `last_ctr` of that frame's author row (§7.1), so that an author that holds no log of its own frames learns the counter to use |
+| `last_seq` | integer | optional; present exactly when `last_ctr` is | 0 to 2^53 − 1 | the stored `last_seq` of that author row |
 
 A client parses an error body strictly too: a field outside this table, or a field present where its row says it is absent, is a protocol error it reports as a relay bug.
 
@@ -192,7 +195,7 @@ The MAC input is `ctx("token")` (18 bytes) followed by the first 37 token bytes:
 
 - **RELAY-TOKEN-001** (relay) A token MUST be laid out as the table of §5.1, with `mac = HMAC(TOKEN_KEY, ctx("token") ‖ token[0..37])`, and written in the text form of §5.1.
 - **RELAY-TOKEN-002** (relay) The gate MUST accept a token only if every check of §5.1 passes, verifying the MAC in constant time, and MUST refuse any other with `401 relay/unauthorized` before any object call.
-- **RELAY-TOKEN-003** (device, recovery) A client MUST treat a token as an opaque ASCII string, MUST send it only in the `Authorization` header of requests to the relay origin that issued it, and MUST NOT put it in a URL, a log or an error message.
+- **RELAY-TOKEN-003** (withdrawn) Client behaviour, owned by `device.md`: replaced by DEV-NET-005, which also names stage `recovery` as an owner.
 
 ### 5.2 Generations
 
@@ -211,7 +214,7 @@ The MAC input is `ctx("token")` (18 bytes) followed by the first 37 token bytes:
 |---|---|---|
 | `mint_read_token` by `w` (§12.11) | `gen` = stored + 1 (1 when no row), `state = 1`, `epoch` from the arguments | the new token is valid, every older one of `w` invalid |
 | `revoke_read_token` for `w` | `state = 2` | `w`'s token is invalid |
-| `revoke`, `reinstate`, `recovery_register` or `purge` (each precedes or carries a rotation, SYNC.md §5.2) | every row `state = 2` | every backup-read token is invalid |
+| `revoke`, `reinstate`, `recovery_register` or `purge` (each precedes, carries or follows a rotation, SYNC.md §5.2) | every row `state = 2` | every backup-read token is invalid |
 | `mint_read_token` with an epoch above `board.read_epoch` | every row with a lower `epoch`: `state = 2` | tokens of older epochs are invalid |
 
 A generation never decreases, and a row of `devices` or `read_tokens` is never deleted while the board exists, so no token can become valid again. A `gen` of 2^32 − 1 cannot be raised; a login or mint that would need it is refused with `409 relay/gen_exhausted`.
@@ -249,7 +252,7 @@ display  = host "/" B in groups of 4 joined by "-", the last group of 2   e.g. r
 1. Remove leading and trailing spaces, tabs and line breaks.
 2. If the text starts with `https://` in any letter case, remove those 8 characters. Any other `scheme://` prefix is an error (`relay/address`).
 3. Split at the first `/`. There must be exactly one `/`; the part before it is the host, the part after it is `B`.
-4. Map `A`–`Z` in the host to `a`–`z`; the host must then match `seal.md` §5.4's host rule, and a port of 443 is removed.
+4. Map `A`–`Z` in the host to `a`–`z` and remove a trailing `:443`; the host must then match `seal.md` §5.4's host rule, which admits no port 443.
 5. Normalise `B` as `seal.md` §5.2 (remove spaces, hyphens and tabs; fold case; `O` to `0`; `I` and `L` to `1`). It must then be exactly 34 alphabet characters whose 2 padding bits are zero.
 6. Decode `B` into 21 bytes: `board_id = [0..16]`, `door = [16..21]`.
 
@@ -379,7 +382,8 @@ CREATE TABLE IF NOT EXISTS devices (
   last_seq INTEGER NOT NULL,              -- the seq of (dev, last_ctr), or 0
   app_day  INTEGER NOT NULL,              -- UTC day of app_count
   app_count INTEGER NOT NULL,             -- new frames stored for this author on app_day
-  added_at INTEGER NOT NULL               -- relay clock
+  added_at INTEGER NOT NULL,              -- relay clock
+  wraps    BLOB                           -- or NULL: u32 first_epoch ‖ u16 n ‖ n × wrap[96] of the latest reinstate (§12.5), until the next revoke
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS log (
@@ -489,11 +493,14 @@ The gate has checked the MAC; the object checks state, in one read of the creden
 | Credential | Valid at the object when | Else |
 |---|---|---|
 | token, role 1 | a `devices` row with `dev`, `role = 1` exists; `state = 1`; `gen` equals the token's | no row or `role = 2`: `401 relay/unauthorized`; `state = 2`: `403 relay/revoked`; `gen` differs: `401 relay/token_stale` |
-| token, role 1, on `login-nonce` and `login` | a `devices` row with `dev` and `role = 1` exists | as above, but the generation is not checked |
+| token, role 1, on `login-nonce` and `login` | a `devices` row with `dev` and `role = 1` exists; `state = 1` | as above, but the generation is not checked |
 | token, role 2 | a `read_tokens` row with `dev` exists, `state = 1`, `gen` equals the token's | `401 relay/token_stale` (no row: `401 relay/unauthorized`) |
 | door, create secret | always (the gate checked it); each route then limits what it does with it | |
 
+The object checks the conditions of a row in the order the row lists them and answers with the code of the first that fails. So a role-1 token whose row has `state = 2` is answered `403 relay/revoked` whatever its `gen`, on every route, `login-nonce` and `login` included; `401 relay/token_stale` is answered only for a row with `state = 1`.
+
 - **RELAY-OBJ-003** (relay) For every request with a token, the object MUST check the token's row as the table of §8.2 states before any other check of the route, and MUST answer with the code the table gives when it fails.
+- **RELAY-OBJ-010** (relay) When more than one condition of a §8.2 row fails, the object MUST answer with the code of the first failing condition in the order the row lists them, so that a token of a device whose row has `state = 2` is answered `403 relay/revoked` whatever its generation.
 - **RELAY-OBJ-004** (relay) The object MUST NOT write any row for a request it refuses for its credential or its board state.
 
 ### 8.3 The relay clock
@@ -728,12 +735,14 @@ Response (200):
 | `token` | string | required | the new token (§5.1), role 1 |
 | `gen` | integer | required | its generation |
 | `push` | boolean | required | the capability of §15.1 |
+| `wraps` | object | optional: present exactly while the device's row stores `wraps` (§12.5) | `{"first_epoch": integer, "wraps": [hex96, …]}`: the reinstatement's 1 to 256 wraps of the roots of epochs `first_epoch` onward, in epoch order, exactly as `reinstate` stored them (ruling S24, lead ruling L1); the relay does not interpret them |
 
 - **RELAY-LOGIN-001** (relay) A login nonce MUST be 32 bytes from `crypto.getRandomValues`, stored with its purpose, device and issue time, and accepted at most once and only within 120,000 ms of its issue.
 - **RELAY-LOGIN-002** (relay) The relay MUST delete a login nonce when a `login` names it, whether or not the login then succeeds.
 - **RELAY-LOGIN-003** (relay) The relay MUST verify the login signature over exactly the bytes of `seal.md` §16.1 with `origin` equal to its configured `RELAY_ORIGIN`, and MUST accept only `gen` equal to the stored generation plus one.
 - **RELAY-LOGIN-004** (relay) A successful login MUST set the device's stored generation to the signed one, so that every token with a lower generation is refused from then on, and MUST close the device's sockets with a lower generation.
 - **RELAY-LOGIN-005** (relay) The relay MUST keep at most 64 `nonces` rows, removing expired rows and then the oldest as §10.3 states when it issues a nonce.
+- **RELAY-LOGIN-006** (relay) A successful `login` MUST carry in `wraps` the `first_epoch` and wraps stored on the device's row, unchanged and in their stored order, whenever the row stores them, and MUST omit the field otherwise.
 
 ### 10.4 `hello`
 
@@ -1004,7 +1013,7 @@ Then store `session`, `features` and `ready = true` in the attachment and send t
 
 **Append and read.** An append message is processed exactly as the append route (§9), and answered by `result` with its `req`; a read message exactly as the read route (§10.5) with `after` and `limit`, answered by `page`. Before either, the object re-reads the device row: if the device is no longer current or its `gen` differs from the attachment's, it sends `error` (`403 relay/revoked` or `401 relay/token_stale`) and closes with 4003. A whole-request refusal (board state, a malformed batch, a `limit` outside 1 to 256) is answered by `error` with the request's `req` and the code the HTTPS route would use. A message of an unknown type, of the wrong length for its type, or a text message other than `ping` is answered by `error` with `req = 0` and `400 relay/bad_message`, then the socket is closed with 4004. A message longer than 4,194,378 bytes is closed with 1009 without processing.
 
-**Push.** After any transaction that stored new `log` rows (an append over HTTPS or a socket, `register`, `recovery_register`, `fence` with a frame, `restore_tail`), the object sends each socket with `ready = true`, of every device, the author's included, `push` messages carrying exactly the new entries in seq order, split as pages are (§10.5: at most 256 entries and 1 MiB of frames per message, `more` set on all but the last). The head fields are the head after the commit; `truncated` is 0. A send that throws is ignored: the client catches up by reading.
+**Push.** After any transaction that stored new `log` rows (an append over HTTPS or a socket, `register` in frame mode, `fence` with a frame, `restore_tail`), the object sends `push` messages carrying exactly the new entries in seq order to each socket with `ready = true`, of every device, the author's included. The messages are split as pages are (§10.5: at most 256 entries and 1 MiB of frames per message, `more` set on all but the last). The head fields are the head after the commit, and `truncated` is 0. For an append over the socket, the object sends that append's `result` on the author's socket before any of those `push` messages. A send that throws is ignored: the client catches up by reading.
 
 **Slot notice.** After a slot B is stored, the object sends `slot` with the ticket id to every ready socket of the ticket's creator.
 
@@ -1013,6 +1022,7 @@ Then store `session`, `features` and `ready = true` in the attachment and send t
 - **RELAY-SOCK-006** (relay) The object MUST process a socket append and a socket read exactly as the append and read routes, and MUST answer each with the request's `req`.
 - **RELAY-SOCK-007** (relay) Before handling a socket append or read, the object MUST re-read the device row and, when the device is not current or its generation differs from the socket's, MUST send `error` and close the socket with 4003.
 - **RELAY-SOCK-008** (relay, engine) After every transaction that stores new entries, the object MUST push exactly those entries, in seq order, to every socket with `ready = true`, including the author's.
+- **RELAY-SOCK-012** (relay) After a socket append commits, the object MUST send that append's `result` on the author's socket before the `push` messages that carry the entries it stored.
 - **RELAY-SOCK-009** (relay) The object MUST close with 1009, without processing it, a socket message longer than 4,194,378 bytes, and MUST answer a malformed message with `error` `relay/bad_message` and close with 4004.
 
 ### 11.5 Pings, hibernation and deploys
@@ -1063,15 +1073,15 @@ An admin operation changes what the relay will accept, or deletes what it holds.
 |---|---|---|---|---|---|---|
 | `register` | 80 | the `DeviceAdded` frame (670 to 262,144), or `u64 seq` (8) | 262,344 | T1 | a current device, the token's | §12.3 |
 | `revoke` | 16 | empty | 136 (fixed) | T1, D | a current device other than the target, or the current recovery identity | §12.4 |
-| `reinstate` | 16 | empty | 136 (fixed) | T1, D | the current recovery identity | §12.5 |
-| `fence` | 10 + host length | empty, or the `Fence` frame | 262,533 | T1, D | a current device or the current recovery identity | §12.6 |
+| `reinstate` | 22 + 96n | empty | 24,718 | T1, D | the current recovery identity | §12.5 |
+| `fence` | 10 + host length | empty, or the `Fence` frame | 262,529 | T1, D | a current device or the current recovery identity | §12.6 |
 | `seed` | 102 + 58n | empty | 18,782 | C | a current device in the seeded set | §12.7 |
-| `compact` | 20 + 8n | empty | 1,048,716 | T1 | a current device other than the snapshot's author | §12.8 |
+| `compact` | 36 + 8n | empty | 1,048,732 | T1 | a current device other than the snapshot's author | §12.8 |
 | `restore_tail` | 12 + 32n | `chain_before[32] ‖ n × (u32 len ‖ frame)` | 1,051,044 | T1, D | a current device or the current recovery identity | §12.9 |
 | `purge` | 12 | empty | 132 (fixed) | T1 | a current device | §12.10 |
 | `mint_read_token` | 20 | empty | 140 (fixed) | T1, D | the writer named in `args`, a current device or the current recovery identity | §12.11 |
 | `revoke_read_token` | 16 | empty | 136 (fixed) | T1, D | a current device or the current recovery identity | §12.11 |
-| `recovery_register` | 80 | the `K`-shape frame (670 to 262,144), or `u64 seq` (8) | 262,344 | T1, D | the current recovery identity or a current device | §12.12 |
+| `recovery_register` | 80 | `u64 seq` (8) | 208 (fixed) | T1, D | the current recovery identity or a current device | §12.12 |
 
 "Current recovery identity" is the role-2 row with `state = 1`; "current device" a role-1 row with `state = 1`.
 
@@ -1091,6 +1101,7 @@ An admin operation changes what the relay will accept, or deletes what it holds.
 - **RELAY-ADMIN-002** (relay) The object MUST run the common checks A1 to A7 of §12.1 in order for every admin request and MUST perform no effect of the operation unless all pass.
 - **RELAY-ADMIN-003** (relay) The object MUST verify the admin signature over exactly the bytes of `seal.md` §16.2 (SEAL-SIG-003), with `op` taken from the path and `args_hash = H(args)` computed by the relay from the received `args`.
 - **RELAY-ADMIN-004** (relay) The object MUST accept each operation only from a signer the "Signer must be" column of §12.1 allows and only with a credential its "Credentials" column allows.
+- **RELAY-ADMIN-005** (relay) When the frame carried by a `register` or `fence` request gets the outcome `gap` or `conflict` (§9.4), the object MUST refuse the request with `409 relay/gap` or `409 relay/conflict` and an error body whose `last_ctr` and `last_seq` are the author row's stored values.
 
 ### 12.2 What the relay can and cannot verify
 
@@ -1100,7 +1111,7 @@ An admin operation changes what the relay will accept, or deletes what it holds.
 | the signer's role and state, and the nonce's freshness and binding | whether the membership in the log agrees with the relay's rows |
 | each argument against the relay's own rows (target state, device counts, floors, head, chain) | what any frame contains: its kind, items, acknowledgements or `at_ms` |
 | for `register` and `recovery_register`, that `frame_hash` is the hash of the frame carried or named | whether a `DeviceAdded` names the registered keys |
-| for frames carried by an operation, everything of §9.3 and §9.4 | whether a compaction's keep list names every control entry below its bound |
+| for frames carried by an operation, everything of §9.3 and §9.4 | whether a compaction's keep list names every control entry and recorded Skip target below its bound |
 | for `restore_tail` and `seed`, every signature, counter and the chain | whether a snapshot was acknowledged, or its content is right |
 | ages from its own `at` column, snapshots from its own blob rows | anything a member is allowed to do: a compromised member can do through the relay what it could do through the log |
 
@@ -1114,7 +1125,7 @@ Checks, in order:
 
 1. `dev_N` is not the `dev` of any row and `sign_pk_N` not the `sign_pk` of any row; else see "Repeat", or `409 relay/duplicate_key`.
 2. fewer than 16 role-1 rows with `state = 1`, and fewer than 256 role-1 rows; else `409 relay/device_cap`.
-3. frame mode: `H(frame) = frame_hash` (else `400 relay/frame_mismatch`); the frame's `dev` is the signer (else `403 relay/not_author`); the frame passes §9.3 and its §9.4 outcome is `new` (otherwise the operation fails with that outcome's code: `409 relay/conflict`, `409 relay/gap`, or the refusal's).
+3. frame mode: `H(frame) = frame_hash` (else `400 relay/frame_mismatch`); the frame's `dev` is the signer (else `403 relay/not_author`); the frame passes §9.3 and its §9.4 outcome is `new` (otherwise the operation fails with that outcome's code: `409 relay/conflict` or `409 relay/gap`, whose error body carries the author row's `last_ctr` and `last_seq` (§4.2, RELAY-ADMIN-005), or the refusal's).
 4. seq mode: a `log` row at `seq` with `seq ≥ purge_floor` and `hash = frame_hash` exists; else `400 relay/frame_mismatch`.
 
 Effects, in one transaction: (frame mode) the append of §9.4 T5; then insert the devices row (`dev_N`, `sign_pk_N`, `role = 1`, `state = 1`, `gen = 1`, `last_ctr = 0`, `last_seq = 0`, counters 0, `added_at = now`). After commit, push (frame mode). The new device's key is accepted for frames sequenced after this one (SEAL-MEM-007 holds by construction: N cannot append before it has its token).
@@ -1130,11 +1141,11 @@ Response (200): `{"seq": integer, "chain": hex32, "token": string}`: the `Device
 
 ### 12.4 `revoke`
 
-`args = dev[16]`, the target. Sent before the `R`-shape entry that revokes it (`seal.md` §16.2), so the target's next request fails at once (SYNC.md §5.4).
+`args = dev[16]`, the target. Sent before the `R`-shape entry that revokes it (`seal.md` §16.2), so the target's next request fails at once (SYNC.md §5.4); or alone, for a device that `register` added but whose `DeviceAdded` clients refused (a rotation raced the pairing, `engine.md` §28.4), so that its row stops counting as current and its token is refused; or alone, by the recovery identity, for a device that `reinstate` returned to current but whose reinstating entry was not sequenced or was refused by clients (`device.md` §15.8 step 11), so that its row agrees with the membership again and its stored wraps are cleared. The relay cannot tell the cases apart and treats them alike.
 
 Checks: a role-1 row for `dev` with `state = 1` (else `409 relay/target`); a device signer is not the target (else `403 relay/not_signer`); after the change at least one role-1 row has `state = 1` (else `409 relay/last_device`, ruling S14).
 
-Effects, in one transaction: the target's `state = 2` and `gen` + 1; every `read_tokens` row `state = 2`. After commit: close the target's sockets with 4003. Response (200): `{}`.
+Effects, in one transaction: the target's `state = 2`, `gen` + 1 and `wraps` NULL; every `read_tokens` row `state = 2`. After commit: close the target's sockets with 4003. Response (200): `{}`.
 
 - **RELAY-REVOKE-001** (relay) A successful `revoke` MUST set the target's state to revoked and raise its generation in the same transaction, so that every token of the target is refused from the next request on.
 - **RELAY-REVOKE-002** (relay) `revoke` MUST be refused with `409 relay/last_device` when it would leave no current role-1 device.
@@ -1142,9 +1153,10 @@ Effects, in one transaction: the target's `state = 2` and `gen` + 1; every `read
 
 ### 12.5 `reinstate`
 
-`args = dev[16]`. Signer: the current recovery identity only (`seal.md` §13.6). Checks: a role-1 row for `dev` with `state = 2` (else `409 relay/target`); fewer than 16 current role-1 rows (else `409 relay/device_cap`). Effects: `state = 1`, `gen` unchanged; every `read_tokens` row `state = 2`. The device logs in for a new token. Response (200): `{}`.
+`args = dev[16] ‖ u32 first_epoch ‖ u16 n ‖ n × wrap[96]` (`seal.md` §16.2; ruling S24, lead ruling L1): the wraps of the roots of epochs `first_epoch` to `first_epoch + n − 1` to the target, which the relay stores and returns at the target's login without interpreting them. Signer: the current recovery identity only (`seal.md` §13.6). Checks: `first_epoch ≥ 1` and `n` from 1 to 256 (else `400 relay/bad_args`); a role-1 row for `dev` with `state = 2` (else `409 relay/target`); fewer than 16 current role-1 rows (else `409 relay/device_cap`). Effects: `state = 1`, `gen` unchanged, `wraps = u32 first_epoch ‖ u16 n ‖ the n wraps` from `args`, replacing any stored; every `read_tokens` row `state = 2`. The device logs in for a new token, and the login answer carries the wraps (§10.3). Response (200): `{}`.
 
 - **RELAY-REVOKE-004** (relay) `reinstate` MUST be accepted only from the current recovery identity, MUST set the target's state to current without changing its generation, and MUST mark every backup-read token revoked.
+- **RELAY-REVOKE-005** (relay) `reinstate` MUST store the `first_epoch` and wraps of its arguments on the target's devices row, replacing any stored, and `revoke` MUST set that row's `wraps` to NULL in its transaction.
 
 ### 12.6 `fence`
 
@@ -1152,7 +1164,7 @@ Ends this relay's service to the board, after which it answers reads only (SYNC.
 
 `args = vb8(host) ‖ door[5] ‖ u32 home_gen`. `extra` is empty or the signer's `Fence` frame, appended first so that one call carries both.
 
-Checks: `host` matches `seal.md` §5.4's host rule (else `400 relay/bad_args`); `home_gen > board.home_gen` (else `409 relay/home_gen`); with a frame: its `dev` is the signer (else `403 relay/not_author`), and it passes §9.3 and its §9.4 outcome is `new` or `dup` (else that outcome's code).
+Checks: `host` matches `seal.md` §5.4's host rule (else `400 relay/bad_args`); `home_gen > board.home_gen` (else `409 relay/home_gen`); with a frame: its `dev` is the signer (else `403 relay/not_author`), and it passes §9.3 and its §9.4 outcome is `new` or `dup` (else that outcome's code; a `409 relay/gap` or `409 relay/conflict` carries the author row's `last_ctr` and `last_seq`, §4.2, RELAY-ADMIN-005).
 
 Effects, in one transaction: the append (outcome `new`; a `dup` stores nothing); `state = 2`, `home_gen`, `fence_host`, `fence_door` from `args`. After commit: push (if a frame was stored), then the state notice (§11.4). Response (200): `{"seq": integer, "chain": hex32}` with the frame's seq and chain, or `{}` without a frame.
 
@@ -1163,7 +1175,7 @@ Effects, in one transaction: the append (outcome `new`; a `dup` stores nothing);
 
 ### 12.7 `seed` and `seed-tail`
 
-Seeds an empty relay after a re-home: the device set, the newest acknowledged snapshot and up to 30 days of tail including other devices' frames, each signature checked (SYNC.md §6.7, V2-9). The board does not exist on the new relay yet, so the credential is the new relay's create secret (§5.5), and the admin signature is checked against the key the seeded set gives the signer.
+Seeds an empty relay after a re-home: the device set, the newest acknowledged snapshot and the tail after it, including other devices' frames, each signature checked (SYNC.md §6.7, V2-9). The tail starts low enough that every Skip target `seal.md` §13.6 permits after the move is on the new relay: `first_seq` is `min(S + 1, max(1, purge_seq, last_seq + 1 − 16,384))`, `S` being the snapshot's seq, whenever the seeding device holds those frames (`seal.md` §16.2 `seed`, `engine.md` §28.3). The relay cannot check this, since the arguments carry no `purge_seq`. The board does not exist on the new relay yet, so the credential is the new relay's create secret (§5.5), and the admin signature is checked against the key the seeded set gives the signer.
 
 `args` (`seal.md` §16.2): `u32 home_gen ‖ u64 first_seq ‖ chain_before[32] ‖ u64 last_seq ‖ chain_last[32] ‖ blob_id[16] ‖ u16 n ‖ n × (dev[16] ‖ sign_pk[32] ‖ u8 role ‖ u8 status ‖ u64 last_ctr)`.
 
@@ -1195,7 +1207,7 @@ Checks, in order: `first = head_seq + 1` (else `409 relay/not_next`); `first + n
 
 Effects, in one transaction: store every frame as §9.4 T5 without the budget (`app_count` unchanged); each author row written once. If the last stored seq is `seed_last_seq`, its chain must equal `seed_chain` — else the whole request is refused with `409 relay/chain_mismatch` and the device re-seeds — and the board becomes `open` with the seed columns set to NULL. Response (200): `{"head": {"seq": integer, "chain": hex32}, "state": "seeding" | "open"}`.
 
-The seeding device then uploads the snapshot (`blob-begin`, purpose 1) and the other devices log in with the door when they follow (`seal.md` §15.4; `engine.md`).
+Once the board is open, the seeding device uploads a snapshot it sealed itself (`blob-begin`, purpose 1, `seq` = the snapshot's `S`) and announces it with a `snap` entry. It never uploads a blob fetched from another relay: §10.7 records the uploader as the blob's `author`, and `seal.md` §20.2 binds the writer into the sealed bytes, so another writer's blob carried here could be neither opened from its `author` (a rejoin, `engine.md` §19.7) nor relied on by `compact` (§12.8 check 4). When the old relay did not sequence the move's `Fence`, the seeding device appends it here as an ordinary entry after the seed; a `fence` operation here would be refused with `409 relay/home_gen`, since the seed stored that `home_gen` (§12.6). The other devices log in with the door when they follow (`seal.md` §15.4; `engine.md`).
 
 - **RELAY-SEED-001** (relay) `seed` MUST be accepted only on an empty or seeding board, only with the create secret, and only when the signer is a current role-1 entry of the seeded set whose key verifies the admin signature.
 - **RELAY-SEED-002** (relay) `seed` MUST run the four argument checks of §12.7 and MUST store exactly the board and device rows §12.7 lists, with each author's `last_ctr` as its counter before `first_seq`.
@@ -1207,21 +1219,21 @@ The seeding device then uploads the snapshot (`blob-begin`, purpose 1) and the o
 
 Compaction deletes entries older than 365 days that a snapshot acknowledged by another device covers, in daily slices, keeping control entries (SYNC.md §4.7, V2-15). The relay sees neither kinds nor acknowledgements, so the signed request names what goes and what stays, and the relay checks what it can itself.
 
-`args = u64 below_seq ‖ u64 snap_entry_seq ‖ u32 n ‖ n × u64 keep_seq` (`n` from 0 to 131,072): delete entries with seq below `below_seq` except the `keep_seq`s (the control entries below it), relying on the snapshot announced by the `snap` entry at `snap_entry_seq`.
+`args = u64 below_seq ‖ u64 snap_entry_seq ‖ blob_id[16] ‖ u32 n ‖ n × u64 keep_seq` (`n` from 0 to 131,072): delete entries with seq below `below_seq` except the `keep_seq`s (the control entries and recorded Skip targets below it, `engine.md` §20.2), relying on the snapshot blob `blob_id` that the `snap` entry at `snap_entry_seq` announces.
 
 Checks, in order:
 
 1. `keep_seq` strictly ascending, each below `below_seq` (else `400 relay/bad_args`).
-2. With `lo = max(compact_floor, purge_floor)`: `lo < below_seq ≤ head_seq` (else `409 relay/target`).
+2. With `lo = max(compact_floor, purge_floor)`: `lo < below_seq ≤ head_seq − 16,384` (else `409 relay/target`).
 3. A `log` row at `snap_entry_seq` with `seq ≥ purge_floor` exists; let `A` be its `dev` (else `409 relay/no_snapshot`).
-4. A complete blob of purpose 1 by author `A` with `below_seq ≤ seq < snap_entry_seq` exists; the chosen snapshot is the one with the largest `seq` (then the latest `at`, then the smallest `id`) (else `409 relay/no_snapshot`).
+4. The blob `blob_id` exists, is complete, has purpose 1 and author `A`, and has `below_seq ≤ seq < snap_entry_seq`; it is the chosen snapshot (else `409 relay/no_snapshot`).
 5. `A` is not the signer (else `403 relay/not_signer`): the signer states that it, another device, acknowledged that snapshot.
 6. `remaining = 5,000 − (del_count if del_day is today, else 0)` is above 0 (else `429 relay/delete_budget`).
 7. `hi = min(below_seq, lo + remaining)`; the `log` row at `hi − 1` has `at ≤ now − 31,536,000,000` (365 days) (else `409 relay/too_recent`).
 
 Effects, in one transaction: delete every `log` row with `lo ≤ seq < hi` whose seq is not a `keep_seq` (`d` rows); `compact_floor = hi`; `compact_snap` = the chosen snapshot's id; `del_day` = today, `del_count` = the used count + `d`; delete every blob of purpose 3 with its parts (§13.3). Response (200): `{"deleted": d, "floor": hi, "more": hi < below_seq}`. A device repeats the request on a later day while `more` is true (`engine.md`).
 
-**Skip targets (ruling S15).** The relay cannot see which frames a later `Skip` may name, so it guarantees the one thing it can: a `log` row at or above `purge_floor` is deleted only by a signed `compact` that puts it below `below_seq` and leaves it out of `keep_seq`, or by a re-seed of an unfinished seed (§12.7); purge deletes only below `purge_floor`, and `seal.md` §13.6 already refuses a Skip target below `purge_seq`. Every other row at or above `purge_floor` stays readable, and a device that lacks a target frame `t` fetches it with `read` (`after = t − 1`, `limit = 1`; the entry returned has seq `t` exactly when the frame is held). So the floor of ruling S15 holds at the relay exactly when every compacting device sends `below_seq` no higher than that floor or lists the frames above it as `keep_seq`; `engine.md` owns the floor and that duty (§22).
+**Skip targets (ruling S15).** A Skip at seq `s` may target only `t ≥ max(purge_seq, s − 16,384)` (`seal.md` §13.6). Check 2 keeps the newest 16,384 seqs out of every compaction (RELAY-COMPACT-007), so every target a later Skip may name stays at or above `compact_floor`; purge deletes only below `purge_floor`, which is `purge_seq`; and a `log` row at or above `purge_floor` is otherwise deleted only by the replacement of an unfinished seed (§12.7). A device that lacks a target frame `t` fetches it with `read` (`after = t − 1`, `limit = 1`; the entry returned has seq `t` exactly when the frame is held). On a relay seeded after a re-home, the seed's tail covers the window (§12.7). Targets of Skips already sequenced stay as well: the compacting device lists them as `keep_seq` with the control entries (`engine.md` §20.2), for the devices that bootstrapped after such a target and must still classify its Skip.
 
 - **RELAY-COMPACT-001** (relay) `compact` MUST run the seven checks of §12.8 in order and MUST delete nothing unless all pass.
 - **RELAY-COMPACT-002** (relay) `compact` MUST delete only `log` rows with `max(compact_floor, purge_floor) ≤ seq < hi` that are not named as `keep_seq`, and MUST then set `compact_floor` to `hi`.
@@ -1229,10 +1241,11 @@ Effects, in one transaction: delete every `log` row with `lo ≤ seq < hi` whose
 - **RELAY-COMPACT-004** (relay) `compact` MUST record the snapshot it relied on in `compact_snap`, and the retention of §13 MUST NOT delete that snapshot while it is recorded there.
 - **RELAY-COMPACT-005** (relay) Compaction and purge together MUST delete at most 5,000 `log` rows per board per UTC day of the relay clock.
 - **RELAY-COMPACT-006** (relay) The object MUST NOT delete a `log` row at or above `purge_floor` except by a `compact` whose `below_seq` is above that row's seq and whose `keep_seq` list does not name it, or by the replacement of an unfinished seed (§12.7).
+- **RELAY-COMPACT-007** (relay) `compact` MUST refuse with `409 relay/target` a `below_seq` above `head_seq − 16,384`, so that no compaction deletes any of the newest 16,384 seqs.
 
 ### 12.9 `restore_tail`
 
-After a plain relay rollback, the most advanced device re-uploads frames at their original seqs; the relay accepts them only with registered signatures and if they extend its chain (SYNC.md §4.8, V2-9).
+After a plain relay rollback, any device that holds more than the relay re-uploads frames at their original seqs (who and when: `engine.md` §21.3); the relay accepts them only with registered signatures and if they extend its chain (SYNC.md §4.8, V2-9).
 
 `args = u64 first_seq ‖ u32 n ‖ n × frame_hash[32]` (`n` from 1 to 64). `extra = chain_before[32] ‖ n × (u32 len ‖ frame)`, the frames in seq order, their lengths summing to at most 1,048,576. `chain_before` is the client's `C_{first_seq − 1}`; it is not signed, because it only lets the relay refuse a client that disagrees with its head.
 
@@ -1240,7 +1253,7 @@ Checks, in order: `first_seq = head_seq + 1` (else `409 relay/not_next`); `chain
 
 Effects, in one transaction: store every frame as §9.4 T5, without the budget; each author row written once. After commit: push. Response (200): `{"head": {"seq": integer, "chain": hex32}}`.
 
-Restore tail does not change any device row's role, state or key. A rollback that lost a registration, revocation, reinstatement or recovery-key change is repaired by the restoring device sending `register` or `recovery_register` in seq mode, `revoke` and `reinstate` for the restored control entries, in log order, between restore calls (`engine.md`).
+Restore tail does not change any device row's role, state or key, nor any floor. A restore tail restores log rows and the author rows they need, not blobs: a blob that the rollback lost stays lost, and no device uploads it again, because its sealed bytes, which the announcing `snap` entry pins by `sha256`, cannot be reproduced. A compaction that relies on such a blob is refused with `409 relay/no_snapshot` (§12.8 step 4). A rollback that lost a registration, revocation, reinstatement, recovery-key change, fence or purge is repaired by the restoring device: after each restored control entry, and before its next `restore_tail`, it sends what that entry requires, in item order: `register` or `recovery_register` in seq mode, `revoke`, `reinstate` (recovery-signed), `fence` without a frame, or, for a restored rotation that carries `purge_before`, `purge` (`engine.md` §21.3). A `restore_tail` request that contains a control entry ends with it, so that a frame by an author that entry registers is never checked before the author's row exists (`relay/unknown_author`).
 
 - **RELAY-RESTORE-001** (relay) `restore_tail` MUST accept frames only at `head_seq + 1` onward, only when `chain_before` equals the relay's head chain, and only when each frame's hash equals the signed list, its author is registered, its signature verifies strictly and its counter is the author's next.
 - **RELAY-RESTORE-002** (relay) `restore_tail` MUST store all its frames or none, and MUST NOT change the role, state or key of any device row.
@@ -1270,7 +1283,7 @@ Minted per writer and generation, revoked with that device and at every rotation
 
 This keeps ruling S3: the recovery identity never holds a device token. It never logs in, its `devices` row keeps `gen = 0`, no route accepts a role-1 token for it, and its frames are accepted because of their signatures (§9.3), never because of a token. A backup-read token minted for `dev_R` is the role-2 credential of §5.1: it reaches only the read routes of §6.3, is revoked with every other backup-read token at each rotation (§5.2), and exists only because a recovery signature on `mint_read_token` asked for it, which is ruling S4's "recovery-signed read".
 
-**`mint_read_token`**, `args = dev[16] ‖ u32 epoch`. Checks: `dev` equals the signer (else `403 relay/not_signer`); `epoch ≥ 1` (else `400 relay/bad_args`); `epoch ≥ read_epoch` (else `409 relay/stale_epoch`); the row's `gen < 2^32 − 1` (else `409 relay/gen_exhausted`). Effects: if `epoch > read_epoch`, every `read_tokens` row with a lower `epoch` gets `state = 2` and `read_epoch = epoch`; then the row of `dev` gets `gen` = stored + 1 (1 if new), `epoch`, `state = 1`. Response (200): `{"token": string, "gen": integer}` with a role-2 token.
+**`mint_read_token`**, `args = dev[16] ‖ u32 epoch`. Checks: `dev` equals the signer (else `403 relay/not_signer`); `epoch ≥ 1` (else `400 relay/bad_args`); `epoch ≥ read_epoch` (else `409 relay/stale_epoch`, whose error body carries `read_epoch`, §4.2); the row's `gen < 2^32 − 1` (else `409 relay/gen_exhausted`). Effects: if `epoch > read_epoch`, every `read_tokens` row with a lower `epoch` gets `state = 2` and `read_epoch = epoch`; then the row of `dev` gets `gen` = stored + 1 (1 if new), `epoch`, `state = 1`. Response (200): `{"token": string, "gen": integer}` with a role-2 token.
 
 **`revoke_read_token`**, `args = dev[16]`. Checks: a `read_tokens` row for `dev` exists (else `409 relay/target`). Effect: `state = 2`. Response (200): `{}`.
 
@@ -1279,18 +1292,20 @@ A backup-read token reaches only `caps`, `hello`, `read`, `blob-list`, `blob-met
 - **RELAY-RTOKEN-001** (relay) `mint_read_token` MUST be accepted only when the writer named in its arguments is the signer, and MUST invalidate the writer's earlier backup-read token by raising its generation.
 - **RELAY-RTOKEN-002** (relay) A `mint_read_token` with an epoch above `read_epoch` MUST mark revoked every backup-read token of a lower epoch, and one with an epoch below `read_epoch` MUST be refused with `409 relay/stale_epoch`.
 - **RELAY-RTOKEN-003** (relay) A backup-read token MUST NOT be accepted by any route other than `caps`, `hello`, `read`, `blob-list`, `blob-meta` and `blob-get`.
+- **RELAY-RTOKEN-004** (relay) A `relay/stale_epoch` refusal MUST carry in its error body the field `read_epoch` set to the board's stored `read_epoch`.
 
 ### 12.12 `recovery_register`
 
-Registers a new recovery identity in the same call that appends the `K`-shape entry installing it (`seal.md` §13.11, §16.2), and retires the old one.
+Registers a new recovery identity once the `K`-shape entry installing it has been sequenced and accepted (`seal.md` §13.11, §16.2), and retires the old one. The relay cannot see whether clients accept that entry (a lost rotation race, or a confirm after a cancel, refuses it everywhere), so it never registers the key in the call that appends the entry: the entry is appended as an ordinary frame (§9: by the recovery identity with the door or a token, or by the confirming device with its token), and its sender sends `recovery_register` only after it has classified the entry `Accept`. Until then the old recovery identity stays current here, although clients refuse its frames from the installing entry on.
 
-`args = dev_R[16] ‖ sign_pk[32] ‖ frame_hash[32]`; `extra` is the `K`-shape frame (frame mode, authored by the signer) or `u64 seq` (seq mode, after a restore tail).
+`args = dev_R[16] ‖ sign_pk[32] ‖ frame_hash[32]`; `extra` is `u64 seq`, the seq of the stored `K`-shape entry (8 bytes).
 
-Checks, in order: `dev_R = H(ctx("recovery-dev") ‖ board_id ‖ sign_pk)[0..16]` (else `400 relay/bad_args`); `dev_R` and `sign_pk` are in no row (else the repeat below, or `409 relay/duplicate_key`); fewer than 64 role-2 rows (else `409 relay/device_cap`); the frame checks of §12.3 steps 3 and 4.
+Checks, in order: `dev_R = H(ctx("recovery-dev") ‖ board_id ‖ sign_pk)[0..16]` (else `400 relay/bad_args`); `dev_R` and `sign_pk` are in no row (else the repeat below, or `409 relay/duplicate_key`); fewer than 64 role-2 rows (else `409 relay/device_cap`); a `log` row at `seq` with `seq ≥ purge_floor` and `hash = frame_hash` exists (else `400 relay/frame_mismatch`).
 
-Effects, in one transaction: the append (frame mode); every role-2 row with `state = 1` gets `state = 2` (retired: its later frames are refused at P6); insert the new row (`role = 2`, `state = 1`, `gen = 0`, `last_ctr = 0`, `last_seq = 0`); every `read_tokens` row `state = 2` (the entry rotates). After commit: push (frame mode). Response (200): `{"seq": integer, "chain": hex32}`. **Repeat:** a row for `dev_R` with `role = 2`, `state = 1` and the same `sign_pk`, with the frame's outcome `dup` (or step 4 of §12.3 passing in seq mode), is answered 200 with the stored seq and chain and no write other than the nonce deletion of A4.
+Effects, in one transaction: every role-2 row with `state = 1` gets `state = 2` (retired: its later frames are refused at P6); insert the new row (`role = 2`, `state = 1`, `gen = 0`, `last_ctr = 0`, `last_seq = 0`, counters 0, `added_at = now`); every `read_tokens` row `state = 2` (the entry rotates). Response (200): `{"seq": integer, "chain": hex32}`, the named entry's seq and chain. **Repeat:** a row for `dev_R` with `role = 2`, `state = 1` and the same `sign_pk`, with the named `log` row passing the last check, is answered 200 with that entry's seq and chain and no write other than the nonce deletion of A4.
 
-- **RELAY-RECKEY-001** (relay) `recovery_register` MUST check that `dev_R` derives from `sign_pk` and the board id (SEAL-KEY-006), and MUST append its frame, retire the previous current recovery identity and insert the new one in one transaction.
+- **RELAY-RECKEY-001** (relay) `recovery_register` MUST check that `dev_R` derives from `sign_pk` and the board id (SEAL-KEY-006) and that the `log` row at the seq in `extra`, at or above `purge_floor`, has the hash `frame_hash`, and MUST retire the previous current recovery identity and insert the new one in one transaction.
+- **RELAY-RECKEY-002** (relay) `recovery_register` MUST NOT append a frame, and MUST refuse with `400 relay/bad_body` an `extra` that is not exactly 8 bytes.
 
 ## 13. Blob retention
 
@@ -1310,13 +1325,13 @@ In the transaction of every `blob-begin`, before its checks (§10.7): delete eve
 
 ### 13.3 Compaction and purge
 
-`compact` deletes every purpose-3 blob (§12.8): once a compaction has relied on a later acknowledged snapshot, no device needs the genesis snapshot to bootstrap. `purge` deletes every blob of purposes 1 to 3 with `seq` below `before_seq` (§12.10). Purpose-4 blobs survive a purge: the epoch they were sealed under is shredded with its root, and the engine re-uploads the shared picture under the new epoch (`engine.md`), after which §13.1 removes the old one.
+`compact` deletes every purpose-3 blob (§12.8): once a compaction has relied on a later acknowledged snapshot, no device needs the genesis snapshot to bootstrap. `purge` deletes every blob of purposes 1 to 3 with `seq` below `before_seq` (§12.10). Purpose-4 blobs survive a purge: the epoch they were sealed under is shredded with its root, and the engine re-uploads the shared picture under the new epoch (`engine.md`), after which §13.1 removes the old one. Control entries below `before_seq` are deleted by `purge` like every other row (§24 open question 13), so a device that bootstraps later receives them only in the control history its bootstrap snapshot carries (`seal.md` §20.4, ruling S27); the blob size limit of §10.7 covers that history.
 
 Deleting a blob deletes its `blobs` row and every `parts` row from `slot × 64` to `slot × 64 + 63`.
 
 ### 13.4 What compaction may rely on
 
-A compaction relies on one complete purpose-1 snapshot at `S ≥ below_seq` (§12.8). That snapshot stays until a later compaction relies on another or a purge deletes it, so a device whose cursor falls below the floor can always bootstrap from a snapshot at or above the floor, announced by a `snap` entry the compaction left in place (`snap_entry_seq > S ≥ below_seq`).
+A compaction relies on the complete purpose-1 snapshot `blob_id` at `S ≥ below_seq`, which the `snap` entry at `snap_entry_seq` announces (§12.8; the relay cannot read that entry, and the signer states it). That snapshot stays until a later compaction relies on another or a purge deletes it, so a device whose cursor falls below the floor can always bootstrap from a snapshot at or above the floor, announced by a `snap` entry the compaction left in place (`snap_entry_seq > S ≥ below_seq`).
 
 - **RELAY-BLOB-005** (relay) On completing a blob of purpose 1 or 4, the object MUST delete exactly the blobs §13.1 says to delete, and no other.
 - **RELAY-BLOB-006** (relay) Every `blob-begin` MUST delete the incomplete blobs and the complete purpose-2 blobs whose `at` is 3,600,000 ms or more before the relay clock, before it checks the blob count and bytes.
@@ -1339,7 +1354,7 @@ Compaction and purge together delete at most 5,000 `log` rows per board per UTC 
 
 A device sends at most 5,000 requests per UTC day of its own clock: HTTPS requests plus socket messages it sends, protocol pings and `ping` texts excluded (SYNC.md §6.2, R3 §6). The relay does not count requests: counting would write a row per request, double the rows of a read-only day and break the rule that a replay writes nothing (RELAY-SEQ-005). A stranger's requests are refused by the gate and cost only Worker requests, which no relay-side counter could stop (SYNC.md §7, the DoS row).
 
-- **RELAY-CLIENT-001** (device) A device MUST NOT send more than 5,000 requests to the relay per UTC day of its own clock, counting HTTPS requests and socket messages it sends and not counting protocol pings or `ping` text messages; over the budget it MUST send nothing but a `hello` every 15 minutes until the next 00:00 UTC.
+- **RELAY-CLIENT-001** (withdrawn) Client behaviour, owned by `device.md`: replaced by DEV-BUDGET-001, which counts as this section states.
 
 ### 14.4 Caps on stored state
 
@@ -1363,15 +1378,18 @@ Every response the relay's own code produces carries `X-TD-Relay` (§4.2), so a 
 | a response without `X-TD-Relay`, status 429 (Cloudflare's Error 1027) | the platform's daily quota | "sync paused until 00:00 UTC" | no request until the next 00:00 UTC of its own clock, then one `hello` |
 | a response without `X-TD-Relay`, any other status | the platform failed | as unreachable | as unreachable |
 | `503 relay/object_unavailable` | the board's object failed or is over its quota | as unreachable | as unreachable |
+| `408 relay/slow` | the request body did not arrive within the gate's deadline (§6.2 step 9): the link is slower than the 64 KiB/s §6.2 assumes, or stalled | as unreachable | as unreachable: the session ends, and the request is sent again after the backoff (a blob upload resumes from `blob-meta`) |
 | `507 relay/storage_refused` | the platform refused a write (rows-written quota or storage full) | "sync paused until 00:00 UTC" | no append until the next 00:00 UTC; reads go on |
 | `429 relay/budget` (append result or JSON) | this device's append budget | "daily sync limit reached until 00:00 UTC" | no append until `until` (the next 00:00 UTC); reads go on |
 | `429 relay/delete_budget` | compaction or purge budget | nothing | the duty retries on the next UTC day (`engine.md`) |
 
 When a storage call throws inside a transaction (the platform's rows-written limit, or a full database), the core rolls the transaction back and answers `507 relay/storage_refused`. Any other exception escaping the core in the Worker makes the object call throw, and the Worker answers `503 relay/object_unavailable`.
 
+A client classifies every exchange by this table first and acts as its row states (`device.md` §10.6, DEV-NET-011).
+
 - **RELAY-BUDGET-003** (relay) When a storage call throws during a request, the core MUST roll back the request's transaction and answer `507 relay/storage_refused`, and the front MUST answer `503 relay/object_unavailable` when the object call itself throws.
-- **RELAY-CLIENT-002** (device) A client MUST classify every exchange with the relay that matches a row of the table of §14.5 into exactly that row, by the presence of `X-TD-Relay`, the status and the code, and MUST act as that row states; every other relay answer it MUST handle by its code (§19).
-- **RELAY-CLIENT-003** (device) A client MUST NOT delete local data or keys, or forget a token, because of any relay answer or the lack of one (V2-21), except that it replaces a token after a successful login.
+- **RELAY-CLIENT-002** (withdrawn) Client behaviour, owned by `device.md`: replaced by DEV-NET-011, whose table (`device.md` §10.6) applies the table of §14.5 first.
+- **RELAY-CLIENT-003** (withdrawn) Client behaviour, owned by `device.md`: replaced by DEV-NET-012.
 
 ## 15. Capabilities and the standby
 
@@ -1380,7 +1398,7 @@ When a storage call throws inside a transaction (the platform's rows-written lim
 A client learns whether this relay pushes from `push` in `caps` (§10.9), in the `login` response (§10.3), in `hello` (§10.4), and from bit 0 of the welcome's `caps`. When `push` is true, a visible app keeps one socket open and catches up by reading over it; background jobs use `hello`, `read` and `append` over HTTPS. When `push` is false, every client polls `hello` and `read` over HTTPS at the intervals `device.md` sets. Routes and bodies are otherwise the same.
 
 - **RELAY-CAPS-002** (relay) The Worker MUST report `push: true` and the standby `push: false` in every place §15.1 lists.
-- **RELAY-CLIENT-004** (device) A client MUST NOT open a socket to a relay that reported `push: false`.
+- **RELAY-CLIENT-004** (withdrawn) Client behaviour, owned by `device.md`: replaced by DEV-NET-008.
 
 ### 15.2 What the standby does differently
 
@@ -1443,16 +1461,17 @@ Rows written are exact; rows read are upper bounds (the platform counts rows sca
 | `purge` | 2 + `r` + 2`d` + Σ(1 + `P`) over deleted blobs | 5 + `B` + 256 + `d` |
 | `mint_read_token` | 2 + `r` (nonce, the writer's row); 3 + `r` when it raises `read_epoch` (the board row too) | 4 + 256 |
 | `revoke_read_token` | 2 | 4 |
-| `recovery_register` (frame mode) | 6 + `r` (nonce, log row and index, signer row, old and new recovery rows) when a device signs; 5 + `r` when the retiring recovery identity signs (its row is written once) | 10 + 64 |
-| `recovery_register` (seq mode) | 3 + `r` (nonce, old and new recovery rows) | 8 + 64 |
+| `recovery_register` | 3 + `r` (nonce, old and new recovery rows) | 8 + 64 |
 | `recovery_register` repeat | 1 (the nonce) | 10 + 64 |
 | any admin request refused after A4 | 1 (the nonce) | 4 |
+
+A seed tail is outside the append budget (§14.1); covering the Skip window, one re-home can store up to 16,384 frames this way, `2f + a` rows written once.
 
 - **RELAY-ROWS-001** (relay) Every operation MUST write exactly the rows the table of §16.1 states for it on the Worker's platform counters and on the suite's counting storage, and MUST read at most the rows it states.
 
 ### 16.2 The typical day
 
-SYNC.md §6.2's day, recomputed from §16.1: 3 devices (two desktops, one phone), 300 edits, 50 phone opens, 48 background syncs; plus what that day implies: 3 beats; 280 edits sent over sockets and 20 queued on the phone and sent by background jobs; the desktops reconnecting 10 times each; one compaction of one day's entries (305) a year after creation; one snapshot of 3 MB (3 parts) a week, which replaces an older one.
+SYNC.md §6.2's day, recomputed from §16.1: 3 devices (two desktops, one phone), 300 edits, 50 phone opens, 48 background syncs; plus what that day implies: 3 beats; 280 edits sent over sockets and 20 queued on the phone and sent by background jobs; the desktops reconnecting 10 times each; one compaction of one day's entries (305) a year after creation; one snapshot of 3 MB (3 parts) every 3.3 days, which replaces an older one (the 1,000-entry trigger of ruling S25 at about 305 entries a day; the week trigger and the one-per-24-hours cap of `engine.md` §19.2 do not bind on this day).
 
 | Item | Count | Worker requests | Object requests | Rows written | Rows read |
 |---|---|---|---|---|---|
@@ -1463,15 +1482,27 @@ SYNC.md §6.2's day, recomputed from §16.1: 3 devices (two desktops, one phone)
 | background `hello` and `read` | 96 | 96 | 96 | 0 | 576 |
 | background appends | 20 | 20 | 20 | 60 | 120 |
 | compaction (`admin-nonce`, `compact` deleting 305) | 2 | 2 | 2 | 1 + 612 | 66 + 620 |
-| weekly snapshot (begin, 3 parts, one older snapshot deleted), per day | 4 ÷ 7 | 0.6 | 0.6 | 11 ÷ 7 = 1.6 | 2 |
+| snapshot every 3.3 days (begin, 3 parts, one older snapshot deleted), per day | 4 ÷ 3.3 | 1.2 | 1.2 | 11 ÷ 3.3 = 3.3 | 4 |
 | retries and `caps` | 10 | 10 | 5 | 0 | 15 |
-| **total** | | **≈ 199** | **≈ 215** | **≈ 1,524** | **≈ 4,217** |
+| **total** | | **≈ 199** | **≈ 215** | **≈ 1,525** | **≈ 4,219** |
 | free-plan daily limit | | 100,000 | 100,000 | 100,000 | 5,000,000 |
-| **share** | | **0.20%** | **0.22%** | **1.52%** | **0.08%** |
+| **share** | | **0.20%** | **0.22%** | **1.53%** | **0.08%** |
 
 Duration, on R3 §6's model (each event 50 ms at 128 MB): about 610 events × 0.05 s × 0.125 GB ≈ 3.8 GB-s of 13,000 (0.03%); the real figure is among SYNC.md §11's measurements, taken in the owner's rehearsal. Storage is not a daily limit: after a year, with compaction, about 0.15 GB of 5 GB (SYNC.md §6.2).
 
 - **RELAY-ROWS-002** (relay) The conformance suite MUST replay the day of §16.2 against the Worker target and MUST fail unless the Worker requests, object requests, rows written and rows read it measures, plus the compaction counted on the core target, each stay below 2% of the daily limit of the table.
+
+SYNC.md §6.2's import: 5,000 commands of another board brought in as ordinary commands (SYNC.md §9 step 3) by one device, as 5,000 new `cmd` frames of one role-1 author over HTTPS `append`, 16 frames per request (the last of 8), the worst case for requests; rows are the same over the socket. The append budget (§14.1) splits them over two UTC days of the relay clock (3,000 frames on the first, 2,000 on the second), each day after one `login-nonce` and `login`; the check sums both days and compares the sum with one day's limit.
+
+| Item | Count | Worker requests | Object requests | Rows written | Rows read |
+|---|---|---|---|---|---|
+| `login-nonce` and `login`, each day | 4 | 4 | 4 | 6 | 138 |
+| appends (188 on the first day, 125 on the second) | 313 | 313 | 313 | 2 × 5,000 + 313 = 10,313 | 3 × 313 + 3 × 5,000 = 15,939 |
+| **total** | | **317** | **317** | **10,319** | **16,077** |
+| free-plan daily limit | | 100,000 | 100,000 | 100,000 | 5,000,000 |
+| **share** | | **0.32%** | **0.32%** | **10.32%** | **0.32%** |
+
+- **RELAY-ROWS-003** (relay) The conformance suite MUST store the import of §16.2 (5,000 new frames of one role-1 author, 16 per `append`, over two UTC days of the relay clock as the append budget allows) against the Worker target and MUST fail unless the Worker requests, object requests, rows written and rows read it measures, summed over both days, each stay below 20% of the daily limit of the table.
 
 ## 17. Deployment and configuration
 
@@ -1567,8 +1598,8 @@ HTTP refusals carry the JSON body of §4.2; per-frame refusals are results of §
 | `relay/not_author` | the frame's author is not the token's device and not a recovery identity (403; per frame) | §9.3 P5, §12.3, §12.6 | a client bug |
 | `relay/bad_signature` | the frame's signature fails strictly (400; per frame) | §9.3 P7, §12.7, §12.9 | `engine.md`: someone else is signing, or local corruption |
 | `relay/budget` | the author's daily append budget is used (429; per frame or JSON, with `until`) | §14.1 | §14.5 |
-| `relay/conflict` | another frame is stored under this `(dev, ctr)` (409; per frame or JSON) | §9.4 T3b, T3c; §12.7; §12.9 | SYNC.md §4.3 rule 4 (`engine.md`) |
-| `relay/gap` | the counter is above the next one (409; per frame or JSON) | §9.4 T3d; §12.7; §12.9 | SYNC.md §4.3 rule 3: fetch own frames first |
+| `relay/conflict` | another frame is stored under this `(dev, ctr)`, or none is held any more (409; per frame, or JSON; for the frame of `register` or `fence` with `last_ctr` and `last_seq`) | §9.4 T3b, T3c; §12.3; §12.6; §12.7; §12.9 | SYNC.md §4.3 rule 4 (`engine.md`); the recovery tool re-seals with `last_ctr + 1` (`device.md` §15.8) |
+| `relay/gap` | the counter is above the next one (409; per frame, or JSON; for the frame of `register` or `fence` with `last_ctr` and `last_seq`) | §9.4 T3d; §12.3; §12.6; §12.7; §12.9 | SYNC.md §4.3 rule 3: fetch own frames first; the recovery tool re-seals with `last_ctr + 1` (`device.md` §15.8) |
 | `relay/duplicate_key` | the id or key is already registered (409) | §12.3, §12.12 | the device generates new keys and pairs again |
 | `relay/device_cap` | too many devices or recovery identities (409) | §12.3, §12.5, §12.12 | revoke a device first |
 | `relay/frame_mismatch` | the carried or named frame's hash differs from the signed one (400) | §12.3, §12.9, §12.12 | a client bug |
@@ -1580,7 +1611,7 @@ HTTP refusals carry the JSON body of §4.2; per-frame refusals are results of §
 | `relay/no_snapshot` | no qualifying snapshot for the compaction (409) | §12.8 | upload or wait for an acknowledged snapshot |
 | `relay/too_recent` | entries younger than 365 days by the relay clock (409) | §12.8 | retry later with a lower bound |
 | `relay/delete_budget` | 5,000 deletions already today (429, with `until`) | §12.8, §14.2 | retry on the next UTC day |
-| `relay/stale_epoch` | a read token for an epoch below the relay's (409) | §12.11 | mint for the current epoch |
+| `relay/stale_epoch` | a read token for an epoch below the relay's (409, with `read_epoch`) | §12.11 | mint again with the `read_epoch` the refusal carries |
 | `relay/bad_blob` | blob arguments, part index or part length wrong (400) | §10.7 | a client bug |
 | `relay/blob_exists` | a blob with this id but other fields, or a second genesis snapshot, exists (409) | §10.7 | draw a new id; or nothing |
 | `relay/blob_quota` | too many incomplete blobs or too many bytes (409) | §10.7 | retry after an hour |
@@ -1626,20 +1657,23 @@ HTTP refusals carry the JSON body of §4.2; per-frame refusals are results of §
 | other blobs kept | 2 per author | blobs | RELAY-BLOB-005 |
 | append budget | 3,000 | new frames per role-1 author per UTC day | RELAY-BUDGET-001 |
 | delete budget | 5,000 | `log` rows per board per UTC day | RELAY-COMPACT-005 |
-| client request budget | 5,000 | requests per device per UTC day | RELAY-CLIENT-001 |
 | compaction age | 31,536,000,000 | ms (365 days) of relay clock | RELAY-COMPACT-003 |
 | compaction keep list | 131,072 | seqs | RELAY-COMPACT-001 |
+| compaction window | 16,384 | newest seqs never compacted | RELAY-COMPACT-007 |
 | restore tail per request | 64 frames, 1,048,576 bytes of frames | | RELAY-RESTORE-001 |
 | seed tail per request | 256 frames, 1,048,576 bytes of frames | | RELAY-SEED-003 |
 | seeded entries | 320 (at most 256 role 1, 64 role 2, 16 current role 1) | entries | RELAY-SEED-002 |
 | current devices | 16 | rows | RELAY-REG-004 |
+| wraps per `reinstate` | 1 to 256 | wraps | RELAY-REVOKE-005 |
 | device rows | 256 role 1, 64 role 2 | rows | RELAY-REG-004, RELAY-RECKEY-001 |
 | token | 96 | ASCII characters | RELAY-TOKEN-001 |
 | door | 5 | bytes | RELAY-DOOR-001 |
 | relay address | host, `/`, 34 characters | | RELAY-ADDR-001 |
+| host | 255 | bytes, `:port` included (`seal.md` §5.4) | RELAY-ADDR-002, RELAY-ADMIN-002 |
 | generation | 2^32 − 1 | | RELAY-TOKEN-004 |
 | socket attachment | 2,048 | bytes | RELAY-SHAPE-008 |
 | typical day | 2% of every daily limit | | RELAY-ROWS-002 |
+| a 5,000-command import | 20% of every daily limit | | RELAY-ROWS-003 |
 
 ## 21. Test vectors
 
@@ -1676,7 +1710,7 @@ Stage `relay` publishes these families under `relay/test/vectors/`, one JSON fil
 | `relay-socket.json` | §11 | hello, welcome, second and displaced sessions, push, slot and state notices, errors and close codes |
 | `relay-blobs.json` | §10.7, §13 | begin, parts, completion, retention, lazy expiry, quotas |
 | `relay-pairing.json` | §10.8 | slot order, credentials, tries, expiry, notices |
-| `relay-admin.json` | §12.1 to §12.6, §12.11, §12.12 | nonces, envelope, signer rules, every operation and its repeat |
+| `relay-admin.json` | §12.1 to §12.6, §12.11, §12.12 | nonces, envelope, signer rules, every operation and its repeat; the `last_ctr` and `last_seq` of a `gap` or `conflict` refusing the frame of `register` or `fence` |
 | `relay-seed.json` | §12.7 | seed, re-seed, tail, chain completion |
 | `relay-compact.json` | §12.8, §13.4 | every check, slices, the age rule, `compact_snap` |
 | `relay-restore.json` | §12.9 | restore tail and the seq-mode registrations |
@@ -1691,29 +1725,27 @@ Wycheproof `ed25519_test.json` and `seal`'s `seal-signatures.json`, `seal-frame.
 ## 22. Interfaces
 
 **`seal.md`.**
-- Requires: the frame layout and signature (SEAL-FRAME-001 to SEAL-FRAME-003), the login message (SEAL-SIG-001), the admin message and its registry of operation names and `args` layouts (SEAL-SIG-003, SEAL-SIG-004), the chain (SEAL-CHAIN-001), `board_id` and `dev_R` derivations (SEAL-KEY-005, SEAL-KEY-006), the ticket id (SEAL-PAIR-001), the slot layouts (`seal.md` §17.4), the host and origin forms (`seal.md` §5.4) and Crockford base32 (`seal.md` §5.2). It uses only registered context strings: `frame`, `login`, `admin`, `chain`, `board`, `recovery-dev`, `pair-tid`, `token`, `door`; it registers none.
-- Requires: the clauses of `seal.md` that name `relay` as an owner, realised here as follows: SEAL-GEN-007 by RELAY-GEN-002; SEAL-GEN-008 by RELAY-GEN-003; SEAL-GEN-010 by RELAY-GEN-009 and RELAY-GEN-010; SEAL-CTX-001 by using only `ctx(...)` of the registry (§5, §9.3, §10.2); SEAL-ENC-005 by the login message of §10.3 with `RELAY_ORIGIN`; SEAL-KEY-005 and SEAL-KEY-006 by §10.2 and §12.12; SEAL-FRAME-001 to SEAL-FRAME-003 by §9.3 P1 and P7; SEAL-CHAIN-001 by RELAY-STORE-003; SEAL-SIG-001 by RELAY-LOGIN-003; SEAL-SIG-003 and SEAL-SIG-004 by RELAY-ADMIN-003 and §12.1 A1; SEAL-PAIR-001 by §6.2 step 7.
-- Requires: SEAL-MEM-004 names `relay` as an owner, but a keyless relay can check only its frame-level part: `dev = dev_R` from the supplied `rsign_pk`, `ctr = 1`, the signature under `rsign_pk`, and `board_id` from `rsign_pk` and `salt` (§10.2). The epoch, the opening under `K_entry,1`, `based_on` and the Genesis item lie inside `body`, which the relay never reads (RELAY-GEN-004). I assume `seal.md` narrows the relay's share of SEAL-MEM-004 to those four checks (or drops `relay` from its owners); until then stage `relay` cites it only for them.
-- I assume `seal.md` accepts, without a change to its bytes, these meanings this spec gives to its registry (and ask that its "Sent with" column say so): `register` and `recovery_register` may name an entry already stored, by `seq` in the unsigned `extra`, after a restore tail (§12.3, §12.12); `fence` carries its `Fence` frame in the same call or none (§12.6); `seed`'s per-device `last_ctr` is the author's counter at `first_seq − 1` and `blob_id` is informational (§12.7); `restore_tail`'s `chain_before` travels unsigned beside the arguments (§12.9); `mint_read_token` may be signed by the recovery identity with `dev = dev_R` (§12.11).
+- Requires: the frame layout and signature (SEAL-FRAME-001 to SEAL-FRAME-003), the login message (SEAL-SIG-001), the admin message and its registry of operation names and `args` layouts (SEAL-SIG-003, SEAL-SIG-004), the chain (SEAL-CHAIN-001), `board_id` and `dev_R` derivations (SEAL-KEY-005, SEAL-KEY-006), the ticket id (SEAL-PAIR-015), the slot layouts (`seal.md` §17.4), the host and origin forms (`seal.md` §5.4) and Crockford base32 (`seal.md` §5.2). It uses only registered context strings: `frame`, `login`, `admin`, `chain`, `board`, `recovery-dev`, `pair-tid`, `token`, `door`; it registers none.
+- Requires: the clauses of `seal.md` that name `relay` as an owner, realised here as follows: SEAL-GEN-007 by RELAY-GEN-002; SEAL-GEN-008 by RELAY-GEN-003; SEAL-GEN-010 by RELAY-GEN-009 and RELAY-GEN-010; SEAL-CTX-001 by using only `ctx(...)` of the registry (§5, §9.3, §10.2); SEAL-ENC-005 by the login message of §10.3 with `RELAY_ORIGIN`; SEAL-KEY-005 and SEAL-KEY-006 by §10.2 and §12.12; SEAL-FRAME-001 to SEAL-FRAME-003 by §9.3 P1 and P7; SEAL-CHAIN-001 by RELAY-STORE-003; SEAL-SIG-001 by RELAY-LOGIN-003; SEAL-SIG-003 and SEAL-SIG-004 by RELAY-ADMIN-003 and §12.1 A1; SEAL-PAIR-015 by §6.2 step 7.
+- Requires: the relay's share of the checks of seq 1 is `board_id` from `rsign_pk` and `salt` (SEAL-KEY-005), `dev = dev_R` (SEAL-KEY-006), `ctr = 1` and the strict signature under `rsign_pk` (SEAL-GEN-010), all in §10.2 (RELAY-CREATE-001); SEAL-MEM-004 and SEAL-KEY-017 concern the encrypted body and are the clients' alone.
 - I assume `seal.md` §17.10's `RegisterTicket{tid, slot A}` is `pair-open`, `FetchSlot` is `slot-get` with the door and `X-TD-Proof: ticket_key`, `PostSlot` is `slot-post`, and `DeleteTicket{tid}` is `pair-close`; that "what counts as a try" (`seal.md` §17.11) is §10.8 here; and that the bundle's `token` (`seal.md` §17.8) is the 96-character token of §5.1.
-- I assume `seal.md` §17.11's "a second post of the same label is refused by the relay" reads as "a second post with other bytes": an identical repeat is answered 200 and stores nothing (RELAY-PAIR-007), so a lost answer does not abort a pairing, and the single-use property is unchanged.
-- I assume the hosts carried in `vb8(host)` (`seal.md` §12.7, §16.2 `fence`, and the welcome and `state` messages here) are at most 255 bytes. `seal.md` §5.4 allows 253 bytes before the `:` plus a port of up to 6 bytes (259 in all), which a `vb8` cannot carry; the `fence` body cap of §12.1 (262,533) is computed for 259 and is therefore an upper bound. A Fence host longer than 255 bytes cannot be encoded and is refused by the encoder (`seal.md` should say so).
-- I assume `seal.md` §13.6's Skip floor (`t ≥ purge_seq`) is what ruling S15 settles, or that the settled floor is computed from the log so that `engine.md` can bound compaction by it (§12.8 "Skip targets").
+- Requires: the hosts carried in `vb8(host)` (`seal.md` §12.7 and §16.2 `fence`, and the welcome and `state` messages here) are at most 255 bytes, `:port` included (`seal.md` §5.4, SEAL-ENC-006); the `fence` body cap of §12.1 (262,529) is computed for 255, and §5.4 parsing step 4 rejects a longer host with `relay/address`.
+- Requires: the Skip floor `max(purge_seq, s − 16,384)` of `seal.md` §13.6 (ruling S15), which RELAY-COMPACT-007 keeps fetchable.
 - Provides: the token, the door, the relay address and its parsing (§5); the token text that `seal.md` treats as opaque.
 
 **`engine.md`.**
 - Requires: the engine's model relay implements every clause owned by `engine` here (the sequencing outcomes, the read pages, the floors and push), and the faults of SYNC_PLAN.md §6.5 on top.
-- Requires, of the engine's duties: the Skip floor of ruling S15 is computed from the log, and compaction sends `below_seq` no higher than that floor (or names every frame between the floor and `below_seq` as `keep_seq`) and no higher than the snapshot acknowledged by a device other than the snapshot's author, lists every control entry below `below_seq` as `keep_seq`, is signed by a device other than that author, and repeats daily while `more` is true (§12.8); purge appends the rotation with `purge_before`, then sends `purge`, and repeats daily until `done = purge_floor` (§12.10); after a purge the shared picture is re-uploaded under the new epoch (§13.3); restore tail sends the seq-mode `register` and `recovery_register` and the `revoke` and `reinstate` operations of the restored control entries in log order (§12.9); a revocation sends `revoke` before appending its `R`-shape entry, and retries that entry until it is sequenced (§12.4); the move appends the `Fence` with the `fence` operation, using the new relay's door (§10.9, §12.6); seeding sends the device set of the membership at the end of the tail with each author's counter before the tail (§12.7), and resumes a seed tail or restore tail after a lost answer from the `head` of `relay/not_next` (§4.2).
+- Requires, of the engine's duties: compaction sends `below_seq` no higher than `head_seq − 16,384` (RELAY-COMPACT-007) and no higher than the snapshot acknowledged by a device other than the snapshot's author, lists every control entry and every recorded Skip target below `below_seq` as `keep_seq`, is signed by a device other than that author, and repeats daily while `more` is true (§12.8); purge appends the rotation with `purge_before`, then sends `purge`, and repeats daily until `done = purge_floor` (§12.10); after a purge the shared picture is re-uploaded under the new epoch (§13.3); restore tail ends each request at its first control entry and, before the next request, sends for that entry, when clients accepted it, the seq-mode `register` or `recovery_register`, `revoke`, `reinstate`, `fence` without a frame, or `purge` for a rotation that carries `purge_before` (§12.9); a recovery-key confirmation appends its `K`-shape entry as an ordinary entry and sends `recovery_register` only after classifying it `Accept` (§12.12); a revocation sends `revoke` before appending its `R`-shape entry, and retries that entry until it is sequenced (§12.4); the move appends the `Fence` with the `fence` operation on the old relay, using the new relay's door (§10.9, §12.6), and reads the old relay through that `Fence` before it seeds; when the old relay does not answer, or the moving device is under an evidence stop (it then fences the old relay without a frame), the `Fence` is an ordinary append on the new relay after the seed, never a `fence` there; the seeding device uploads only a snapshot it sealed itself (§12.7); seeding sends a tail from `first_seq = min(S + 1, max(1, purge_seq, last_seq + 1 − 16,384))` (`seal.md` §16.2 `seed`), every device and recovery identity of the membership at the end of the tail, and each author's counter before the tail (§12.7), and resumes a seed tail or restore tail after a lost answer from the `head` of `relay/not_next` (§4.2).
 - Requires: the engine decides what `second`, `displaced` and close code 4001 mean (an alarm policy that tolerates one displacement after a crash and restart), what `truncated` triggers, and how it reconciles with `last_ctr`, `last_seq`, `gap` and `conflict` (SYNC.md §4.3 rules 3 and 4, V1-16), never trusting `at` or `relay_now` (RELAY-STORE-006).
 - Requires: snapshot uploads use purpose 1 for periodic snapshots, 2 for the pairing bundle's, 3 for the genesis snapshot of an imported board, and 4 for the shared picture (§10.7).
 - Provides: nothing to the relay; the relay reads no engine data.
 
 **`device.md`.**
-- Requires: the transport sends the constant User-Agent, protocol pings every 30 seconds, a session id per process (§11.3), uploads at no less than 64 KiB/s (§6.2), and polls `hello` and `read` on a relay with `push: false` and slot C and D while pairing as N; it keeps tokens opaque (RELAY-TOKEN-003), parses relay addresses (RELAY-ADDR-002), keeps the request budget (RELAY-CLIENT-001), classifies failures (RELAY-CLIENT-002), never deletes on a relay answer (RELAY-CLIENT-003) and opens no socket to the standby (RELAY-CLIENT-004).
-- Requires: the device stores each board's relay address (host and door) with its token.
+- Requires: the transport sends the constant User-Agent, protocol pings every 30 seconds, a session id per process (§11.3), uploads at no less than 64 KiB/s (§6.2), and polls `hello` and `read` on a relay with `push: false` and slot C and D while pairing as N; it keeps tokens opaque and only in the `Authorization` header (DEV-NET-005), parses relay addresses (RELAY-ADDR-002), keeps the request budget of §14.3 (DEV-BUDGET-001), classifies every exchange by the table of §14.5 (DEV-NET-011, `device.md` §10.6), never deletes on a relay answer (DEV-NET-012) and opens no socket to a relay that reports `push: false` (DEV-NET-008).
+- Requires: the device keeps each board's relay address (host and door) in its relay target and a token per relay host (`device.md` §10.3, §16), and presents the door of that target when it logs in without a token (§10.3).
 - Provides: nothing to the relay.
 
-**Stage `recovery`.** Requires: the recovery tool takes host, board id and door from the sheet's relay address (§5.4), obtains nonces and sends recovery-signed operations with the door (§12.1), mints its own backup-read token as `dev_R` to top up a backup (§12.11), and fences the old board with a `Fence` frame and the `fence` operation over the door (§12.6).
+**Stage `recovery`.** Requires: the recovery tool takes host, board id and door from the sheet's relay address (§5.4), obtains nonces and sends recovery-signed operations with the door (§12.1), mints its own backup-read token as `dev_R` to top up a backup (§12.11), asking with epoch 1 and then with the `read_epoch` a `relay/stale_epoch` refusal carries (§4.2), so that it never raises the relay's read epoch; sends `recovery_register` for a `direct` recovery-key change only after the `K`-shape entry it appended is sequenced and classified `Accept` (§12.12); reinstates a device that a device revoked with `reinstate` (§12.5) before it appends, with the door (§9.3), the `R`-shape entry that reinstates it, and sends `revoke` alone (§12.4) for a device that `reinstate` returned to current but whose reinstating entry was not sequenced or was refused by clients (`device.md` §15.8); and fences the old board with a `Fence` frame and the `fence` operation over the door (§12.6), re-sealing that frame once with the `last_ctr` that a `409 relay/gap` or `409 relay/conflict` answer carries (§4.2, RELAY-ADMIN-005).
 
 **`core.md`, `bridge.md`.** None: the relay never reads core data, and the phone page never talks to the relay.
 
@@ -1728,7 +1760,7 @@ export const LIMITS;            // frozen object: one property per row of §20, 
 export const ROUTES;            // frozen array of the rows of §10.1: { name, method, pattern, creds, cap, fixed, object }
 export const SQL;               // frozen object: SQL.schema (array of statements of §7.1) and every statement the core runs, by name
 export class RelayError extends Error {
-  constructor(status, code, extra);      // extra: { until?, index? }
+  constructor(status, code, extra);      // extra: { until?, index?, head?, read_epoch?, last_ctr?, last_seq? }
   status; code; extra;
 }
 
@@ -1826,7 +1858,7 @@ Non-normative. Each states the default this spec takes.
 5. **The request budget of 5,000 per client is kept by the client, not counted at the relay** (§14.3): counting at the relay costs a row per request and makes replays write. The relay enforces the 3,000-append budget in the row an append writes anyway. Decided here (SYNC.md §6.2 lists both budgets without saying where they are counted).
 6. **The relay computes the chain for every append**: no extra row (it is a column of the `log` row), 32 bytes per row, one SHA-256 per frame. It gives the head chain to `hello`, pages, restore tail and seed checks. Decided here (SYNC.md §4.8 needs it only for restore tail).
 7. **Seeding uses the create secret** and a `door` route on the new relay, because the board does not exist there and the moving device needs the new door before it appends its Fence. Decided here; ruling S4 names the create secret for `create` only, and this spec widens it to the create family (§6.3).
-8. **`seed`'s `last_ctr` is the counter before the tail; `register` and `recovery_register` have a seq mode; `restore_tail` carries an unsigned `chain_before`; the recovery identity mints its own read token.** Decided here; the bytes of `seal.md` §16.2 are unchanged, and §22 asks `seal.md` to record the meanings.
+8. **`seed`'s `last_ctr` is the counter before the tail; `register` and `recovery_register` have a seq mode; `restore_tail` carries an unsigned `chain_before`; the recovery identity mints its own read token.** Decided here; the bytes of `seal.md` §16.2 are unchanged, and its "Sent with" column records these meanings. Since R1, `recovery_register` has the seq mode only (§12.12).
 9. **A try is a slot-B post** (§10.8), because the ticket proof is checked statelessly in the gate and a wrong proof never reaches the object. Decided here (SYNC.md says "5 tries" without saying of what).
 10. **Blob purposes and retention** (§13): pairing snapshots kept an hour, the genesis snapshot until the first compaction, two other blobs per author. A `ResetTo` far in the past may name a picture no longer held; the device then shows no picture. Decided here (SYNC.md is silent).
 11. **"Acknowledged by another device" is checked as "signed by a device other than the snapshot's author"**; the keep list cannot be checked. A compromised member could strand a device by omitting control entries, as it could harm the board in other ways until revoked. Decided here (SYNC.md §4.7 assumes the relay can tell).
@@ -1844,3 +1876,5 @@ Non-normative. Each states the default this spec takes.
 23. **The seeded device set is the membership at the end of the tail**, with counters from before it (§12.7). Decided here (SYNC.md §6.7 says only "the device set").
 24. **A socket that has not said hello is never closed by another socket's hello** (§11.3), so a second process is always reported by `second` and `displaced` whichever process speaks first. Decided here.
 25. **Signature checks run before the one transaction of a request and their results are applied in the section's order** (§8.4), so a refused login or admin request commits only its nonce deletion in the same single transaction. Decided here.
+26. **Links slower than 64 KiB/s** (§6.2): the body deadline is 10,000 ms plus 1,000 ms per 65,536 bytes, so a 1,048,576-byte blob part, or a large append batch, sent over a sustained link slower than 64 KiB/s is answered `408 relay/slow` every time. Clients treat that answer as transient (§14.5), and 64 KiB/s stays a stated client requirement (§22, `device.md` §10.10). The constants stay until the owner's rehearsal measures real phone links (SYNC.md §11 "Still to measure"). Default kept.
+27. **A re-home drops stored wraps** (§12.5, §12.7): `seed` writes every device row with `wraps` NULL, and a `reinstate` sent again on the new relay is refused with `409 relay/target`, because the seeded row is already current. A device reinstated but not yet logged in when the board moves never receives its wraps, stays revoked and pairs again (lead ruling L21). Accepted as a residual.

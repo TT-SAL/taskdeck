@@ -1,0 +1,102 @@
+# What the engine may not reach (ENG-GEN-003, ENG-GEN-004): no clock, no local
+# zone, no file, network, thread or environment access. Clippy reports each use
+# as an error under `-D warnings`. It is the list of
+# crates/taskdeck-core/clippy.toml (SYNC.md §4.5; SYNC_PLAN.md §6.2); keep the
+# two in step.
+# The four chrono entries carry `allow-invalid = true`: the engine does not
+# depend on chrono (ENG-GEN-005), so the paths reach nothing and clippy would
+# warn; they are listed so that a chrono dependency could not bring them in
+# unnoticed.
+disallowed-types = [
+    { path = "chrono::Local", reason = "the engine has no local zone: time comes from its inputs (ENG-GEN-003)", allow-invalid = true },
+    { path = "chrono::offset::Local", reason = "the engine has no local zone: time comes from its inputs (ENG-GEN-003)", allow-invalid = true },
+    { path = "std::fs::File", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::OpenOptions", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::DirBuilder", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::net::TcpStream", reason = "no network access in the engine (ENG-GEN-003)" },
+    { path = "std::net::TcpListener", reason = "no network access in the engine (ENG-GEN-003)" },
+    { path = "std::net::UdpSocket", reason = "no network access in the engine (ENG-GEN-003)" },
+    { path = "std::thread::Builder", reason = "no threads in the engine (ENG-GEN-003)" },
+    { path = "std::thread::LocalKey", reason = "no thread-local state in the engine (ENG-GEN-003)" },
+]
+disallowed-methods = [
+    # Clocks.
+    { path = "chrono::Utc::now", reason = "the engine reads no clock: time comes from its inputs (ENG-GEN-003)", allow-invalid = true },
+    { path = "chrono::Local::now", reason = "the engine reads no clock or zone (ENG-GEN-003)", allow-invalid = true },
+    { path = "std::time::SystemTime::now", reason = "the engine reads no clock (ENG-GEN-003)" },
+    { path = "std::time::Instant::now", reason = "the engine reads no clock (ENG-GEN-003)" },
+    { path = "std::time::SystemTime::elapsed", reason = "the engine reads no clock (ENG-GEN-003)" },
+    { path = "std::time::Instant::elapsed", reason = "the engine reads no clock (ENG-GEN-003)" },
+    # Files.
+    { path = "std::fs::read", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::read_to_string", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::write", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::read_dir", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::create_dir", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::create_dir_all", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::remove_file", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::remove_dir", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::remove_dir_all", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::rename", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::copy", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::hard_link", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::metadata", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::symlink_metadata", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::canonicalize", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::read_link", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::set_permissions", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::exists", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::File::open", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::File::create", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::File::create_new", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::File::options", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::fs::OpenOptions::new", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::exists", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::metadata", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::read_dir", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::try_exists", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::is_file", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::is_dir", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::is_symlink", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::canonicalize", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::read_link", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::symlink_metadata", reason = "no file access in the engine (ENG-GEN-003)" },
+    # Network.
+    { path = "std::net::TcpStream::connect", reason = "no network access in the engine (ENG-GEN-003)" },
+    { path = "std::net::TcpStream::connect_timeout", reason = "no network access in the engine (ENG-GEN-003)" },
+    { path = "std::net::TcpListener::bind", reason = "no network access in the engine (ENG-GEN-003)" },
+    { path = "std::net::UdpSocket::bind", reason = "no network access in the engine (ENG-GEN-003)" },
+    { path = "std::net::ToSocketAddrs::to_socket_addrs", reason = "no name resolution in the engine (ENG-GEN-003)" },
+    # Threads.
+    { path = "std::thread::spawn", reason = "no threads in the engine (ENG-GEN-003)" },
+    { path = "std::thread::scope", reason = "no threads in the engine (ENG-GEN-003)" },
+    { path = "std::thread::sleep", reason = "no threads or waiting in the engine (ENG-GEN-003)" },
+    { path = "std::thread::park", reason = "no threads or waiting in the engine (ENG-GEN-003)" },
+    { path = "std::thread::Builder::new", reason = "no threads in the engine (ENG-GEN-003)" },
+    { path = "std::thread::Builder::spawn", reason = "no threads in the engine (ENG-GEN-003)" },
+    { path = "std::thread::available_parallelism", reason = "no thread or system queries in the engine (ENG-GEN-003)" },
+    { path = "std::thread::park_timeout", reason = "no threads or waiting in the engine (ENG-GEN-003)" },
+    { path = "std::thread::yield_now", reason = "no threads or waiting in the engine (ENG-GEN-003)" },
+    { path = "std::thread::current", reason = "no thread-local state in the engine (ENG-GEN-003)" },
+    # Random sources. `RandomState::new` takes an OS-seeded key kept per thread.
+    { path = "std::collections::hash_map::RandomState::new", reason = "no random source in the engine (ENG-GEN-003)" },
+    { path = "std::hash::RandomState::new", reason = "no random source in the engine (ENG-GEN-003)" },
+    # Platform file entry points outside std::fs; each exists on one family only.
+    { path = "std::os::unix::fs::symlink", reason = "no file access in the engine (ENG-GEN-003)", allow-invalid = true },
+    { path = "std::os::windows::fs::symlink_file", reason = "no file access in the engine (ENG-GEN-003)", allow-invalid = true },
+    { path = "std::os::windows::fs::symlink_dir", reason = "no file access in the engine (ENG-GEN-003)", allow-invalid = true },
+    # The environment.
+    { path = "std::env::var", reason = "no environment variables in the engine (ENG-GEN-003)" },
+    { path = "std::env::var_os", reason = "no environment variables in the engine (ENG-GEN-003)" },
+    { path = "std::env::vars", reason = "no environment variables in the engine (ENG-GEN-003)" },
+    { path = "std::env::vars_os", reason = "no environment variables in the engine (ENG-GEN-003)" },
+    { path = "std::env::set_var", reason = "no environment variables in the engine (ENG-GEN-003)" },
+    { path = "std::env::remove_var", reason = "no environment variables in the engine (ENG-GEN-003)" },
+    { path = "std::env::args", reason = "no process environment in the engine (ENG-GEN-003)" },
+    { path = "std::env::args_os", reason = "no process environment in the engine (ENG-GEN-003)" },
+    { path = "std::env::current_dir", reason = "no process environment in the engine (ENG-GEN-003)" },
+    { path = "std::env::set_current_dir", reason = "no process environment in the engine (ENG-GEN-003)" },
+    { path = "std::env::current_exe", reason = "no process environment in the engine (ENG-GEN-003)" },
+    { path = "std::env::temp_dir", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::env::home_dir", reason = "no file access in the engine (ENG-GEN-003)" },
+]

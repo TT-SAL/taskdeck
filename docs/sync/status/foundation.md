@@ -1,9 +1,11 @@
 # Stage `foundation`: status
 
-**State: in progress** (wave 0), **handed off** on 2026-11-21 at about 19:45 UTC. The first lead
-session ran from 12:39 UTC on branch `claude/focused-volta-tbqufb` and stopped at a clean point
-because its context was nearly full. Its pull request, TT-SAL/taskdeck#1, is merged into
-`day-planner` with everything described here; it was not the exit pull request.
+**State: final** (wave 0), since 2026-11-22. Every task of SYNC_PLAN.md §6.1 is built, attacked
+until its loop converged, verified by the lead and green in CI; an agent that did no work here
+reviewed the whole, and what it found is done. The owner starts wave 1: `core`, `seal`, `relay`,
+`engine`, `android-shell`. The stage ran in two lead sessions: 2026-11-21 12:39 to 19:45 UTC
+(branch `claude/focused-volta-tbqufb`, pull request TT-SAL/taskdeck#1) and 2026-11-21 21:20 UTC to
+2026-11-22 (branch `claude/upbeat-hamilton-klp7n9`, the exit pull request TT-SAL/taskdeck#2).
 This file is the stage's memory (SYNC_PLAN.md §3.5).
 
 ## Resuming: read this first
@@ -17,14 +19,26 @@ This file is the stage's memory (SYNC_PLAN.md §3.5).
    step 1, and a small journal helper.
 4. Never run two sessions on this stage. The first session has stopped and cancelled its scheduled
    resume.
+5. A workflow cannot be resumed from another session. What a session's workflows finished is in this
+   file and in the commits; what they had not finished starts again from "Next steps".
 
 ## How this stage is run
 
-- Workflows of Opus agents (`model: 'opus'`; agents report Opus 5.5), at most two agents at a time,
-  one workflow at a time. Queued calls run first in, first out, so two long queues in one workflow
-  keep both slots busy.
+- Workflows of Opus agents (`model: 'opus'`; agents report Opus 5.5), at most two agents at a time.
+  Since the second session: two workflows side by side, each running strictly one agent at a time
+  (D15). The **spec track** only reads and writes under `docs/sync/spec/`; the **code track** is the
+  only one that compiles. When one track waits for the lead or has no work, the other may run two
+  agents wide.
 - Agents write; the lead runs every gate and reads CI itself. Agents never commit or push and never
   run a git command that changes state.
+- Since the second session, writers never touch the main checkout (D18). Each track has a working
+  copy, a clone under `target/work/` (`c` for code, `s` for specs), which git ignores. Implementers,
+  fixers and attackers work on the clone; reviewers read the main checkout. When a writer has
+  finished, the lead copies its files into the main checkout, runs the gate there, commits and
+  pushes, then moves the clone's HEAD to the new commit
+  (`git -C target/work/c fetch -q origin && git -C target/work/c reset -q --mixed origin/<branch>`).
+  The main checkout is clean whenever the lead's turn ends, and nothing reaches the public
+  repository before the lead has read it.
 - Every implementation task goes through the task loop of SYNC_PLAN.md §7 (implement, attack through
   three lenses, fix, until two dry rounds). Spec work uses drafters, pairwise interface reviews and
   the two-readers test (§6.1).
@@ -32,9 +46,9 @@ This file is the stage's memory (SYNC_PLAN.md §3.5).
   handled). The lead adds a ruling to the brief the moment a loop starts to circle (D12, D14).
 - A running loop reads a lead inbox each round (`<scratch>/lead-findings/<task>.md`, one `## ` section
   per finding), so the lead can feed in a finding or a ruling without stopping the workflow.
-- The session's stop hook wants a clean tree whenever the lead's turn ends: commit and push a
-  snapshot of a spec that is still being written; for code, wait until no fixer is running, verify,
-  then commit.
+- The session's stop hook wants a clean tree whenever the lead's turn ends. With the working copies
+  that holds by construction. A background `tools/waitwriter.py <journal> <seen>` wakes the lead
+  when the next implementer or fixer has finished.
 - Pull-request CI runs the full matrix on every push, about 13 minutes; results arrive as
   notifications. Every pushed head of the first session was green.
 - Usage (D13): one five-hour window of the account allows about 60 agent runs at these settings.
@@ -51,8 +65,11 @@ This file is the stage's memory (SYNC_PLAN.md §3.5).
 | `briefs/supply-chain.md`, `briefs/ci.md`, `briefs/workspace.md`, `briefs/fixtures.md`, `briefs/tooling.md` | the lead's designs for tasks 1b, 1c, 2, 5 and 6, ready to hand to an implementer |
 | `briefs/core-digest.md`, `briefs/device-bridge-digest.md` | what the code digests were asked to contain |
 | `digests/core-digest.md`, `digests/device-digest.md`, `digests/bridge-digest.md` | facts about today's code with file and line, written for the drafters; useful to `core`, `device` and `android-shell` too |
-| `workflows/interface-reviews-and-1a.js` | the next workflow, ready: nine reviews, one resolver, six spec fixers; and task 1a's loop, then task 1b. Launch with `args: { scratch: <session scratchpad> }` after creating `lead-findings/` and `resolutions/` in it |
+| `workflows/s1-interface-reviews.js` | spec track, round 1: nine pairwise reviews, then one resolver per pair, one after another, writing `<scratch>/resolutions/r1-<a>-<b>.md`. It stops there: the lead rules on each "For the lead" list before fixers edit a spec (D16). Launch with `args: { scratch: <session scratchpad>, width: 1 }` |
+| `workflows/c1-supply-chain-1a-loop-ci.js` | code track, on the working copy `target/work/c`: finishing task 1b, task 1a's attack loop until two dry rounds, task 1c's implementation. Launch with `args: { scratch: <session scratchpad> }` after creating `lead-findings/` in the scratchpad, cloning the working copy and warming its `target/debug` and `target/attack-0` to `-2` (copies of the main `target/debug` after `cargo test --locked --no-default-features --lib --no-run`) |
+| `tools/waitwriter.py`, `tools/speccheck.py` | the lead's waiter for finished writers, and a quick format check of the six specs (clause lines, unique ids, owners, MUST outside clauses, closing sections, dangling references). Neither is the stage's tooling; `scripts/spec-lint.sh` comes with task 6 |
 | `tools/wf.py` | prints which agents of a running workflow have finished and their reports (`WF_JOURNAL=<transcript dir>/journal.jsonl`) |
+| `tools/tokens.py`, `tools/sync-clone.sh` | adds up the tokens of a workflow's agents from their transcripts (`tokens.py <journal.jsonl>`), per agent and in total; brings a track's working copy to the pushed branch after the lead has integrated |
 
 These are working papers of the stage, not contracts. The exit pull request may delete them.
 
@@ -61,53 +78,37 @@ These are working papers of the stage, not contracts. The exit pull request may 
 | # | Task (SYNC_PLAN.md §6.1) | State | Evidence |
 |---|---|---|---|
 | 0 | Status file, first pull request | done | this file; TT-SAL/taskdeck#1, merged |
-| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented, with the panic hook of D11. Three loops so far: 5 rounds (14 findings), 5 rounds (9), 3 rounds (5); every finding fixed or ruled on. No finding against the product changes themselves since the hook landed; all recent ones are about which hypothetical edits the checks detect, now a closed list (D14). Not yet two dry rounds: the loop must run again from round 1 (`briefs/task-1a.md`) | commits `a743020` onwards; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`, `src/panic_abort.rs`; full CI matrix green on the merged head |
-| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | todo; brief ready (`briefs/supply-chain.md`) | |
-| 1c | CI: path filters at job level, aggregate `gate` job | todo; design and brief ready (`briefs/ci.md`) | |
-| 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo; brief ready (`briefs/workspace.md`). Today the workspace has the root package and `crates/panic-probe` | |
+| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | **done.** The fourth loop (second session) ran six rounds: rounds 1 and 3 dry, rounds 2 and 4 one low finding each about which invalid `SOURCE_DATE_EPOCH` spellings the date check tries (fixed; rulings 8 and 9 in the brief close that list), rounds 5 and 6 dry on all three lenses: converged. The lead ran the gate after each fix: 265 passed, 1 ignored | commits `6ca1240`, `938e4b9`; `briefs/task-1a.md` |
+| 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | **done.** The lead's lockfile rulings (D19) are applied and proven in CI on Windows, macOS and Linux. The first loop of six rounds found a real gap in every round (index failures failing open, twice; notices; a lockfile source in another spelling; replaced crates.io sources; a configuration `include`), all fixed and each verified by the lead (script tests, the gate, the cooldown over all 519 packages). Ruling 8 in the brief then made the gate's five properties a closed list, and the second loop's rounds 1 and 2 were both dry on all three lenses (real tools on scratch projects, the lockfile compared entry by entry with the base, fresh tool and cargo homes, dead network): converged | `briefs/supply-chain.md`; commits to `e4c81fe` |
+| 1c | CI: path filters at job level, aggregate `gate` job | implemented, committed, and proven on GitHub: the pull-request run on `fee727d` was green in every job on all three systems, with `gate` named `gate` only on the pull-request run. Two loops so far, eleven attack rounds, and each found something real: the colour defect from the first real run, path-filter gaps, a file-name injection, cancelled push runs losing their changes, and, round after round, one more way to write a file read that the reads check did not follow. All fixed, each with a test; the lead ran the script tests after each loop. The second loop (six rounds) ended with the reads check failing closed on anything it cannot resolve to a tracked file (ruling 12) and with two low findings in `toolchain.sh` (ruling 13 closes that class). The second loop's fixes are proven on GitHub: the push run on `bef6b87` ran every area on all three systems and was green. Since then the path rules gained what the workspace, the fixtures and the tooling needed (rulings 14; the device and engine crates mark the recovery area). **Done:** the third loop converged in three rounds (2026-11-22 evening): round 1 confirmed the lead's three findings for the last CI wiring (the supply-chain job's spare step, `spec-lint` in the foundation job, the android job on three systems) and found two path-rule gaps (`SYNC.md` and `SYNC_PLAN.md` are read by spec-lint; `scripts/wrangler/`), all fixed; rounds 2 and 3 had no high or medium finding (ruling 15 of the brief) | `briefs/ci.md`; `scripts/ci/README.md` |
+| 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | implemented: seven shell crates (core, seal, sync, device, backup, recover, android) with their dependencies in a root `[workspace.dependencies]` table, exact pins for the versions SYNC.md names, TLS on the ring provider only, one RustCrypto generation, 56 new third-party lockfile entries (the youngest published 2026-11-12) and nothing existing moved; READMEs for `relay/`, `android/`, `tests/e2e/`. Where a spec clause and the brief's table disagreed the implementer followed the clause (confirmed, ruling 1 of the brief). The lead ran every proof in the main checkout (20 steps, all passed, 2026-11-22 09:19 UTC: tests, clippy with each feature, wasm32, the Android target for the crates without C code, the stage script for every stage, supply chain, script tests, the reads check, the server build, today's 265 tests), and the pull-request run on `08dfc65` was green on Windows, macOS and Linux, so the device crate's Windows-only and macOS-only declarations compile there. The lead's three findings are fixed and verified (a default backend for the Android library, S32; `taskdeck-recover` depends on `taskdeck-device`, with the CI rule that follows; hpke re-exports `rand_core`, so seal declares nothing). **Done:** the attack loop converged in four rounds (the clippy lists of core and sync gained clock, file-system, random-source and thread entries in two rounds; the core's library is built alone by `crates/taskdeck-core/ci.sh`; then two rounds with low findings only) | `briefs/workspace.md` |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
 | 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge drafted (1,655 lines, 110 clauses). All six are first drafts: 11,635 lines, 852 clauses | `docs/sync/spec/*.md` |
-| 3c | Pairwise interface reviews: the plan's six pairs (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) plus core–device, seal–device, relay–device | todo; the workflow is ready (`workflows/interface-reviews-and-1a.js`) | |
-| 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
-| 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
-| 4 | Skeleton crates: public types and traits, toy state machine, fake sealer | todo | |
-| 5 | Fixtures as data: boards, legacy `main` formats, snapshot JSON, transcripts | todo; brief ready (`briefs/fixtures.md`) | |
-| 6 | Tooling: `scripts/gate.sh`, `scripts/spec-coverage.sh`, `scripts/dev-setup.sh` | todo; brief ready (`briefs/tooling.md`) | |
-| 7 | Stage exit review, exit pull request, merge | todo | |
+| 3c | Pairwise interface reviews: the plan's six pairs (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) plus core–device, seal–device, relay–device | **done.** Nine reviews brought 152 findings (26 high, 75 medium, 51 low); nine resolvers turned them into 232 exact changes; the lead ruled on the open points (L1 to L23); one more resolver wrote the rulings as exact text; fixers applied everything spec by spec and a second agent checked each spec against its diff (seal 102 of 102 items exact, core 15 of 15, relay 78 of 79 and the last fixed, engine 179 of 179, device 225 of 226 with the one a placement the lead confirmed, bridge 34 of 34; nothing unrequested). The six specs now hold 899 clauses (7 withdrawn) in 12,237 lines, and the lead's format check finds no problem. Five small follow-ups for the next spec pass are in `resolutions/r1-followups.md` | commits `220f07a` to this one; `resolutions/` |
+| 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | **done after two rounds (a deviation, D24).** One fixed world and six scenarios (`briefs/two-readers.md`); readers work from the specs alone. In both rounds they agreed on every byte layout, counter, seq and chain value both gave. Differences that needed a spec change, all about behaviour the specs left open: 40 in round 1, 12 in round 2. All applied. Rulings T1 to T13 (`two-readers/r1/lead.md`, `r2/lead.md`). `spec/CHANGES.md` records at the exit that two of four rounds were run | `two-readers/r1/`, `two-readers/r2/` |
+| 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | **in the README: 502 rows** (378 cite a clause, 119 a stage, 40 a row of the plan's §2, 7 the plan's backlog). Two mappers worked from SYNC.md and an index of every clause; a checker who did not write the map compared every fourth row's first clause with the spec text (91 rows, 11 corrected) and added 6 missing rows. About 20 requirements had nothing covering them: nine got a clause in one more spec pass (955 clauses now), the others map to a stage or to the backlog by the lead's rulings (`requirement-map-notes.md`). `tools/build-map.py` assembles and checks the table; `scripts/spec-lint.sh` checks it once the tooling is in | `resolutions/map-followups.md`; `requirement-map-notes.md` |
+| 4 | Skeleton crates: public types and traits, toy state machine, fake sealer | **done.** Every crate carries its spec's public surface with `unimplemented!()` bodies (core 149, seal 86, sync 16, device 161, android 27), and `taskdeck-sync` has, behind the feature `sim`, the toy state machine and the fake sealer as working code (4,750 lines with their tests; 54 tests). Writing the surfaces was a compile check of the specs: 23 places did not hold together; one pass wrote them as 22 changes, applied them and carried six into the crates (`resolutions/skeleton-followups.md`, ruling T17). The attack loop converged in three rounds: the first confirmed the lead's finding of one method the last spec pass had added (`Published::overlay_fetched`) and a stale comment, the next two found nothing. Lead's run after each step: tests, clippy for every feature set, wasm32, the Android targets, the stage script; CI green on three systems | `briefs/skeletons.md`; commits `bb39fe7` to `df26b52` |
+| 5 | Fixtures as data: boards, legacy `main` formats, snapshot JSON, transcripts | **done; the attack loop converged in five rounds.** A generator crate on today's public API with a pinned clock and two pinned zones (Europe/Berlin, America/New_York), six boards, 48 snapshot files, 20 transcripts, about 14 MB with a manifest; `scripts/check-fixtures.sh` regenerates and compares (in the script tests, so in CI). Round 1 confirmed the lead's finding as high: the older build's formats had been derived from the documentation and were wrong (plan fields, quoted numbers, built-in palettes). The fixer rewrote them from `origin/main`'s source, built that branch and ran its own loaders and writers over every legacy directory: byte for byte, but for one deliberately damaged archive line. Shapes that build reads but never writes are in `fixtures/legacy-other/`. Also fixed: a 201-character name, two "unreadable" lines that tested the wrong thing, two README gaps. Rounds 2 and 3: the 10,000-row board had no archive rows near its snapshot windows; `check-fixtures.sh` did not see an extra symlink; no `.gitattributes` kept the bytes on a Windows checkout; the order of archive rows with equal times was unstated (all fixed). Rounds 4 and 5 found low points only | `briefs/fixtures.md`; commits `a183f0f`, `df26b52`, `bc9fdbe` |
+| 6 | Tooling: `scripts/gate.sh`, `scripts/spec-coverage.sh`, `scripts/dev-setup.sh` | **done.** `spec-lint.sh`, `spec-coverage.sh`, `gate.sh` with a gate file for each of the twelve stages, the scans for unimplemented bodies and skipped tests, `check-android-targets.sh`, `dev-setup.sh` for every stage (the Android SDK and NDK, cargo-ndk and wrangler were installed once here, 3 GB), the hook `crates/taskdeck-android/ci.sh`; all with tests. Three attack loops. The first two ran six rounds each without two clean rounds in a row: round 1 of the first found one high (spec-coverage could never pass for `release` and `rc`) and five mediums; the later rounds kept finding one more way to write a skipped test and then one more way for a citation to stand beside a test that does not run. Rulings 6 and 9 of the brief ended both series: the scans guard the ordinary forms, and spec-coverage counts a clause as covered when its id stands in a test file of its stage, which is the plan's wording. The third loop applied that (the script lost a third of its lines), split the Android crate's `backend-device` items into `src/device_backend.rs` so that `android-shell`'s gate leaves stage `android`'s part out (the exit review's finding), and converged in three rounds. One low is left: a case of `test-gate-lib.sh` reads two paths from the current directory, so it passes only when run from the repository root, as CI and the gate run it | `briefs/tooling.md`; commits `8347c33` and the exit commit |
+| 7 | Stage exit review, exit pull request, merge | **done.** One agent that did no work in the stage read the plan, this file, the diff and the specs (`workflows/e1-exit-review.js`). It found every item and gate part of §6.1 in the tree. Its three blockers were the open tooling loop, the missing green pull-request run for the last CI wiring, and the exit clean-up (the spec README's draft notice, the empty `CHANGES.md`, this file's state): all done. Its two should-fix points (the `android-shell` gate scanned stage `android`'s part of the crate; a stale gate text) went to the tooling loop and are fixed. Its notes are in this file: the fourth file under `src/`, the lockfile moves as a deviation, who owns the new root files, fuzz targets | the exit pull request TT-SAL/taskdeck#2 |
 
 ## Next steps
 
-In this order; a resuming session starts at the first.
+None for this stage: it has exited. For the owner: start wave 1 (SYNC_PLAN.md §1.3), the sessions
+`core`, `seal`, `relay`, `engine` and `android-shell`.
 
-1. **Interface reviews of the six spec drafts.** Nine pairs, each reviewer also checking that the
-   rulings S1 to S31 are reflected; then one resolver writes the exact change per spec; then one fixer
-   per spec applies it. The ready workflow does this, with step 2 and the start of step 3 in its
-   second queue. Read the resolver's "For the lead" list before the fixers' output is committed.
-   Repeat with a second, lighter round until a round brings nothing of substance.
-2. **Task 1a's attack loop** again from round 1 until two dry rounds. Scope and the closed mutation
-   list are in `briefs/task-1a.md` (D11, D12, D14).
-3. **Task 1b** (`briefs/supply-chain.md`). When the implementer reports which advisories remain in
-   the lockfile, the lead decides for each between a targeted `cargo update -p` and a reviewed
-   ignore, then runs its attack loop. SYNC_PLAN.md §6.1 allows `cargo update -p` only for rustls,
-   rustls-webpki, webpki-roots and tokio, so any other crate needs a written reason here.
-4. **Task 1c** (`briefs/ci.md`). Push it early in a pull request: only a real CI run shows whether
-   the path filter, the per-stage jobs and the `gate` job behave. Then its attack loop.
-5. **Task 2** (`briefs/workspace.md`), **task 5** (`briefs/fixtures.md`), **task 6**
-   (`briefs/tooling.md`), each with its attack loop. Task 2 needs task 1b's scripts; task 6 comes
-   after the crates and fixtures exist.
-6. **Two-readers test** on the reviewed specs: two independent readers per scenario (first edit,
-   offline edit replayed, pairing, revocation with rotation, relay rollback, snapshot bootstrap), a
-   third agent lists the differences, spec fixers resolve them; stop after two rounds without a
-   difference or after four, recording what remains in `spec/CHANGES.md`. The lead must first write
-   each scenario's fixed starting state so both readers begin alike.
-7. **Requirement map** in `spec/README.md` (`briefs/reviews.md`, part D), then `scripts/spec-lint.sh`
-   over it.
-8. **Task 4**: skeleton crates from the specs' Public API sections, with the toy state machine and the
-   fake sealer in `taskdeck-sync`.
-9. **Stage exit**: an agent that did no work here lists what is missing; then remove the draft notice
-   from `spec/README.md`, set this file to `final`, write "What the next stages need to know", open
-   the exit pull request with what was built and measured, merge on green, and tell the owner to
-   start wave 1 (`core`, `seal`, `relay`, `engine`, `android-shell`).
+Two dated follow-ups remain, each a small pull request to shared files (plan §3.2), by whoever
+comes first after the date:
+
+- from 2026-11-24: `cargo update -p zeroize --precise 1.9.2` and `zeroize = "=1.9.2"` in the root
+  manifest (SYNC.md §5.1 names that version; it was inside the seven-day cooldown at the exit);
+- from 2026-11-28: `cargo update -p url --precise 2.5.9`, and remove the ignore of
+  RUSTSEC-2026-0592 from `deny.toml` and `.cargo/audit.toml`.
+
+How a task was integrated here, for a later session that takes over these paths: agents worked in
+clones under `target/work/`; the lead copied the changed files into the main checkout, ran the
+checks with `CARGO_TARGET_DIR=target/lead`, committed, pushed, read CI, and reset the clone to the
+pushed commit. A push to the pull request cancels its running CI.
 
 ## Decisions (with reasons)
 
@@ -167,6 +168,112 @@ In this order; a resuming session starts at the first.
   guarded hook call or naming the hook twice; the hook not printing as the default hook does, or not
   aborting. The hook's test reads the two main files only and runs in the debug profile. Anything else
   is left to review.
+- **D15. Two tracks, one agent each.** A workflow's own limit is two agents, and one workflow holding
+  both the spec work and the code work could not be steered: its second queue had to wait for the
+  lead's decision on task 1b's advisories while the first ran for hours. Two workflows, each
+  strictly sequential, keep the plan's "two agents at a time" and let the lead restart either track
+  alone. Only the code track compiles, so no two agents ever build at once.
+- **D16. One resolver per pair, and the lead rules before a spec is edited.** The first review
+  alone (seal with relay) brought 16 findings, so nine bring about 140: too many for one resolver,
+  and grouping by spec would give seal's resolver a third of them. Each pair's findings go to one
+  resolver; the nine run one after another, each reading what the earlier ones settled and building
+  on it. The workflow stops after the resolvers; the lead reads every "For the lead" list, writes
+  its rulings beside them (`r1-lead.md`), and only then starts one fixer per spec.
+- **D17. The start prompt of the second session names the agents' model as "opus 5.5".** The
+  workflows keep `model: 'opus'`, which is that model (D1): the session's first agent reported
+  `claude-opus-5-5`.
+- **D18. Writers work on clones, the lead integrates.** The first implementer of the session wrote
+  into the main checkout, so the stop hook met untracked, unfinished files as soon as the lead
+  paused. Committing them would have pushed work nobody had read to a public repository; hiding
+  them from the hook would have defeated it. So the code track and the spec track each write in a
+  clone under `target/work/`, and only what the lead has read and verified enters the main
+  checkout. It also keeps the two tracks, and the lead's own gate runs, out of each other's way.
+- **D19. The lockfile advisories outside the four refreshed crates** (the written reasons that step 3
+  of "Next steps" asked for; SYNC_PLAN.md §6.1 names four crates and forbids a blanket update, and
+  also requires cargo-deny and cargo-audit, which cannot pass on today's lockfile). A crate with a
+  fixed release moves by one targeted `cargo update -p … --precise` to the lowest fixed release at
+  least seven days old; a crate with none gets a reviewed ignore; egui, wgpu and winit do not move.
+  - Moves: `crossbeam-epoch` to 0.9.20 (RUSTSEC-2026-0204, an invalid pointer dereference, in both
+    binaries); `rustix` 1.1.4 to 1.1.6 (RUSTSEC-2026-0486, unsound); `webbrowser` to 1.2.2
+    (RUSTSEC-2026-0257, argument injection, desktop binary); `clipboard-win` to 5.4.2 (the locked
+    version is yanked); `wayland-scanner` to 0.31.11 with `quick-xml` 0.41.0 (RUSTSEC-2026-0194 and
+    -0195; a build-time generator on the Linux desktop, so it cannot change the look on Windows or
+    macOS; a reviewed ignore is the fall-back if the Linux desktop job fails); `quinn-proto` to
+    0.11.19, `quinn-udp` to 0.5.16 and `chacha20` to 0.10.2 (eight advisories and a yanked version in
+    entries that no target compiles, so the moves change no built code).
+  - Ignores, none with a fixed release: `paste` (RUSTSEC-2024-0436, a build-time macro under the AVIF
+    encoder, which `desktop` removes); `proc-macro-error` and `structopt` (RUSTSEC-2024-0370,
+    RUSTSEC-2022-0104: the command-line helper `kmeans_colors` enables by default and the app never
+    calls; turning that feature off is a change to today's app, left to `desktop`); `ttf-parser`
+    (RUSTSEC-2026-0192, Wayland title-bar fonts on the Linux desktop).
+  - Also: duplicate versions outside the cryptographic list are allowed without a warning (41 of
+    them, from the pinned window toolkit, were 2,650 of the gate's 3,500 output lines); cargo-audit
+    fails on unmaintained, unsound and yanked, not on notices, so the two tools agree.
+- **D20. Cheaper workflows (the owner's instruction, 2026-11-22 00:00 UTC).** The second session's first
+  two workflows used 5.9 and 3.0 million tokens and brought the account's five-hour window to 92% in
+  under three hours. The owner asked for no launch near the limit (a workflow cut by it wastes its
+  unfinished agents) and for more economical designs. From here on: every agent gets an explicit
+  effort (medium for agents that apply, check or attack by a closed list, high for resolvers,
+  implementers and attackers of new code; nothing inherits the session's effort); reading lists are
+  short (the rules an agent needs are in its prompt, and it reads only the sections it touches,
+  never a whole plan, brief or spec unless reviewing that text is the task); an attack round is one
+  fresh agent that covers the task's three lenses, not three agents and an inbox reader (SYNC_PLAN.md
+  §7 allows adapting the loop while its properties hold: the writer does not judge its own work, a
+  finding needs a reproduction, a failed agent is never a clean result, convergence is reported);
+  lead findings go into the task's brief, which the next attacker reads; a fix-up is not followed by
+  a second automatic check. The lead pushes once per task and reads CI when it needs it. Before a
+  launch the lead considers where the usage window stands; the owner sees the meter, the lead does
+  not.
+- **D22. A usage budget per window (the owner again, 2026-11-22 07:20 UTC: the limit was hit).** The
+  second window ended with both workflows cut: 2.7, 2.9 and 2.6 million tokens of agents plus the
+  lead's own turns filled it. A five-hour window holds about 8 to 9 million agent tokens. From here
+  on the lead plans at most about 6 million per window, adds up each workflow's reported tokens,
+  and launches nothing that would not fit. A reader in the two-readers test costs about 440,000
+  tokens because it reads nearly all of the specs, whatever its scenarios: rounds 2 to 4 therefore
+  use two readers for all six scenarios, as SYNC_PLAN.md §6.1 words it, instead of six. The lead
+  integrates once per finished workflow, not after every fix, to spend fewer turns of its own.
+- **D23. Counting usage, and fewer messages per agent (2026-11-22 08:15 UTC).** The number a workflow
+  reports is input plus cache writes plus output; `tools/tokens.py` adds the same up from the agents'
+  transcripts while a workflow runs, so the lead knows where a window stands before it launches
+  (this window at 08:15: 3.0 million). The transcripts also show what the reported number hides:
+  each message an agent sends re-reads its whole context, and round 1's readers each re-read about
+  10 million tokens over some 40 messages. So from round 2 a reader issues the reads of all the
+  specs as parallel calls in its first message and writes each file in one call, and every agent is
+  told to batch its look-ups. A workflow whose cost is uncertain is launched in steps (`until`): it
+  returns after a phase, the lead looks at the window, and a resume replays the finished agents
+  from the cache. Round 2's readers come first (about 1.3 million); the comparers and fixers (about
+  1.2 million) follow in the same window only if it then stands under about 5.5 million.
+- **D24. Build first, check less (the owner, 2026-11-22 10:00 UTC: the token use is unacceptable for
+  the pace; "premature optimization is the root of all evil"; the window stood at 65%).** Counted from
+  the transcripts, this session's agents had used 22.6 million tokens: about 1.2 million built
+  things (tasks 1b, 1c, 2 and the applied rulings), about 4 million wrote spec changes, and about 17
+  million reviewed, attacked and re-read (interface reviews 8.7, two-readers 6.1, the attack loops of
+  1a, 1b and 1c about 6.5). The lead's own turns cost 2.9 million more. From here:
+  1. The remaining deliverables (fixtures, skeletons, tooling, the requirement map) start at once, on
+     both tracks, each track in its own working copy.
+  2. A usage window holds about 9 million agent tokens (6.1 million stood at 65%). The lead plans to
+     about 85% of that, not to 6 million, and does not sit idle below it.
+  3. The attack loop keeps the plan's properties (someone else attacks; a finding is reproduced
+     before anyone acts; a failed agent is never a clean result; the loop reports whether it
+     converged, which means two dry rounds in a row), with one change: a round is dry when it brings
+     no high or medium finding. Low findings (robustness inside the documented use) are listed for
+     the lead, fixed only where the fix is a few lines, and do not start another round. Under this
+     rule task 1c's sixth round was dry (two lows, both fixed); one more dry round closes it.
+  4. The two-readers test stops after round 2 (see "Deviations from the plan").
+  5. The lead takes fewer turns and reads less: one integration per finished workflow.
+- **D25. The lead's own turns are a large part of a window (2026-11-22 12:25 UTC).** The third
+  window was hit at about 11:22 UTC with the agents at 8.2 million tokens: 6.1 million had stood at
+  65% at 10:00, and the last 35% went to 2.1 million agent tokens and some ninety turns of the lead,
+  each of which re-reads a long conversation. One small fixer was cut. From here: at most 7 million
+  agent tokens a window, counted by the workflows' own reports where they are higher than
+  `tools/tokens.py`; one integration per finished workflow; a tally scheduled mid-window; and a
+  loop is stopped at an agent boundary (a background watcher on the journal, then `TaskStop`)
+  rather than left to run into the limit. An implementer costs 0.15 to 0.55 million tokens; an
+  attack round with its fix about 0.4 to 0.5 million, and the tooling loop alone took 2.9 million.
+- **D21. The spec resolutions are kept in the repository** (`docs/sync/status/foundation/resolutions/`):
+  nine files with 232 exact changes and the lead's rulings on them are eighteen agent runs of work
+  and existed only in the session's scratch space.
+
 ## Rulings for the specs
 
 SYNC.md leaves these open and more than one spec touches each, so the lead fixed them before the
@@ -274,11 +381,14 @@ Rulings on what the engine draft raised (2026-11-21):
 - **S15, settled. The Skip floor is `F(s) = max(purge_seq, s − 16,384)`.** A Skip at seq `s` may
   target only an entry at or above that floor, on every device alike, and compaction keeps the newest
   16,384 seqs, so the target frame is always fetchable. `seal.md` §13.6 takes the precondition.
-- **S24. A reinstating entry carries the roots the reinstated device missed.** The recovery identity
-  holds a wrap of every epoch root, so when it reinstates a device it wraps to that device every root
-  from the revocation to the reinstating entry. The device can then read and apply what was sealed
-  while it was out, and need not pair again (SYNC.md §5.5: the recovery key overrules a hostile
-  revocation).
+- **S24, reworded after the reviews (lead ruling L1). The recovery-signed `reinstate` operation
+  carries the roots the reinstated device missed.** They cannot travel inside the reinstating entry:
+  that entry is sealed under an epoch the revoked device does not hold. The recovery identity holds
+  a wrap of every epoch root, so it wraps to the device every root from the epoch its revocation set
+  up to the epoch the reinstating entry is sealed under (at most 256); the relay keeps them for that
+  device and returns them at its next login; the device checks each against the commitments in the
+  log, oldest first. It can then read and apply what was sealed while it was out, and need not pair
+  again (SYNC.md §5.5: the recovery key overrules a hostile revocation).
 - **S25. Snapshots keep SYNC.md §4.7's two triggers:** the newest acknowledged snapshot is a week old
   by the log clock, or 1,000 entries behind the head. To keep an import from producing a burst, a
   device writes at most one snapshot per 24 hours of log clock. (The draft had dropped the entry
@@ -328,14 +438,36 @@ Rulings on what the bridge draft raised (2026-11-21):
 - The page's caches go in `android`, as SYNC_PLAN.md §6.10 says, so the first frame waits for one
   bridge round trip; the cold-start budget checks that. The minimum WebView version (120) and bundled
   roots on API 26 to 33 are the spec's defaults for `android-shell` to confirm (§6.6 task 7).
+- **S32. `taskdeck-android` has a default backend** (2026-11-22, found while writing the skeleton brief).
+  bridge.md §11 makes a build with neither `backend-echo` nor `backend-device` a `compile_error!`. Then
+  no workspace-wide cargo command works without feature arguments, and the CI contract of
+  `scripts/ci/stage.sh` (`cargo test -p <package>`) fails for that crate. Ruling: the crate declares
+  `default = ["backend-device"]`; both or neither stays a `compile_error!`; the echo flavour builds
+  with `--no-default-features --features backend-echo`. A build that forgets its flags gets the real
+  backend, never the echo one. bridge.md is changed to match in the next spec pass (follow-up 9).
 
 ## Deviations from the plan
 
-- **`foundation` edits three files under `src/`**, which SYNC_PLAN.md §4 gives to `desktop`:
-  `src/main.rs`, `src/server_main.rs` and a small new module for the panic hook (D11). Without it
-  the plan's own `panic = "unwind"` would break "every merge keeps today's app working" for the
-  server. Nothing else in `src/` is touched. `desktop` should note it in its status file when it
-  starts.
+- **`foundation` touches four files under `src/`**, which SYNC_PLAN.md §4 gives to `desktop`:
+  `src/main.rs`, `src/server_main.rs`, the new module `src/panic_abort.rs` for the panic hook, and
+  one line in `src/lib.rs` that declares it (D11). Without the hook the plan's own
+  `panic = "unwind"` would break "every merge keeps today's app working" for the server. Nothing
+  else in `src/` is touched. `desktop` should note it in its status file when it starts.
+- **More crates moved in the lockfile than the plan's four** (SYNC_PLAN.md §6.1 item 1 names
+  `rustls`, `rustls-webpki`, `webpki-roots` and `tokio` only). The supply-chain gate the same item
+  asks for could not pass otherwise: crossbeam-epoch, rustix, webbrowser, clipboard-win,
+  wayland-scanner with quick-xml, quinn-proto, quinn-udp and chacha20 each moved for an advisory or
+  a yanked version, each by a targeted `cargo update -p --precise` (D19). egui, wgpu and winit did
+  not move. Three advisories are ignored with dated reasons instead (`deny.toml`).
+- **The two-readers test ran two rounds, not "two rounds with no difference, or four" (SYNC_PLAN.md
+  §6.1).** Round 1 found 40 differences that needed a spec change and round 2 found 12, all about
+  behaviour the specs had left open; in both rounds the readers agreed on every byte layout,
+  counter, seq and chain value. Rounds 3 and 4 would have cost about 4 million tokens for a
+  shrinking yield. The lead stopped the test after the owner's message of 2026-11-22 10:00 UTC
+  about token use (D24); the owner can overrule. What two more rounds would have found is not
+  known: `spec/CHANGES.md` says so, and a stage that meets a behaviour the specs leave open raises
+  a spec change as §3.3 says.
+
 
 ## Measurements
 
@@ -349,6 +481,29 @@ Rulings on what the bridge draft raised (2026-11-21):
 | A full pull-request CI run | about 13 minutes | every run of the first session |
 | The six spec drafts | 11,635 lines, 852 clauses (seal 155, core 93, relay 166, engine 182, device 146, bridge 110) | `docs/sync/spec/` |
 | Agent runs in the first session | about 110 finished, of them 13 attack rounds on task 1a | workflow journals |
+| Task 1a's gate in the second session's container, run by the lead | both check scripts pass, the server builds, 265 tests passed and 1 ignored in 157 s; a cold build of the test binary took 7 min 34 s | `target/lead`, 2026-11-21 21:36 UTC |
+| A pairwise interface review | about 11 minutes; the first returned 16 findings (3 high, 6 medium, 7 low) and 17 points found sound | spec track, seal with relay |
+| Spec workflow 1 (nine reviews, nine resolvers) | 18 agents, 5.9 million tokens, 2 h 19 min; a resolver took about 10 minutes and wrote 30 to 60 KB | 2026-11-21 21:28 to 2026-11-22 00:00 UTC |
+| Code workflow 1 (task 1b, task 1a's loop of six rounds, task 1c) | 28 agents, 3.0 million tokens, 2 h 41 min | 2026-11-21 21:38 to 2026-11-22 00:20 UTC |
+| Spec workflow 2 (rulings as text, ten fixer runs, six checks, two fix-ups) | 19 agents, 2.7 million tokens, 54 minutes: about 140,000 tokens an agent against 330,000 in workflow 1, with short reading lists and medium effort (D20) | 2026-11-22 04:23 to 05:17 UTC |
+| Code workflow 2 (rulings for 1b and 1c, six attack rounds on 1b, five on 1c) | 23 agents finished, 2 cut by the usage limit; 2.9 million tokens; about 125,000 tokens an agent | 2026-11-22 04:23 to 06:27 UTC |
+| Two-readers round 1, first part (follow-ups resolver, five readers) | 6 agents, 2.6 million tokens: about 440,000 a reader | 2026-11-22 05:21 to about 06:45 UTC |
+| Two-readers round 1, second part (one reader, three comparers, six fixers) | 10 agents, 1.7 million tokens; the whole round: 16 agents, 4.4 million tokens | 2026-11-22 07:22 to 08:05 UTC |
+| Two-readers round 2 (two readers for all six scenarios, three comparers, six fixers) | 11 agents, 2.0 million tokens (readers 1.06 million, the rest 0.90 million), 38 minutes of agent time; round 1 took 4.4 million | 2026-11-22 08:15 to 08:55 UTC |
+| Code workflow 3 (ruling 11, two attack rounds on 1b, six on 1c with six fixes, the workspace implementation) | 16 agents, 2.4 million tokens, 1 h 44 min; the workspace implementer alone 270,000 | 2026-11-22 07:22 to 09:06 UTC |
+| The third usage window (07:20 to 12:20 UTC) | about 6.4 million agent tokens: two-readers round 1's second part 1.7, round 2 2.0, code workflow 3 2.4, and the lead's own turns; no cut | D22, D23 |
+| A pull-request CI run with the seven workspace crates | 19.5 minutes (13 before): the stage jobs build the device crate's TLS stack on three systems without a cache | run 124 on `08dfc65` |
+| Builders after D24 (follow-ups pass, fixtures, workspace fix-up, core skeleton) | 0.59, 0.31, 0.27 (two agents) million tokens: an implementer costs 0.15 to 0.3 million, a tenth of an attack loop | 2026-11-22 10:05 to 10:30 UTC |
+| The skeletons (task 4): workspace fixes, five implementer steps, the fake sealer | 1.21 million tokens in all (0.27, 0.39, 0.55), about 1 h 15 min of agent time | 2026-11-22 10:15 to 13:09 UTC |
+| The spec pass for what the skeletons found (one resolver, five fixers, one agent for the crates) | 7 agents, 0.84 million tokens, 15 minutes | 2026-11-22 13:14 to 13:30 UTC |
+| The third usage window | hit its limit at about 11:22 UTC with the agents at 8.2 million tokens (6.1 at 10:00, when the meter stood at 65%); one small fixer was cut. A window holds about 8 million agent tokens together with the lead's own turns | D24 |
+| The requirement map (two mappers, one checker) and the spec pass for its nine gaps | 0.66 and 0.57 million tokens, 17 and 9 minutes | 2026-11-22 13:32 to 14:01 UTC |
+| The fourth usage window (12:20 to 17:20 UTC), agents | about 6.5 million tokens: the last skeletons 0.55, the spec pass for the skeletons 0.84, the requirement map 0.66, its spec pass 0.57, the skeleton loop (three rounds) 0.80, the tooling loop (six rounds) and one fixtures round 3.1 | D25 |
+| CI with everything in (run 156, `8347c33`) | green in 19 minutes on Windows, macOS and Linux; the android job compiled the crates for the three Android targets with the runner's NDK | pull-request run |
+| The fifth usage window (17:20 to 22:20 UTC), agents | about 4.7 million tokens: the fixtures loop's rounds 2 to 5 0.91, the workspace and CI loops 1.35, the second tooling loop (six rounds) 1.69, the exit review 0.20, the third tooling loop (three rounds) 0.58 | D25 |
+| The second session in all | about 34 million agent tokens (input, cache writes and output) in five usage windows: specs' reviews and repairs about 17, attack loops about 13, builders (workspace, fixtures, tooling, skeletons, the map) about 3.5, the exit review 0.2; the lead's own turns on top | the workflows' reports |
+| CI at the exit | the pull-request run is green on Windows, macOS and Linux in about 20 minutes: desktop matrix, both emulators, supply chain, the foundation job with spec-lint and the fixture check, every stage job on three systems, the Android targets | the exit pull request |
+| The first real run of the new CI (pull request, every area) | 13 minutes; all stage jobs and the toolchain script work on Windows, macOS and Linux runners; `gate` is named `gate` only on the pull-request run and failed because two jobs failed; one real defect found: `scripts/check-build-date.sh` cannot see `build.rs` rerun when the workflow's `CARGO_TERM_COLOR: always` colours cargo's output (a lead finding for task 1c's loop) | run 44976738183 on `3d6ff82`, 2026-11-22 02:35 UTC |
 
 ## Facts found along the way
 
@@ -372,6 +527,13 @@ Rulings on what the bridge draft raised (2026-11-21):
   each fix grows the script. Name the mutations a check must catch before the loop starts.
 - A spec drafter cut off late leaves a nearly complete file; a finishing pass that runs the closing
   checks is far cheaper than a redraft (this is how `relay.md` was completed).
+- A commit message that quotes the marker `[ci full]`, even inside a sentence, makes that push's run
+  wide. It happened on `bef6b87` (harmless: it gave the proof on three systems). Write "the full-CI
+  marker" in a message that only talks about it.
+- `cargo build --workspace` on Windows would write `taskdeck.pdb` (the Android library's name) and
+  `TaskDeck.pdb` (the root binary) into one directory. The default build is the root package alone,
+  and CI never builds both in one job.
+
 
 ## Open questions for the owner
 
@@ -390,7 +552,86 @@ Decisions the lead took that the owner may want to overrule:
 - A backup's file name carries a writer tag (S28).
 - `zeroize` stays at the lockfile's 1.9.0 until 1.9.2 (named by SYNC.md §5.1, published 2026-11-17)
   is seven days old, on 2026-11-24; then one `cargo update -p zeroize --precise 1.9.2`.
+- Eight more crates moved in the lockfile than the four the plan names, each for an advisory or a
+  yanked version, and `deny.toml` carries four more reviewed ignores than SYNC.md's one (D19).
+- cargo-deny is pinned at 0.20.2: the two newer releases were inside the seven-day rule on
+  2026-11-21. cargo-audit's release publishes no checksum, so its pinned hash is the download's.
+- From the spec reviews (lead rulings L1 to L19 in `resolutions/r1-lead.md`): a seeded relay may
+  hold more than SYNC.md §6.7's 30 days of tail, so that a Skip target stays fetchable (L2);
+  local-only mode refuses a folder over a cap of rules version 1 and names the ids (L15, next to
+  S18); a host never carries `:443` (L17); links slower than 64 KiB/s cannot upload a 1 MiB part
+  within the relay's deadline, which the rehearsal should measure (L19).
+- An attack round is now one agent covering three lenses instead of three agents (D20).
+- The two-readers test ran two rounds, not up to four (D24, "Deviations"). An attack round counts
+  as dry when it has no high or medium finding (D24).
+- `url` 2.5.8 has an advisory (RUSTSEC-2026-0592, a crash on a nested `blob:` URL that nothing in
+  the tree can reach). It is ignored with that reason until its fix, 2.5.9, is seven days old: from
+  2026-11-28, `cargo update -p url --precise 2.5.9` and remove the ignore from `deny.toml` and
+  `.cargo/audit.toml`.
+- `wrangler` is pinned at 4.166.0, the version the plan names, although it was a day old when
+  pinned; `scripts/dev-setup.sh` accepts the Android SDK licences for its own SDK directory.
+- `taskdeck-android` has a default backend (S32); `taskdeck-recover` depends on `taskdeck-device`.
+- The requirement map sends two things to the backlog that SYNC_PLAN.md §6.13 does not name: the
+  optional app lock on Android, and bringing in another board's items later. Where the specs differ
+  from SYNC.md in detail is listed in `requirement-map-notes.md`.
+- The specs fix the words of the lines that report a sync outcome (T11); `desktop` owns two of those
+  clauses.
+- Agents' shell slips left empty directories at the container's root (`/crates`, `/android`), outside
+  the repository; a safety check kept the lead from removing them. They go with the container.
 
 ## What the next stages need to know
 
-To be written at exit.
+- **Specs.** `docs/sync/spec/`: six specs, 955 clauses, with `README.md` for the conventions and the
+  requirement map (502 rows). They are the contract. The two-readers test ran two rounds of four,
+  so expect to meet a behaviour the specs leave open: raise a spec change (plan §3.3), do not
+  improvise. `scripts/spec-lint.sh` must stay green. `docs/sync/status/foundation/tools/clause-index.py`
+  (kept with this stage's papers, which stay in the repository) prints every clause in one file,
+  the cheap way to find the clause that states something.
+- **Skeletons.** Every crate has its spec's public surface; bodies are exactly `unimplemented!()`
+  (`grep -rn 'unimplemented!()' crates/<crate>` is your to-do list, and your gate wants zero). Each
+  skeleton root carries `#![allow(unused_variables)]`: remove it. Names and signatures come from
+  the spec's "Public API" section; change one only with the spec.
+- **`taskdeck-sync`, feature `sim`.** `ToyMachine` and `FakeSealer` are working code with tests, so
+  stage `engine` can build `Engine<ToyMachine, FakeSealer>` on day one. `engine` owns them now, and
+  publishes `engine-toy.json` and `engine-fake.json` (the tests hold the expected bytes as hex).
+  `FaultSet`, `OpSet` and `SimStats` are empty: name their fields through a spec change.
+- **Fixtures.** `fixtures/README.md` says what each board is for and lists today's quirks.
+  Boards and transcripts are written under Europe/Berlin and America/New_York. `legacy-main/` is
+  what the older `main` build writes, checked against that build; `legacy-other/` holds shapes it
+  reads but never writes. Test against the data, never against `src/`. `desktop` deletes the
+  generator with the old code; until then a change under `src/` runs `scripts/check-fixtures.sh`.
+- **Gates and tools.** `bash scripts/gate.sh <stage>` runs your gate from
+  `scripts/gates/<stage>.gate` and lists what only CI checks; `scripts/gates/README.md` names the
+  test targets your gate expects. `bash scripts/spec-coverage.sh <stage>` wants every clause you
+  own cited by a test (`spec: <ID>` in a comment of a test file, or the id in a test's name).
+  `bash scripts/dev-setup.sh <stage>` installs your tools.
+- **CI.** `scripts/ci/README.md`: which path marks which area; a stage adds checks in
+  `<its directory>/ci.sh`, not in the workflow. The required check is `gate`. A push to a pull
+  request cancels its running CI. A commit message that quotes the full-CI marker makes that
+  push's run wide.
+- **Dependencies.** Everything is declared in the root `[workspace.dependencies]`; add one only as
+  plan §3.2 says. `scripts/supply-chain.sh` must pass: a new crate version must be seven days old
+  (`scripts/cooldown-exemptions.txt` for a dated exception). seal does not depend on core. A fuzz
+  crate under `crates/<crate>/fuzz` carries its own `[workspace]` table, and then its lockfile is
+  outside the supply-chain gate: say in your status file how you cover it.
+- **Clippy.** Workspace-wide: `cargo clippy --workspace --exclude task_deck --exclude
+  taskdeck-fixtures --all-targets -- -D warnings`; the generator pulls in today's root package,
+  which is not clippy-clean.
+- **Left open for a stage.** Whether `MoveReport` should carry the seed's first seq, and whether
+  the shared picture is uploaded again after a relay move (T21): `engine` and `device`. The words
+  for a calendar or forecast that could not be refreshed (T19): `desktop` and `android`.
+- **Files at the root that the plan's ownership table does not name** (`rust-toolchain.toml`,
+  `deny.toml`, `.cargo/audit.toml`, `crates/panic-probe/`, `fixtures/.gitattributes`) stay
+  foundation's and follow the shared-file rule of plan §3.2: a small pull request of their own,
+  noted in both status files.
+- **Fuzz targets.** Nothing installs cargo-fuzz and the pinned toolchain is stable. A wave-1 stage
+  with fuzz targets makes them compile on the pinned toolchain in its `ci.sh`; running them is
+  stage `release`'s nightly job, which adds the tool to `scripts/dev-setup.sh`.
+- **`crates/taskdeck-android`.** Stage `android-shell` fills everything but
+  `src/device_backend.rs`, which holds the `backend-device` items and is stage `android`'s; the
+  gate's scan for unimplemented bodies leaves that file out for `android-shell`.
+- **spec-coverage** counts a clause as covered when its id stands in a file under your stage's test
+  paths (`bash scripts/spec-coverage.sh --paths`). It does not judge whether that test runs.
+- **In a cloud container you are root.** Never give `/dev/null` as an output file to a compiler or
+  linker, and never run `git config --global` with `GIT_CONFIG_GLOBAL=/dev/null`: both replace the
+  device with a file, and everything that reads it then misbehaves.
