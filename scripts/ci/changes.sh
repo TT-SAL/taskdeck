@@ -54,10 +54,13 @@ everything() {
 
 mark() { ON[$1]=true; HIT=1; }
 
-# Paths that set every area true, because every job reads them.
+# Paths that set every area true, because every job reads them. Under .cargo/,
+# only audit.toml is the supply area's alone: any other file there (a
+# .cargo/config.toml) changes every build.
 is_shared() {
     case "$1" in
-        Cargo.lock | Cargo.toml | rust-toolchain.toml | .github/workflows/* | scripts/ci/*) return 0 ;;
+        .cargo/audit.toml) return 1 ;;
+        Cargo.lock | Cargo.toml | rust-toolchain.toml | .github/workflows/* | scripts/ci/* | .cargo/*) return 0 ;;
     esac
     return 1
 }
@@ -66,6 +69,7 @@ is_shared() {
 is_no_ci() {
     case "$1" in
         docs/sync/status/* | docs/sync/research/* | docs/sync/runbooks/*) return 0 ;;
+        deploy/*) return 0 ;;     # today's server's install script and unit file; no job reads them
         LICENSE | .gitignore) return 0 ;;
         */*) return 1 ;;          # below: files at the repository root only
         *.md | *.png) return 0 ;;
@@ -88,7 +92,7 @@ classify() {
             | fonts/* | images/* | weather_svgs_2/*) mark root ;;
     esac
     case "$p" in
-        Cargo.lock | Cargo.toml | */Cargo.toml | deny.toml | .cargo/* \
+        Cargo.lock | Cargo.toml | */Cargo.toml | deny.toml | .cargo/audit.toml \
             | scripts/dev-setup.sh | scripts/supply-chain.sh | scripts/cooldown*) mark supply ;;
     esac
     case "$p" in

@@ -1,19 +1,48 @@
 # cargo-audit configuration (SYNC.md §8 "Supply chain"; R4 §4.2). Read by
 # cargo-audit 0.23.0, the version scripts/dev-setup.sh pins, when run from the
-# repository root (scripts/supply-chain.sh does). It keeps the same single
-# reviewed ignore as deny.toml.
+# repository root (scripts/supply-chain.sh does). It keeps the same reviewed
+# ignores as deny.toml (cargo-audit takes ids only, so each reason lives in the
+# comment above its id).
 
 [advisories]
-# RUSTSEC-2026-0543: chrono is unmaintained. Reviewed: the design keeps chrono
-# for now and plans a move to jiff later (SYNC.md sections 8 and 11). The notice
-# is informational, not a vulnerability. Remove this ignore when chrono leaves
-# the tree. (cargo-audit takes ids only, so the reason lives in this comment.)
-ignore = ["RUSTSEC-2026-0543"]
+ignore = [
+    # RUSTSEC-2026-0543: chrono is unmaintained. Reviewed: the design keeps
+    # chrono for now and plans a move to jiff later (SYNC.md sections 8 and 11).
+    # The notice is informational, not a vulnerability. Remove this ignore when
+    # chrono leaves the tree.
+    "RUSTSEC-2026-0543",
+    # The four below have no fixed release (the lead's rulings for task
+    # baseline-1b, ruling 2).
+    # RUSTSEC-2024-0436: paste is unmaintained. Reviewed: a build-time macro
+    # under rav1e, which the image crate's avif feature pulls in; no runtime
+    # code. Stage desktop removes the AVIF encoder with the phone server
+    # (SYNC.md section 2.1); remove this ignore then.
+    "RUSTSEC-2024-0436",
+    # RUSTSEC-2024-0370: proc-macro-error is unmaintained. Reviewed: used only by
+    # structopt, the command-line helper that kmeans_colors enables by default;
+    # the app never calls it. Stage desktop turns that default feature off when
+    # it reworks the root package's dependencies; remove this ignore then.
+    "RUSTSEC-2024-0370",
+    # RUSTSEC-2022-0104: structopt is unmaintained. Reviewed: the command-line
+    # helper that kmeans_colors enables by default; the app never calls it.
+    # Stage desktop turns that default feature off when it reworks the root
+    # package's dependencies; remove this ignore then.
+    "RUSTSEC-2022-0104",
+    # RUSTSEC-2026-0192: ttf-parser is unmaintained. Reviewed: used for Wayland
+    # title-bar fonts on the Linux desktop only, read from local font files,
+    # under the pinned winit. Remove this ignore when the pinned winit no
+    # longer pulls it in.
+    "RUSTSEC-2026-0192",
+]
+# Report unmaintained, unsound and notice advisories (a notice is printed but,
+# see [output], does not fail the run).
 informational_warnings = ["unmaintained", "unsound", "notice"]
 
 [output]
-# Unmaintained, unsound and yanked crates fail the run, not only vulnerabilities.
-deny = ["warnings"]
+# Vulnerabilities fail the run, and so do unmaintained, unsound and yanked
+# crates; a notice does not (the lead's rulings for task baseline-1b, ruling 4),
+# so cargo-audit and cargo-deny agree.
+deny = ["unmaintained", "unsound", "yanked"]
 quiet = false
 show_tree = true
 

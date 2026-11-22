@@ -40,7 +40,8 @@ paths() {
 
 echo "-- shared files set every area"
 for p in Cargo.lock Cargo.toml rust-toolchain.toml .github/workflows/ci.yml \
-    .github/workflows/release.yml scripts/ci/changes.sh scripts/ci/README.md; do
+    .github/workflows/release.yml scripts/ci/changes.sh scripts/ci/README.md \
+    .cargo/config.toml .cargo/config .cargo/other/x.toml; do
     paths "shared: $p" "$ALL" "$p"
 done
 
@@ -86,21 +87,22 @@ paths "android: the forked page" "android" android/page/index.html
 echo "-- paths that need no CI"
 for p in docs/sync/status/foundation.md docs/sync/status/foundation/briefs/ci.md \
     docs/sync/research/R1.md docs/sync/runbooks/restore.md README.md SYNC.md SYNC_PLAN.md \
-    LICENSE taskdeck_example_main.png .gitignore; do
+    LICENSE taskdeck_example_main.png .gitignore deploy/install.sh deploy/taskdeck-server.service \
+    deploy/NOTES.md; do
     paths "no CI: $p" "none" "$p"
 done
 paths "docs-only change: nothing but changes and gate" "none" \
-    README.md docs/sync/status/foundation.md docs/sync/research/R4.md LICENSE .gitignore
+    README.md docs/sync/status/foundation.md docs/sync/research/R4.md LICENSE .gitignore deploy/install.sh
 paths "no changed path at all" "none"
 
 echo "-- unknown paths are fail safe"
-for p in deploy/install.sh .github/dependabot.yml docs/README.md docs/sync/other.md \
-    LICENSE.txt Makefile src.rs tests/other/x.rs scripts; do
+for p in .github/dependabot.yml docs/README.md docs/sync/other.md \
+    LICENSE.txt Makefile src.rs tests/other/x.rs scripts deploy .cargo deployment/x.sh; do
     paths "unknown: $p" "$ALL" "$p"
 done
-paths "a nested .md is not a root .md" "$ALL" deploy/NOTES.md
+paths "a nested .md is not a root .md" "$ALL" tests/NOTES.md
 paths "a nested .png is not a root .png" "$ALL" docs/shot.png
-paths "docs plus one unknown path" "$ALL" README.md docs/sync/status/x.md deploy/install.sh
+paths "docs plus one unknown path" "$ALL" README.md docs/sync/status/x.md deploy/install.sh Makefile
 paths "mixed areas add up" "root relay" README.md src/ui.rs relay/x.js
 paths "a CRLF line still matches" "root" $'src/ui.rs\r'
 

@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # The supply-chain gate (SYNC.md §8 "Supply chain"; R4 §4.2).
 #
-#   bash scripts/supply-chain.sh
+#   bash scripts/supply-chain.sh [--base <rev>]
 #
 # Runs, in order and always all three:
 #   1. cargo deny check advisories bans sources   (deny.toml)
 #   2. cargo audit                                 (.cargo/audit.toml)
-#   3. the seven-day cooldown against its default base (scripts/cooldown.sh)
-# and exits non-zero if any of them failed. cargo-deny and cargo-audit must be
+#   3. the seven-day cooldown (scripts/cooldown.sh), against <rev> when --base
+#      is given (passed through as `cooldown.sh --base <rev>`), otherwise
+#      against the cooldown's default base
+# and exits non-zero if any of them failed (2, before running anything, on an
+# unknown argument; --base is the only option). cargo-deny and cargo-audit must be
 # the versions scripts/dev-setup.sh pins, installed by it; the script runs
 # those binaries from the directory dev-setup installs into.
 set -uo pipefail
@@ -15,6 +18,22 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(dirname "$here")"
 cd "$root" || exit 2
 TOOLS_DIR="${TASKDECK_TOOLS_DIR:-${CARGO_HOME:-$HOME/.cargo}/bin}"
+
+usage() { echo "usage: bash scripts/supply-chain.sh [--base <rev>]" >&2; exit 2; }
+cooldown_args=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --base)
+            [[ $# -ge 2 && -n "$2" && ${#cooldown_args[@]} -eq 0 ]] || usage
+            cooldown_args=(--base "$2")
+            shift 2
+            ;;
+        *)
+            echo "supply-chain: unknown argument: $1" >&2
+            usage
+            ;;
+    esac
+done
 
 failed=()
 banner() { printf '\n==== supply-chain: %s ====\n' "$1"; }
@@ -55,8 +74,12 @@ else
     failed+=("cargo audit (not installed)")
 fi
 
-banner "3/3 cooldown (7 days, new packages since the base)"
-if bash "$here/cooldown.sh"; then
+if [[ ${#cooldown_args[@]} -gt 0 ]]; then
+    banner "3/3 cooldown (7 days, new packages since ${cooldown_args[1]})"
+else
+    banner "3/3 cooldown (7 days, new packages since the default base)"
+fi
+if bash "$here/cooldown.sh" ${cooldown_args[@]+"${cooldown_args[@]}"}; then
     echo "supply-chain: cooldown: passed"
 else
     echo "supply-chain: cooldown: FAILED"

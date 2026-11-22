@@ -9,7 +9,7 @@ a container (`bash scripts/tests/run.sh`, the `test-ci-*.sh` files).
 | `changes.sh` | `changes` | Decides from the event and the changed paths which areas need CI; writes `root`, `supply`, `foundation`, `core`, `seal`, `engine`, `device`, `recovery`, `relay`, `android` (`true`/`false`), `wide` and `oses` |
 | `toolchain.sh` | every job that runs cargo | Installs exactly the toolchain `rust-toolchain.toml` pins (profile, components, targets) by name, never `rustup default` or `rustup update`; fails unless `rustc --version` reports the pinned channel |
 | `stage.sh <stage>` | `core`, `seal`, `engine`, `device`, `recovery`, `relay`, `android` | Tests and lints the stage's crates and runs the stage's own `ci.sh` hooks (below) |
-| `supply-chain.sh` | `supply-chain` | Runs `scripts/supply-chain.sh`, and the cooldown against the pull request's base or the push's `before` when that is not already the default base |
+| `supply-chain.sh` | `supply-chain` | Runs `scripts/supply-chain.sh` once: with `--base` set to the pull request's base or the push's `before` when that commit is in the clone, without it (the cooldown's default base) otherwise |
 | `gate.sh` | `gate` | Prints every job's result; fails if `changes` did not succeed or any job failed or was cancelled; skipped passes |
 
 ## When jobs run
@@ -27,9 +27,9 @@ is true.
 
 | Area | Paths |
 |---|---|
-| every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, and any path no rule here knows |
+| every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, `.cargo/**` except `.cargo/audit.toml` (a `.cargo/config.toml` changes every build), and any path no rule here knows |
 | `root` | `src/**`, `build.rs`, `resources.rc`, `icon.ico`, `icon.png`, `noback.png`, `1920px-Blue_Marble_2002.png`, `fonts/**`, `images/**`, `weather_svgs_2/**` |
-| `supply` | `Cargo.lock`, any `Cargo.toml`, `deny.toml`, `.cargo/**`, `scripts/dev-setup.sh`, `scripts/supply-chain.sh`, `scripts/cooldown*` |
+| `supply` | `Cargo.lock`, any `Cargo.toml`, `deny.toml`, `.cargo/audit.toml`, `scripts/dev-setup.sh`, `scripts/supply-chain.sh`, `scripts/cooldown*` |
 | `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**` |
 | `core` | `crates/taskdeck-core/**`, `fixtures/**` |
 | `seal` | `crates/taskdeck-seal/**`, `docs/sync/vectors/**` |
@@ -38,7 +38,7 @@ is true.
 | `device` | `crates/taskdeck-device/**`, `tests/e2e/**`; and whenever `core`, `seal` or `engine` is true |
 | `recovery` | `crates/taskdeck-backup/**`, `crates/taskdeck-recover/**`; and whenever `core` or `seal` is true |
 | `android` | `android/**`, `crates/taskdeck-android/**`; and whenever `device` is true |
-| none | `docs/sync/status/**`, `docs/sync/research/**`, `docs/sync/runbooks/**`, `*.md`, `*.png` and `LICENSE` at the root, `.gitignore` (unless a rule above matched first: `icon.png` is `root`) |
+| none | `docs/sync/status/**`, `docs/sync/research/**`, `docs/sync/runbooks/**`, `deploy/**` (today's server's install script and unit file), `*.md`, `*.png` and `LICENSE` at the root, `.gitignore` (unless a rule above matched first: `icon.png` is `root`) |
 
 The `root` list is what the root package compiles or embeds (`include_bytes!`,
 `include_str!`, `egui::include_image!`, `resources.rc`), plus `images/`, which

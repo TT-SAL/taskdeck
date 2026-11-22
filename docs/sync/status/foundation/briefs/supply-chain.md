@@ -71,3 +71,9 @@ other entry stay where they are.
    it otherwise, instead of running the cooldown a second time; its test follows. This ruling lets the
    agent that applies it change `scripts/ci/supply-chain.sh` and `scripts/tests/test-ci-supply-chain.sh`
    for exactly that.
+
+## State after the rulings (2026-11-22)
+
+Rulings 1 to 5 and 7 are applied and committed; ruling 6's checks were run by the lead in the main checkout and
+pass. `scripts/tests/test-supply-chain.sh` (the `--base` option) joined the tests. `scripts/tests/lib.sh` and
+`scripts/cooldown.py` stay mode 644: one is only sourced, the other is run through `python3 -I`.

@@ -21,12 +21,19 @@ yanked = "deny"
 unused-ignored-advisory = "deny"
 ignore = [
     { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained. Reviewed: the design keeps chrono for now and plans a move to jiff later (SYNC.md sections 8 and 11). The notice is informational, not a vulnerability. Remove this ignore when chrono leaves the tree." },
+    # The four below have no fixed release (the lead's rulings for task baseline-1b, ruling 2).
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained. Reviewed: a build-time macro under rav1e, which the image crate's avif feature pulls in; no runtime code. Stage desktop removes the AVIF encoder with the phone server (SYNC.md section 2.1); remove this ignore then." },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained. Reviewed: used only by structopt, the command-line helper that kmeans_colors enables by default; the app never calls it. Stage desktop turns that default feature off when it reworks the root package's dependencies; remove this ignore then." },
+    { id = "RUSTSEC-2022-0104", reason = "structopt is unmaintained. Reviewed: the command-line helper that kmeans_colors enables by default; the app never calls it. Stage desktop turns that default feature off when it reworks the root package's dependencies; remove this ignore then." },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained. Reviewed: used for Wayland title-bar fonts on the Linux desktop only, read from local font files, under the pinned winit. Remove this ignore when the pinned winit no longer pulls it in." },
 ]
 
 [bans]
-# Duplicate versions in general are only reported; the egui, wgpu and winit
-# tree carries several and is pinned on purpose.
-multiple-versions = "warn"
+# Duplicate versions in general are allowed, not reported: the pinned egui,
+# wgpu and winit tree carries dozens, and their warnings buried the errors
+# (the lead's rulings for task baseline-1b, ruling 3). The per-crate
+# deny-multiple-versions entries below still fail.
+multiple-versions = "allow"
 multiple-versions-include-dev = true
 wildcards = "allow"
 # One RustCrypto generation (SYNC.md §5.1): two versions of any crate below in
