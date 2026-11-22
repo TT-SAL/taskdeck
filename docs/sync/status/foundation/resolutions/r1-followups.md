@@ -9,3 +9,12 @@ round, or a small fix pass before it) writes them.
 2. **engine.md: `TruncateLogBelow` now takes `(seq, floor_chain)`** (R1-DEVICE-ENGINE-11), but several places
    still write the one-argument form: §28.2 "On every device" step 2, §19.7 step 4, the D8 row, and possibly
    others. Every use must give both arguments.
+3. **device.md: the order of `history.tdk` and `bootstrap.tdk` when a device joins.** §15.7 (as R1-SEAL-RELAY-28
+   wrote it) says the store writes `history.tdk` from the bootstrap snapshot before it persists the bootstrap;
+   the list "Persisting the join" in §18.3 still names `bootstrap.tdk` first. One order must hold in both.
+4. **relay.md: references to seal clauses whose relay duty moved.** SEAL-MEM-004 lost its relay owner and
+   SEAL-PAIR-001's relay part moved to SEAL-PAIR-015 (R1-SEAL-RELAY-5 and -13). Any relay.md text that still
+   cites the old ids as relay duties must cite what now states the duty.
+5. Settled by the lead, no change needed: DEV-CREATE-005 stands at the end of device.md §18.1 (the change named
+   the section and a clause of another section); the sentence R1-SEAL-DEVICE-14 added to seal.md §20.2 stands
+   after the exception it builds on.
