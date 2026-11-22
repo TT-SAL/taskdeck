@@ -84,7 +84,7 @@ if (args.followups) {
   const file = `${TR}/followups.md`
   const r = await safe(() => agent(`You write exact spec changes for a few small follow-ups of the TaskDeck sync specs (${SPECS}/: seal.md, core.md, relay.md, engine.md, device.md, bridge.md). You change no spec and run no git command that changes state.
 The follow-ups: ${args.followups}
-They are listed in ${MAIN}/docs/sync/status/foundation/resolutions/r1-followups.md (read that file). The lead's rulings they refer to are in ${MAIN}/docs/sync/status/foundation/resolutions/r1-lead.md (L-numbers), ${MAIN}/docs/sync/status/foundation/two-readers/r1/lead.md and r2/lead.md (T-numbers) and ${MAIN}/docs/sync/status/foundation.md (S-numbers: find the one named with Grep and read only that paragraph): read only the rulings named. Do not read any spec in full; find the places with Grep and read around them. ${BATCH}
+They are listed in ${args.followups_file || `${MAIN}/docs/sync/status/foundation/resolutions/r1-followups.md`} (read that file). The lead's rulings they refer to are in ${MAIN}/docs/sync/status/foundation/resolutions/r1-lead.md (L-numbers), ${MAIN}/docs/sync/status/foundation/two-readers/r1/lead.md and r2/lead.md (T-numbers) and ${MAIN}/docs/sync/status/foundation.md (S-numbers: find the one named with Grep and read only that paragraph): read only the rulings named. Do not read any spec in full; find the places with Grep and read around them. ${args.followups_extra || ''} ${BATCH}
 Write the changes to ${file} (create the directory). ${RESOLVER_RULES} Head each change "### TR${ROUND}-FOLLOW-<n> (<follow-up item>)". End with "## For the lead" (only what cannot be settled from the specs and rulings, with your recommendation and the conservative reading written as the change).
 Return the structured summary (changes_per_spec uses the bare names seal, core, relay, engine, device, bridge, README).`,
     { label: `resolve:followups:r${ROUND}`, phase: 'Follow-ups', model: 'opus', effort: 'high', schema: CHANGES }))
@@ -163,5 +163,24 @@ Return the structured report: applied (the change ids), not_applied (id and reas
   if (r === null) { out.failed = `specfix:${spec}`; return out }
   out.fixes[spec] = { files, applied: r.applied.length, not_applied: r.not_applied, questions: r.questions_for_lead, format_check: r.format_check }
   log(`${spec}: applied ${r.applied.length}, not applied ${r.not_applied.length}`)
+}
+if (args.sync_skeleton && changeFiles.length) {
+  phase('Spec fixes')
+  const SYNC = {
+    type: 'object',
+    properties: {
+      summary: { type: 'string' },
+      files_changed: { type: 'array', items: { type: 'string' } },
+      commands_run: { type: 'array', items: { type: 'object', properties: { cmd: { type: 'string' }, result: { type: 'string' } }, required: ['cmd', 'result'] } },
+      not_done: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['summary', 'files_changed', 'commands_run', 'not_done'],
+  }
+  const r = await safe(() => agent(`YOUR TASK: bring the skeleton crates of the TaskDeck sync build in line with spec changes that were just applied. You work in ${WORK}, a clone of the repository: change only files under ${WORK}/crates/ (and ${WORK}/Cargo.lock if a change adds a dependency edge between crates that are already in it: run cargo once without --locked for that, and check with "git diff Cargo.lock" that nothing else moved). ${MAIN} outside ${WORK} is read-only. Run no git command that changes state. Never give /dev/null as an output file to a compiler or linker, and never run "git config --global".
+The changes are in ${changeFiles.map(c => c.file).join(' , ')} (each headed "### TR..."); the specs in ${WORK}/docs/sync/spec/ already carry them. Read the change file in full. For each change that alters a public item (a name, a parameter, a type, a signature, a feature gate, a dependency) or the stated behaviour of the toy state machine or the fake sealer (crates/taskdeck-sync, feature sim), make the skeleton say the same: skeleton bodies stay exactly unimplemented!(); the toy and the fake are working code with tests, so change them and their tests together. A change that only writes into the spec what the skeleton already has needs nothing: say so. ${BATCH}
+Done means these pass in ${WORK}: cargo test --locked --workspace --exclude task_deck && cargo test --locked -p taskdeck-sync --features sim && cargo test --locked -p taskdeck-android --no-default-features --features backend-echo && cargo clippy --locked --workspace --exclude task_deck --exclude taskdeck-fixtures --all-targets -- -D warnings && cargo clippy --locked -p taskdeck-sync --features sim --all-targets -- -D warnings && cargo clippy --locked -p taskdeck-device --features test-trust --all-targets -- -D warnings && cargo clippy --locked -p taskdeck-android --no-default-features --features backend-echo --all-targets -- -D warnings && cargo check --locked -p taskdeck-core -p taskdeck-sync --target wasm32-unknown-unknown . Report each command and its result, per change what you did, and under not_done every change you could not carry into the skeleton, with the reason.`,
+    { label: `skeleton-sync:r${ROUND}`, phase: 'Spec fixes', model: 'opus', effort: 'high', schema: SYNC }))
+  if (r === null) { out.failed = 'skeleton-sync'; return out }
+  out.skeleton_sync = r
 }
 return out
