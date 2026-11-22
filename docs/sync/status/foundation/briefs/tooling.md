@@ -165,3 +165,21 @@ in the implementer's run; spec-lint fails on two real defects of core.md and on 
 ## Already raised and handled (do not re-report)
 
 (none yet)
+
+6. **The two scans guard against honest mistakes, and their list of spellings is closed (lead ruling,
+   2026-11-22 13:55 UTC).** Three attack rounds in a row found one more way to write a skipped test that
+   `no-skipped-tests` did not see. A developer who wants to hide a skipped test can always find a spelling;
+   review and the stage's own tests are the defence against that. From here a finding against
+   `no-skipped-tests` or `no-unimplemented` counts only when the ORDINARY form passes: Rust `#[ignore]`,
+   `#[ignore = "..."]`, `#[cfg_attr(..., ignore)]`, `#![ignore]`, `unimplemented!(`, `todo!(`; node:test
+   `it.skip(`, `test.skip(`, `describe.skip(`, `{ skip: true }` and `t.skip(`; JUnit `@Ignore`, `@Disabled`,
+   `assumeTrue(false)`. Any other spelling, split across lines or fully qualified, is not a finding. The
+   same holds for `spec-lint` and `spec-coverage`: a finding counts when a clause, a citation or a map row
+   written the way the README shows passes or fails wrongly, not for forms the README does not show.
+7. **The requirement map may name the plan's backlog.** SYNC_PLAN.md §6.13, "After cutover (backlog, not
+   planned here)", stands under "6. Stages"; a requirement the plan defers there maps to `stage: backlog`.
+   `spec-lint` accepts `backlog` as a stage name in the map (and nowhere else: no clause has that owner).
+8. **CI wiring comes in one change at the end** (the lead's, with the exit): the supply-chain job's "Pinned
+   tools" step goes, the foundation job runs `spec-lint`, and the android job gets the three-system matrix
+   on wide runs so that `taskdeck-android` compiles on Windows and macOS too. Until then these are not
+   findings.
