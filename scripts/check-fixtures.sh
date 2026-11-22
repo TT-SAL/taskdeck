@@ -21,28 +21,33 @@ if ! bash "$here/regen-fixtures.sh" "$tmp/fixtures"; then
 fi
 
 bad=0
-# Every committed file outside the generator crate and the README must be one
-# the generator writes, and every file it writes must be committed, unchanged.
+# Every committed entry outside the generator crate, the README and
+# .gitattributes must be a
+# regular file (not a symlink, even to identical bytes) that the generator
+# writes, and every file it writes must be committed, unchanged.
 while IFS= read -r -d '' file; do
     rel="${file#"$fixtures"/}"
     case "$rel" in
-        README.md|generator/*) continue ;;
+        README.md|.gitattributes|generator/*) continue ;;
     esac
-    if [[ ! -e "$tmp/fixtures/$rel" ]]; then
+    if [[ -L $file || ! -f $file ]]; then
+        echo "check-fixtures: fixtures/$rel is not a regular file (the generator writes only regular files)"
+        bad=1
+    elif [[ ! -e "$tmp/fixtures/$rel" ]]; then
         echo "check-fixtures: fixtures/$rel is not written by the generator"
         bad=1
     elif ! cmp -s "$file" "$tmp/fixtures/$rel"; then
         echo "check-fixtures: fixtures/$rel differs from what the generator writes"
         bad=1
     fi
-done < <(find "$fixtures" -path "$fixtures/generator" -prune -o -type f -print0 | sort -z)
+done < <(find "$fixtures" -path "$fixtures/generator" -prune -o ! -type d -print0 | sort -z)
 while IFS= read -r -d '' file; do
     rel="${file#"$tmp/fixtures"/}"
     if [[ ! -e "$fixtures/$rel" ]]; then
         echo "check-fixtures: fixtures/$rel is missing (the generator writes it)"
         bad=1
     fi
-done < <(find "$tmp/fixtures" -type f -print0 | sort -z)
+done < <(find "$tmp/fixtures" ! -type d -print0 | sort -z)
 
 if command -v sha256sum >/dev/null && [[ -f "$fixtures/MANIFEST.sha256" ]]; then
     if ! (cd "$fixtures" && sha256sum -c --quiet MANIFEST.sha256); then

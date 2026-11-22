@@ -17,8 +17,9 @@ a container (`bash scripts/tests/run.sh`, the `test-ci-*.sh` files).
 
 Pushes run only Linux jobs. Pull requests, and pushes whose head commit message
 contains `[ci full]` (in any case: `[CI full]` too, as the old workflow's `contains()` matched it), are *wide*: the desktop matrix and the emulator run, and
-the stage jobs `core`, `seal`, `engine`, `device` and `recovery` run on Ubuntu,
-Windows and macOS (`oses`). Within that, a job runs only when its area is true.
+the stage jobs `core`, `seal`, `engine`, `device`, `recovery` and `android` run
+on Ubuntu, Windows and macOS (`oses`; `relay` runs on Ubuntu only). Within that,
+a job runs only when its area is true.
 
 The changed paths are the pull request's changes against its base (the merge
 commit against its first parent), or a push's `before..after`. When that cannot
@@ -28,10 +29,10 @@ is true.
 
 | Area | Paths |
 |---|---|
-| every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, `.cargo/**` except `.cargo/audit.toml` (a `.cargo/config.toml` changes every build), `scripts/dev-setup.sh` (it installs the tools of the supply-chain job and of every stage's `ci.sh` hook), a file directly under `crates/` (such as `crates/clippy.toml`: clippy and rustfmt read their config from every parent of a crate), any path no rule here knows, and any path that holds a control character such as a newline (its name could otherwise inject a workflow command into the log) |
+| every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, `.cargo/**` except `.cargo/audit.toml` (a `.cargo/config.toml` changes every build), `scripts/dev-setup.sh` and `scripts/wrangler/**` (its pinned wrangler and lockfile; it installs the tools of the supply-chain job and of every stage's `ci.sh` hook), a file directly under `crates/` (such as `crates/clippy.toml`: clippy and rustfmt read their config from every parent of a crate), any path no rule here knows, and any path that holds a control character such as a newline (its name could otherwise inject a workflow command into the log) |
 | `root` | `src/**`, `build.rs`, `resources.rc`, `icon.ico`, `icon.png`, `noback.png`, `1920px-Blue_Marble_2002.png`, `fonts/**`, `images/**`, `weather_svgs_2/**`; `scripts/check-release-panic.sh` and `crates/panic-probe/**` (the desktop job runs that check on every OS) |
 | `supply` | `Cargo.lock`, any `Cargo.toml`, `deny.toml`, `.cargo/audit.toml`, `scripts/supply-chain.sh`, `scripts/cooldown*` |
-| `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**`, `build.rs` (checked by `scripts/check-build-date.sh`); and whenever `root` is true (the fixture generator, `fixtures/generator`, links the root package, and `scripts/check-fixtures.sh` compares the committed fixtures with what it writes) |
+| `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**`, `build.rs` (checked by `scripts/check-build-date.sh`), `SYNC.md` and `SYNC_PLAN.md` (`scripts/spec-lint.sh` checks the requirement map against their sections, stages and §2 rows); and whenever `root` is true (the fixture generator, `fixtures/generator`, links the root package, and `scripts/check-fixtures.sh` compares the committed fixtures with what it writes) |
 | `core` | `crates/taskdeck-core/**`, `fixtures/**` except `fixtures/generator/**` (the generator's code is `foundation`'s alone) |
 | `seal` | `crates/taskdeck-seal/**`, `docs/sync/vectors/**` |
 | `engine` | `crates/taskdeck-sync/**` |
@@ -39,7 +40,7 @@ is true.
 | `device` | `crates/taskdeck-device/**`, `tests/e2e/**`; and whenever `core`, `seal`, `engine`, `relay` or `recovery` is true (it links the backup crate, and its end-to-end tests run against the relay) |
 | `recovery` | `crates/taskdeck-backup/**`, `crates/taskdeck-recover/**`, `crates/taskdeck-device/**`, `crates/taskdeck-sync/**` (the tool's online steps link the device runtime, which links the engine); and whenever `core` or `seal` is true |
 | `android` | `android/**`, `crates/taskdeck-android/**`, `scripts/check-android-targets.sh` (the job's hook runs it); and whenever `device` is true |
-| none | `docs/sync/status/**`, `docs/sync/research/**`, `docs/sync/runbooks/**`, `deploy/**` (today's server's install script and unit file), `*.md`, `*.png` and `LICENSE` at the root, `.gitignore` (unless a rule above matched first: `icon.png` is `root`). The area rules ignore case, because a case variant (`ICON.png`) is the same file on Windows and macOS; the no-CI list does not, so `Deploy/x` means every area |
+| none | `docs/sync/status/**`, `docs/sync/research/**`, `docs/sync/runbooks/**`, `deploy/**` (today's server's install script and unit file), `*.md` (except `SYNC.md` and `SYNC_PLAN.md`, which spec lint reads), `*.png` and `LICENSE` at the root, `.gitignore` (unless a rule above matched first: `icon.png` is `root`). The area rules ignore case, because a case variant (`ICON.png`) is the same file on Windows and macOS; the no-CI list does not, so `Deploy/x` means every area |
 
 The `root` list is what the root package compiles or embeds (`include_bytes!`,
 `include_str!`, `egui::include_image!`, `resources.rc`), plus `images/`, which

@@ -166,7 +166,7 @@ for job in ("core", "seal", "engine", "device", "recovery", "relay", "android"):
     check(f"{job}: runs scripts/ci/stage.sh {job}",
           re.search(rf"^\s+run: bash scripts/ci/stage\.sh {job}$", body, re.M) is not None, "")
     check(f"{job}: passes CI_WIDE", "CI_WIDE: ${{ needs.changes.outputs.wide }}" in body, "")
-    if job in ("relay", "android"):
+    if job == "relay":
         check(f"{job}: Ubuntu only", key(job, "runs-on") == "ubuntu-latest", str(key(job, "runs-on")))
     else:
         check(f"{job}: a matrix over oses", "os: ${{ fromJSON(needs.changes.outputs.oses) }}" in body
@@ -178,6 +178,12 @@ fd = "\n".join(jobs["foundation"])
 for s in ("bash scripts/tests/run.sh", "bash scripts/check-release-panic.sh", "bash scripts/check-build-date.sh"):
     check(f"foundation: runs {s}", f"run: {s}" in fd, "")
 check("foundation: a marked place for later tasks", "LATER FOUNDATION TASKS" in fd, "")
+check("foundation: runs the spec lint", re.search(r"^        run: bash scripts/spec-lint\.sh$", fd, re.M) is not None, "")
+# The supply-chain job: the toolchain, then scripts/ci/supply-chain.sh, which
+# installs its own tools; nothing else that could fail it.
+sc_runs = [l.strip() for l in jobs["supply-chain"] if re.match(r"^\s+(- )?run: ", l)]
+check("supply-chain: only the toolchain and scripts/ci/supply-chain.sh",
+      sc_runs == ["run: bash scripts/ci/toolchain.sh", "run: bash scripts/ci/supply-chain.sh"], str(sc_runs))
 
 # The gate.
 g = jobs["gate"]
@@ -235,6 +241,9 @@ broken "the gate named gate on pushes" "s/'gate (push)'/'gate'/"
 broken "a stage job on the wrong area" "s/needs.changes.outputs.seal == 'true'/needs.changes.outputs.core == 'true'/"
 broken "a matrix that fails fast" '0,/fail-fast: false/s/fail-fast: false/fail-fast: true/'
 broken "no check of what the code reads" '/^        run: bash scripts\/ci\/reads.sh$/d'
+broken "an android job on Ubuntu only" '/^  android:$/,/^  gate:$/s/runs-on: \${{ matrix.os }}/runs-on: ubuntu-latest/'
+broken "no spec lint" '/^        run: bash scripts\/spec-lint.sh$/d'
+broken "an extra tools step in supply-chain" 's/^        run: bash scripts\/ci\/supply-chain.sh$/        run: bash scripts\/dev-setup.sh foundation \&\& bash scripts\/ci\/supply-chain.sh/'
 broken "a lost changes output" '/^      oses: \${{ steps.decide.outputs.oses }}$/d'
 
 finish

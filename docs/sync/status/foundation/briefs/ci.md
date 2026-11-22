@@ -243,3 +243,14 @@ Second loop (2026-11-22, six rounds, every finding fixed in the round that raise
     - In `scripts/ci/reads.sh`, a path dependency whose directory is the top of the tree is a dependency on
       the root package, and its files are the tracked files under `src/` plus `build.rs` and the root
       `Cargo.toml`, not every tracked file of the repository.
+
+15. **The last CI wiring (lead ruling, 2026-11-22; changes the design text above where they differ).** The
+    supply-chain job has no step of its own for tools: `scripts/ci/supply-chain.sh` installs the row
+    `supply-chain`. The foundation job runs `scripts/spec-lint.sh`. The android job runs on the three systems
+    on wide runs like the other stage jobs, so that `taskdeck-android` compiles on Windows and macOS; its
+    hooks decide by `CI_OS` what they do. `SYNC.md` and `SYNC_PLAN.md` mark the foundation area, because
+    spec-lint reads both; `scripts/wrangler/**` is a shared path like `scripts/dev-setup.sh`.
+
+Third loop (2026-11-22, three rounds, converged): round 1 confirmed the lead's three findings above and found
+the two path-rule gaps of ruling 15 (all fixed); round 2 found nothing; round 3 found one low (stage.sh reads
+a `name = "..."` line inside a multi-line string of `[package]` as the package name), left as it is.

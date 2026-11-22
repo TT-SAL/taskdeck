@@ -61,7 +61,8 @@ mark() { ON[$1]=true; HIT=1; }
 # Paths that set every area true, because every job reads them. Under .cargo/,
 # only audit.toml is the supply area's alone: any other file there (a
 # .cargo/config.toml) changes every build. scripts/dev-setup.sh installs the
-# tools of the supply-chain job and of every stage's ci.sh hook (stage.sh).
+# tools of the supply-chain job and of every stage's ci.sh hook (stage.sh), and
+# scripts/wrangler/ is its data (the pinned wrangler and its lockfile).
 # A file directly under crates/ (crates/clippy.toml) is read by tools from
 # every crate below it, whatever the crate's area.
 is_shared() {
@@ -69,7 +70,7 @@ is_shared() {
         .cargo/audit.toml | crates/*/*) return 1 ;;
         crates/*) return 0 ;;
         Cargo.lock | Cargo.toml | rust-toolchain.toml | .github/workflows/* | scripts/ci/* | .cargo/* \
-            | scripts/dev-setup.sh) return 0 ;;
+            | scripts/dev-setup.sh | scripts/wrangler/*) return 0 ;;
     esac
     return 1
 }
@@ -119,7 +120,9 @@ classify() {
     esac
     case "$p" in
         # build.rs too: the foundation job's check-build-date.sh checks it.
-        docs/sync/spec/* | fixtures/* | scripts/* | crates/* | build.rs) mark foundation ;;
+        # SYNC.md and SYNC_PLAN.md too: the foundation job's spec lint checks
+        # the requirement map against their sections, stages and §2 rows.
+        docs/sync/spec/* | fixtures/* | scripts/* | crates/* | build.rs | SYNC.md | SYNC_PLAN.md) mark foundation ;;
     esac
     # The generator's code is foundation's alone; the fixture data is core's.
     case "$p" in

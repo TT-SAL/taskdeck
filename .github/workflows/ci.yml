@@ -164,9 +164,8 @@ jobs:
       - name: Toolchain
         shell: bash
         run: bash scripts/ci/toolchain.sh
-      - name: Pinned tools
-        shell: bash
-        run: bash scripts/dev-setup.sh foundation
+      # scripts/ci/supply-chain.sh installs its pinned tools itself
+      # (`bash scripts/dev-setup.sh supply-chain`).
       - name: cargo deny, cargo audit, the seven-day cooldown
         shell: bash
         env:
@@ -198,6 +197,9 @@ jobs:
         shell: bash
         run: bash scripts/check-build-date.sh
       # ---- LATER FOUNDATION TASKS: add their steps here, below this line ----
+      - name: Spec lint
+        shell: bash
+        run: bash scripts/spec-lint.sh
       # Spec lint, the fixture check, and the Android and wasm32 skeleton
       # checks, each a `bash scripts/<name>.sh` step with `shell: bash`.
       # ---- end of the place for later foundation tasks ----
@@ -340,10 +342,14 @@ jobs:
         run: bash scripts/ci/stage.sh relay
 
   android:
-    name: Stage android
+    name: Stage android · ${{ matrix.os }}
     needs: changes
     if: needs.changes.outputs.android == 'true'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.oses) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

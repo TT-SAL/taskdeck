@@ -42,7 +42,7 @@ echo "-- shared files set every area"
 for p in Cargo.lock Cargo.toml rust-toolchain.toml .github/workflows/ci.yml \
     .github/workflows/release.yml scripts/ci/changes.sh scripts/ci/README.md \
     .cargo/config.toml .cargo/config .cargo/other/x.toml \
-    scripts/dev-setup.sh; do
+    scripts/dev-setup.sh scripts/wrangler/package.json scripts/wrangler/package-lock.json; do
     paths "shared: $p" "$ALL" "$p"
 done
 
@@ -69,6 +69,9 @@ paths "supply: scripts/cooldown-exemptions.txt" "supply foundation" scripts/cool
 
 echo "-- foundation"
 paths "foundation: a spec" "foundation" docs/sync/spec/core.md
+# The foundation job's spec lint checks the requirement map against both.
+paths "foundation: SYNC.md (spec lint reads it)" "foundation" SYNC.md
+paths "foundation: SYNC_PLAN.md (spec lint reads it)" "foundation" SYNC_PLAN.md
 paths "foundation: fixtures also mean core" "foundation core device recovery android" fixtures/boards/small.json
 paths "foundation only: the fixture generator's code" "foundation" fixtures/generator/src/main.rs
 paths "foundation only: the fixture generator's case variant" "foundation" Fixtures/Generator/src/main.rs
@@ -103,7 +106,7 @@ paths "android: the forked page" "android" android/page/index.html
 
 echo "-- paths that need no CI"
 for p in docs/sync/status/foundation.md docs/sync/status/foundation/briefs/ci.md \
-    docs/sync/research/R1.md docs/sync/runbooks/restore.md README.md SYNC.md SYNC_PLAN.md \
+    docs/sync/research/R1.md docs/sync/runbooks/restore.md README.md \
     LICENSE taskdeck_example_main.png .gitignore deploy/install.sh deploy/taskdeck-server.service \
     deploy/NOTES.md; do
     paths "no CI: $p" "none" "$p"

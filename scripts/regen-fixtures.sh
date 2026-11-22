@@ -11,10 +11,10 @@
 # Europe/Berlin, then America/New_York. Honours CARGO_TARGET_DIR.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-out="${1:-$root/fixtures}"
+# Resolved before the cd, so a relative <dir> is the caller's.
+out="$(mkdir -p "${1:-$root/fixtures}" && cd "${1:-$root/fixtures}" && pwd)"
 cd "$root"
 cargo build --locked --quiet -p taskdeck-fixtures
-mkdir -p "$out"
 for generated in boards legacy-main legacy-other snapshots transcripts MANIFEST.sha256; do
     rm -rf -- "${out:?}/$generated"
 done

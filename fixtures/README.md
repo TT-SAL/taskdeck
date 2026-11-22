@@ -6,7 +6,10 @@ boards written by today's `Board` code, the same boards in older builds' file fo
 **Everything here is invented**: names, notes, calendars and the home place are synthetic; subscription
 addresses are under `example.invalid` and `example.com`; no line comes from a real board.
 
-Everything except this file and `generator/` is generated. Do not edit it by hand.
+Everything except this file, `.gitattributes` and `generator/` is generated. Do not edit it by hand.
+`.gitattributes` (`* -text`) keeps every file's committed bytes on a checkout that converts line
+endings (`core.autocrlf=true`, Git's default on Windows): the data is compared byte for byte, and
+some archive lines must stay exactly as they are.
 
 ```sh
 bash scripts/regen-fixtures.sh      # regenerate everything
@@ -18,18 +21,18 @@ cargo test --locked -p taskdeck-fixtures
 
 | Path | What | Bytes (`du -sb`) |
 |---|---|---|
-| `boards/<board>/` | a data directory, exactly the files today's build keeps for that board | 3,978,701 |
-| `legacy-main/<board>/` | the same board as the `origin/main` build writes it | 1,930,996 |
+| `boards/<board>/` | a data directory, exactly the files today's build keeps for that board | 3,985,462 |
+| `legacy-main/<board>/` | the same board as the `origin/main` build writes it | 1,952,993 |
 | `legacy-other/<board>/` | `empty` and `small` in shapes main reads but never writes | 8,058 |
-| `legacy-main/MIGRATION.json`, `legacy-other/MIGRATION.json` | what today's code made of each legacy directory (counts) | 4,938; 1,636 |
-| `snapshots/europe-berlin/<board>/<from>_<days>d_at-<now>.json` | `phone::snapshot`, one file per request | 1,159,965 |
+| `legacy-main/MIGRATION.json`, `legacy-other/MIGRATION.json` | what today's code made of each legacy directory (counts) | 4,939; 1,636 |
+| `snapshots/europe-berlin/<board>/<from>_<days>d_at-<now>.json` | `phone::snapshot`, one file per request | 1,192,943 |
 | `snapshots/america-new-york/<board>/…` | the same for `small` and `dst-edges`, under New York | 456,861 |
-| `transcripts/europe-berlin/<name>.jsonl` | ten transcripts and `COVERAGE.json` | 3,196,355 |
-| `transcripts/america-new-york/<name>.jsonl` | the same ten, under New York | 3,209,892 |
+| `transcripts/europe-berlin/<name>.jsonl` | ten transcripts and `COVERAGE.json` | 3,196,300 |
+| `transcripts/america-new-york/<name>.jsonl` | the same ten (the same commands; see Transcript files), under New York | 3,209,837 |
 | `MANIFEST.sha256` | `sha256sum` format, one line per generated file | 16,351 |
-| **all generated data** | | **13,963,753** |
+| **all generated data** | | **14,025,380** |
 
-Board sizes: `archive-10k` 3,760,036; `unreadable` 128,043 (two deliberately long lines);
+Board sizes: `archive-10k` 3,766,797; `unreadable` 128,043 (two deliberately long lines);
 `id-limits` 49,507; `small` 20,581; `dst-edges` 16,074; `empty` 4,460. No compression.
 
 ## The pinned clock and zones
@@ -43,8 +46,8 @@ Board sizes: `archive-10k` 3,760,036; `unreadable` 128,043 (two deliberately lon
 - **Clock.** Every `now` is an explicit UTC instant in the generator (`clock::utc`); today's API
   takes `now` everywhere the generator calls it (`Board::apply`, `phone::snapshot`). The values are
   in the files: each transcript step's `now`, each snapshot's file name.
-- **Randomness.** SplitMix64 written in the crate, seeded per use (`archive-10k`: 10000; seeded
-  transcript *n*: *n*).
+- **Randomness.** SplitMix64 written in the crate, seeded per use (`archive-10k`: 10000, and 10001 for the gaps between its rows;
+  seeded transcript *n*: *n*).
 
 Where today's code reads ambient state on the paths the generator calls, and what is done about it:
 
@@ -75,7 +78,7 @@ fixture scheme in `colorschemes.json` beside the built-ins).
 |---|---|---|
 | `empty` | a first start: `[]`, `""`, built-in palettes, default settings | `core` genesis; seeded transcripts start here |
 | `small` | 22 live items: tasks at every severity and horizon, undated, quick-added, renamed; tasks with several blocks, an estimate, a block moved, one unplanned, one with a block removed; events (wire and timeline, moved, resized); routines (daily, weekdays, one-off); 6 archive rows (met, missed, undated, dropped task, removed event, dropped routine; on the way one row was restored and one forgotten for good, so the log has been rewritten whole); notes with a tab and non-ASCII text; 4 subscriptions (one webcal rewritten, one unnamed and renamed, one disabled) and an overlay with timed, all-day, free, twelve-hour and disabled-calendar events, OK and failed fetch status and a covered window | `core` transcripts and snapshots, `android-shell` bridge, `desktop` import check |
-| `archive-10k` | 10,000 archive rows over four years (tasks finished and dropped, events, routines, sessions, estimates) below 150 live items (110 tasks, 35 events, 5 routines) | the `core` budgets (31-day snapshot, entries applied, checkpoint load), `recovery`, `android` |
+| `archive-10k` | 10,000 archive rows over nearly four years, 2022-11-01 to 2026-10-20 07:00Z, just before its snapshots' `now`, so the 7- and 31-day snapshots place ghosts (tasks finished and dropped, events, routines, work sessions in the three days before each retirement, estimates) below 150 live items (110 tasks, 35 events, 5 routines, made through the wire at 2026-10-01) | the `core` budgets (31-day snapshot, entries applied, checkpoint load), `recovery`, `android` |
 | `dst-edges` | items, blocks, due dates and archive times in and around Berlin's gap and fold (through day+minutes, naive wire times, and both offsets of the fold), at New York's transition instants, across midnight, at year ends (one due in New York's 2026 and Berlin's 2027), and on 1970-01-01 local (1969 in UTC) and 9999-12-31; one archive row in 9999 written by `ArchiveLog::record` (the wire clamps a retirement to a day past `now`) | zone handling in `core`; import-check's "every instant survives conversion to UTC" (SYNC.md §9 step 4) |
 | `id-limits` | item ids 1, 2^40±1, 2^53±1, 2^62−1…2^62+2, 2^63−1, 2^63, u64::MAX−1, u64::MAX; archive ids near the same limits; names at the 200-character limit, which today's code counts in code points (`chars()`): ASCII, astral, and 198 `é` + `e` + U+0301 (200 code points, 199 graphemes); notes at 20,000 characters; 24 sessions on one task; 1440-minute lengths; a routine at 23:59 for 1440 minutes; the maximum 20 subscriptions, **ids 1–10 twice** (ten added, the board reopened, ten more: the counter is seeded from items only, R1 §2 item 4), one name at 200 characters and one address at 2,000 | import-check's id folding and limits; device ids below 2^53 |
 | `unreadable` | an archive whose lines include invalid JSON, a JSON array and string, a row with fields missing, an unknown outcome, an empty and a blank line, invalid UTF-8, a good row behind a byte-order mark (unreadable: today's reader does not skip one), a CRLF row (readable), a readable row with a 50,000-character name, a 70,000-byte line that is not a row (today's code has no line-length limit, so it is unreadable for its shape, not its length: it stands for a long damaged line), and a last line with no final newline, among good rows; and an item that is **both live and archived** (V2-11) | import-check's "unreadable lines carried or reported" and "id both live and archived" |
@@ -166,6 +169,29 @@ not modelled. `state` is `BoardState` (`Command::Board`'s answer: `version`, `it
 newest first, `notes`, `subscriptions`, `overlay`) in today's serialisation, compact. A replayer
 needs only the start state, the `wire` text and the `now` of each step.
 
+**Order in `state`.** Every array is in today's in-memory order, and "compared whole" means in that
+order. The order follows from the start state and these rules (`tests/committed.rs` in the generator
+checks them at every step of every transcript):
+
+- `items`, `subscriptions`: a new entry (`add`, `create`, `quick_add`, `restore`, `add_subscription`)
+  goes last; a removal keeps the rest in order. So `items` is not in id order after a `restore` (the
+  restored item goes last whatever its id; `every-command` from step 41, `seeded-03` from step 22,
+  `seeded-05` from step 18). Ids can repeat (see Quirks); `remove_subscription` removes every
+  subscription with the id.
+- `overlay.events`: commands only remove entries (`remove_subscription` takes the subscription's
+  events), keeping the rest in order.
+- `archive`: newest first by instant (compare the instants, not the strings: offsets differ). Rows
+  with the same instant are not ordered by id: they keep the order the start state lists them in (the
+  order of the file the board was read from), and a row a step files goes before the first row whose
+  instant is the same as or earlier than its own. The ties in `every-command`, `refusals`,
+  `seeded-05` and `seeded-06` are in descending id and those in `dst-edges` are one key twice; by
+  these rules, not by any id order. A reload of the same rows from the file would keep the file's
+  order instead (V2 determinism audit item 8); no transcript reloads. `restore` and
+  `forget_archived` take the **first** row in this order whose id and instant equal the key's.
+- The key (id, `inactivated`) is not unique: `dst-edges` steps 12–13 (both zones) add an item, which
+  gets id 32 because the counter is seeded from live ids only while an archived row already holds 32,
+  then complete it at that row's instant, so the archive holds two rows with one key from step 13 on.
+
 | Transcript | Start | What |
 |---|---|---|
 | `every-command` | `small` | all 25 commands carried out (most in several forms), the three queries refused |
@@ -174,6 +200,13 @@ needs only the start state, the `wire` text and the `now` of each step.
 | `id-limits` | `id-limits` | the calendar cap; `quick_add` on a board holding u64::MAX gets u64::MAX again; ids above 2^53 and 2^62 |
 | `seeded-01`…`04` | `empty` | 30 seeded commands each, some aimed at ids that are not there |
 | `seeded-05`, `06` | `small` | 20 seeded commands each |
+
+The seeded commands are drawn from the UTC instant (days are UTC dates, exact times are written
+with `Z`, naive times are the UTC wall clock), so a seeded transcript sends the same `wire` texts
+under both zones, except the `archived_at` keys of `restore` and `forget_archived`, which quote
+the board's archive keys back in the local offset (as the scripted transcripts do); the naive
+times, days and "today" are then read in each zone, which is what the zone tests compare
+(`tests/committed.rs` in the generator checks this).
 
 `COVERAGE.json` counts the ops carried out and refused and each refusal message. Under Berlin the
 generator fails unless every command was carried out and every refusal in
@@ -191,6 +224,8 @@ doesn't exist on this day (daylight saving)." (no gap in either zone is longer t
 - Archive retirements are clamped to `now` + 1 day (`small`'s rows were made at a later `now` for that).
 - The id counter saturates: on `id-limits` a new item gets u64::MAX, which is already taken.
 - Subscription ids repeat after a reopen (`id-limits`), and `with_subscribed` matches the first.
+- An archive key (id, instant) can be held by two rows (`dst-edges` from step 13; see Order in `state`).
+- Archive rows with one instant are in the order Order in `state` gives, not in id order, and a reload can change it.
 - `colorschemes.json` key order is not stable in today's own writes (normalised here).
 - The `{}` notepad (`legacy-other/empty`) opens as today's placeholder text, not as an empty notepad.
 - A row behind a byte-order mark is unreadable to today's archive reader; a long line is not (no length limit).

@@ -15,5 +15,10 @@ chrono = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 proptest = { workspace = true }
+# The property tests also run under a named `TZ` with `ChronoZone(chrono::Local)`
+# (core.md §18.5), so the tests get `clock`. `cargo test` and `cargo clippy
+# --all-targets` then build the library with `clock` too; what keeps `Local`
+# out of the library (CORE-GEN-003) is the lib-only build of ci.sh here.
+chrono = { workspace = true, features = ["clock"] }
 # The SHA-256 of canonical bytes in the test vectors (core.md §18).
 sha2 = { workspace = true }

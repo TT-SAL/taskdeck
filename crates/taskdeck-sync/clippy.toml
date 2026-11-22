@@ -25,6 +25,8 @@ disallowed-methods = [
     { path = "chrono::Local::now", reason = "the engine reads no clock or zone (ENG-GEN-003)", allow-invalid = true },
     { path = "std::time::SystemTime::now", reason = "the engine reads no clock (ENG-GEN-003)" },
     { path = "std::time::Instant::now", reason = "the engine reads no clock (ENG-GEN-003)" },
+    { path = "std::time::SystemTime::elapsed", reason = "the engine reads no clock (ENG-GEN-003)" },
+    { path = "std::time::Instant::elapsed", reason = "the engine reads no clock (ENG-GEN-003)" },
     # Files.
     { path = "std::fs::read", reason = "no file access in the engine (ENG-GEN-003)" },
     { path = "std::fs::read_to_string", reason = "no file access in the engine (ENG-GEN-003)" },
@@ -52,6 +54,13 @@ disallowed-methods = [
     { path = "std::path::Path::exists", reason = "no file access in the engine (ENG-GEN-003)" },
     { path = "std::path::Path::metadata", reason = "no file access in the engine (ENG-GEN-003)" },
     { path = "std::path::Path::read_dir", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::try_exists", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::is_file", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::is_dir", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::is_symlink", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::canonicalize", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::read_link", reason = "no file access in the engine (ENG-GEN-003)" },
+    { path = "std::path::Path::symlink_metadata", reason = "no file access in the engine (ENG-GEN-003)" },
     # Network.
     { path = "std::net::TcpStream::connect", reason = "no network access in the engine (ENG-GEN-003)" },
     { path = "std::net::TcpStream::connect_timeout", reason = "no network access in the engine (ENG-GEN-003)" },
@@ -65,6 +74,17 @@ disallowed-methods = [
     { path = "std::thread::park", reason = "no threads or waiting in the engine (ENG-GEN-003)" },
     { path = "std::thread::Builder::new", reason = "no threads in the engine (ENG-GEN-003)" },
     { path = "std::thread::Builder::spawn", reason = "no threads in the engine (ENG-GEN-003)" },
+    { path = "std::thread::available_parallelism", reason = "no thread or system queries in the engine (ENG-GEN-003)" },
+    { path = "std::thread::park_timeout", reason = "no threads or waiting in the engine (ENG-GEN-003)" },
+    { path = "std::thread::yield_now", reason = "no threads or waiting in the engine (ENG-GEN-003)" },
+    { path = "std::thread::current", reason = "no thread-local state in the engine (ENG-GEN-003)" },
+    # Random sources. `RandomState::new` takes an OS-seeded key kept per thread.
+    { path = "std::collections::hash_map::RandomState::new", reason = "no random source in the engine (ENG-GEN-003)" },
+    { path = "std::hash::RandomState::new", reason = "no random source in the engine (ENG-GEN-003)" },
+    # Platform file entry points outside std::fs; each exists on one family only.
+    { path = "std::os::unix::fs::symlink", reason = "no file access in the engine (ENG-GEN-003)", allow-invalid = true },
+    { path = "std::os::windows::fs::symlink_file", reason = "no file access in the engine (ENG-GEN-003)", allow-invalid = true },
+    { path = "std::os::windows::fs::symlink_dir", reason = "no file access in the engine (ENG-GEN-003)", allow-invalid = true },
     # The environment.
     { path = "std::env::var", reason = "no environment variables in the engine (ENG-GEN-003)" },
     { path = "std::env::var_os", reason = "no environment variables in the engine (ENG-GEN-003)" },

@@ -194,9 +194,17 @@ fn archive_10k(dir: &Path) -> Result<(), String> {
     // for years.
     b.board.number_from(rows + 1);
     let mut archive = Vec::with_capacity(rows as usize);
-    let mut at = utc(2022, 11, 1, 7, 0, 0);
-    for id in 1..=rows {
-        at += Duration::minutes(rng.between(60, 290));
+    // The rows run up to just before the snapshots' `now` (2026-10-20
+    // 08:15Z), as on a board in daily use, so the budget snapshots place
+    // ghosts: the gaps (about 3.5 hours on average, about four years in all)
+    // are drawn first and the walk is anchored at its last row.
+    let gaps: Vec<i64> = {
+        let mut gap_rng = SplitMix64::new(10_001);
+        (0..rows).map(|_| gap_rng.between(60, 357)).collect()
+    };
+    let mut at = utc(2026, 10, 20, 7, 0, 0) - Duration::minutes(gaps.iter().sum());
+    for (id, gap) in (1..=rows).zip(gaps) {
+        at += Duration::minutes(gap);
         let name = format!("Synthetic archived #{id}: {} {}", rng.pick(&WORDS), rng.pick(&WORDS));
         let created = at - Duration::hours(rng.between(1, 24 * 40));
         let kind = rng.below(20);
@@ -237,8 +245,12 @@ fn archive_10k(dir: &Path) -> Result<(), String> {
                 } else {
                     item.time_importance = Some(rng.below(4) as u8);
                 }
+                // Work sessions in the three days before the row was archived
+                // (not before the task existed).
                 for _ in 0..rng.below(4) {
-                    item.sessions.push(Session { start: start(&mut rng), minutes: rng.between(1, 8) as u32 * 15 });
+                    let minutes = rng.between(1, 8) * 15;
+                    let start = (at - Duration::minutes(minutes + rng.between(0, 24 * 4 * 3) * 15)).max(created);
+                    item.sessions.push(Session { start, minutes: minutes as u32 });
                 }
                 if rng.chance(1, 2) {
                     item.duration_minutes = Some(rng.between(1, 16) as u32 * 15);

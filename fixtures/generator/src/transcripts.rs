@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use chrono::{DateTime, Duration, Local};
+use chrono::{DateTime, Duration, Local, SecondsFormat, Utc};
 use serde_json::{Value, json};
 use task_deck::board::{Board, Command, NAME_MAX_CHARS, NOTES_MAX_CHARS};
 use task_deck::phone;
@@ -419,7 +419,10 @@ fn id_limits(r: &mut Runner) -> Result<(), String> {
     Ok(())
 }
 
-fn some_day(rng: &mut SplitMix64, now: DateTime<Local>) -> String {
+// The seeded wire texts are drawn from the UTC instant, never from the local
+// rendering, so both zones' runs send the same commands (only archive keys,
+// which the board echoes back in local time, differ).
+fn some_day(rng: &mut SplitMix64, now: DateTime<Utc>) -> String {
     (now.date_naive() + Duration::days(rng.between(-2, 7))).to_string()
 }
 
@@ -431,9 +434,10 @@ fn some_minutes(rng: &mut SplitMix64) -> u32 {
     *rng.pick(&[0, 15, 30, 45, 60, 90, 120, 240, 2000])
 }
 
-fn some_instant(rng: &mut SplitMix64, now: DateTime<Local>) -> String {
+/// A naive wire time (read in the board's zone) or an exact UTC instant.
+fn some_instant(rng: &mut SplitMix64, now: DateTime<Utc>) -> String {
     let at = now + Duration::minutes(rng.between(-3 * 1440, 10 * 1440) / 15 * 15);
-    if rng.chance(1, 2) { at.format("%Y-%m-%dT%H:%M").to_string() } else { text(at) }
+    if rng.chance(1, 2) { at.format("%Y-%m-%dT%H:%M").to_string() } else { at.to_rfc3339_opts(SecondsFormat::Secs, true) }
 }
 
 fn some_name(rng: &mut SplitMix64) -> String {
@@ -452,7 +456,7 @@ fn seeded(r: &mut Runner, seed: u64, steps: usize) -> Result<(), String> {
         r.board.load_archive()?;
         let keys: Vec<(u64, String)> = r.board.archive.entries().iter().map(|row| (row.id, text(row.archived_at))).collect();
         let (key_id, key_at) = if keys.is_empty() || rng.chance(1, 6) { (700_000, text(r.now)) } else { rng.pick(&keys).clone() };
-        let now = r.now;
+        let now = r.now.with_timezone(&Utc);
         let wire = match rng.below(40) {
             0..=4 => {
                 let mut w = json!({"op":"add","name":some_name(&mut rng)});

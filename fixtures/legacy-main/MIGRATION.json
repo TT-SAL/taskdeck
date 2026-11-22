@@ -62,9 +62,9 @@
   {
     "board": "archive-10k",
     "opened": {
-      "archive_events_marked_finished": 999,
-      "archive_rows": 8438,
-      "archive_rows_finished": 8438,
+      "archive_events_marked_finished": 1023,
+      "archive_rows": 8550,
+      "archive_rows_finished": 8550,
       "archive_rows_with_id_0": 0,
       "archive_unreadable_lines": 0,
       "calendar_weeks_to_show": 100,
@@ -80,9 +80,9 @@
       "ui_scale_percent": 0
     },
     "written": {
-      "archive_rows_left_out": 1562,
+      "archive_rows_left_out": 1450,
       "archive_rows_without_id": 0,
-      "blocks_left_out": 101,
+      "blocks_left_out": 104,
       "items_with_planned_start": 0,
       "items_without_id": 0,
       "notepad_tabs": 3,

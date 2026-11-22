@@ -131,3 +131,11 @@ checkout.
   links the engine and the reads check follows the chain; accepted by the lead).
 - [lead finding] `rand_core` for seal: hpke 0.15.1 re-exports it (`hpke::rand_core`), so nothing is declared;
   a type-check in seal's `const _` block proves a wrapper for `single_shot_seal_with_rng` compiles (ruling 6).
+- [loop of 2026-11-22, four rounds, converged] the clippy lists of core and sync missed clock, file-system,
+  random-source and thread entries (fixed, two rounds); the core's tests get chrono's `clock` for the property
+  tests under a named `TZ`, and `crates/taskdeck-core/ci.sh` builds the library alone, where `Local` does not
+  exist (fixed). Accepted and recorded: `core-foundation` 0.9.4 and 0.10.1 side by side on macOS only (the
+  newer one through security-framework and the platform verifier; not cryptographic). Low findings left as
+  they are: further ways around the clippy lists (`RandomState::default()`, Unix sockets, `thread::panicking`,
+  `process::Command`), and `tests/e2e/README.md` does not yet say how the Rust harness is laid out (stage
+  `device` writes it).
