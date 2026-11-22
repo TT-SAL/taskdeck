@@ -13,6 +13,9 @@
 # CARGO_TARGET_DIR (a relative value is taken from the caller's directory, as
 # cargo would) and cargo's own target-dir configuration.
 set -euo pipefail
+# The rerun check below greps cargo's human-readable output, which colour
+# would break (CI sets CARGO_TERM_COLOR=always): colour off for every call.
+export CARGO_TERM_COLOR=never
 
 # Make a relative target dir from the environment absolute against the
 # caller's directory before moving to the repository root. `pwd -W` gives the

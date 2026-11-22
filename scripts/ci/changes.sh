@@ -87,16 +87,20 @@ classify() {
     HIT=0
     # root: what the root package compiles, embeds (include_bytes!, include_str!,
     # egui::include_image!, resources.rc) or reads in its tests.
+    # Also the release-panic check and its probe: the desktop job runs that
+    # check on every OS.
     case "$p" in
         src/* | build.rs | resources.rc | icon.ico | icon.png | noback.png | 1920px-Blue_Marble_2002.png \
-            | fonts/* | images/* | weather_svgs_2/*) mark root ;;
+            | fonts/* | images/* | weather_svgs_2/* \
+            | scripts/check-release-panic.sh | crates/panic-probe/*) mark root ;;
     esac
     case "$p" in
         Cargo.lock | Cargo.toml | */Cargo.toml | deny.toml | .cargo/audit.toml \
             | scripts/dev-setup.sh | scripts/supply-chain.sh | scripts/cooldown*) mark supply ;;
     esac
     case "$p" in
-        docs/sync/spec/* | fixtures/* | scripts/* | crates/*) mark foundation ;;
+        # build.rs too: the foundation job's check-build-date.sh checks it.
+        docs/sync/spec/* | fixtures/* | scripts/* | crates/* | build.rs) mark foundation ;;
     esac
     case "$p" in crates/taskdeck-core/* | fixtures/*) mark core ;; esac
     case "$p" in crates/taskdeck-seal/* | docs/sync/vectors/*) mark seal ;; esac

@@ -46,11 +46,15 @@ for p in Cargo.lock Cargo.toml rust-toolchain.toml .github/workflows/ci.yml \
 done
 
 echo "-- root: what the root package compiles, embeds or reads"
-for p in src/main.rs src/phone.html src/notes.md build.rs resources.rc icon.ico icon.png noback.png \
+for p in src/main.rs src/phone.html src/notes.md resources.rc icon.ico icon.png noback.png \
     1920px-Blue_Marble_2002.png fonts/DejaVuSans.ttf fonts/LICENSES/dejavu.txt \
     images/pexels-francesco-ungaro-1525041.jpg weather_svgs_2/04.svg; do
     paths "root: $p" "root" "$p"
 done
+paths "root and foundation: build.rs (check-build-date.sh checks it)" "root foundation" build.rs
+paths "root: the release-panic check (desktop runs it on every OS)" "root foundation" scripts/check-release-panic.sh
+paths "root: the panic probe" "root foundation" crates/panic-probe/src/main.rs
+paths "root: the panic probe's manifest" "root supply foundation" crates/panic-probe/Cargo.toml
 
 echo "-- supply"
 paths "supply: deny.toml" "supply" deny.toml
@@ -68,7 +72,7 @@ paths "foundation: a spec" "foundation" docs/sync/spec/core.md
 paths "foundation: fixtures also mean core" "foundation core device recovery android" fixtures/boards/small.json
 paths "foundation: a script" "foundation" scripts/check-build-date.sh
 paths "foundation: a script test" "foundation" scripts/tests/run.sh
-paths "foundation: any crate" "foundation" crates/panic-probe/src/main.rs
+paths "foundation: any crate" "foundation" crates/other/src/main.rs
 
 echo "-- one path per stage area, with what builds on it"
 paths "core" "foundation core device recovery android" crates/taskdeck-core/src/lib.rs

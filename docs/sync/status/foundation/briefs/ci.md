@@ -127,3 +127,17 @@ Implemented and committed: `.github/workflows/ci.yml`, `scripts/ci/` (`changes.s
 5. **Real runs are the evidence.** What GitHub actually did with this workflow is written down by the lead in
    the session scratchpad (`ci-evidence/1c.md`) and, in short, in the status file. A finding that contradicts
    an observed run needs its own observation.
+
+## Already raised and handled (do not re-report)
+
+- [high] `scripts/check-build-date.sh` failed under the workflow's `CARGO_TERM_COLOR: always`, so the Foundation job and `gate` failed on GitHub (the lead's finding from the first real run; fixed: the script switches cargo's colour off for its own calls, and `scripts/tests/test-check-build-date.sh` runs it with colour on)
+- [medium] A change to `build.rs` did not run the foundation job, which holds the one check that guards it (fixed: `build.rs` marks `root` and `foundation`)
+- [medium] Changes to `scripts/check-release-panic.sh` or `crates/panic-probe/**` skipped the desktop matrix, where that check runs on Windows and macOS (fixed: they also mark `root`)
+- [medium] The area dependencies left out relay to device, vectors to relay and recovery to device (ruled by the lead: ruling 6)
+
+6. **More area dependencies (lead ruling, 2026-11-22).** `relay` true makes `device` true (the device's
+   end-to-end tests run against the standby relay), and so `android`; `docs/sync/vectors/**` also marks `relay`
+   (the relay's suite takes seal's published vectors); `recovery` true makes `device` true (the device runtime
+   links the backup crate). Each only makes more jobs run. The lead confirms the two additions of round 1:
+   `build.rs` marks `root` and `foundation`; `scripts/check-release-panic.sh` and `crates/panic-probe/**` also
+   mark `root`.

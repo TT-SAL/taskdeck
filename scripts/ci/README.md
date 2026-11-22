@@ -28,9 +28,9 @@ is true.
 | Area | Paths |
 |---|---|
 | every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, `.cargo/**` except `.cargo/audit.toml` (a `.cargo/config.toml` changes every build), and any path no rule here knows |
-| `root` | `src/**`, `build.rs`, `resources.rc`, `icon.ico`, `icon.png`, `noback.png`, `1920px-Blue_Marble_2002.png`, `fonts/**`, `images/**`, `weather_svgs_2/**` |
+| `root` | `src/**`, `build.rs`, `resources.rc`, `icon.ico`, `icon.png`, `noback.png`, `1920px-Blue_Marble_2002.png`, `fonts/**`, `images/**`, `weather_svgs_2/**`; `scripts/check-release-panic.sh` and `crates/panic-probe/**` (the desktop job runs that check on every OS) |
 | `supply` | `Cargo.lock`, any `Cargo.toml`, `deny.toml`, `.cargo/audit.toml`, `scripts/dev-setup.sh`, `scripts/supply-chain.sh`, `scripts/cooldown*` |
-| `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**` |
+| `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**`, `build.rs` (checked by `scripts/check-build-date.sh`) |
 | `core` | `crates/taskdeck-core/**`, `fixtures/**` |
 | `seal` | `crates/taskdeck-seal/**`, `docs/sync/vectors/**` |
 | `engine` | `crates/taskdeck-sync/**` |

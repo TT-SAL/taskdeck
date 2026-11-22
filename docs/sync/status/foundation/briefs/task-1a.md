@@ -160,3 +160,9 @@ After the panic hook lands the gate's test count is 265 passed, 1 ignored (it wa
    values the script itself lists. "A differently broken `build.rs` would get past the listed values" is
    out of scope, whatever the mutation: do not report it and do not add values. The same holds for the
    other checks of this task: their closed lists are rulings 3, 4, 5 and 7.
+
+## After the loop (2026-11-22): one change from task 1c's loop
+
+`scripts/check-build-date.sh` now exports `CARGO_TERM_COLOR=never` for its own cargo calls. The first real run of
+the new CI showed that the workflow's `CARGO_TERM_COLOR: always` broke the script's search for the "Running
+build-script-build" line; `scripts/tests/test-check-build-date.sh` pins it. Found and fixed under task 1c.
