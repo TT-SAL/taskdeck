@@ -1,18 +1,18 @@
 export const meta = {
   name: 'foundation-c2-1b-1c-loops-workspace',
-  description: 'Foundation, code track, in a working copy: apply the lead rulings to the supply-chain task (1b) and attack it until two dry rounds; attack the CI restructure (1c) until two dry rounds; then implement the workspace (task 2); one agent at a time',
+  description: 'Foundation, code track, in a working copy: apply the lead rulings to tasks 1b and 1c, attack each until two dry rounds (one attacker per round, three lenses), then implement the workspace (task 2); one agent at a time',
   phases: [
     { title: 'Implement', detail: '1b rulings; later the workspace (task 2)', model: 'opus' },
-    { title: 'Attack', detail: 'three lenses per round, plus the lead inbox', model: 'opus' },
+    { title: 'Attack', detail: 'one fresh attacker per round, covering the three lenses and the lead inbox', model: 'opus' },
     { title: 'Fix', detail: 'reproduce first, then fix', model: 'opus' },
   ],
 }
 
-// args: { scratch: '<session scratchpad>', steps: ['1b-rulings', '1b-loop', '1c-loop', 'workspace'] }
+// args: { scratch: '<session scratchpad>', steps: ['rulings', '1b-loop', '1c-loop', 'workspace'] }
 // Writers and attackers work on WORK, a clone of the repository under target/ (ignored by git in the main
 // checkout). The main checkout stays clean: the lead copies verified work into it and commits.
 const S = args.scratch
-const STEPS = args.steps || ['1b-rulings', '1b-loop', '1c-loop', 'workspace']
+const STEPS = args.steps || ['rulings', '1b-loop', '1c-loop', 'workspace']
 const MAIN = '/home/user/taskdeck'
 const WORK = `${MAIN}/target/work/c`
 const BRIEFS = `${MAIN}/docs/sync/status/foundation/briefs`
@@ -21,7 +21,7 @@ const INBOX = `${S}/lead-findings`
 const GROUND = `
 GROUND RULES for every worker in stage "foundation" of SYNC_PLAN.md:
 - TWO DIRECTORIES. ${MAIN} is the lead's main checkout: READ-ONLY for you (the plan, SYNC.md, the specs and the task briefs are read there). ${WORK} is YOUR WORKING COPY, a full clone of the same repository (branch claude/upbeat-hamilton-klp7n9) that also holds the uncommitted work of the tasks in progress: every file you create or change is under ${WORK}, and every command you run for the task runs there (cd ${WORK} first). Never create, change or delete anything under ${MAIN} outside ${WORK} (attackers may also use their own scratch directory, named in their task). The lead copies verified work from the working copy into the main checkout and commits it.
-- First read ${MAIN}/SYNC_PLAN.md sections 2, 3, 4 and 6.1. Where SYNC_PLAN.md and SYNC.md disagree, SYNC_PLAN.md wins.
+- Be economical with reading: your task's brief quotes what SYNC_PLAN.md requires. Open SYNC_PLAN.md, SYNC.md or a research paper only for the passage the brief or your lens sends you to, never in full. Where SYNC_PLAN.md and SYNC.md disagree, SYNC_PLAN.md wins.
 - Do NOT run any git command that changes state, in either directory (no add, commit, push, fetch, pull, checkout, switch, stash, reset, restore, merge, rebase, worktree, clean). Read-only git (status, diff, log, show, ls-files, archive) is fine. In the working copy, "git status" shows the uncommitted work; "origin/day-planner" there is the base branch.
 - Change only the paths your task names. Do not edit anything under src/ (unless a lead ruling for your task names the exact files), and do not edit DOCUMENTATION.md, SYNC.md or SYNC_PLAN.md.
 - The repository is public: never write a secret, a real relay address, a token, an account name, an email address, a path that names a person, or anything from a real board. Made-up data only.
@@ -99,33 +99,30 @@ ${JSON.stringify(found, null, 2)}
 Finish by running the task's gate in the working copy: ${t.gate}. Report every command and result. In files_changed list every path you changed, relative to the working copy. In your summary list each finding as fixed, dropped (with the reason) or deferred to the lead.`,
   { label: `fix:${t.id}:r${round}`, phase: 'Fix', model: 'opus', effort: 'high', schema: REPORT }))
 
-const attacker = (t, lens, i, round, seen) => safe(() => agent(`${GROUND}
-YOU ARE AN ATTACKER, not an implementer. You did not write this code. Try to break the task below through ONE lens.
+const attacker = (t, round, seen) => safe(() => agent(`${GROUND}
+YOU ARE AN ATTACKER, not an implementer. You did not write this code. Try to break the task below through three lenses, one after the other.
 The task, its owned paths, the lead's standing rulings and the list of findings already raised and handled are in ${t.brief} : read it in full first. ${rulingsNote(t)}
 The thing under attack is the working copy ${WORK} as it is now (its "git status" and "git diff" show what is ahead of the last commit). ${t.others}.
-YOUR LENS: ${lens.text}.
+THE THREE LENSES (give each its own pass; say in checked_and_fine what you tried under each):
+${t.lenses.map((l, k) => `${k + 1}. ${l.key}: ${l.text}.`).join('\n')}
+LEAD FINDINGS: if the file ${INBOX}/${t.id}.md exists and is not empty, each section in it that starts with "## " is a finding written by the lead. Check each one yourself (reproduce it or confirm it from the evidence it cites); report those that hold as findings of yours, with the lead's text in the repro; then rename the file (mv) to ${INBOX}/${t.id}.consumed-r${round}.md .
 Rules:
-- You change NOTHING in the working copy: no edits, and do not run the task's scripts or cargo inside it. Your scratch directory is ${MAIN}/target/attack-${i} : make a copy of the working copy's tree there ("mkdir -p ${MAIN}/target/attack-${i}/scratch/tree && tar -C ${WORK} --exclude=./target --exclude=./.git -cf - . | tar -C ${MAIN}/target/attack-${i}/scratch/tree -xf -"; the main checkout's workspace excludes target/, so the copy builds on its own) and run everything in the copy, with CARGO_TARGET_DIR=${MAIN}/target/attack-${i} for every cargo command. Mutate only your copy. ${SCRATCH_GIT(i)} Tools that install into the cargo home (scripts/dev-setup.sh) get their own directory through TASKDECK_TOOLS_DIR under your scratch directory; the pinned cargo-deny and cargo-audit are already in ~/.cargo/bin and may be used, not replaced.
+- You change NOTHING in the working copy: no edits, and do not run the task's scripts or cargo inside it. Your scratch directory is ${MAIN}/target/attack-0 : make a copy of the working copy's tree there ("rm -rf ${MAIN}/target/attack-0/scratch && mkdir -p ${MAIN}/target/attack-0/scratch/tree && tar -C ${WORK} --exclude=./target --exclude=./.git -cf - . | tar -C ${MAIN}/target/attack-0/scratch/tree -xf -"; the main checkout's workspace excludes target/, so the copy builds on its own) and run everything in the copy, with CARGO_TARGET_DIR=${MAIN}/target/attack-0 for every cargo command. Mutate only your copy. ${SCRATCH_GIT(0)} Tools that install into the cargo home (scripts/dev-setup.sh) get their own directory through TASKDECK_TOOLS_DIR under your scratch directory; the pinned cargo-deny and cargo-audit are already in ~/.cargo/bin and may be used, not replaced.
 - Report only what you reproduced: the exact command or small test, the output you saw, and what should have happened. A doubt you could not reproduce goes under checked_and_fine with a note.
 - No style preferences, nothing the brief or a lead ruling puts out of scope, nothing in the brief's "Already raised and handled" lists, and none of these, raised in this run: ${JSON.stringify(seen)}.
 - Severity: high = today's app, a later stage or a security rule of SYNC_PLAN.md section 3.4 would be broken; medium = a check can pass when it should fail in CI or documented use, or behaviour differs from what the task states; low = robustness within the documented usage.
-- Spend your effort on the most likely real defects; about fifteen minutes of work is right.
+- Spend your effort on the most likely real defects; about twenty-five minutes of work in all is right.
 Return the structured findings. An empty findings list after a real attempt is a valid and useful answer; list what you checked.`,
-  { label: `attack:${t.id}:${lens.key}:r${round}`, phase: 'Attack', model: 'opus', effort: 'high', schema: FINDINGS }))
+  { label: `attack:${t.id}:r${round}`, phase: 'Attack', model: 'opus', effort: 'high', schema: FINDINGS }))
 
-const inbox = (t, round) => safe(() => agent(`You are the lead's inbox reader for task "${t.id}" in stage "foundation". Do only this: check whether the file ${INBOX}/${t.id}.md exists and is non-empty. If it does not exist or is empty, return an empty findings list with checked_and_fine ["no lead findings"]. If it exists: read it. Each section that starts with a line beginning "## " is one finding written by the lead: return each as a finding (title = the heading text; severity = the value after "severity:" in the section if present, otherwise "medium"; repro = the whole section text verbatim; expected = the text after "expected:" if present, otherwise "see repro"). Then rename the file (mv) to ${INBOX}/${t.id}.consumed-r${round}.md so it is not read twice. Change nothing else anywhere.`,
-  { label: `inbox:${t.id}:r${round}`, phase: 'Attack', model: 'opus', effort: 'low', schema: FINDINGS }))
-
-// One agent at a time: the lenses of a round run one after another.
+// One fresh attacker per round covers the three lenses (decision D20). Two rounds without a finding end the loop.
 const attackLoop = async (t) => {
   let dry = 0, round = 0
   const seen = []
   let stopped = null
   while (dry < 2 && round < 6) {
     round++
-    const reports = []
-    for (let i = 0; i < t.lenses.length; i++) reports.push(await attacker(t, t.lenses[i], i, round, seen))
-    reports.push(await inbox(t, round))
+    const reports = [await attacker(t, round, seen)]
     const found = reports.filter(Boolean).flatMap(r => r.findings)
     log(`${t.id}, attack round ${round}: ${found.length} finding(s), ${reports.filter(Boolean).length}/${reports.length} agents reported`)
     if (!reports.every(Boolean)) { stopped = `an agent failed in round ${round}`; log(`${t.id}: ${stopped}; stopping the loop so nothing is counted as clean`); break }
@@ -142,16 +139,18 @@ const attackLoop = async (t) => {
 
 const out = {}
 
-if (STEPS.includes('1b-rulings')) {
+if (STEPS.includes('rulings')) {
   phase('Implement')
-  out.rulings1b = await safe(() => agent(`${GROUND}
-YOUR TASK: apply the lead's rulings to the supply-chain task. The task is described in ${T1B.brief} : read it in full, including "State after the implementation" and "Lead rulings for task baseline-1b" at its end. The task's files are committed in the working copy. Rulings 1 to 5 tell you exactly what to change (the targeted lockfile moves, the reviewed ignores in both configuration files, duplicates outside the cryptographic list, what cargo-audit fails on, the executable bits); ruling 6 says what "done" means. Ruling 1 overrides "do not change Cargo.lock" for exactly the moves it lists. Change nothing else.
+  out.rulings = await safe(() => agent(`${GROUND}
+YOUR TASK: apply the lead's rulings to two finished tasks whose files are committed in the working copy. Change nothing else.
+A. The supply-chain task: ${T1B.brief} . Read it in full, including "State after the implementation" and "Lead rulings for task baseline-1b" at its end. Rulings 1 to 5 and 7 tell you exactly what to change (the targeted lockfile moves, the reviewed ignores in both configuration files, duplicates outside the cryptographic list, what cargo-audit fails on, the executable bits, the --base option); ruling 6 says what "done" means. Ruling 1 overrides "do not change Cargo.lock" for exactly the moves it lists.
+B. The CI restructure: ${T1C.brief} . Read its design and "Lead rulings for task baseline-1c" at its end. Rulings 2 and 3 change scripts/ci/changes.sh, its README table and its tests (deploy/** needs no CI; .cargo/audit.toml is the area supply and every other path under .cargo/ is a shared file); ruling 1 is the CI side of A's ruling 7.
 ${COMPILE_IMPL}
-Do the lockfile moves one at a time and read the lockfile diff after each ("git diff -- Cargo.lock"): only the entries the ruling names may differ; put back anything else the resolver moved, as decision D7 in ${MAIN}/docs/sync/status/foundation.md describes for the first refresh. Before each move, check the target version's publish time in the crates.io index is at least seven days before today (scripts/cooldown.sh does this for the whole change against origin/day-planner when you are done; it must pass).
-Then run everything ruling 6 lists, in the working copy, and report each command and its result. Report the final lockfile diff against origin/day-planner entry by entry (name, old version, new version, or added or removed), and say for each entry which ruling covers it. In files_changed list every path you changed, relative to the working copy.`,
-    { label: 'impl:baseline-1b-rulings', phase: 'Implement', model: 'opus', effort: 'high', schema: REPORT }))
-  log(`baseline-1b rulings: ${out.rulings1b ? 'reported' : 'FAILED'}`)
-  if (out.rulings1b === null) return out
+Do the lockfile moves one at a time and read the lockfile diff after each ("git diff -- Cargo.lock"): only the entries the ruling names may differ; put back anything else the resolver moved (decision D7 in ${MAIN}/docs/sync/status/foundation.md describes how the first refresh did it). scripts/cooldown.sh checks the publish times of everything new against origin/day-planner; it must pass.
+Then run, in the working copy, everything ruling 6 of A lists and "bash scripts/tests/run.sh", and report each command and its result. Report the final lockfile diff against origin/day-planner entry by entry (name, old version, new version, or added or removed), with the ruling that covers each. In files_changed list every path you changed, relative to the working copy.`,
+    { label: 'impl:rulings-1b-1c', phase: 'Implement', model: 'opus', effort: 'high', schema: REPORT }))
+  log(`rulings for 1b and 1c: ${out.rulings ? 'reported' : 'FAILED'}`)
+  if (out.rulings === null) return out
 }
 
 if (STEPS.includes('1b-loop')) { phase('Attack'); out.loop1b = await attackLoop(T1B) }

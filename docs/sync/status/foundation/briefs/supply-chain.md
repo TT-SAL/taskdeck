@@ -65,3 +65,9 @@ other entry stay where they are.
    265 passed, 1 ignored (`cargo build --locked --no-default-features --bin taskdeck-server`,
    `cargo test --locked --no-default-features --lib`); and `cargo check --locked --lib` with default features
    passes on this Linux machine, or the report says exactly why it cannot run here.
+7. **`scripts/supply-chain.sh` accepts `--base <rev>` and passes it to `scripts/cooldown.sh`** (no other
+   argument; an unknown one is an error). With it, `scripts/ci/supply-chain.sh` makes one call to
+   `scripts/supply-chain.sh --base <rev>` when the event gives a usable base commit, and one call without
+   it otherwise, instead of running the cooldown a second time; its test follows. This ruling lets the
+   agent that applies it change `scripts/ci/supply-chain.sh` and `scripts/tests/test-ci-supply-chain.sh`
+   for exactly that.
