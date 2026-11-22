@@ -125,4 +125,9 @@ checkout.
 
 ## Already raised and handled (do not re-report)
 
-(none yet)
+- [lead finding] `taskdeck-android` had no default backend (fixed: `default = ["backend-device"]`, ruling 2).
+- [lead finding] `taskdeck-recover` did not depend on `taskdeck-device` (fixed; a change under
+  `crates/taskdeck-device/` or `crates/taskdeck-sync/` now marks the area `recovery`, because the device
+  links the engine and the reads check follows the chain; accepted by the lead).
+- [lead finding] `rand_core` for seal: hpke 0.15.1 re-exports it (`hpke::rand_core`), so nothing is declared;
+  a type-check in seal's `const _` block proves a wrapper for `single_shot_seal_with_rng` compiles (ruling 6).

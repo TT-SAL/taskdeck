@@ -231,3 +231,15 @@ Second loop (2026-11-22, six rounds, every finding fixed in the round that raise
 - [second loop, round 5, medium] reads.sh passes a read that does not name a tracked file, and a read of a path no rule knows passes by 'marking every area', contrary to ruling 12 (fixed, with a test)
 - [second loop, round 6, low] scripts/ci/toolchain.sh reports success when `rustup toolchain install` and `rustup component add` both failed, because set -e is off inside the `( ... ) || die` subshell (fixed, with a test)
 - [second loop, round 6, low] scripts/ci/toolchain.sh silently drops single-quoted (TOML literal string) components and targets from rust-toolchain.toml and still passes (fixed, with a test)
+
+14. **A path dependency on the root package, and what follows for the areas (lead ruling, 2026-11-22
+    10:35 UTC).** `fixtures/generator` depends on the root package by path, because the fixtures are what
+    today's code writes. Three rules:
+    - `fixtures/generator/**` marks `foundation` only. The rest of `fixtures/**` marks what it marked
+      before (its data is read by later stages' tests; the generator's code is not).
+    - Whatever marks the area `root` also marks `foundation`: a change to today's code changes what the
+      generator writes, and `scripts/check-fixtures.sh` (run by `scripts/tests/run.sh` in the foundation
+      job) compares the committed fixtures with it.
+    - In `scripts/ci/reads.sh`, a path dependency whose directory is the top of the tree is a dependency on
+      the root package, and its files are the tracked files under `src/` plus `build.rs` and the root
+      `Cargo.toml`, not every tracked file of the repository.

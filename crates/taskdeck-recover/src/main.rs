@@ -11,6 +11,7 @@
 // so that it is resolved and compiled now.
 use taskdeck_backup as _;
 use taskdeck_core as _;
+use taskdeck_device as _;
 use taskdeck_seal as _;
 
 fn main() {

@@ -13,3 +13,6 @@ path = "src/main.rs"
 taskdeck-backup = { workspace = true }
 taskdeck-seal = { workspace = true }
 taskdeck-core = { workspace = true }
+# Its online steps use `taskdeck_device::recovery_online::RecoveryLink`
+# (device.md §15.8).
+taskdeck-device = { workspace = true }

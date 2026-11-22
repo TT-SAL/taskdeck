@@ -37,7 +37,7 @@ is true.
 | `engine` | `crates/taskdeck-sync/**` |
 | `relay` | `relay/**`, `docs/sync/vectors/**` (the relay's suite takes seal's published vectors) |
 | `device` | `crates/taskdeck-device/**`, `tests/e2e/**`; and whenever `core`, `seal`, `engine`, `relay` or `recovery` is true (it links the backup crate, and its end-to-end tests run against the relay) |
-| `recovery` | `crates/taskdeck-backup/**`, `crates/taskdeck-recover/**`; and whenever `core` or `seal` is true |
+| `recovery` | `crates/taskdeck-backup/**`, `crates/taskdeck-recover/**`, `crates/taskdeck-device/**`, `crates/taskdeck-sync/**` (the tool's online steps link the device runtime, which links the engine); and whenever `core` or `seal` is true |
 | `android` | `android/**`, `crates/taskdeck-android/**`; and whenever `device` is true |
 | none | `docs/sync/status/**`, `docs/sync/research/**`, `docs/sync/runbooks/**`, `deploy/**` (today's server's install script and unit file), `*.md`, `*.png` and `LICENSE` at the root, `.gitignore` (unless a rule above matched first: `icon.png` is `root`). The area rules ignore case, because a case variant (`ICON.png`) is the same file on Windows and macOS; the no-CI list does not, so `Deploy/x` means every area |
 

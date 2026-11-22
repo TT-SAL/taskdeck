@@ -127,7 +127,11 @@ classify() {
     # relay too: the relay's suite takes seal's published vectors.
     case "$p" in relay/* | docs/sync/vectors/*) mark relay ;; esac
     case "$p" in crates/taskdeck-device/* | tests/e2e/*) mark device ;; esac
-    case "$p" in crates/taskdeck-backup/* | crates/taskdeck-recover/*) mark recovery ;; esac
+    # The device too, and the engine it links: the recovery tool's online steps
+    # link the device runtime (device.md §15.8).
+    case "$p" in
+        crates/taskdeck-backup/* | crates/taskdeck-recover/* | crates/taskdeck-device/* | crates/taskdeck-sync/*) mark recovery ;;
+    esac
     case "$p" in android/* | crates/taskdeck-android/*) mark android ;; esac
     shopt -u nocasematch
 

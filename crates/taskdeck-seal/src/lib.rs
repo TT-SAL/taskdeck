@@ -33,6 +33,45 @@ const _: () = {
     let _ = ed25519_dalek::VerifyingKey::verify_strict;
     let _ = <hpke::kem::X25519HkdfSha256 as hpke::Kem>::derive_keypair;
     let _ = hpke::single_shot_open::<hpke::aead::ChaCha20Poly1305, hpke::kdf::HkdfSha256, hpke::kem::X25519HkdfSha256>;
+    // hpke's `*_with_rng` sealing functions take `&mut impl CryptoRng` from
+    // rand_core 0.10, which hpke re-exports as `hpke::rand_core`: `Entropy`
+    // (SEAL-GEN-004) reaches hpke through a wrapper like this one, so seal
+    // declares no rand_core of its own.
+    #[allow(dead_code)] // never built: it only proves the wrapper type-checks
+    struct EntropyRng<F: FnMut(&mut [u8])>(F);
+    impl<F: FnMut(&mut [u8])> hpke::rand_core::TryRng for EntropyRng<F> {
+        type Error = core::convert::Infallible;
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            let mut b = [0u8; 4];
+            (self.0)(&mut b);
+            Ok(u32::from_le_bytes(b))
+        }
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            let mut b = [0u8; 8];
+            (self.0)(&mut b);
+            Ok(u64::from_le_bytes(b))
+        }
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+            (self.0)(dst);
+            Ok(())
+        }
+    }
+    impl<F: FnMut(&mut [u8])> hpke::rand_core::TryCryptoRng for EntropyRng<F> {}
+    type Kem = hpke::kem::X25519HkdfSha256;
+    #[allow(dead_code)] // never called: it only proves hpke accepts the wrapper
+    fn seal_with_entropy(
+        rng: &mut EntropyRng<fn(&mut [u8])>,
+        pk: &<Kem as hpke::Kem>::PublicKey,
+    ) -> Result<(<Kem as hpke::Kem>::EncappedKey, Vec<u8>), hpke::HpkeError> {
+        hpke::single_shot_seal_with_rng::<hpke::aead::ChaCha20Poly1305, hpke::kdf::HkdfSha256, Kem>(
+            &hpke::OpModeS::Base,
+            pk,
+            b"",
+            b"",
+            b"",
+            rng,
+        )
+    }
     #[allow(dead_code)] // never built: it only proves the derives compile
     #[derive(serde::Serialize, serde::Deserialize, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
     struct Declared([u8; 32]);

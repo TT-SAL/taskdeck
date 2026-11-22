@@ -32,6 +32,8 @@ ignore = [
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained. Reviewed: used only by structopt, the command-line helper that kmeans_colors enables by default; the app never calls it. Stage desktop turns that default feature off when it reworks the root package's dependencies; remove this ignore then." },
     { id = "RUSTSEC-2022-0104", reason = "structopt is unmaintained. Reviewed: the command-line helper that kmeans_colors enables by default; the app never calls it. Stage desktop turns that default feature off when it reworks the root package's dependencies; remove this ignore then." },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained. Reviewed: used for Wayland title-bar fonts on the Linux desktop only, read from local font files, under the pinned winit. Remove this ignore when the pinned winit no longer pulls it in." },
+    # A fixed release exists but is inside the seven-day cooldown (the lead's ruling of 2026-11-22).
+    { id = "RUSTSEC-2026-0592", reason = "url 2.5.8: Url::origin() overflows the stack on a deeply nested blob: URL (a crash, no more). Reviewed 2026-11-22: no code in the tree calls Url::origin() or url::quirks::origin() (the app, reqwest, tower-http, webbrowser and the device crate were searched). The fixed release 2.5.9 was published 2026-11-20 and is inside the seven-day cooldown until 2026-11-27. From 2026-11-28: cargo update -p url --precise 2.5.9, and remove this ignore here and in .cargo/audit.toml." },
 ]
 
 [bans]

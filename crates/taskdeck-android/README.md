@@ -1,6 +1,6 @@
 # taskdeck-android
 
-The JNI library `libtaskdeck.so` (the `cdylib` named `taskdeck`): the bridge envelope, the backend behind it, the Keystore key store and the JNI entry points. It is built with exactly one of the features `backend-echo` (stage `android-shell`; links no `taskdeck-device`) and `backend-device` (stage `android`).
+The JNI library `libtaskdeck.so` (the `cdylib` named `taskdeck`): the bridge envelope, the backend behind it, the Keystore key store and the JNI entry points. It is built with exactly one of the features `backend-device` (stage `android`; the default, so `cargo build -p taskdeck-android` builds it) and `backend-echo` (stage `android-shell`; links no `taskdeck-device`; built with `cargo build -p taskdeck-android --no-default-features --features backend-echo`). Both or neither is a build error (bridge.md §21).
 
 - Owner: stage `android-shell`, then `android` (SYNC_PLAN.md §4). Created as a shell by stage `foundation`.
 - Spec: `docs/sync/spec/bridge.md` (§11, §21).

@@ -4243,6 +4243,7 @@ version = "0.1.0"
 dependencies = [
  "taskdeck-backup",
  "taskdeck-core",
+ "taskdeck-device",
  "taskdeck-seal",
 ]
 

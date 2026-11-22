@@ -97,7 +97,18 @@ both places); what part B's "Not yet" list holds; what you could not build here.
 
 ## Lead rulings for task skeletons
 
-(none yet)
+1. **Data may be real in a `Default`.** A `Default` impl that returns values the spec states (limits,
+   reminder defaults) returns them; it is data, not behaviour.
+2. **A body that must return `impl Trait`** is `unimplemented!();` followed by the smallest value of a type
+   that satisfies the signature, under `#[allow(unreachable_code)]` with a one-line comment.
+3. **Unused parameters:** a crate-level `#![allow(unused_variables)]` with the comment "the owning stage
+   removes this" is right for a skeleton; do not rename parameters with underscores (the spec fixes names).
+4. **Where a "Public API" section abbreviates and points to today's code** (core.md §20 does, for the modules
+   it ports), take the items from the table the section names and from today's `src/`, leave out what is
+   UI or file I/O, and list what you chose in your report. Where §20 and another section place an item
+   differently, §20 holds (`now_marker` and its neighbours live in `time`).
+5. **`Intent::Create.kind` is `board::Kind`.** A type today's code keeps private that a public signature
+   needs (the weather response family) becomes public; the owning stage may narrow it through a spec change.
 
 ## Already raised and handled
 

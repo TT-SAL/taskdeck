@@ -11,12 +11,15 @@ name = "taskdeck"
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 
-# Exactly one backend (bridge.md §11.1, §21). `backend-echo` answers from the
-# fixtures and links no taskdeck-device (stage android-shell); `backend-device`
-# links taskdeck-device with its default features (stage android). Neither is
-# a default: the Gradle flavour picks one. Both enable nothing yet beyond the
-# dependencies.
+# Exactly one backend (bridge.md §11.1, §21). `backend-device` is the default
+# (ruling S32): it links taskdeck-device with its default features (stage
+# android), so workspace-wide cargo commands and `scripts/ci/stage.sh android`
+# need no feature arguments. `backend-echo` answers from the fixtures and links
+# no taskdeck-device (stage android-shell); it builds with
+# `--no-default-features --features backend-echo`. Both enable nothing yet
+# beyond the dependencies.
 [features]
+default = ["backend-device"]
 backend-echo = []
 backend-device = ["dep:taskdeck-core", "dep:taskdeck-device", "dep:rustls-platform-verifier"]
 
