@@ -32,3 +32,12 @@ round, or a small fix pass before it) writes them.
    `default = ["backend-device"]`; building with both backends or with neither stays a `compile_error!`;
    the `echo` flavour builds with `--no-default-features --features backend-echo` and the `full` flavour
    with the default features. Every place that describes how a flavour passes its feature must say so.
+10. **relay.md §8.2, the row "token, role 1, on `login-nonce` and `login`"**: its "Valid at the object when"
+    cell lists no state condition, while its "Else" cell ("as above, but the generation is not checked") and
+    the paragraph and clause RELAY-OBJ-010 that TR2-TRUST-2 added answer `403 relay/revoked` for a row with
+    `state = 2` on those routes too. The cell must read: a `devices` row with `dev` and `role = 1` exists;
+    `state = 1`.
+11. **README.md §"Glossary", the row `notice`** still quotes "changed on Desk since you last synced" as an
+    example of the words; since TR2-EDIT-3 the words are the interfaces' (`bridge.md` A-04, `device.md`
+    §17.7). Reword the cell to: A persistent per-device message that is not a refusal, such as an overwrite
+    notice.

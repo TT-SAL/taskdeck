@@ -1184,6 +1184,7 @@ The native screens are plain framework views (no AppCompat, no Compose, §12.4) 
 | Devices | the sync state in full (session, last synced, unreachable since, paused until, queued, the request count when above 4,000), the sync fingerprint (`engine.fingerprint`), this device's key fingerprint, the device list (name, short key fingerprint, status, last seen = the later of `last_beat_ms` and `last_entry_ms`; never an alarm, V2-10) | — | all |
 | Devices: banners | each unacknowledged banner with its author's name and key fingerprint | Acknowledge (`ack_banner`) | all |
 | Devices: alarms | each alarm with its evidence, as text | Dismiss (`dismiss_alarm`) for one that does not stop the engine; the stop's action: `ConfirmRejoin` (`confirm_rejoin`), `RePair` (opens Pair in re-pair mode), `Adopt` (type the fingerprint, `adopt`), `UseThisCopy` (`use_this_copy`); `RestoreTail`, `ReHome`, `ReplaceDevice` show "Do this from a desktop."; `Restart` shows "Close TaskDeck and open it again."; `Wait` shows the stop's kind | `Adopt`, `UseThisCopy`: API 30 and auth |
+| Devices: rejoin | while `status().engine.stops` holds the stop of kind `Rejoin` (`engine.md` §19.7 step 1), the line "This device was away longer than the relay keeps its history. Rebuild it from the newest checked snapshot? Changes not yet sent stay queued and are sent after the rebuild." | Rebuild (`confirm_rejoin`) | all |
 | Devices: the clock | the skew when `clock.warning` | Confirm the clock (`confirm_clock`) | all |
 | Devices: continuity | `ContinuityUnchecked { from }` of `status().warnings`, with its seq | Acknowledge (`ack_continuity`) | all |
 | Devices: the halted view | the halt's kind, since when, the entry's author and key fingerprint, the Skip offer | Skip (`skip`) when `skip_offer.here` | API 30 and auth |
@@ -1201,6 +1202,7 @@ Below API 30 the rows that need it are shown with the text "This needs Android 1
 **Desktop-only** (SYNC_PLAN.md §2, `device.md` §17): restore to a point, purge history, reset trust, recovery-key changes, moving the board (starting it), creating a board, backups, the shared picture's upload, rules overrides, managing subscriptions, the palette and the home place. The phone offers none of them and the `call` table has none of them.
 
 - **BRIDGE-SCREEN-001** (android) The native screens MUST offer exactly the actions of §13.1's table, each only where its "Needs" column allows, and MUST offer none of the desktop-only operations.
+- **BRIDGE-SCREEN-002** (android) While `status().engine.stops` holds a stop of kind `Rejoin`, the Devices screen MUST show the line "This device was away longer than the relay keeps its history. Rebuild it from the newest checked snapshot? Changes not yet sent stay queued and are sent after the rebuild." with a button "Rebuild" that calls `confirm_rejoin`.
 
 ### 13.2 Authentication
 

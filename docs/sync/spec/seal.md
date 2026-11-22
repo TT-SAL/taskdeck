@@ -290,7 +290,7 @@ plaintext   = R_e (32 bytes)
 
 The info binds the use, the board, the epoch and the recipient; the aad binds the envelope version, the suite and the commitment (V1-12).
 
-**The ephemeral key.** `SealBase` makes its ephemeral key with RFC 9180's `GenerateKeyPair`: `wrap_root` draws exactly 32 bytes `ikm` from its `Entropy` argument and takes the key pair `DeriveKeyPair(ikm)` (RFC 9180 §7.1.3). It draws nothing else. A test vector (§24) gives those 32 bytes for each wrap, in the order the wraps are made.
+**The ephemeral key.** `SealBase` makes its ephemeral key with RFC 9180's `GenerateKeyPair`: `wrap_root` draws exactly 32 bytes `ikm` from its `Entropy` argument and takes the key pair `DeriveKeyPair(ikm)` (RFC 9180 §7.1.3). It draws nothing else. The wraps of one rotation are made in ascending recipient-id order, the order in which they stand in the item (§12.5); so within the one sealing call of a rotation the root is drawn first, then the 32 bytes of each wrap in that order, then the frame's nonce (`engine.md` §6.1 `seal`, ENG-SEALER-008). A test vector (§24) gives those 32 bytes for each wrap, in that order.
 
 **Wrap layout** (96 bytes):
 
@@ -1435,7 +1435,7 @@ The reader returns the records that opened, in order, with the outcome for the r
 
 ### 20.1 Blob ids
 
-A blob id is 16 bytes from `Entropy`, drawn by the writer before sealing. It is not a hash of the content: the id is inside the AEAD's AD, so it must exist before the ciphertext does. What makes a blob self-certifying is the SHA-256 of the sealed bytes, published in a signed entry (the `snap` entry, the bundle, or the `core` command that references a picture), and checked before decryption (V1-14).
+A blob id is 16 bytes from `Entropy`, drawn by the writer before sealing. Within one sealing call (`seal_snapshot`, and every function of §26 that seals a blob), the `blob_id` is the first value drawn from the call's `Entropy` and the nonce of §20.2 the second; nothing else is drawn in between. It is not a hash of the content: the id is inside the AEAD's AD, so it must exist before the ciphertext does. What makes a blob self-certifying is the SHA-256 of the sealed bytes, published in a signed entry (the `snap` entry, the bundle, or the `core` command that references a picture), and checked before decryption (V1-14).
 
 ### 20.2 Sealed layout
 
@@ -1507,6 +1507,7 @@ Splitting: part `i` (0-based) is bytes `i × 1,048,576` to `min((i + 1) × 1,048
 - **SEAL-BLOB-003** (seal) A reader MUST inflate a snapshot under an output cap equal to the signed `inflated` value, at most 67,108,864 bytes, and MUST fail when the stream would exceed it.
 - **SEAL-BLOB-004** (seal) A snapshot body MUST be laid out as §20.4 and compressed with raw DEFLATE before padding and sealing.
 - **SEAL-BLOB-005** (seal) A writer MUST draw a fresh `blob_id` from `Entropy` for every blob it seals.
+- **SEAL-BLOB-010** (seal) A function that seals a blob MUST draw the `blob_id` (16 bytes) and then the nonce (24 bytes) from its `Entropy` argument, in that order, and MUST draw nothing else between or before them.
 - **SEAL-BLOB-006** (seal) A writer MUST put in a snapshot body's `history` exactly one history record (§21.5) for each seq in its membership's `ctl_seqs`, in seq order, starting at seq 1.
 - **SEAL-BLOB-007** (seal) A reader MUST reject with `seal/blob_open` a snapshot whose history fails a projection step of §21.6 or disagrees with the snapshot's membership as §20.5 step 7 states.
 - **SEAL-BLOB-008** (seal) A reader opening a declared snapshot MUST check the parts against the declared `size` and SHA-256 before any decryption, MUST derive the key only from a root it already holds for the epoch in the sealed header, MUST open the AEAD before it parses any field of the body, and MUST inflate under a cap of 67,108,864 bytes.

@@ -497,7 +497,10 @@ The gate has checked the MAC; the object checks state, in one read of the creden
 | token, role 2 | a `read_tokens` row with `dev` exists, `state = 1`, `gen` equals the token's | `401 relay/token_stale` (no row: `401 relay/unauthorized`) |
 | door, create secret | always (the gate checked it); each route then limits what it does with it | |
 
+The object checks the conditions of a row in the order the row lists them and answers with the code of the first that fails. So a role-1 token whose row has `state = 2` is answered `403 relay/revoked` whatever its `gen`, on every route, `login-nonce` and `login` included; `401 relay/token_stale` is answered only for a row with `state = 1`.
+
 - **RELAY-OBJ-003** (relay) For every request with a token, the object MUST check the token's row as the table of §8.2 states before any other check of the route, and MUST answer with the code the table gives when it fails.
+- **RELAY-OBJ-010** (relay) When more than one condition of a §8.2 row fails, the object MUST answer with the code of the first failing condition in the order the row lists them, so that a token of a device whose row has `state = 2` is answered `403 relay/revoked` whatever its generation.
 - **RELAY-OBJ-004** (relay) The object MUST NOT write any row for a request it refuses for its credential or its board state.
 
 ### 8.3 The relay clock

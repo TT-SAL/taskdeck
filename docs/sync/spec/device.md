@@ -1385,6 +1385,13 @@ The notepad edits a draft, not `board.notes` (SYNC.md §4.6). The facade holds t
 
 The halted view is the pending view with `status().engine.halt` (frozen since, the entry's author, the Skip offer); alarm evidence is `status().engine.alarms` with each stop's `action`.
 
+The desktop app shows each notice and refusal record of `NoticeView` (§17.5) with the line `bridge.md` A-04 gives for that record, with `This device's` in place of `This phone's`, `name(id)` the item's name in quotes (or `#<id>` when the item is not on the board) and `dev(n)` the name of device `n` in `status().engine.devices` (or `device <n>`).
+
+While `status().engine.stops` holds the stop of kind `Rejoin` (`engine.md` §19.7 step 1), the app shows the line "This device was away longer than the relay keeps its history. Rebuild it from the newest checked snapshot? Changes not yet sent stay queued and are sent after the rebuild." with the button "Rebuild", which calls `confirm_rejoin()`.
+
+- **DEV-FACADE-010** (desktop) The desktop app MUST show each notice and refusal record with the line of `bridge.md` A-04 for that record, with `This device's` in place of `This phone's`.
+- **DEV-FACADE-011** (desktop) While `status().engine.stops` holds a stop of kind `Rejoin`, the desktop app MUST show the line "This device was away longer than the relay keeps its history. Rebuild it from the newest checked snapshot? Changes not yet sent stay queued and are sent after the rebuild." with a button "Rebuild" that calls `confirm_rejoin()`.
+
 ### 17.8 Sync status, devices and operations
 
 `status()` (read) returns `DeviceStatus`: the engine's `Status` (`engine.md` §30.1: session, last synced, unreachable since, paused until, queued, doomed, head, fingerprint, clock, halt, stops, alarms, banners, devices with their last beat and last entry as "last seen", rules with each newer version's blockers, the recovery-key change, a move, operations, unread counts, warnings), plus the device's own: the mode, the relay address, whether a socket is open, today's request count, the overlay's per-subscription statuses, the weather's age, the picture status, the backup status (§15.6), the pairing state (§18.3), and `device_name`.

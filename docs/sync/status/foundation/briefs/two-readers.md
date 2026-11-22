@@ -8,8 +8,8 @@ an ambiguity to fix. Stop after two rounds with no difference, or after four rou
 
 How it is run here: the six scenarios are three groups of two. In round 1 two readers per group, A and B,
 worked alone. From round 2 on there are two readers in all, as the plan words it, each writing all six
-scenarios (a reader reads nearly all of the specs whatever its scenarios, so six readers cost three times as
-much as two; decision D22). A comparer per group lists every difference and writes the exact spec change for
+scenarios (decision D22). A reader reads the sections its scenarios need, not every spec in full: the six
+specs are about 540,000 tokens, and round 2's reader who read them all had little room left to write. A comparer per group lists every difference and writes the exact spec change for
 each; one fixer per spec applies the changes. Readers of a later round are new agents.
 
 | Group | Scenarios |
@@ -84,9 +84,13 @@ stop rule.
 - **Snapshots.** The newest one is at seq 192, written by Desk, blob id `SNAP192`, acknowledged by Mac.
 - **Relay.** The Cloudflare relay (it pushes over sockets), host `relay.example`. Each device holds a valid
   device token of generation 1. Desk and Mac are connected with a socket and idle; Phone's app is closed.
+  The relay has never compacted: it holds every entry from seq 1. No device has appended yet on the day of
+  `T0`.
+- **Beats.** Unless a scenario's own facts make one due, no beat falls due on Desk, Mac or Phone during a
+  scenario: each sent its last beat recently enough.
 - **Board content.** Among others, a task "Call plumber" with item id 1 × 2^40 + 7, created by Desk, no due
-  date, not planned, not done. Desk has minted item ids up to n = 40; Mac up to n = 9; Phone up to n = 5.
-  No block ids matter here.
+  date, not planned, not done. Desk has minted item ids up to n = 40; Mac up to n = 9; Phone up to n = 5;
+  each device's next item id is its device number × 2^40 + (n + 1). No block ids matter here.
 - **Clocks and zones.** Every clock is right. `T0` = 2026-11-22T10:00:00.000Z = 1,795,341,600,000 ms. All
   three devices are in the zone Europe/Helsinki.
 - **Outboxes** are empty.
@@ -124,8 +128,9 @@ stop rule.
    happens to Mac's own frame, step by step; what Phone meets when it returns and what it shows.
 
 5. **Relay rollback.** The relay has been restored from an older copy: it holds seqs 1 to 190 and has
-   forgotten 191 to 200 (of those ten, Desk wrote six, Mac three, Phone one). The devices hold everything to
-   200. At `T0` Desk's socket reconnects; at `T0 + 30 s` the user on Desk adds a task "Pay rent"; at
+   forgotten 191 to 200 (of those ten, Desk wrote six, Mac three, Phone one), and its rows about the
+   authors are those of that older copy too (last counters: Desk 115, Mac 57, Phone 17). The devices hold
+   everything to 200. Whatever Desk does to repair the relay is finished before `T0 + 30 s`. At `T0` Desk's socket reconnects; at `T0 + 30 s` the user on Desk adds a task "Pay rent"; at
    `T0 + 60 s` Mac reconnects. Phone stays offline. Write: the start of Desk's session, message by message;
    how Desk notices, what it records as evidence and what it shows; what happens to the new edit; how the
    missing entries get back onto the relay (who does it, each request and each relay check); Mac's session;
@@ -133,10 +138,12 @@ stop rule.
 
 6. **Snapshot bootstrap.** A different history from the world above: the log has reached seq 20,000 (chain
    value `C20000`). Of its frames Desk wrote 14,000, Phone 5,939, Mac 60 and the recovery identity 1.
-   Membership has not changed since the board was created: the same three devices, epoch 1. The relay has
+   Mac and Phone were added before seq 100 and membership has not changed since: the same three devices,
+   epoch 1. The relay has
    compacted the log and no longer holds entries below seq 3,000. The newest snapshot is at seq 19,968,
    written by Desk (blob id `SNAP19968`) and acknowledged by Phone. Mac was last connected 400 days before
-   `T0`, when the head was seq 100, and it has one edit queued from that time (renaming an existing task).
+   `T0`, when the head was seq 100, and it has one edit queued from that time (renaming a task that still exists at
+   seq 20,000); Mac was already offline when the user made it, so it was never sealed or sent.
    At `T0` the user opens the app on Mac. Write: Mac's session start; how Mac learns it cannot catch up from
    101; what the user is asked; how Mac finds and fetches the snapshot, request by request; every check on
    it, in order; what Mac makes durable and in which order; how it gets the entries after the snapshot; what
