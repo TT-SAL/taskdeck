@@ -4,8 +4,69 @@
 //!
 //! Spec: `docs/sync/spec/seal.md`. Owner: stage `seal` (SYNC_PLAN.md §4).
 //! Created as a shell by stage `foundation`; the skeleton types come from the
-//! spec's Public API (§26).
+//! spec's Public API (§26). Every body is `unimplemented!()` until stage
+//! `seal` fills it: `grep -rn 'unimplemented!()' crates/taskdeck-seal` lists
+//! what is left.
 #![forbid(unsafe_code)]
+// Skeleton (task 4): the bodies are `unimplemented!()`, so the parameters the
+// spec names and the private fields of the opaque types are not read yet.
+// Stage `seal` removes this line.
+#![allow(unused_variables, dead_code)]
+
+mod backup;
+pub mod base32;
+mod blob;
+mod chain;
+pub mod ctx;
+mod encodings;
+mod entries;
+mod entropy;
+mod error;
+mod file;
+mod ids;
+mod keys;
+mod membership;
+pub mod pair;
+mod receipt;
+mod signatures;
+
+pub use backup::{
+    BackupContent, BackupHeader, BackupInput, HistoryRecord, VerifiedBackup, read_backup,
+    verify_backup_file, write_backup,
+};
+pub use blob::{
+    BlobKind, BlobRef, SealedBlob, SnapshotBody, open_blob, open_snapshot, open_snapshot_declared,
+    seal_blob, seal_snapshot, split_parts,
+};
+pub use chain::{
+    SyncFingerprint, chain_step, chain_zero, check_move_code, key_fingerprint, move_code,
+    state_hash, sync_fingerprint,
+};
+pub use encodings::relay_origin;
+pub use entries::{
+    AckVerdict, Beat, BeatAck, BeatState, CtlItem, DeviceAdded, EpochRotated, Fence, FrameHeader,
+    Genesis, GenesisDevice, GenesisSnapshot, Kind, Plain, RecoveryKeyChange, RecoveryKeyMode,
+    ResetTo, RulesUpgrade, RulesUpgradeMode, SkipItem, SnapAnnounce, beat_payload, ctl_payload,
+    frame_hash, frame_header, new_entry_id, padded_len, seal_frame, snap_payload,
+};
+#[cfg(feature = "test-entropy")]
+pub use entropy::{FixedEntropy, TEST_ENTROPY_MARKER};
+pub use entropy::{Entropy, OsEntropy};
+pub use error::SealError;
+pub use file::{FileKind, FileSealer, FileTail, OpenedFile, StorageKey, open_file};
+pub use ids::{BlobId, BoardId, Chain, DevId, EntryId, Epoch, FrameHash, Head};
+pub use keys::{
+    DeviceKeys, DevicePublic, EpochRoot, KeyKind, Recipient, RecoveryKeys, RecoveryPublic,
+    RecoverySeed, Signer, SymKey, board_id, derive_epoch_key, unwrap_root, wrap_root,
+};
+pub use membership::{
+    DeviceRecord, DeviceStatus, GenesisAnchor, Membership, PendingRecovery, RecoveryRecord,
+};
+pub use receipt::{Class, Halt, Opened, OwnIdentity, Receipt, ReceiptInput, classify};
+pub use signatures::{
+    AdminOp, CompactArgs, SeedArgs, SeedEntry, admin_message, login_message, sign_admin,
+    sign_login,
+};
 
 // Declared for the stage that fills this crate: each dependency is named once
 // so that it is resolved and compiled now, and a wrong feature set fails today

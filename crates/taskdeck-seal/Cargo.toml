@@ -7,8 +7,8 @@ description = "Frames, contexts, envelope, keys, membership, chain, pairing, HPK
 
 [features]
 # Deterministic entropy for the test vectors (seal.md §26, SEAL-GEN-005,
-# SEAL-GEN-014). Off by default; release builds never enable it. It enables
-# nothing yet: the seal stage adds `FixedEntropy` and `TEST_ENTROPY_MARKER`.
+# SEAL-GEN-014). Off by default; release builds never enable it. It declares
+# `FixedEntropy` and `TEST_ENTROPY_MARKER`; stage `seal` fills their bodies.
 test-entropy = []
 
 # The pinned crates of SYNC.md §5.1 (SEAL-GEN-003), with only the features
