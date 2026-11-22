@@ -10,6 +10,7 @@ a container (`bash scripts/tests/run.sh`, the `test-ci-*.sh` files).
 | `toolchain.sh` | every job that runs cargo | Installs exactly the toolchain `rust-toolchain.toml` pins (profile, components, targets) by name, never `rustup default` or `rustup update`; fails unless `rustc --version` reports the pinned channel |
 | `stage.sh <stage>` | `core`, `seal`, `engine`, `device`, `recovery`, `relay`, `android` | Tests and lints the stage's crates and runs the stage's own `ci.sh` hooks (below) |
 | `supply-chain.sh` | `supply-chain` | Runs `scripts/supply-chain.sh` once: with `--base` set to the pull request's base or the push's `before` when that commit is in the clone, without it (the cooldown's default base) otherwise |
+| `reads.sh` | `changes` | Fails unless a change to whatever the code reads from elsewhere in the tree marks at least the reader's areas (below) |
 | `gate.sh` | `gate` | Prints every job's result; fails if `changes` did not succeed or any job failed or was cancelled; skipped passes |
 
 ## When jobs run
@@ -27,15 +28,15 @@ is true.
 
 | Area | Paths |
 |---|---|
-| every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, `.cargo/**` except `.cargo/audit.toml` (a `.cargo/config.toml` changes every build), and any path no rule here knows |
+| every area | `Cargo.lock`, `Cargo.toml` (root), `rust-toolchain.toml`, `.github/workflows/**`, `scripts/ci/**`, `.cargo/**` except `.cargo/audit.toml` (a `.cargo/config.toml` changes every build), any path no rule here knows, and any path that holds a control character such as a newline (its name could otherwise inject a workflow command into the log) |
 | `root` | `src/**`, `build.rs`, `resources.rc`, `icon.ico`, `icon.png`, `noback.png`, `1920px-Blue_Marble_2002.png`, `fonts/**`, `images/**`, `weather_svgs_2/**`; `scripts/check-release-panic.sh` and `crates/panic-probe/**` (the desktop job runs that check on every OS) |
 | `supply` | `Cargo.lock`, any `Cargo.toml`, `deny.toml`, `.cargo/audit.toml`, `scripts/dev-setup.sh`, `scripts/supply-chain.sh`, `scripts/cooldown*` |
 | `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**`, `build.rs` (checked by `scripts/check-build-date.sh`) |
 | `core` | `crates/taskdeck-core/**`, `fixtures/**` |
 | `seal` | `crates/taskdeck-seal/**`, `docs/sync/vectors/**` |
 | `engine` | `crates/taskdeck-sync/**` |
-| `relay` | `relay/**` |
-| `device` | `crates/taskdeck-device/**`, `tests/e2e/**`; and whenever `core`, `seal` or `engine` is true |
+| `relay` | `relay/**`, `docs/sync/vectors/**` (the relay's suite takes seal's published vectors) |
+| `device` | `crates/taskdeck-device/**`, `tests/e2e/**`; and whenever `core`, `seal`, `engine`, `relay` or `recovery` is true (it links the backup crate, and its end-to-end tests run against the relay) |
 | `recovery` | `crates/taskdeck-backup/**`, `crates/taskdeck-recover/**`; and whenever `core` or `seal` is true |
 | `android` | `android/**`, `crates/taskdeck-android/**`; and whenever `device` is true |
 | none | `docs/sync/status/**`, `docs/sync/research/**`, `docs/sync/runbooks/**`, `deploy/**` (today's server's install script and unit file), `*.md`, `*.png` and `LICENSE` at the root, `.gitignore` (unless a rule above matched first: `icon.png` is `root`) |
@@ -44,6 +45,22 @@ The `root` list is what the root package compiles or embeds (`include_bytes!`,
 `include_str!`, `egui::include_image!`, `resources.rc`), plus `images/`, which
 the app reads at run time and an ignored measurement test opens. A new file the
 root package embeds must be added to `changes.sh` and to this table.
+
+### What the code reads
+
+`reads.sh`, a step of the `changes` job, so it runs on every change, fails the
+run when the code reads a file whose change would not run that code's jobs. A
+read is a path dependency in any `Cargo.toml` (the crate's `src/lib.rs` must
+mark every area the reader's `src/lib.rs` marks), a path in `include!`,
+`include_bytes!`, `include_str!`, `include_image!` or `#[path = ...]` in a `.rs`
+file (an argument that is not a string literal, or `concat!` starting with one,
+cannot be checked and fails), and a symlink's target. In particular, **when the
+root package gains a path dependency on a workspace crate, that crate's area
+must mark `root`** (for the device runtime: a `device` → `root` rule in
+`changes.sh`, which core, seal, the engine and recovery then reach through
+`device`), or every pull request touching only that crate would skip the
+`linux` and `desktop` jobs. Fix a failure in `changes.sh` and this table, never
+by moving the read out of sight.
 
 Try it on any list of paths:
 

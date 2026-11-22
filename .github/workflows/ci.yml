@@ -62,6 +62,11 @@ jobs:
           CI_AFTER: ${{ github.sha }}
           CI_HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: bash scripts/ci/changes.sh
+      # Fails the run (and so gate) when code reads a file whose changes would
+      # not run that code's jobs: a path dependency, an include, a symlink.
+      - name: What the code reads
+        shell: bash
+        run: bash scripts/ci/reads.sh
 
   linux:
     name: Linux · headless tests

@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Tests for scripts/ci/reads.sh: this repository passes, and each kind of read
+# that changes.sh would miss (a path dependency, an include, a #[path], a
+# symlink) fails, on throwaway trees. Offline; touches nothing outside a
+# temporary directory.
+set -uo pipefail
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+READS="$SCRIPTS_DIR/ci/reads.sh"
+unset GITHUB_OUTPUT CI_EVENT CI_BEFORE CI_AFTER CI_HEAD_MESSAGE
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+
+expect "this repository: every read marks its reader's areas" 0 bash "$READS"
+expect "this repository, from elsewhere" 0 env -C "$TMP" bash "$READS" "$REPO_DIR"
+
+# tree <dir>: a git repository of the files written under it.
+tree() { git -C "$1" init -q && git -C "$1" add -A; }
+
+echo "-- reads changes.sh would miss"
+BAD="$TMP/bad"
+mkdir -p "$BAD/src" "$BAD/crates/taskdeck-device/src" "$BAD/crates/taskdeck-core/src" \
+    "$BAD/docs/sync/status" "$BAD/deploy"
+cat >"$BAD/Cargo.toml" <<'EOF'
+[package]
+name = "app"
+[[bin]]
+name = "app"
+path = "src/main.rs"
+[dependencies]
+serde = "1"
+taskdeck-device = { path = "crates/taskdeck-device" }
+EOF
+cat >"$BAD/crates/taskdeck-device/Cargo.toml" <<'EOF'
+[dependencies.taskdeck-core]
+path = "../taskdeck-core"
+EOF
+cat >"$BAD/src/main.rs" <<'EOF'
+const A: &str = include_str!("../docs/sync/status/a.rs");
+#[path = "../deploy/b.rs"]
+mod b;
+const C: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/deploy/c"));
+EOF
+ln -s ../docs/sync/status/x.rs "$BAD/src/sym.rs"
+ln -s ../docs/sync/status "$BAD/src/assets"
+tree "$BAD"
+expect "a tree with missed reads fails" 1 bash "$READS" "$BAD"
+output_has "the root package's path dependency on a crate that does not mark root" \
+    "Cargo.toml depends on crates/taskdeck-device: a change to crates/taskdeck-device/src/lib.rs does not mark root"
+output_lacks "a path dependency whose crate marks the reader's areas passes" "depends on ../taskdeck-core"
+output_lacks "a path outside a dependencies table is not a dependency" "depends on src/main.rs"
+output_has "include_str! into a path that needs no CI" \
+    "src/main.rs reads ../docs/sync/status/a.rs: a change to docs/sync/status/a.rs does not mark root"
+output_has "#[path] into a path that needs no CI" "src/main.rs reads ../deploy/b.rs: a change to deploy/b.rs does not mark root"
+output_has "a read through env! cannot be checked" "cannot be checked: env!"
+output_has "a symlink into a path that needs no CI" \
+    "the symlink src/sym.rs: a change to docs/sync/status/x.rs does not mark root"
+output_has "a symlink to a directory that needs no CI" \
+    "the symlink src/assets: a change to docs/sync/status/x does not mark root"
+
+echo "-- reads changes.sh covers"
+GOOD="$TMP/good"
+mkdir -p "$GOOD/src" "$GOOD/weather_svgs_2" "$GOOD/crates/a/src" "$GOOD/crates/b/src"
+cat >"$GOOD/Cargo.toml" <<'EOF'
+[workspace.dependencies]
+a = { path = "crates/a" }
+[package]
+name = "app"
+[[bin]]
+name = "app"
+path = "src/main.rs"
+[dependencies]
+# old = { path = "deploy/old" }
+EOF
+printf '[dev-dependencies]\nb = { path = "../b" }\n' >"$GOOD/crates/a/Cargo.toml"
+cat >"$GOOD/src/main.rs" <<'EOF'
+const I: &[u8] = include_bytes!("../icon.png");
+const F: &[u8] = include_bytes!(r#"../fonts/x.ttf"#);
+const W: &[u8] = include_bytes!(concat!("../weather_svgs_2/", "04", ".svg"));
+const P: &str = include_str!("page.html");
+EOF
+ln -s main.rs "$GOOD/src/other.rs"
+tree "$GOOD"
+expect "a tree whose reads changes.sh covers passes" 0 bash "$READS" "$GOOD"
+
+finish

@@ -140,6 +140,8 @@ check("changes: outputs are the areas, wide and oses", outs == areas + ["wide", 
 ch = "\n".join(jobs["changes"])
 check("changes: full history", "fetch-depth: 0" in ch, "no fetch-depth: 0")
 check("changes: no condition", key("changes", "if") is None, "has an if")
+check("changes: checks what the code reads", re.search(r"^        run: bash scripts/ci/reads\.sh$", ch, re.M) is not None,
+      "no reads.sh step")
 
 # Each area job runs on its area.
 area_job = {"linux": "root", "desktop": "root", "emulator": "android", "supply-chain": "supply",
@@ -225,6 +227,7 @@ broken "a gate that does not always run" 's/^    if: always()$/    if: success()
 broken "the gate named gate on pushes" "s/'gate (push)'/'gate'/"
 broken "a stage job on the wrong area" "s/needs.changes.outputs.seal == 'true'/needs.changes.outputs.core == 'true'/"
 broken "a matrix that fails fast" '0,/fail-fast: false/s/fail-fast: false/fail-fast: true/'
+broken "no check of what the code reads" '/^        run: bash scripts\/ci\/reads.sh$/d'
 broken "a lost changes output" '/^      oses: \${{ steps.decide.outputs.oses }}$/d'
 
 finish

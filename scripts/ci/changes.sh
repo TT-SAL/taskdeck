@@ -31,7 +31,8 @@
 #   other events  "everything".
 # A head commit message containing "[ci full]" means "everything" too.
 # "Everything" sets every area true. So does a changed path that no rule below
-# knows (fail safe). In test mode git is not used at all.
+# knows, or that holds a control character such as a newline (fail safe).
+# In test mode git is not used at all.
 set -euo pipefail
 
 AREAS=(root supply foundation core seal engine device recovery relay android)
@@ -43,7 +44,10 @@ for a in "${AREAS[@]}"; do ON[$a]=false; done
 EVERYTHING=""   # the reason, once "everything" has been decided
 HIT=0           # did the path being classified match an area rule
 
-say() { echo "changes: $*" >&2; }
+# The runner reads workflow commands ("::add-mask::...") from any line of a
+# step's output, and a changed path can hold a newline: never print a control
+# character.
+say() { local m="$*"; echo "changes: ${m//[[:cntrl:]]/?}" >&2; }
 
 everything() {
     if [[ -z "$EVERYTHING" ]]; then
@@ -80,6 +84,10 @@ is_no_ci() {
 # classify <path>: marks the areas the path belongs to.
 classify() {
     local p="$1"
+    if [[ "$p" == *[[:cntrl:]]* ]]; then
+        everything "a path holds a control character: $p"
+        return
+    fi
     if is_shared "$p"; then
         everything "shared file $p"
         return
@@ -105,7 +113,8 @@ classify() {
     case "$p" in crates/taskdeck-core/* | fixtures/*) mark core ;; esac
     case "$p" in crates/taskdeck-seal/* | docs/sync/vectors/*) mark seal ;; esac
     case "$p" in crates/taskdeck-sync/*) mark engine ;; esac
-    case "$p" in relay/*) mark relay ;; esac
+    # relay too: the relay's suite takes seal's published vectors.
+    case "$p" in relay/* | docs/sync/vectors/*) mark relay ;; esac
     case "$p" in crates/taskdeck-device/* | tests/e2e/*) mark device ;; esac
     case "$p" in crates/taskdeck-backup/* | crates/taskdeck-recover/*) mark recovery ;; esac
     case "$p" in android/* | crates/taskdeck-android/*) mark android ;; esac
@@ -232,11 +241,15 @@ main() {
     if [[ -n "$EVERYTHING" ]]; then
         for a in "${AREAS[@]}"; do ON[$a]=true; done
     else
-        # What builds on what (SYNC_PLAN.md §4): the device runtime links core,
-        # seal and the engine; recovery reads core's board and seal's files;
-        # the phone links the device runtime.
-        if [[ ${ON[core]} == true || ${ON[seal]} == true || ${ON[engine]} == true ]]; then ON[device]=true; fi
+        # What builds on what (SYNC_PLAN.md §4), in this order: recovery reads
+        # core's board and seal's files; the device runtime links core, seal,
+        # the engine and the backup crate, and its end-to-end tests run against
+        # the relay; the phone links the device runtime.
         if [[ ${ON[core]} == true || ${ON[seal]} == true ]]; then ON[recovery]=true; fi
+        local d
+        for d in core seal engine relay recovery; do
+            if [[ ${ON[$d]} == true ]]; then ON[device]=true; fi
+        done
         if [[ ${ON[device]} == true ]]; then ON[android]=true; fi
     fi
 

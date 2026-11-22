@@ -141,3 +141,16 @@ Implemented and committed: `.github/workflows/ci.yml`, `scripts/ci/` (`changes.s
    links the backup crate). Each only makes more jobs run. The lead confirms the two additions of round 1:
    `build.rs` marks `root` and `foundation`; `scripts/check-release-panic.sh` and `crates/panic-probe/**` also
    mark `root`.
+- [medium] A changed file name holding a line break could inject a workflow command through the path filter's log and make jobs skip (fixed: everything the script logs has control characters replaced, and a path holding one means "everything")
+- [medium] No area marked `root` for a crate the desktop app will link, and [low] a file under a no-CI path that the build reads (an include, a symlink) could change with every job skipped (fixed by `scripts/ci/reads.sh`, run by the `changes` job: a path dependency, an include or a symlink target must mark every area its reader marks)
+
+7. **The area rules are a checked contract (lead ruling, 2026-11-22).** `scripts/ci/reads.sh` stays: when a
+   later stage adds a path dependency, an include or a symlink that the rules do not cover, the run fails until
+   that stage adds the rule to `scripts/ci/changes.sh`, in a small pull request of its own (SYNC_PLAN.md §3.2).
+   No `device` to `root` rule is added now: the check will ask for it when the root package links the device
+   crate.
+
+8. **Observed (lead, 2026-11-22 06:06 UTC).** The pull-request run on `fee727d` was green in every job: `gate`
+   passed on the pull-request run and `gate (push)` on the push run; the Foundation job passed with the colour
+   fix; the Supply chain job passed with the lockfile rulings; the desktop job built and tested the moved
+   crates on Windows, macOS and Linux.

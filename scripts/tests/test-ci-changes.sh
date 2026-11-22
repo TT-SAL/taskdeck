@@ -60,7 +60,7 @@ echo "-- supply"
 paths "supply: deny.toml" "supply" deny.toml
 paths "supply: .cargo/audit.toml" "supply" .cargo/audit.toml
 paths "supply: a member's Cargo.toml" "supply foundation core device recovery android" crates/taskdeck-core/Cargo.toml
-paths "supply: a Cargo.toml outside crates/" "supply relay" relay/Cargo.toml
+paths "supply: a Cargo.toml outside crates/" "supply device relay android" relay/Cargo.toml
 paths "supply: scripts/dev-setup.sh" "supply foundation" scripts/dev-setup.sh
 paths "supply: scripts/supply-chain.sh" "supply foundation" scripts/supply-chain.sh
 paths "supply: scripts/cooldown.sh" "supply foundation" scripts/cooldown.sh
@@ -77,13 +77,13 @@ paths "foundation: any crate" "foundation" crates/other/src/main.rs
 echo "-- one path per stage area, with what builds on it"
 paths "core" "foundation core device recovery android" crates/taskdeck-core/src/lib.rs
 paths "seal" "foundation seal device recovery android" crates/taskdeck-seal/src/lib.rs
-paths "seal: vectors" "seal device recovery android" docs/sync/vectors/frame.json
+paths "seal: vectors also mean relay" "seal device recovery relay android" docs/sync/vectors/frame.json
 paths "engine" "foundation engine device android" crates/taskdeck-sync/src/lib.rs
 paths "device" "foundation device android" crates/taskdeck-device/src/lib.rs
 paths "device: e2e tests" "device android" tests/e2e/pairing.rs
-paths "recovery: backup" "foundation recovery" crates/taskdeck-backup/src/lib.rs
-paths "recovery: recover" "foundation recovery" crates/taskdeck-recover/src/main.rs
-paths "relay" "relay" relay/relay-core.js
+paths "recovery: backup, and the device that links it" "foundation device recovery android" crates/taskdeck-backup/src/lib.rs
+paths "recovery: recover, and the device" "foundation device recovery android" crates/taskdeck-recover/src/main.rs
+paths "relay, and the device whose e2e tests use it" "device relay android" relay/relay-core.js
 paths "android" "android" android/app/build.gradle
 paths "android: the JNI crate" "foundation android" crates/taskdeck-android/src/lib.rs
 paths "android: the forked page" "android" android/page/index.html
@@ -107,7 +107,7 @@ done
 paths "a nested .md is not a root .md" "$ALL" tests/NOTES.md
 paths "a nested .png is not a root .png" "$ALL" docs/shot.png
 paths "docs plus one unknown path" "$ALL" README.md docs/sync/status/x.md deploy/install.sh Makefile
-paths "mixed areas add up" "root relay" README.md src/ui.rs relay/x.js
+paths "mixed areas add up" "root device relay android" README.md src/ui.rs relay/x.js
 paths "a CRLF line still matches" "root" $'src/ui.rs\r'
 
 echo "-- wide, oses and [ci full]"
@@ -203,9 +203,34 @@ mkdir -p "$REPO/relay" && echo x >"$REPO/relay/x.js"
 g add -A && g commit -qm feature
 g checkout -q day-planner
 g merge -q --no-ff -m merge feature
-git_case "pull request: the merge commit's changes against its base" "relay" CI_EVENT=pull_request
+git_case "pull request: the merge commit's changes against its base" "device relay android" CI_EVENT=pull_request
 verdict "pull request: wide" "$(value_of wide "$LAST")" "true"
 g checkout -q feature
 git_case "pull request: a HEAD with one parent means everything" "$ALL" CI_EVENT=pull_request
+
+# A file name with a newline must not put a workflow command ("::add-mask::true",
+# which would blank the job outputs and skip every job) at the start of a log
+# line, and such a name means everything.
+no_command_lines() {   # no_command_lines <case> <env...>: CI mode in $REPO
+    local name="$1" err
+    shift
+    err="$(cd "$REPO" && env "$@" bash "$CHANGES" 2>&1 >/dev/null)"
+    if grep -q '^::' <<<"$err"; then
+        FAILS=$((FAILS + 1)); echo "FAIL  $name: a log line starts with '::'"; sed 's/^/        /' <<<"$err"
+    else
+        PASSES=$((PASSES + 1)); echo "ok    $name"
+    fi
+}
+g checkout -q -b hostile day-planner
+mkdir -p "$REPO/docs/sync/status" && echo x >"$REPO/docs/sync/status/note"$'\n''::add-mask::true'
+echo 'fn b() {}' >"$REPO/src/b.rs"
+g add -A && g commit -qm hostile
+g checkout -q day-planner
+g merge -q --no-ff -m merge hostile
+git_case "pull request: a path with a newline means everything" "$ALL" CI_EVENT=pull_request
+no_command_lines "pull request: a path with a newline prints no workflow command" CI_EVENT=pull_request
+no_command_lines "push: a before with a newline prints no workflow command" \
+    CI_EVENT=push CI_BEFORE=$'x\n::add-mask::true'
+paths "test mode: a path with a control character means everything" "$ALL" $'docs/sync/status/a\033b'
 
 finish
