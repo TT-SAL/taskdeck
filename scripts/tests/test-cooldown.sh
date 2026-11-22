@@ -147,7 +147,20 @@ index_put "$d" q <<<"$(index_line q 1.0.0 2025-06-01T00:00:00Z)"
     pkg q 1.0.0
 } | lock "$TMP/sources.lock"
 expect "git and path packages are ignored" 0 run_cool --base-lockfile "$BASE" --lockfile "$TMP/sources.lock" --index-dir "$d"
-output_has "three registry packages checked, two skipped" "3 crates.io package(s) checked (new since $BASE), 0 violation(s), 0 exempted, 2 non-crates.io package(s) skipped"
+output_has "three registry packages checked, two skipped" "3 crates.io package(s) checked (new since $BASE), 0 violation(s), 0 exempted, 2 git or path package(s) skipped"
+
+# --- a crates.io URL that cargo accepts but does not write is a violation ----
+# cargo and cargo-deny take these as crates.io; the cooldown must not skip them.
+for src in "registry+https://github.com/rust-lang/crates.io-index/" \
+    "registry+https://github.com/rust-lang/crates.io-index.git" \
+    "registry+https://github.com/Rust-Lang/crates.io-index" \
+    "sparse+https://index.crates.io" "registry+https://example.invalid/index"; do
+    { pkg oldie 0.1.0; pkg alpha 1.1.0 "$src"; } | lock "$TMP/variant.lock"
+    expect "source $src fails" 1 run_cool --base-lockfile "$BASE" --lockfile "$TMP/variant.lock" --index-dir "$TMP/idx-seven"
+    output_has "source $src is reported" "VIOLATION: alpha 1.1.0: source '$src' is not crates.io"
+    expect "source $src fails with --all" 1 run_cool --all --lockfile "$TMP/variant.lock" --index-dir "$TMP/idx-bump"
+    output_has "source $src is reported with --all" "VIOLATION: alpha 1.1.0: source '$src'"
+done
 
 # --- the git base path, read-only: HEAD against a copy of HEAD's lockfile ----
 git -C "$REPO_DIR" show HEAD:Cargo.lock >"$TMP/head.lock"

@@ -9,6 +9,6 @@ git -C "$C" reset -q --mixed "origin/$B"
 if [ "$1" = c ]; then
     git -C "$C" checkout -q HEAD -- docs/sync/status docs/sync/spec     # code agents write neither
 else
-    git -C "$C" checkout -q HEAD -- docs/sync/status                     # spec agents write only docs/sync/spec
+    git -C "$C" checkout -q HEAD -- . ':!docs/sync/spec'                 # spec agents write only docs/sync/spec
 fi
 git -C "$C" status --short

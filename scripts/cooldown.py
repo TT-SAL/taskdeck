@@ -4,8 +4,10 @@ Every crates.io package (name, version) in the working tree's Cargo.lock that
 is absent from the base revision's Cargo.lock must have been published at least
 seven days (604800 seconds) before now, must not be yanked, and must exist in
 the crates.io index. Publish times come from the sparse index's "pubtime" field.
-Git and path packages, and packages from other registries, are not checked
-here: cargo-deny's sources check refuses those.
+Git and path packages are not checked here: cargo-deny's sources check owns
+those. Any other source that is not crates.io written exactly as cargo writes
+it is a violation, never a skip: cargo accepts variants of the crates.io URL
+(a trailing slash, ".git", other letter case) and cargo-deny passes them.
 
 Network access goes through curl, which honours the proxy environment.
 Standard library only; run with `python3 -I`.
@@ -45,19 +47,22 @@ def parse_time(text, what):
 
 
 def crates_io_packages(lock_text, what):
-    """(name, version) pairs from crates.io, and the count of other packages."""
+    """(name, version) pairs from crates.io, the count of git and path
+    packages, and the (name, version, source) of every other package."""
     try:
         lock = tomllib.loads(lock_text)
     except tomllib.TOMLDecodeError as e:
         raise Fatal(f"{what}: cannot parse: {e}")
-    found, other = set(), 0
+    found, other, unknown = set(), 0, []
     for pkg in lock.get("package", []):
         source = pkg.get("source")
         if source in CRATES_IO_SOURCES:
             found.add((pkg["name"], pkg["version"]))
-        else:
+        elif source is None or source.startswith("git+"):
             other += 1
-    return found, other
+        else:
+            unknown.append((pkg["name"], pkg["version"], source))
+    return found, other, unknown
 
 
 def index_path(name):
@@ -209,19 +214,19 @@ def main(argv):
     exemptions = read_exemptions(exemptions_path, now)
 
     with open(lockfile, encoding="utf-8") as f:
-        current, other = crates_io_packages(f.read(), lockfile)
+        current, other, unknown = crates_io_packages(f.read(), lockfile)
 
     if args.all:
         to_check = set(current)
         scope = "all"
     elif args.base_lockfile:
         with open(args.base_lockfile, encoding="utf-8") as f:
-            before, _ = crates_io_packages(f.read(), args.base_lockfile)
+            before, _, _ = crates_io_packages(f.read(), args.base_lockfile)
         to_check = current - before
         scope = f"new since {args.base_lockfile}"
     else:
         base, text = base_lock_text(repo, args.base)
-        before, _ = crates_io_packages(text, f"{base}:Cargo.lock")
+        before, _, _ = crates_io_packages(text, f"{base}:Cargo.lock")
         to_check = current - before
         scope = f"new since {base[:12]}"
 
@@ -232,6 +237,11 @@ def main(argv):
         files = load_index_curl(names)
 
     violations, exempted = [], []
+    for name, version, source in sorted(unknown):
+        violations.append(
+            f"{name} {version}: source {source!r} is not crates.io as cargo writes it, "
+            f"nor git or path; cannot check"
+        )
     for name, version in sorted(to_check):
         text = files.get(name)
         if text is None:
@@ -277,7 +287,7 @@ def main(argv):
     print(
         f"cooldown: {len(to_check)} crates.io package(s) checked ({scope}), "
         f"{len(violations)} violation(s), {len(exempted)} exempted, "
-        f"{other} non-crates.io package(s) skipped; now = {now.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+        f"{other} git or path package(s) skipped; now = {now.strftime('%Y-%m-%dT%H:%M:%SZ')}"
     )
     return 1 if violations else 0
 
