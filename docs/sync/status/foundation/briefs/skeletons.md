@@ -49,14 +49,9 @@ Rules:
   `--no-default-features --features backend-echo`. So every workspace-wide cargo command works without
   feature arguments, and a build that forgets its flags gets the real backend, never the echo one.
 - The one trivial test each shell has stays; add no test of behaviour in part A.
-- `crates/taskdeck-android/ci.sh` (the hook `scripts/ci/stage.sh` runs; read that script's header): checks
-  that the skeletons compile for the Android targets of `rust-toolchain.toml`: `cargo check --locked` of
-  core, seal, sync, backup and device and of `taskdeck-android` with each backend, for each Android target.
-  A crate with C code (ring, under rustls) needs the NDK's compiler: take it from `ANDROID_NDK_HOME`, else
-  `ANDROID_NDK_LATEST_HOME`, else `ANDROID_NDK_ROOT`, and set `CC_<target>`, `AR_<target>` and the cargo
-  linker variable from it. With no NDK: on CI (`CI=true`) that is a failure; elsewhere the hook checks the
-  crates without C code, prints which checks it could not run, and exits 0. The hook runs on Linux only
-  (`CI_OS`); on other systems it prints that and exits 0.
+- The hook `crates/taskdeck-android/ci.sh` is not part of this task: the tooling task writes it, because it
+  calls that task's `scripts/dev-setup.sh android-targets` and `scripts/check-android-targets.sh` (lead
+  ruling 4 of `tooling.md`).
 
 ## Part B: the toy state machine and the fake sealer (`taskdeck-sync`, feature `sim`)
 
@@ -87,7 +82,6 @@ Rules:
 `-p taskdeck-sync --features sim`, for `-p taskdeck-device --features test-trust`, for seal with its test
 feature if it has one, and for the echo backend; `cargo check -p taskdeck-core -p taskdeck-sync
 --target wasm32-unknown-unknown`, and `-p taskdeck-sync --features sim` for the same target;
-`bash crates/taskdeck-android/ci.sh` with `CI_STAGE=android CI_OS=linux CI_WIDE=false`;
 `bash scripts/tests/run.sh`; `bash scripts/ci/reads.sh`; and the root package as before:
 `cargo build --locked --no-default-features --bin taskdeck-server`.
 

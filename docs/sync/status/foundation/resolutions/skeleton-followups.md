@@ -45,4 +45,14 @@ already took a reading, the spec is brought to the skeleton, not the other way r
     enforces on a mark's device number (1 to 8,191) and `n` (at most 2^40 − 1), which the toy does not
     enforce yet.
 
+## core.md (found by `scripts/spec-lint.sh`, which is stricter than the lead's earlier format check)
+
+15. §16: the error code `core/gone` stands twice, at two places of the catalogue with different meanings
+    (lines 1201 and 1227 when found). One of the two gets a name of its own, and every place that cites it
+    follows.
+16. §16: the table "Intent and compile errors" has the columns Code, Status, Message, Raised when, What the
+    caller does; README §6 fixes Code, Meaning, Raised when, What the caller does. The table takes the
+    README's four columns, with the status and the message inside "Meaning" (as relay.md's "Meaning
+    (status)" does).
+
 (The device, android and fake-sealer implementers' points are added below as they report.)

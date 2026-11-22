@@ -135,3 +135,33 @@ for the gate runner (a made-up gate file with a passing, a failing and a CI item
 for the two scans. All run by `bash scripts/tests/run.sh`.
 
 Report: every gate item per stage (the table), every place you had to interpret the plan, what you ran.
+
+## State after the implementation (2026-11-22)
+
+Built: `spec-lint.sh`, `spec-coverage.sh`, `gate.sh` with one gate file per stage, the gate scans,
+`check-android-targets.sh`, and `dev-setup.sh` for every stage (the Android SDK and NDK, cargo-ndk and
+wrangler were installed once in the container: 3.0 GB). The foundation gate passed 13 of its 14 run items
+in the implementer's run; spec-lint fails on two real defects of core.md and on the empty requirement map.
+
+## Lead rulings for task tooling
+
+1. **wrangler stays at 4.166.0**, the version SYNC_PLAN.md names, although it and its pinned dependencies
+   were younger than seven days when pinned. It runs only in cloud containers and CI, from a lockfile with
+   integrity hashes and without install scripts. Stage `relay` may move the pin.
+2. **`dev-setup.sh` accepts the Android SDK licences** for its own SDK directory and says so when it does;
+   the lead tells the owner.
+3. **The map rules of spec-lint stand** (rows in SYNC.md's order, a row for every section of §3 to §9 that
+   has no subsections, a `plan §2:` topic equal to the first cell of a row of that table). The requirement
+   map is written to meet them.
+4. **Two rows of their own in the stage table of `dev-setup.sh`**, so that CI installs only what a job
+   needs: `supply-chain` (cargo-deny, cargo-audit), used by `scripts/ci/supply-chain.sh`; and
+   `android-targets` (the Rust toolchain and cargo-ndk, and the NDK only when neither `ANDROID_NDK_HOME`
+   nor `ANDROID_NDK_LATEST_HOME` names a usable one), used by `crates/taskdeck-android/ci.sh`, the hook of
+   CI's android job, before it runs `scripts/check-android-targets.sh`. GitHub's Ubuntu runners carry an
+   NDK; a container does not.
+5. **spec-lint joins the foundation CI job last**, once the requirement map is filled and core.md's two
+   defects are fixed (the lead makes that change with the exit).
+
+## Already raised and handled (do not re-report)
+
+(none yet)
