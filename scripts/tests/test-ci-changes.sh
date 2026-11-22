@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# Tests for scripts/ci/changes.sh: every path rule, the fall-backs to
+# "everything", [ci full], wide and oses, and the git modes on throwaway
+# repositories. Offline; touches nothing outside a temporary directory.
+set -uo pipefail
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+CHANGES="$SCRIPTS_DIR/ci/changes.sh"
+unset GITHUB_OUTPUT CI_EVENT CI_BEFORE CI_AFTER CI_HEAD_MESSAGE
+ALL="root supply foundation core seal engine device recovery relay android"
+
+verdict() {   # verdict <case> <got> <want>
+    if [[ "$2" == "$3" ]]; then
+        PASSES=$((PASSES + 1)); echo "ok    $1"
+    else
+        FAILS=$((FAILS + 1)); echo "FAIL  $1: got [$2], wanted [$3]"
+    fi
+}
+
+# The areas set true in changes.sh's output, in its order, or "none".
+on_areas() {
+    local got
+    got="$(sed -n 's/^\([a-z-]*\)=true$/\1/p' <<<"$1" | grep -vx wide | tr '\n' ' ' | sed 's/ $//')"
+    echo "${got:-none}"
+}
+value_of() { sed -n "s/^$1=//p" <<<"$2"; }
+
+# paths <case> <expected areas> <path>...: test mode, paths on standard input.
+# EV and MSG set the event and the head commit message (default: a push).
+paths() {
+    local name="$1" want="$2" out
+    shift 2
+    if ! out="$(printf '%s\n' "$@" | CI_EVENT="${EV-push}" CI_HEAD_MESSAGE="${MSG-}" \
+        bash "$CHANGES" --paths-from - 2>/dev/null)"; then
+        FAILS=$((FAILS + 1)); echo "FAIL  $name: changes.sh exited non-zero"; return
+    fi
+    LAST="$out"
+    verdict "$name" "$(on_areas "$out")" "$want"
+}
+
+echo "-- shared files set every area"
+for p in Cargo.lock Cargo.toml rust-toolchain.toml .github/workflows/ci.yml \
+    .github/workflows/release.yml scripts/ci/changes.sh scripts/ci/README.md; do
+    paths "shared: $p" "$ALL" "$p"
+done
+
+echo "-- root: what the root package compiles, embeds or reads"
+for p in src/main.rs src/phone.html src/notes.md build.rs resources.rc icon.ico icon.png noback.png \
+    1920px-Blue_Marble_2002.png fonts/DejaVuSans.ttf fonts/LICENSES/dejavu.txt \
+    images/pexels-francesco-ungaro-1525041.jpg weather_svgs_2/04.svg; do
+    paths "root: $p" "root" "$p"
+done
+
+echo "-- supply"
+paths "supply: deny.toml" "supply" deny.toml
+paths "supply: .cargo/audit.toml" "supply" .cargo/audit.toml
+paths "supply: a member's Cargo.toml" "supply foundation core device recovery android" crates/taskdeck-core/Cargo.toml
+paths "supply: a Cargo.toml outside crates/" "supply relay" relay/Cargo.toml
+paths "supply: scripts/dev-setup.sh" "supply foundation" scripts/dev-setup.sh
+paths "supply: scripts/supply-chain.sh" "supply foundation" scripts/supply-chain.sh
+paths "supply: scripts/cooldown.sh" "supply foundation" scripts/cooldown.sh
+paths "supply: scripts/cooldown.py" "supply foundation" scripts/cooldown.py
+paths "supply: scripts/cooldown-exemptions.txt" "supply foundation" scripts/cooldown-exemptions.txt
+
+echo "-- foundation"
+paths "foundation: a spec" "foundation" docs/sync/spec/core.md
+paths "foundation: fixtures also mean core" "foundation core device recovery android" fixtures/boards/small.json
+paths "foundation: a script" "foundation" scripts/check-build-date.sh
+paths "foundation: a script test" "foundation" scripts/tests/run.sh
+paths "foundation: any crate" "foundation" crates/panic-probe/src/main.rs
+
+echo "-- one path per stage area, with what builds on it"
+paths "core" "foundation core device recovery android" crates/taskdeck-core/src/lib.rs
+paths "seal" "foundation seal device recovery android" crates/taskdeck-seal/src/lib.rs
+paths "seal: vectors" "seal device recovery android" docs/sync/vectors/frame.json
+paths "engine" "foundation engine device android" crates/taskdeck-sync/src/lib.rs
+paths "device" "foundation device android" crates/taskdeck-device/src/lib.rs
+paths "device: e2e tests" "device android" tests/e2e/pairing.rs
+paths "recovery: backup" "foundation recovery" crates/taskdeck-backup/src/lib.rs
+paths "recovery: recover" "foundation recovery" crates/taskdeck-recover/src/main.rs
+paths "relay" "relay" relay/relay-core.js
+paths "android" "android" android/app/build.gradle
+paths "android: the JNI crate" "foundation android" crates/taskdeck-android/src/lib.rs
+paths "android: the forked page" "android" android/page/index.html
+
+echo "-- paths that need no CI"
+for p in docs/sync/status/foundation.md docs/sync/status/foundation/briefs/ci.md \
+    docs/sync/research/R1.md docs/sync/runbooks/restore.md README.md SYNC.md SYNC_PLAN.md \
+    LICENSE taskdeck_example_main.png .gitignore; do
+    paths "no CI: $p" "none" "$p"
+done
+paths "docs-only change: nothing but changes and gate" "none" \
+    README.md docs/sync/status/foundation.md docs/sync/research/R4.md LICENSE .gitignore
+paths "no changed path at all" "none"
+
+echo "-- unknown paths are fail safe"
+for p in deploy/install.sh .github/dependabot.yml docs/README.md docs/sync/other.md \
+    LICENSE.txt Makefile src.rs tests/other/x.rs scripts; do
+    paths "unknown: $p" "$ALL" "$p"
+done
+paths "a nested .md is not a root .md" "$ALL" deploy/NOTES.md
+paths "a nested .png is not a root .png" "$ALL" docs/shot.png
+paths "docs plus one unknown path" "$ALL" README.md docs/sync/status/x.md deploy/install.sh
+paths "mixed areas add up" "root relay" README.md src/ui.rs relay/x.js
+paths "a CRLF line still matches" "root" $'src/ui.rs\r'
+
+echo "-- wide, oses and [ci full]"
+EV=push paths "push: narrow" "root" src/ui.rs
+verdict "push: wide=false" "$(value_of wide "$LAST")" "false"
+verdict "push: Linux only" "$(value_of oses "$LAST")" '["ubuntu-latest"]'
+EV=pull_request paths "pull request: still only what changed" "root" src/ui.rs
+verdict "pull request: wide=true" "$(value_of wide "$LAST")" "true"
+verdict "pull request: three systems" "$(value_of oses "$LAST")" '["ubuntu-latest","windows-latest","macos-latest"]'
+EV=pull_request paths "pull request, docs only: nothing" "none" README.md
+EV=push MSG=$'fix the planner\n\n[ci full]' paths "[ci full]: everything" "$ALL" README.md
+verdict "[ci full]: wide" "$(value_of wide "$LAST")" "true"
+verdict "[ci full]: three systems" "$(value_of oses "$LAST")" '["ubuntu-latest","windows-latest","macos-latest"]'
+EV=push MSG='[ci full] first' paths "[ci full] at the start" "$ALL" README.md
+EV=push MSG='[CI FULL]' paths "[CI FULL] is not [ci full]" "none" README.md
+EV=push MSG='ci full' paths "ci full without brackets is not [ci full]" "none" README.md
+EV=push MSG='$(touch '"$TMP"'/pwned) `touch '"$TMP"'/pwned2`' paths "a hostile message is data" "none" README.md
+verdict "the hostile message ran nothing" "$(ls "$TMP" | grep -c pwned)" "0"
+
+echo "-- outputs"
+out_file="$TMP/github_output"
+: >"$out_file"
+stdout="$(printf 'relay/x.js\n' | CI_EVENT=push GITHUB_OUTPUT="$out_file" bash "$CHANGES" --paths-from - 2>/dev/null)"
+verdict "GITHUB_OUTPUT gets exactly the printed outputs" "$(cat "$out_file")" "$stdout"
+verdict "twelve outputs" "$(wc -l <"$out_file" | tr -d ' ')" "12"
+verdict "outputs in order" "$(cut -d= -f1 "$out_file" | tr '\n' ' ')" "$ALL wide oses "
+printf 'src/ui.rs\n' >"$TMP/paths.txt"
+expect "--paths-from <file>" 0 env CI_EVENT=push bash "$CHANGES" --paths-from "$TMP/paths.txt"
+output_has "--paths-from <file> reads the file" "root=true"
+expect "an unreadable paths file is an error" 2 bash "$CHANGES" --paths-from "$TMP/nope.txt"
+expect "an unknown argument is an error" 2 bash "$CHANGES" --frobnicate
+expect "--paths-from without a value is an error" 2 bash "$CHANGES" --paths-from
+
+echo "-- git modes, on throwaway repositories"
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+g() { git -C "$REPO" -c user.name=test -c user.email= -c commit.gpgsign=false "$@"; }
+REPO="$TMP/repo"
+git init -q -b day-planner "$REPO"
+echo one >"$REPO/README.md"
+g add -A && g commit -qm one
+A="$(g rev-parse HEAD)"
+mkdir -p "$REPO/src" && echo 'fn a() {}' >"$REPO/src/a.rs"
+g add -A && g commit -qm two
+B="$(g rev-parse HEAD)"
+echo two >>"$REPO/README.md"
+g add -A && g commit -qm three
+C="$(g rev-parse HEAD)"
+
+# git_case <case> <expected areas> <env...>: CI mode in $REPO.
+git_case() {
+    local name="$1" want="$2" out
+    shift 2
+    if ! out="$(cd "$REPO" && env "$@" bash "$CHANGES" 2>/dev/null)"; then
+        FAILS=$((FAILS + 1)); echo "FAIL  $name: changes.sh exited non-zero"; return
+    fi
+    LAST="$out"
+    verdict "$name" "$(on_areas "$out")" "$want"
+}
+git_case "push: the diff before..after" "root" CI_EVENT=push CI_BEFORE="$A" CI_AFTER="$B"
+git_case "push: after defaults to HEAD" "root" CI_EVENT=push CI_BEFORE="$A"
+git_case "push: a docs-only push runs nothing" "none" CI_EVENT=push CI_BEFORE="$B" CI_AFTER="$C"
+git_case "push: before all zeros means everything" "$ALL" \
+    CI_EVENT=push CI_BEFORE=0000000000000000000000000000000000000000 CI_AFTER="$C"
+git_case "push: no before means everything" "$ALL" CI_EVENT=push CI_AFTER="$C"
+git_case "push: a before not in the clone means everything" "$ALL" \
+    CI_EVENT=push CI_BEFORE=1234567890abcdef1234567890abcdef12345678 CI_AFTER="$C"
+git_case "push: a before that is not a revision means everything" "$ALL" \
+    CI_EVENT=push CI_BEFORE='--output=x' CI_AFTER="$C"
+git_case "push: a ref name instead of a commit id means everything" "$ALL" \
+    CI_EVENT=push CI_BEFORE=day-planner CI_AFTER="$C"
+git_case "push: an after not in the clone means everything" "$ALL" \
+    CI_EVENT=push CI_BEFORE="$A" CI_AFTER=1234567890abcdef1234567890abcdef12345678
+git_case "push: [ci full] on a docs-only push" "$ALL" \
+    CI_EVENT=push CI_BEFORE="$B" CI_AFTER="$C" CI_HEAD_MESSAGE='docs [ci full]'
+verdict "push: [ci full] is wide" "$(value_of wide "$LAST")" "true"
+git_case "no event means everything" "$ALL" CI_BEFORE="$A" CI_AFTER="$B"
+git_case "another event means everything" "$ALL" CI_EVENT=workflow_dispatch CI_BEFORE="$A"
+
+# A move out of src/ into a path that needs no CI still runs root (both names count).
+g mv src/a.rs docs-a.md 2>/dev/null || mv "$REPO/src/a.rs" "$REPO/docs-a.md"
+g add -A && g commit -qm move
+D="$(g rev-parse HEAD)"
+git_case "push: a rename counts its old path too" "root" CI_EVENT=push CI_BEFORE="$C" CI_AFTER="$D"
+# Odd file names are neither quoted nor split.
+mkdir -p "$REPO/src/odd dir" && echo x >"$REPO/src/odd dir/ü näme.rs"
+g add -A && g commit -qm odd
+E="$(g rev-parse HEAD)"
+git_case "push: a path with spaces and non-ASCII letters" "root" CI_EVENT=push CI_BEFORE="$D" CI_AFTER="$E"
+
+# Pull requests: the checkout is the merge commit, base first.
+g checkout -q -b feature "$C"
+mkdir -p "$REPO/relay" && echo x >"$REPO/relay/x.js"
+g add -A && g commit -qm feature
+g checkout -q day-planner
+g merge -q --no-ff -m merge feature
+git_case "pull request: the merge commit's changes against its base" "relay" CI_EVENT=pull_request
+verdict "pull request: wide" "$(value_of wide "$LAST")" "true"
+g checkout -q feature
+git_case "pull request: a HEAD with one parent means everything" "$ALL" CI_EVENT=pull_request
+
+finish

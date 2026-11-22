@@ -107,3 +107,23 @@ bash script sets `shell: bash` so it works on Windows runners.
   run `scripts/ci/changes.sh` in its test mode against the real diff of this branch, and simulate
   `scripts/ci/stage.sh` for each stage in this checkout. The lead will read the real CI run.
 - Report precisely what you could not verify locally.
+
+## State after the implementation (2026-11-22, second session)
+
+Implemented and committed: `.github/workflows/ci.yml`, `scripts/ci/` (`changes.sh`, `toolchain.sh`, `stage.sh`,
+`gate.sh`, `supply-chain.sh`, `README.md`) and six test files `scripts/tests/test-ci-*.sh`.
+`bash scripts/tests/run.sh` passes. Owned paths for the attack loop: those files.
+
+# Lead rulings for task baseline-1c (2026-11-22)
+
+1. **`scripts/supply-chain.sh` gains `--base <rev>`, passed through to `scripts/cooldown.sh`** (a change to the
+   supply-chain task's script, made with that task's rulings). `scripts/ci/supply-chain.sh` stays as the place
+   that works out the base from the event, and then makes one call instead of running the cooldown twice.
+2. **`deploy/**` needs no CI.** It holds the install script and the unit file of today's server; no job reads it.
+3. **`.cargo/audit.toml` belongs to the area `supply`; any other path under `.cargo/` is a shared file** (every
+   area): a `.cargo/config.toml` would change every build.
+4. **A run cancelled by the concurrency group makes `gate` fail for that run.** That is the plan's wording
+   ("fails if any job failed or was cancelled") and it stays; the superseding run is the one that counts.
+5. **Real runs are the evidence.** What GitHub actually did with this workflow is written down by the lead in
+   the session scratchpad (`ci-evidence/1c.md`) and, in short, in the status file. A finding that contradicts
+   an observed run needs its own observation.

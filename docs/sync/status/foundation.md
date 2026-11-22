@@ -75,13 +75,13 @@ These are working papers of the stage, not contracts. The exit pull request may 
 | # | Task (SYNC_PLAN.md §6.1) | State | Evidence |
 |---|---|---|---|
 | 0 | Status file, first pull request | done | this file; TT-SAL/taskdeck#1, merged |
-| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | implemented, with the panic hook of D11. Three loops so far: 5 rounds (14 findings), 5 rounds (9), 3 rounds (5); every finding fixed or ruled on. No finding against the product changes themselves since the hook landed; all recent ones are about which hypothetical edits the checks detect, now a closed list (D14). Not yet two dry rounds: the loop must run again from round 1 (`briefs/task-1a.md`) | commits `a743020` onwards; `scripts/check-release-panic.sh`, `scripts/check-build-date.sh`, `src/panic_abort.rs`; full CI matrix green on the merged head |
+| 1a | Toolchain pin, lockfile refresh, `panic = "unwind"` with its release test, `build.rs` date | **done.** The fourth loop (second session) ran six rounds: rounds 1 and 3 dry, rounds 2 and 4 one low finding each about which invalid `SOURCE_DATE_EPOCH` spellings the date check tries (fixed; rulings 8 and 9 in the brief close that list), rounds 5 and 6 dry on all three lenses: converged. The lead ran the gate after each fix: 265 passed, 1 ignored | commits `6ca1240`, `938e4b9`; `briefs/task-1a.md` |
 | 1b | `deny.toml`, cargo-deny, cargo-audit, seven-day cooldown | implemented and committed; the lead read every file and ran the tests (39 and 43 cases pass). The gate `scripts/supply-chain.sh` fails on today's lockfile, as expected: the lead's rulings on each advisory are in the brief (D19) and are applied next; then the attack loop | commit `42f8d8b`; `briefs/supply-chain.md` |
-| 1c | CI: path filters at job level, aggregate `gate` job | todo; design and brief ready (`briefs/ci.md`) | |
+| 1c | CI: path filters at job level, aggregate `gate` job | implemented and committed; the lead read the workflow and the gate script and ran the script tests (eight test files pass). Next: read the first real run, write it down as evidence, then the attack loop. The lead's rulings on the implementer's four questions are in the brief | `briefs/ci.md`; `scripts/ci/README.md` |
 | 2 | Workspace: member crates with every planned dependency pinned; `relay/`, `android/` READMEs | todo; brief ready (`briefs/workspace.md`). Today the workspace has the root package and `crates/panic-probe` | |
 | 3a | Spec conventions (`docs/sync/spec/README.md`) | done, read in full by the lead | commit `460aa26` |
 | 3b | Spec drafts: core, seal, relay, engine, device, bridge | seal drafted (2,038 lines, 155 clauses; the lead read §3–§10, §14, §17); core drafted (1,622 lines, 93 clauses; the lead read the report and §14.3); relay drafted and finished (1,846 lines, 166 clauses; typical day recomputed at 199 Worker requests, 215 object requests, 1,524 rows written, 4,217 rows read, all under 2%); engine drafted (2,390 lines, 182 clauses, with the outcome of each of V2's fifteen scenarios); device drafted (2,085 lines, 146 clauses); bridge drafted (1,655 lines, 110 clauses). All six are first drafts: 11,635 lines, 852 clauses | `docs/sync/spec/*.md` |
-| 3c | Pairwise interface reviews: the plan's six pairs (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) plus core–device, seal–device, relay–device | todo; the workflow is ready (`workflows/interface-reviews-and-1a.js`) | |
+| 3c | Pairwise interface reviews: the plan's six pairs (seal–relay, seal–engine, core–engine, engine–relay, device–bridge, device–engine) plus core–device, seal–device, relay–device | reviewed and resolved, not yet applied. Nine reviews brought 152 findings (26 high, 75 medium, 51 low); nine resolvers turned them into 232 exact changes (seal 35, core 15, relay 25, engine 50, device 71, bridge 10); the lead ruled on their 19 open points (`r1-lead.md`, L1 to L19). Next: `workflows/s2-spec-fixes.js` with `s2-plan.json` (the rulings as exact text, then fixers spec by spec in the working copy `target/work/s`, each checked by a second agent) | `resolutions/r1-*.md` |
 | 3d | Two-readers test, six scenarios, until two rounds agree (at most four) | todo | |
 | 3e | Requirement map in `spec/README.md` (SYNC.md §3–§9 to clause, stage or plan §2 row) | todo | |
 | 4 | Skeleton crates: public types and traits, toy state machine, fake sealer | todo | |
@@ -91,11 +91,15 @@ These are working papers of the stage, not contracts. The exit pull request may 
 
 ## Next steps
 
-In this order; a resuming session starts at the first. Steps 1 and 6 to 8 are the spec track, steps
-2 to 5 the code track (D15); the two run side by side. Started in the second session, 21:28 UTC:
-step 1 (`workflows/s1-interface-reviews.js`) and steps 2 to 4 up to task 1c's implementation
-(`workflows/c1-supply-chain-1a-loop-ci.js`). Nothing of either is committed yet; task 1b's files
-exist, unverified, in the working copy `target/work/c`.
+In this order; a resuming session starts at the first open one. Steps 1 and 6 to 8 are the spec
+track, steps 2 to 5 the code track (D15); the two run side by side.
+
+Where the second session stands (2026-11-22 02:40 UTC): step 2 is done. Step 1 is reviewed and
+resolved; applying it is the next spec workflow (`workflows/s2-spec-fixes.js`). Steps 3 and 4 are
+implemented and committed; the next code workflow (`workflows/c2-1b-1c-loops-workspace.js`, to be
+trimmed as D20 says before launch) applies the lead's rulings to task 1b, attacks tasks 1b and 1c,
+and implements task 2. No workflow is running: the owner asked for none before the usage window's
+reset, and a launch at 02:28 UTC was refused by the session's permission check.
 
 1. **Interface reviews of the six spec drafts.** Nine pairs, each reviewer also checking that the
    rulings S1 to S31 are reflected; then one resolver per spec, in dependency order, writes the exact
@@ -225,6 +229,24 @@ exist, unverified, in the working copy `target/work/c`.
   - Also: duplicate versions outside the cryptographic list are allowed without a warning (41 of
     them, from the pinned window toolkit, were 2,650 of the gate's 3,500 output lines); cargo-audit
     fails on unmaintained, unsound and yanked, not on notices, so the two tools agree.
+- **D20. Cheaper workflows (the owner's instruction, 2026-11-22 00:00 UTC).** The second session's first
+  two workflows used 5.9 and 3.0 million tokens and brought the account's five-hour window to 92% in
+  under three hours. The owner asked for no launch near the limit (a workflow cut by it wastes its
+  unfinished agents) and for more economical designs. From here on: every agent gets an explicit
+  effort (medium for agents that apply, check or attack by a closed list, high for resolvers,
+  implementers and attackers of new code; nothing inherits the session's effort); reading lists are
+  short (the rules an agent needs are in its prompt, and it reads only the sections it touches,
+  never a whole plan, brief or spec unless reviewing that text is the task); an attack round is one
+  fresh agent that covers the task's three lenses, not three agents and an inbox reader (SYNC_PLAN.md
+  §7 allows adapting the loop while its properties hold: the writer does not judge its own work, a
+  finding needs a reproduction, a failed agent is never a clean result, convergence is reported);
+  lead findings go into the task's brief, which the next attacker reads; a fix-up is not followed by
+  a second automatic check. The lead pushes once per task and reads CI when it needs it. Before a
+  launch the lead considers where the usage window stands; the owner sees the meter, the lead does
+  not.
+- **D21. The spec resolutions are kept in the repository** (`docs/sync/status/foundation/resolutions/`):
+  nine files with 232 exact changes and the lead's rulings on them are eighteen agent runs of work
+  and existed only in the session's scratch space.
 
 ## Rulings for the specs
 
@@ -333,11 +355,14 @@ Rulings on what the engine draft raised (2026-11-21):
 - **S15, settled. The Skip floor is `F(s) = max(purge_seq, s − 16,384)`.** A Skip at seq `s` may
   target only an entry at or above that floor, on every device alike, and compaction keeps the newest
   16,384 seqs, so the target frame is always fetchable. `seal.md` §13.6 takes the precondition.
-- **S24. A reinstating entry carries the roots the reinstated device missed.** The recovery identity
-  holds a wrap of every epoch root, so when it reinstates a device it wraps to that device every root
-  from the revocation to the reinstating entry. The device can then read and apply what was sealed
-  while it was out, and need not pair again (SYNC.md §5.5: the recovery key overrules a hostile
-  revocation).
+- **S24, reworded after the reviews (lead ruling L1). The recovery-signed `reinstate` operation
+  carries the roots the reinstated device missed.** They cannot travel inside the reinstating entry:
+  that entry is sealed under an epoch the revoked device does not hold. The recovery identity holds
+  a wrap of every epoch root, so it wraps to the device every root from the epoch its revocation set
+  up to the epoch the reinstating entry is sealed under (at most 256); the relay keeps them for that
+  device and returns them at its next login; the device checks each against the commitments in the
+  log, oldest first. It can then read and apply what was sealed while it was out, and need not pair
+  again (SYNC.md §5.5: the recovery key overrules a hostile revocation).
 - **S25. Snapshots keep SYNC.md §4.7's two triggers:** the newest acknowledged snapshot is a week old
   by the log clock, or 1,000 entries behind the head. To keep an import from producing a burst, a
   device writes at most one snapshot per 24 hours of log clock. (The draft had dropped the entry
@@ -410,6 +435,8 @@ Rulings on what the bridge draft raised (2026-11-21):
 | Agent runs in the first session | about 110 finished, of them 13 attack rounds on task 1a | workflow journals |
 | Task 1a's gate in the second session's container, run by the lead | both check scripts pass, the server builds, 265 tests passed and 1 ignored in 157 s; a cold build of the test binary took 7 min 34 s | `target/lead`, 2026-11-21 21:36 UTC |
 | A pairwise interface review | about 11 minutes; the first returned 16 findings (3 high, 6 medium, 7 low) and 17 points found sound | spec track, seal with relay |
+| Spec workflow 1 (nine reviews, nine resolvers) | 18 agents, 5.9 million tokens, 2 h 19 min; a resolver took about 10 minutes and wrote 30 to 60 KB | 2026-11-21 21:28 to 2026-11-22 00:00 UTC |
+| Code workflow 1 (task 1b, task 1a's loop of six rounds, task 1c) | 28 agents, 3.0 million tokens, 2 h 41 min | 2026-11-21 21:38 to 2026-11-22 00:20 UTC |
 
 ## Facts found along the way
 
@@ -455,6 +482,12 @@ Decisions the lead took that the owner may want to overrule:
   yanked version, and `deny.toml` carries four more reviewed ignores than SYNC.md's one (D19).
 - cargo-deny is pinned at 0.20.2: the two newer releases were inside the seven-day rule on
   2026-11-21. cargo-audit's release publishes no checksum, so its pinned hash is the download's.
+- From the spec reviews (lead rulings L1 to L19 in `resolutions/r1-lead.md`): a seeded relay may
+  hold more than SYNC.md §6.7's 30 days of tail, so that a Skip target stays fetchable (L2);
+  local-only mode refuses a folder over a cap of rules version 1 and names the ids (L15, next to
+  S18); a host never carries `:443` (L17); links slower than 64 KiB/s cannot upload a 1 MiB part
+  within the relay's deadline, which the rehearsal should measure (L19).
+- An attack round is now one agent covering three lenses instead of three agents (D20).
 
 ## What the next stages need to know
 
