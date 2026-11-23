@@ -1,0 +1,25 @@
+{
+ "root": "/home/user/taskdeck",
+ "work": "/home/user/taskdeck/target/work/core",
+ "briefs": "docs/sync/status/core/briefs",
+ "gate": "cargo test --locked -p taskdeck-core && cargo clippy --locked -p taskdeck-core --all-targets -- -D warnings && bash crates/taskdeck-core/ci.sh && bash scripts/gate.sh --only purity-clippy-toml core",
+ "steps": [
+  {
+   "id": "exit:hygiene",
+   "kind": "verify",
+   "briefs": [
+    "g-hygiene.md"
+   ],
+   "commit": "HEAD",
+   "effort": "medium"
+  },
+  {
+   "id": "exit:review",
+   "kind": "verify",
+   "briefs": [
+    "g-exit-review.md"
+   ],
+   "commit": "HEAD"
+  }
+ ]
+}

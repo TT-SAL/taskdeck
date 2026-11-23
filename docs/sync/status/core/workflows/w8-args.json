@@ -1,0 +1,34 @@
+{
+ "root": "/home/user/taskdeck",
+ "work": "/home/user/taskdeck/target/work/core",
+ "briefs": "docs/sync/status/core/briefs",
+ "gate": "cargo test --locked -p taskdeck-core && cargo clippy --locked -p taskdeck-core --all-targets -- -D warnings && bash crates/taskdeck-core/ci.sh && bash scripts/gate.sh --only purity-clippy-toml core",
+ "steps": [
+  {
+   "id": "impl:f1-transcripts",
+   "kind": "impl",
+   "brief": "f1-transcripts.md",
+   "after": []
+  },
+  {
+   "id": "impl:f2-gate",
+   "kind": "impl",
+   "brief": "f2-gate.md",
+   "after": [
+    "impl:f1-transcripts"
+   ]
+  },
+  {
+   "id": "verify:f-gate",
+   "kind": "verify",
+   "briefs": [
+    "f1-transcripts.md",
+    "f2-gate.md"
+   ],
+   "after": [
+    "impl:f2-gate"
+   ],
+   "extra": "These are the stage's gate tests, so the question is whether each test can fail. For the transcript test: check the classification rules against core.md \u00a713.5 and \u00a718.7 one by one (a rule that classifies too much as changed hides defects: count what each rule excludes, per transcript, and judge whether the recorded data justifies it); break `apply` or `compile` in your copy in three different ways and see the transcript test catch each. For determinism and rebase: read the strategies (do they reach every op, conflicts, refusals?), and break determinism on purpose (a zone read, an order that depends on insertion) to see the test fail. For the budgets: run `bash crates/taskdeck-core/ci.sh` and check the arithmetic of the median and the workloads against core.md \u00a717. Run `bash scripts/gate.sh core` whole."
+  }
+ ]
+}
