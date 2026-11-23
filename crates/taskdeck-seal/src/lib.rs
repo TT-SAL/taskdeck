@@ -16,6 +16,7 @@
 mod backup;
 pub mod base32;
 mod blob;
+mod canon;
 mod chain;
 pub mod ctx;
 mod encodings;
@@ -27,6 +28,7 @@ mod ids;
 mod keys;
 mod membership;
 pub mod pair;
+mod payloads;
 mod prim;
 mod receipt;
 mod signatures;
