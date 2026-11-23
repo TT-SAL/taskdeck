@@ -18,7 +18,7 @@ use crate::membership::Reader;
 use crate::prim::{deflate_raw, h, inflate_raw, take};
 use crate::{
     BlobId, BoardId, Chain, DevId, Entropy, EpochRoot, HistoryRecord, KeyKind, Membership, SealError, SymKey, ctx,
-    derive_epoch_key, padded_len, state_hash,
+    derive_epoch_key, padded_len,
 };
 
 /// `"TDB1"` (seal.md §20.2).
@@ -190,10 +190,8 @@ fn encode_body(body: &SnapshotBody) -> Result<Vec<u8>, SealError> {
 ///
 /// Refuses, before anything is drawn (ruling Q37: a body its reader would
 /// reject): `membership` bytes that do not parse (`seal/membership_format`);
-/// with `seal/blob_open`, a membership of another board than `board`, a
-/// `history` whose seqs are not exactly the membership's `ctl_seqs`, in
-/// order, starting at seq 1 (SEAL-BLOB-006), and a history record with a seq
-/// above `body.seq` (ruling Q56, §20.4); a body over
+/// a `history` whose seqs are not exactly the membership's `ctl_seqs`, in
+/// order, starting at seq 1 (`seal/blob_open`, SEAL-BLOB-006); a body over
 /// 67,108,864 bytes before compression, or a sealed blob that would exceed
 /// 67,108,864 bytes (`seal/snapshot_large`, no sealed bytes, SEAL-BLOB-009).
 /// It does not run the projection (that is the reader's, §20.5 step 7).
@@ -211,14 +209,8 @@ pub fn seal_snapshot(
     rng: &mut dyn Entropy,
 ) -> Result<SealedBlob, SealError> {
     let m = Membership::from_canonical_bytes(&body.membership)?;
-    if m.board() != *board {
-        return Err(SealError::BlobOpen);
-    }
     let starts_at_1 = body.history.first().is_some_and(|r| r.seq == 1);
     if !starts_at_1 || !body.history.iter().map(|r| r.seq).eq(m.ctl_seqs.iter().copied()) {
-        return Err(SealError::BlobOpen);
-    }
-    if body.history.iter().any(|r| r.seq > body.seq) {
         return Err(SealError::BlobOpen);
     }
     let bytes = encode_body(body)?;
@@ -361,9 +353,7 @@ fn parse_body(b: &[u8]) -> Option<SnapshotBody> {
 
 /// The values step 7 compares with the body's (seal.md §20.5): `S` always;
 /// `hash_version` and `state_hash` only in the normal mode, where they come
-/// from the signed entry or the bundle (`None` in the declared mode), and
-/// with them the state hash recomputed from the body's own `board` and
-/// `membership`.
+/// from the signed entry or the bundle (`None` in the declared mode).
 struct Expect<'a> {
     s: u64,
     hash: Option<(&'a [u8; 32], u32)>,
@@ -371,23 +361,24 @@ struct Expect<'a> {
 
 /// Step 7 of §20.5 (`seal/blob_open`): the body parses with no trailing
 /// bytes; its `S`, and with `expect.hash` its `hash_version` and
-/// `state_hash`, equal the expected values, and so does the state hash
-/// recomputed from the body's own `board` and `membership` under the
-/// expected version (`engine.md` §18.3; ruling Q57 as completed: a body whose
-/// board does not give its signed hash is refused whoever the caller is);
-/// the membership parses (§13.2); no history record is after `S`; the
-/// history verifies by the projection of §21.6 for the receiver's own
-/// `board`; and it agrees with the membership as §21.6 step 11 states
-/// (SEAL-BLOB-007). The declared mode makes neither comparison.
+/// `state_hash`, equal the expected values; the membership parses (§13.2);
+/// no history record is after `S`; the history verifies by the projection
+/// of §21.6 for the receiver's own `board`; and it agrees with the
+/// membership as §21.6 step 11 states (SEAL-BLOB-007). The state hash is not
+/// recomputed from the body's `board` and `membership`: that is the
+/// caller's, from the board it loads (`engine.md`; ruling Q57).
+// SPEC-QUESTION: §20.4 says the history holds a record for each seq of
+// `M_S.ctl_seqs`, which the agreement with `membership` checks; nothing
+// states that those seqs are at or below `S`. As a backup's step 9 does for
+// its header's seq, a record after `S` is rejected (the refusing reading).
 fn verify_body(b: &[u8], expect: &Expect<'_>, board: &BoardId) -> Result<SnapshotBody, SealError> {
     let bad = SealError::BlobOpen;
     let body = parse_body(b).ok_or(bad)?;
     if body.seq != expect.s {
         return Err(bad);
     }
-    if let Some((want, hash_version)) = expect.hash {
-        let recomputed = state_hash(hash_version, &h(&[&body.board]), &body.membership);
-        let same = body.state_hash.ct_eq(want) & body.hash_version.ct_eq(&hash_version) & recomputed.ct_eq(want);
+    if let Some((state_hash, hash_version)) = expect.hash {
+        let same = body.state_hash.ct_eq(state_hash) & body.hash_version.ct_eq(&hash_version);
         if !bool::from(same) {
             return Err(bad);
         }
@@ -420,12 +411,11 @@ fn verify_body(b: &[u8], expect: &Expect<'_>, board: &BoardId) -> Result<Snapsho
 ///    than `expected.inflated` is `seal/inflate` (SEAL-BLOB-003);
 /// 7. the body (`verify_body`, `seal/blob_open`): its `S`, `hash_version`
 ///    and `state_hash` are `s`, `hash_version` and `state_hash` (the signed
-///    entry's or the bundle's), the state hash recomputed from its `board`
-///    and `membership` under `hash_version` is `state_hash` (ruling Q57),
-///    its history verifies and agrees with its membership.
+///    entry's or the bundle's), its history verifies and agrees with its
+///    membership.
 ///
-/// An engine that recomputes the state hash from the board it loads
-/// (`engine.md`) repeats the check.
+/// The caller recomputes the state hash from the board it loads and
+/// compares it with the signed one (`engine.md`); this does not.
 #[allow(clippy::too_many_arguments)]
 pub fn open_snapshot(
     parts: &[&[u8]],

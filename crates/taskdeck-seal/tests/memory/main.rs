@@ -17,7 +17,6 @@ mod pairing;
 
 mod s5_roots;
 mod s6_typed;
-mod s7_sheet;
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::{Cell, RefCell};

@@ -4,7 +4,7 @@ use ed25519_dalek::Signer as _;
 
 use crate::encodings::host_is_valid;
 use crate::prim::h;
-use crate::{BlobId, BoardId, Chain, DevId, DeviceKeys, Entropy, FrameHash, RecoveryPublic, SealError, Signer, ctx};
+use crate::{BlobId, BoardId, Chain, DevId, DeviceKeys, Entropy, FrameHash, SealError, Signer, ctx};
 
 /// The relay's login and admin nonce (seal.md §16.1, §16.2, §23).
 pub(crate) const RELAY_NONCE_LEN: usize = 32;
@@ -12,9 +12,6 @@ pub(crate) const RELAY_NONCE_LEN: usize = 32;
 pub(crate) const ORIGIN_MAX: usize = 263;
 /// Wraps per reinstatement (seal.md §16.2, §23).
 pub(crate) const REINSTATE_WRAPS_MAX: usize = 256;
-/// Entries of `seed`: the devices and recovery identities of a membership,
-/// at most 256 device records and 64 recovery records (seal.md §16.2, §23).
-const SEED_ENTRIES_MAX: usize = 256 + 64;
 
 /// The author's `dev` and signing key: the device's own, or `dev_R` and the
 /// recovery signing key on the board the `Signer` names (seal.md §6.3,
@@ -265,35 +262,25 @@ impl AdminOp {
     /// (`seal/host_format`); every other refusal here is `seal/bad_payload`.
     ///
     /// - `reinstate`: 1 to 256 wraps, each to `dev` (its recipient id),
-    ///   `first_epoch ≥ 2` ("the epoch the rotation in the revoking entry set
-    ///   up": a rotation's new epoch, ruling Q15) and `first_epoch + n − 1`
-    ///   within `u32`;
-    /// - `recovery_register`: `dev` is the `dev_R` of its `sign_pk` on `board`
-    ///   (§6.3; the registry's `dev_R[16] ‖ sign_pk[32]`, ruling Q15);
+    ///   `first_epoch ≥ 1` and `first_epoch + n − 1` within `u32`;
     /// - `fence`: a host of §5.4 (`seal/host_format`), `home_gen ≥ 2` (§12.7);
-    /// - `seed`: at most 320 entries ("the devices and recovery identities of
-    ///   `M_{last_seq}`": 256 device records and 64 recovery records, §23,
-    ///   ruling Q15), `role` and `status` each 1 or 2, `first_seq ≥ 1` and
-    ///   `last_seq ≥ first_seq − 1`;
+    /// - `seed`: at most 65,535 entries, `role` and `status` each 1 or 2,
+    ///   `first_seq ≥ 1` and `last_seq ≥ first_seq − 1`;
     /// - `compact`: `keep_seq` strictly ascending and each below `below_seq`,
     ///   their count within `u32`;
     /// - `restore_tail`: `first_seq ≥ 1`, the count within `u32`;
     /// - `purge`: `before_seq ≥ 1` and `epoch ≥ 2` (a rotation's new epoch);
-    /// - `mint_read_token`: `epoch ≥ 1`, and `dev` is `signer` ("`dev` is the
-    ///   signer", ruling Q15).
-    ///
-    /// The signer's role (`reinstate` is the recovery identity's) is not in
-    /// these arguments; `sign_admin` checks it.
+    /// - `mint_read_token`: `epoch ≥ 1`.
     // SPEC-QUESTION: §16.2 states these through the meaning of each field,
     // not as checks, and §22 has no code for an admin operation's arguments;
     // this refuses with `seal/bad_payload` (the arguments are the payload
     // of the admin call), and lists the choice in the task report.
-    fn validate(&self, board: &BoardId, signer: &DevId) -> Result<(), SealError> {
+    fn validate(&self) -> Result<(), SealError> {
         let bad = Err(SealError::BadPayload);
         match self {
             AdminOp::Reinstate { dev, first_epoch, wraps } => {
                 let n = u32::try_from(wraps.len()).unwrap_or(u32::MAX);
-                if wraps.is_empty() || wraps.len() > REINSTATE_WRAPS_MAX || *first_epoch < 2 {
+                if wraps.is_empty() || wraps.len() > REINSTATE_WRAPS_MAX || *first_epoch == 0 {
                     return bad;
                 }
                 if first_epoch.checked_add(n - 1).is_none() {
@@ -312,7 +299,7 @@ impl AdminOp {
                 }
             }
             AdminOp::Seed(s) => {
-                if s.entries.len() > SEED_ENTRIES_MAX || s.first_seq == 0 {
+                if u16::try_from(s.entries.len()).is_err() || s.first_seq == 0 {
                     return bad;
                 }
                 if s.last_seq < s.first_seq - 1 {
@@ -343,26 +330,18 @@ impl AdminOp {
                     return bad;
                 }
             }
-            AdminOp::MintReadToken { dev, epoch } => {
-                if *epoch == 0 || dev != signer {
+            AdminOp::MintReadToken { epoch, .. } => {
+                if *epoch == 0 {
                     return bad;
                 }
             }
-            AdminOp::RecoveryRegister { dev, sign_pk, .. } => {
-                if *dev != recovery_dev(board, sign_pk) {
-                    return bad;
-                }
-            }
-            AdminOp::Register { .. } | AdminOp::Revoke(_) | AdminOp::RevokeReadToken(_) => {}
+            AdminOp::Register { .. }
+            | AdminOp::RecoveryRegister { .. }
+            | AdminOp::Revoke(_)
+            | AdminOp::RevokeReadToken(_) => {}
         }
         Ok(())
     }
-}
-
-/// The `dev_R` of a recovery signing key on `board` (seal.md §6.3): only
-/// `sign_pk` enters it.
-fn recovery_dev(board: &BoardId, sign_pk: &[u8; 32]) -> DevId {
-    RecoveryPublic { sign_pk: *sign_pk, hpke_pk: [0; 32] }.dev(board)
 }
 
 /// The `args` of `seed` (seal.md §16.2).
@@ -407,7 +386,7 @@ pub fn admin_message(op: &AdminOp, board: &BoardId, signer: &DevId, relay_nonce:
     if relay_nonce.len() != RELAY_NONCE_LEN {
         return Err(SealError::ChallengeLength);
     }
-    op.validate(board, signer)?;
+    op.validate()?;
     let name = op.name().as_bytes();
     let n = u8::try_from(name.len()).map_err(|_| SealError::BadPayload)?;
     let mut m = Vec::with_capacity(115 + name.len());
@@ -422,22 +401,11 @@ pub fn admin_message(op: &AdminOp, board: &BoardId, signer: &DevId, relay_nonce:
 }
 
 /// Signs an admin operation (seal.md §16.2, SEAL-SIG-003, §26): the
-/// signer's `dev` (or `dev_R`) in the message, its key signing.
-///
-/// In order: a `relay_nonce` that is not exactly 32 bytes is
-/// `seal/challenge_length`, before anything else (ruling Q18, SEAL-SIG-002);
-/// a `Signer::Recovery` of another board is `seal/unknown_author` (see
-/// `signer_identity`); `reinstate` by a device is `seal/bad_payload` (the
-/// registry: "signed by the current recovery identity", ruling Q15); then the
-/// arguments as `admin_message` checks them.
+/// signer's `dev` (or `dev_R`) in the message, its key signing. A
+/// `Signer::Recovery` of another board is `seal/unknown_author` (see
+/// `signer_identity`).
 pub fn sign_admin(signer: &Signer, op: &AdminOp, board: &BoardId, relay_nonce: &[u8]) -> Result<[u8; 64], SealError> {
-    if relay_nonce.len() != RELAY_NONCE_LEN {
-        return Err(SealError::ChallengeLength);
-    }
     let (dev, sk) = signer_identity(signer, board)?;
-    if matches!((signer, op), (Signer::Device(_), AdminOp::Reinstate { .. })) {
-        return Err(SealError::BadPayload);
-    }
     let msg = admin_message(op, board, &dev, relay_nonce)?;
     Ok(sign_with(sk, &[&msg]))
 }

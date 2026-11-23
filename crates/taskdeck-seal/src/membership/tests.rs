@@ -3,7 +3,7 @@
 //! the empty state, and that no secret enters the bytes.
 
 use super::*;
-use crate::receipt::tests::board_tests::{Board, Spec, Who};
+use crate::receipt::tests::board::{Board, Spec, Who};
 use crate::{CtlItem, Fence, OsEntropy, RecoveryKeyChange, RecoveryKeyMode, RecoverySeed, ResetTo, RulesUpgrade, RulesUpgradeMode, SkipItem, frame_hash};
 
 /// The bytes of §13.2, written field by field from the table, independent

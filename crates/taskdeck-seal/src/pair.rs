@@ -16,14 +16,8 @@
 //! zeroizing buffer. An abort drops the box, N's long-term keys and the
 //! bundle, and leaves the machine `Aborted` for good (SEAL-PAIR-014).
 //!
-//! A slot that is byte for byte one the machine has already accepted (E:
-//! slot B; N: slots A, C and D) is ignored in every later state (§17.10,
-//! ruling Q60: a relay answers a repeated read with the stored slot, and a
-//! runtime that polls and listens can deliver one twice); the comparison is
-//! in constant time.
-//!
 //! What a machine does with an event its state does not expect (lead
-//! ruling: the last row of each table, an abort): any other slot is
+//! ruling: the last row of each table, an abort): a slot is
 //! `seal/slot_mac` (it is not the slot the state awaits); on N, a
 //! `Snapshot`, `Entries` or `Frames` is `seal/bundle_invalid`; on E, a
 //! `RegisterFailed{code}` aborts with its own `code`; any other event
@@ -374,13 +368,6 @@ fn bundle_ad(board: &BoardId, tid: &[u8; 16], t: &[u8; 32]) -> Vec<u8> {
     ad.extend_from_slice(tid);
     ad.extend_from_slice(t);
     ad
-}
-
-/// Whether `bytes` is byte for byte the slot `accepted` (non-empty), in
-/// constant time for slots of the same length: a slot carries a MAC under a
-/// key derived from the pairing secret.
-fn same_slot(accepted: &[u8], bytes: &[u8]) -> bool {
-    !accepted.is_empty() && bool::from(accepted.ct_eq(bytes))
 }
 
 /// A relay origin of §5.4: `"https://"` and a host (seal.md §5.4).
@@ -768,9 +755,6 @@ pub struct Existing {
     epk: [u8; 32],
     slot_a: Vec<u8>,
     n: Option<SlotB>,
-    /// Slot B as E accepted it, byte for byte (empty before): a repeat of it
-    /// is ignored (§17.10).
-    accepted_b: Vec<u8>,
     transcript: [u8; 32],
 }
 
@@ -792,10 +776,6 @@ pub struct New {
     commit: [u8; 32],
     slot_a: Vec<u8>,
     slot_b: Vec<u8>,
-    /// Slots C and D as N accepted them, byte for byte (empty before; slot A
-    /// is `slot_a`): a repeat of any accepted slot is ignored (§17.10).
-    slot_c: Vec<u8>,
-    slot_d: Vec<u8>,
     transcript: [u8; 32],
     sas_tries: u8,
     bundle: Option<Bundle>,
@@ -963,7 +943,6 @@ impl Existing {
             epk: [0; 32],
             slot_a: Vec::new(),
             n: None,
-            accepted_b: Vec::new(),
             transcript: [0; 32],
         };
         let fx = match e.begin(membership, relay_origin, rng) {
@@ -1020,8 +999,6 @@ impl Existing {
         use ExistingState as S;
         match (self.state, ev) {
             (S::Idle | S::Done | S::Aborted, _) => Vec::new(),
-            // Slot B again, as accepted: ignored (§17.10).
-            (_, ExistingEvent::SlotB { bytes }) if same_slot(&self.accepted_b, &bytes) => Vec::new(),
             (_, ExistingEvent::Cancel) => self.fail(SealError::PairCancelled),
             (_, ExistingEvent::Tick { now }) => {
                 if now.saturating_sub(self.start_ms) >= LIFETIME_MS {
@@ -1114,7 +1091,6 @@ impl Existing {
         let shown: String = digits.iter().map(|d| char::from(*d)).collect();
         self.transcript = t;
         self.n = Some(b);
-        self.accepted_b = bytes.to_vec();
         self.state = ExistingState::Showing;
         Ok(vec![ExistingEffect::PostSlot { slot: slot_c }, ExistingEffect::ShowSas { digits: shown }])
     }
@@ -1238,8 +1214,6 @@ impl New {
             commit: [0; 32],
             slot_a: Vec::new(),
             slot_b: Vec::new(),
-            slot_c: Vec::new(),
-            slot_d: Vec::new(),
             transcript: [0; 32],
             sas_tries: 0,
             bundle: None,
@@ -1259,8 +1233,6 @@ impl New {
                 erase_typed(ev);
                 return Vec::new();
             }
-            // A slot already accepted, again: ignored (§17.10).
-            (_, NewEvent::Slot { bytes }) if self.accepted(&bytes) => Ok(Vec::new()),
             (_, NewEvent::Cancel) => Err(SealError::PairCancelled),
             (S::Idle, NewEvent::Tick { .. }) => Ok(Vec::new()),
             (_, NewEvent::Tick { now }) => {
@@ -1310,12 +1282,6 @@ impl New {
         self.join = None;
         self.state = NewState::Aborted;
         vec![NewEffect::Abort { code }]
-    }
-
-    /// Whether `bytes` is byte for byte a slot this machine has accepted
-    /// (A, C or D; each is empty until accepted).
-    fn accepted(&self, bytes: &[u8]) -> bool {
-        [&self.slot_a, &self.slot_c, &self.slot_d].into_iter().any(|s| same_slot(s, bytes))
     }
 
     fn ticket_key(&self) -> Zeroizing<[u8; 32]> {
@@ -1423,7 +1389,6 @@ impl New {
             .ok_or(SealError::HostFormat)?;
         sec.sas = *sec.sas_digits(&t);
         self.transcript = t;
-        self.slot_c = bytes.to_vec();
         self.state = NewState::AwaitSas;
         Ok(vec![NewEffect::AskSas])
     }
@@ -1478,7 +1443,6 @@ impl New {
         }
         let fx = NewEffect::FetchSnapshot { token: b.token.clone(), blob: b.snapshot.blob, parts: b.snapshot.parts };
         self.bundle = Some(b);
-        self.slot_d = bytes.to_vec();
         self.state = NewState::AwaitSnapshot;
         Ok(vec![fx])
     }
@@ -1519,10 +1483,9 @@ impl New {
                 return Err(bad);
             }
         }
-        // The state hash recomputed from the body, as step 5 states:
-        // `open_snapshot` already compared the body's `state_hash`,
-        // `hash_version` and its recomputed hash with the bundle's (ruling
-        // Q57 as completed); this repeats it, with the version check below.
+        // The state hash recomputed from the body: `open_snapshot` compared
+        // the body's `state_hash` and `hash_version` with the bundle's and
+        // no longer recomputes it (ruling Q57), so the crate does it here.
         // SPEC-QUESTION: step 5 recomputes the state hash "(`engine.md`)",
         // which defines it for the versions the membership's rules allow
         // (§14.3); `open_snapshot` used to refuse any other version (ruling

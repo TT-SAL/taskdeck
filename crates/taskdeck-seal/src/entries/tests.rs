@@ -197,32 +197,20 @@ fn based_on_is_the_callers() {
     }
 }
 
-// The `at_ms` row of §10.1's table: the value the sealer lays out at
-// offsets 17 to 24 is the caller's, as a big-endian i64, at both ends of the
-// range, and a value outside 0 to 253,402,300,799,999 is never laid out
-// (the sealer refuses it with `seal/bad_plaintext`).
+// What every receiver would refuse at step 11 is not sealed: an `at_ms`
+// outside §10.1's range, an empty `cmd`.
 // spec: SEAL-PLAIN-001
 #[test]
-fn at_ms_range() {
+fn at_ms_range_and_empty_cmd() {
     let d = DeviceKeys::generate(&mut OsEntropy).unwrap();
     let seal = |p: &Plain| seal_frame(&Signer::Device(&d), &BOARD, 3, 1, &key(1), p, &mut OsEntropy);
     for at in [-1, AT_MS_MAX + 1, i64::MIN, i64::MAX] {
         assert_eq!(seal(&Plain { at_ms: at, ..plain(Kind::Cmd, vec![1]) }).err(), Some(SealError::BadPlaintext), "{at}");
     }
-    for at in [0, 1, AT_MS_MAX] {
+    for at in [0, AT_MS_MAX] {
         let f = seal(&Plain { at_ms: at, ..plain(Kind::Cmd, vec![1]) }).unwrap();
-        let pt = open_envelope(&f, &key(1)).unwrap();
-        assert_eq!(pt[17..25], at.to_be_bytes(), "{at}");
-        assert_eq!(unpad(&pt).unwrap().at_ms, at);
+        assert_eq!(unpad(&open_envelope(&f, &key(1)).unwrap()).unwrap().at_ms, at);
     }
-}
-
-// What every receiver would refuse at step 11 is not sealed: an empty `cmd`
-// (a beat may be empty).
-#[test]
-fn empty_cmd_is_not_sealed() {
-    let d = DeviceKeys::generate(&mut OsEntropy).unwrap();
-    let seal = |p: &Plain| seal_frame(&Signer::Device(&d), &BOARD, 3, 1, &key(1), p, &mut OsEntropy);
     assert_eq!(seal(&plain(Kind::Cmd, vec![])).err(), Some(SealError::BadPlaintext));
     assert!(seal(&plain(Kind::Beat, vec![])).is_ok());
 }

@@ -221,6 +221,7 @@ fn reading_a_sheet_follows_the_four_steps() {
 // spec: SEAL-GEN-006
 // spec: SEAL-KEY-004
 // spec: SEAL-KEY-009
+// spec: SEAL-SHEET-003
 #[test]
 fn secret_types_zeroize_and_do_not_show() {
     use zeroize::ZeroizeOnDrop;

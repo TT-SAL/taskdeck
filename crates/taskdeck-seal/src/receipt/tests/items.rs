@@ -3,7 +3,7 @@
 //! the limits of §23, the two passes of §14.6, the recovery identity's
 //! powers (§13.12), and the all-or-nothing rule.
 
-use super::board_tests::*;
+use super::board::*;
 use super::{only_counter, unchanged};
 use crate::membership::{DeviceRecord, DeviceStatus};
 use crate::*;

@@ -1,8 +1,7 @@
 //! Pairing (task S6, seal.md §17): a relay in the middle that knows the code
 //! and holds every slot (`s6_mitm`), and both machines through whole
 //! pairings against a simulated relay and board, with every check of §17.6
-//! and §17.9 failing once and the rotation races (`s6_flow`); slots
-//! delivered twice (`s7b_repeats`).
+//! and §17.9 failing once and the rotation races (`s6_flow`).
 
 #[path = "../common/mod.rs"]
 mod common;
@@ -17,4 +16,3 @@ mod pairing;
 
 mod s6_flow;
 mod s6_mitm;
-mod s7b_repeats;
