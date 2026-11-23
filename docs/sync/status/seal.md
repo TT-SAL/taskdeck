@@ -128,7 +128,7 @@ Notes behind the briefs (the lead's reading of the spec), and for the brief of S
   what an item alone decides; the bounds relative to the entry's seq, the Genesis checks that need the
   board and "Genesis only at seq 1" are S3's, at step 16.
 
-## Task S3: what happened so far
+## Task S3: what happened
 
 - Implementer (35 minutes, 0.89 million tokens, the largest of the stage): `membership.rs` with the
   canonical bytes and a strict parser that also checks the state's invariants, a private module
@@ -137,8 +137,19 @@ Notes behind the briefs (the lead's reading of the spec), and for the brief of S
   targets (`tests/common/board.rs`), four vector families (each case a full record of §14.1's inputs).
   Gate green in the lead's run. It raised fourteen spec questions (Q20 to Q33 below; the rulings are
   also at the end of its brief, for the passes that follow).
-- Not yet done: the verify pass and the two security passes. The window's budget was spent
-  (3.32 of 3.5 million), so they wait for the window that starts at 04:50 UTC.
+- Verify pass (second window): no high or medium finding. The verifier recomputed the four vector
+  families independently, ran a history through every transition and the limit states to prove the
+  parser accepts every state the transitions produce, and tested citations by mutation: two missing
+  tests (the "keys still fresh" precondition of `confirm`; the item order of the Skip targets' second
+  pass) and three citations that prove less than they claim.
+- Security passes: no code defect of high or medium severity. The membership lens reproduced three
+  weaknesses of the design itself (the code does what `seal.md` says): see "Open questions for the
+  owner", O1. The parsing lens found that the membership parser accepted recovery records no log can
+  produce (a `dev` that is not the `dev_R` of its key), and that one published vector was built on
+  such a state. One code differed from a ruling's wording (a revocation of the last device beside a
+  reinstatement that fails); the ruling was refined instead (Q25).
+- Fix pass, one, with the lead's items: the 30-day condition before decryption (E3, below), the
+  recovery records' invariants and the vector's fixture, the two missing tests, the citations.
 - **A defect between two specs, found by this task (spec change E1, to raise):** a rotation that lost
   a race was sealed under the epoch the winner replaced, so `seal.md` §14.2's own step order refuses
   it at step 13 with `seal/stale_epoch`. `engine.md` §28.5 step 4 retries a raced revocation only when
@@ -146,6 +157,18 @@ Notes behind the briefs (the lead's reading of the spec), and for the brief of S
   written, a revocation that loses a rotation race would fail with the target already locked out at
   the relay. The change: §28.5 step 4 also names `seal/stale_epoch`; `seal.md` §13.8 and §22 say which
   code a lost race gets. It affects stage `engine` (not started) and nobody else.
+
+- **E3, a second defect between two specs, older than this stage (found by the second check of the
+  spec change):** step 9 of `seal.md` §14.2 accepted the previous epoch whenever it existed and tested
+  the 30 days of §13.9 only at step 14, after step 10 had needed that epoch's root; `engine.md` §28.2
+  has every device delete the roots below a purge's epoch after 30 days. A late frame under the purged
+  epoch then stopped the receivers that had deleted the root (`seal/missing_root`, a local fault) and
+  was refused by the others. Now the 30-day condition is part of step 9, before decryption
+  (`seal/stale_epoch`, no root needed), and §28.2 deletes only when more than 30 days have passed.
+  The code change is in S3's fix pass.
+- **E4, left open for `engine`** (a row of `CHANGES.md`): `engine.md` §24.3 re-seals every later own
+  record after a re-sealable refusal, a pending revocation among them, and §28.5 now composes a raced
+  revocation again on the same codes; the two rules can meet on one record.
 
 ## Decisions (with reasons)
 
@@ -207,7 +230,7 @@ tasks S1 to S3, the ownership of five caller clauses and the defect E1 were writ
 and `engine.md` by the lead on 2026-11-23 02:30 UTC (sentences added or rewritten in place, so no
 line moved; `scripts/spec-lint.sh` passes). They travel in the pull request of task S3. One agent that
 did not write them then checked the spec diff against this table (0.27 million tokens) and found one
-high, seven medium and five low points, all applied on 2026-11-23 06:10 UTC:
+high, seven medium and five low points, all applied on 2026-11-23 05:56 UTC:
 
 - E1 was incomplete: after two or more rotations the lost entry is refused with `seal/old_epoch`
   (step 9), which `engine.md` §28.5 step 4 now also names;
@@ -219,8 +242,13 @@ high, seven medium and five low points, all applied on 2026-11-23 06:10 UTC:
   exactly when step 11 passed; `padded_len`'s overflow and `ctl_payload`'s codes are in §26.
 
 Seal now owns 164 clauses: 163 of `seal.md` and ENG-HASH-001. Because the check found a high point, a
-second check pass runs on the corrected change. Rulings of later tasks go into a second spec change
-before the exit.
+second check pass ran on the corrected change (0.26 million tokens): it went through the raced
+revocation case by case and found E1 right and complete, no high point, five medium and six low:
+E3 and E4 (under "Task S3"), SEAL-WRAP-003 also owned by `engine` (the engine halts on a wrap
+delivered outside an entry), three more catalogue rows, the transport (not the sealer adapter)
+carries the login's origin and the `register` arguments, `engine.md` §36 tells `engine` what it owns,
+wording. All applied on 2026-11-23 06:13 UTC; nothing is checked a third time. Rulings of later tasks
+go into a second spec change before the exit.
 
 **E2, left open for `engine` and `device` (a row of `CHANGES.md`):** the check found the same kind of
 defect as E1 for an own `Fence`: the relay fences itself in the same transaction that appends the
@@ -256,7 +284,7 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q22 | §12.1 | Genesis at another seq, or another shape at seq 1 | `seal/ctl_shape`; `seal/ctl_genesis` is for the item and anchor checks |
 | Q23 | §14.3 | a rules version above 1 has no row | nothing is allowed under it: later frames are `seal/bad_version`; a `DeviceAdded` under it records no envelope |
 | Q24 | §13.6 | which records "every recorded key" covers | device and recovery records, current or retired; not a pending proposal. Spec note |
-| Q25 | §13.6 `DeviceRevoked` | when "at least one current device remains" is judged | over the whole entry; the refusal is the first revocation's |
+| Q25 | §13.6 `DeviceRevoked` | when "at least one current device remains" is judged | over the whole entry, with its later revocations and reinstatements taken as applied; when none would be left the refusal is the first revocation's; a later item that then fails its own row refuses the entry with its own code (refined after the security pass) |
 | Q26 | §13.5, §23 | `ctl_seqs` is full | `seal/ctl_cap`, after the items passed |
 | Q27 | §14.8 | `chain_at` gives nothing at or above `retained_from` | the comparison is skipped, `based_on_unchecked` is set |
 | Q28 | §14.2 | a root that does not match the recorded commitment | the local fault `seal/missing_root` |
@@ -307,7 +335,11 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S2, security passes | 2 | 0.39 M | 0.35 M | 0.39 M |
 | | S3, the implementer | 1 | 0.45 M | 0.89 M | 0.89 M |
 | | **window total** | | | | **3.32 M** |
-| from 2026-11-23 06:50 | (S3's verify and security passes, the spec change, S4 …) | | | | |
+| from 2026-11-23 about 07:40 (the owner: the limit was hit and has reset; the lead takes that as the window's start) | first check of the spec change | 1 | 0.22 M | 0.27 M | 0.27 M |
+| | S3, the verifier | 1 | 0.32 M | 0.39 M | 0.39 M |
+| | second check of the spec change | 1 | 0.20 M | 0.26 M | 0.26 M |
+| | S3, security passes | 2 | 0.45 M | 0.44 M | 0.45 M |
+| | **window so far** | | | | **1.37 M** |
 
 ## Low findings left as they are
 
@@ -338,7 +370,52 @@ output); the higher is booked. Limit: 3.5 million per window.
 
 ## Open questions for the owner
 
-None.
+**O1. One compromised device defeats every "second device" rule and every time window of the
+membership design** (found by task S3's security pass, 2026-11-23; each consequence reproduced by a
+test against the crate; the code does what `seal.md` says, so this is the design's). Two facts:
+
+- Any current device can add a device (`DeviceAdded`) with no other device taking part. A compromised
+  device adds one of its own and then holds two members.
+- Every time window is measured on `at_ms` values that the entries' authors set (ruling S6: so that
+  all devices decide alike). Any member can date an entry forward, and the log clock follows.
+
+What follows:
+
+1. *The recovery key is replaced without the sheet, at once* (§13.11): the compromised device
+   proposes, its own second device confirms with `at_ms` 72 hours ahead. V1-2's remedy, the 72-hour
+   delay, gives the owner no real time. From then on the owner's sheet no longer overrules, and every
+   later rotation wraps its root to the attacker's key.
+2. *A rules version no build knows is activated* by the two-member override, or by the normal path
+   after one forward-dated beat makes the honest devices look inactive (§13.10). Every honest device
+   halts, and nothing sequenced afterwards is accepted by anyone, the recovery identity's entries
+   included: the board cannot be repaired in band.
+3. *The lost-sheet path is switched off for good* by one entry dated at the largest `at_ms`.
+
+What still holds: every one of these entries raises a banner on every device; backups stay sealed to
+the recovery key each desktop pinned (SEAL-BKP-006); every device keeps its local data; "Reset trust"
+and a restore to a new board work. What is lost is the live board, and the claim of SYNC.md §7 that
+one compromised device cannot take the recovery key.
+
+Options, the owner's to choose (plan §3.5: the remedies remove a feature or weaken a claim):
+
+- **A. The sheet is the second factor (the lead's recommendation).** The recovery key changes only
+  with the current sheet (`direct`); `propose`, `confirm` and `cancel` go, and a lost sheet means
+  "Reset trust" (a new board and a new sheet, devices pair again). A rules upgrade needs every
+  current device to list the version (a device that is gone is revoked first), and the override is
+  signed by the recovery identity instead of a second device. Reason: a device that can add devices
+  can mint any quorum of devices, and no rule computed from the log can tell real time; the sheet is
+  the one authority a compromised device cannot mint. Cost: two features of SYNC.md (§5.5 "the sheet
+  is lost: new recovery key"; §4.5 the two-member override) change. Work: a small task in this crate
+  (items, transitions, vectors) and a spec change that reaches `engine`, `device`, `desktop`,
+  `recovery`.
+- **B. Keep the design, state the limit.** SYNC.md §7 and the runbooks say that a compromised member
+  can take the live board at once and that the remedy is "Reset trust". No code changes.
+- **C. Keep both paths, add a detection.** Each device compares a `confirm` or an activation with its
+  own clock and stops with an alarm when the 72 hours cannot have passed. It detects the forgery; it
+  does not prevent it, and the stop is each device's own (not part of the replicated rules).
+
+Nothing in tasks S4 to S7 depends on the answer; the crate implements `seal.md` as it stands until
+the owner chooses.
 
 ## What the next stages need to know
 

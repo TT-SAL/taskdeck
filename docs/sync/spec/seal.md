@@ -307,7 +307,7 @@ In JSON a wrap is a 192-character hex string of these 96 bytes. A receiver opens
 
 - **SEAL-WRAP-001** (seal, recovery) A wrap of `R_e` MUST be produced by HPKE `SealBase` with the suite, `info`, `aad` and plaintext of §7, and laid out as the 96-byte table of §7.
 - **SEAL-WRAP-002** (seal, recovery) Unwrapping MUST call HPKE `OpenBase` with the `info` and `aad` rebuilt from the receiver's own `board_id`, the epoch named by the item, the receiver's own id and public key, and the commitment `c_e` from the same item (for a wrap delivered outside an entry, §7: the epoch it is delivered for and `c_e` as the receiver's membership records it), never from values taken from the wrap.
-- **SEAL-WRAP-003** (seal, device) A device MUST treat a failure to open its own wrap, or an opened root whose commitment differs from `c_e`, as the commitment halt of §14.5, for a wrap delivered outside an entry (§7) as for one inside a rotation.
+- **SEAL-WRAP-003** (seal, engine, device) A device MUST treat a failure to open its own wrap, or an opened root whose commitment differs from `c_e`, as the commitment halt of §14.5, for a wrap delivered outside an entry (§7) as for one inside a rotation.
 - **SEAL-WRAP-004** (seal) `wrap_root` MUST draw exactly 32 bytes from its `Entropy` argument, MUST derive HPKE's ephemeral key pair from them with `DeriveKeyPair`, and MUST draw nothing else.
 
 ## 8. Frame
@@ -376,7 +376,7 @@ ciphertext = XChaCha20-Poly1305-Seal(key, nonce, AD, padded plaintext)
 The receiver decides the key from the log position, never from the frame alone. For the entry at seq `s`, with `E = M_{s−1}.epoch`:
 
 1. `epoch = E` is accepted for every kind.
-2. `epoch = E − 1` (only when `E ≥ 2`) is accepted only under the stale-epoch rule of §13.9, checked after decryption.
+2. `epoch = E − 1` (only when `E ≥ 2`) is accepted only under the stale-epoch rule of §13.9: its 30-day condition is checked before decryption (step 9 of §14.2), the others after.
 3. Any other epoch is refused: an epoch above `E` with `seal/bad_epoch`, an older one with `seal/old_epoch` (§14.2 step 9).
 
 An entry carrying `EpochRotated{E+1}` is sealed under epoch `E`, because no receiver can know `R_{E+1}` before applying it. The new epoch applies to every entry at a seq greater than the rotation's seq (§13.8).
@@ -652,7 +652,7 @@ The membership state `M` is derived from the log in seq order. It holds no secre
 | `epoch_seq` | u64 | the seq of the entry that set `E` (1 for epoch 1) |
 | `epoch_clock_ms` | i64 | the log clock after that entry |
 | `clock_ms` | i64 | the log clock `τ` (§13.5) |
-| `home_gen`, `home_seq`, `home_host`, `home_door` | | the latest Fence (generation 1, seq 0, empty host and zero door before any) |
+| `home_gen`, `home_seq`, `home_host`, `home_door` | | the latest Fence (from Genesis until the first Fence: generation 1, seq 0, empty host and zero door; in `M_0` every field is zero, §13.3) |
 | `purge_seq` | u64 | the latest `purge_before`, or 0 |
 | `next_device_no` | u16 | the number the next DeviceAdded receives |
 | `commitments` | list | `(e, seq, c_e)` for every epoch, ascending by `e` |
@@ -717,7 +717,7 @@ Fixed part before the lists: 4 + 4 + 16 + 16 + 4 + 4 + 8 + 8 + 8 + 4 + 8 = 84 by
 | `hash_versions` | 1 + 4n | u8 count, then `u32` each | ascending |
 | `name` | 1 + n | vb8 | §5.5 |
 
-Fixed part of a record: 16 + 32 + 32 + 2 + 1 + 8 + 16 + 8 + 8 + 16 + 8 + 8 = 155 bytes, then the three lists and the name. A parser also rejects, with `seal/membership_format`, bytes whose state no log can produce: another number of current recovery records than one, commitments other than exactly those of the epochs 1 to `epoch`, an id or a `device_no` that appears twice, a `device_no` at or above `next_device_no`, a `board_id` that the first recovery key and the salt do not give, a `home_host` that is neither empty nor a host of §5.4, or a device name that fails §5.5 (`M_0` of §13.3 apart).
+Fixed part of a record: 16 + 32 + 32 + 2 + 1 + 8 + 16 + 8 + 8 + 16 + 8 + 8 = 155 bytes, then the three lists and the name. A parser also rejects, with `seal/membership_format`, bytes whose state no log can produce: another number of current recovery records than one, commitments other than exactly those of the epochs 1 to `epoch`, a recovery record whose `dev` is not the `dev_R` of its `sign_pk` (§6.3) or whose `until_seq` is not the `since_seq` of the record after it, an id or a `device_no` that appears twice, a `device_no` at or above `next_device_no`, a `board_id` that the first recovery key and the salt do not give, a `home_host` that is neither empty nor a host of §5.4, or a device name that fails §5.5 (`M_0` of §13.3 apart).
 
 - **SEAL-MEM-001** (seal) The canonical membership bytes MUST be produced exactly as §13.2 lays them out, with every list in its stated order, so that equal states give equal bytes.
 - **SEAL-MEM-002** (seal) A parser of canonical membership bytes MUST reject, with `seal/membership_format`, input that is not in the canonical form of §13.2 (wrong magic or version, a list out of order or with duplicates, a flag other than 0 or 1, a count over its limit in §23, or trailing bytes).
@@ -786,7 +786,7 @@ The items of an accepted-so-far control entry are applied in order to a working 
 | `RulesUpgrade` `normal` | D | `v > W.rules` (`seal/ctl_target`); every active member of §13.10 lists `v` in its `rules` (`seal/ctl_support`) | `rules = v`; `pending_override` cleared |
 | `RulesUpgrade` `override` | D | `v > W.rules` (`seal/ctl_target`); not a second vote by the same voter for the same `v` (`seal/ctl_duplicate`) | if `pending_override = (v, B, ·)` with `B ≠ A` and `B` current: `rules = v` and `pending_override` cleared; otherwise `pending_override = (v, A, s)` |
 
-An item whose author does not match its Author column is refused with `seal/ctl_author`. An item whose effect would make a list of the membership state exceed its limit in §23 is refused with `seal/ctl_cap`; for `DeviceAdded` and `DeviceReinstated` the device limits use `seal/ctl_device_cap` as the table says. A control entry that would take `ctl_seqs` over its limit is refused with `seal/ctl_cap` after its items passed. "Every recorded" key or id means every device record and every recovery record, current or retired; a pending proposal is not a record. Whether a revocation leaves a current device is judged over the whole entry, its later revocations and reinstatements counted, and the refusal is the first revocation's.
+An item whose author does not match its Author column is refused with `seal/ctl_author`. An item whose effect would make a list of the membership state exceed its limit in §23 is refused with `seal/ctl_cap`; for `DeviceAdded` and `DeviceReinstated` the device limits use `seal/ctl_device_cap` as the table says. A control entry that would take `ctl_seqs` over its limit is refused with `seal/ctl_cap` after its items passed. "Every recorded" key or id means every device record and every recovery record, current or retired; a pending proposal is not a record. Whether a revocation leaves a current device is judged over the whole entry, with its later revocations and reinstatements taken as applied: when none would be left, the refusal is the first revocation's (`seal/ctl_last_device`); a later item that then fails its own row refuses the entry with its own code.
 
 - **SEAL-MEM-010** (seal) A receiver MUST apply the items of a control entry in order to a working copy and MUST either accept every item or refuse the entry as a whole, leaving the membership state as §13.6 states.
 - **SEAL-MEM-011** (seal) Each control item MUST be accepted only when its author matches the Author column and every precondition of its row in §13.6 holds, and MUST then change the working copy exactly as the Effects column states.
@@ -812,7 +812,7 @@ An item whose author does not match its Author column is refused with `seal/ctl_
 
 ### 13.9 Stale-epoch entries
 
-An entry at seq `s` sealed under `E − 1`, where `E = M_{s−1}.epoch ≥ 2`, is accepted only if all of these hold, checked after it has opened (SYNC.md §5.4, V2-8, ruling S6):
+An entry at seq `s` sealed under `E − 1`, where `E = M_{s−1}.epoch ≥ 2`, is accepted only if all of these hold; condition 4 is checked before the entry is opened (step 9 of §14.2), so that no receiver needs a root of `E − 1` once the 30 days have passed, and the others after it has opened (SYNC.md §5.4, V2-8, ruling S6):
 
 1. its kind is `cmd` or `beat`;
 2. its author is a current device (never the recovery identity);
@@ -903,12 +903,12 @@ Each step runs only if every earlier one passed. The class and code are the outc
 | 6 | own-dev check (§14.7) | not a failure: sets the flag `own_dev_foreign` |
 | 7 | the author is a current device or the current recovery identity (at `s = 1`, the anchor's recovery identity) | `Refuse`, `seal/revoked_author` |
 | 8 | (`ver`, `suite`) is allowed by `M_{s−1}.rules` (§14.3) | `Refuse`, `seal/bad_version` |
-| 9 | `epoch` is `E`, or `E − 1` with `E ≥ 2`; at `s = 1`, `epoch = 1` | `Refuse`, `seal/bad_epoch` when `epoch > E` (at `s = 1`, any epoch other than 1); `seal/old_epoch` when `epoch < E − 1` |
+| 9 | `epoch` is `E`, or `E − 1` with `E ≥ 2` and condition 4 of §13.9 holding; at `s = 1`, `epoch = 1` | `Refuse`, `seal/bad_epoch` when `epoch > E` (at `s = 1`, any epoch other than 1); `seal/old_epoch` when `epoch < E − 1`; `seal/stale_epoch` when `epoch = E − 1` and condition 4 of §13.9 fails |
 | 10 | AEAD opens under `K_entry,epoch` with the AD of §9.2 | `Refuse`, `seal/aead` |
 | 11 | the unpadding checks of §10.3 | `Refuse`, `seal/bad_plaintext` |
 | 12 | the `based_on` checks of §14.8 | `Tamper`, `seal/based_on_future` or `seal/based_on_fork`; or the flag `based_on_unchecked` |
 | 13 | the author and epoch are allowed for the kind (§11.1) | `Refuse`, `seal/not_authorized`; `seal/stale_epoch` for a `ctl` or `snap` under `E − 1` |
-| 14 | under `E − 1`: the stale-epoch rule of §13.9 | `Refuse`, `seal/stale_epoch` |
+| 14 | under `E − 1`: conditions 1 to 3 of the stale-epoch rule of §13.9 | `Refuse`, `seal/stale_epoch` |
 | 15 | for `ctl`, `beat`, `snap`: the payload parses under §5.3 and its table; for `ctl`, the inner signature verifies (§11.3) | `Refuse`, `seal/bad_payload`, or `seal/bad_ctl_sig` |
 | 16 | for `ctl`: the shape (§12.1) and every item (§13.6) | `Refuse` with the item's code; or `NeedFrames` (§14.6) |
 | 17 | none | `Accept`, with the halts of §14.5 where they apply |
@@ -1659,17 +1659,17 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 | `seal/revoked_author` | signed by a revoked device or a retired recovery key | step 7 | `Refuse`; alarm naming the author |
 | `seal/bad_version` | (`ver`, `suite`) not allowed by the active rules | step 8 | `Refuse`; alarm naming the author |
 | `seal/bad_epoch` | epoch above the current one (at seq 1, not 1) | step 9, §9.3 | `Refuse`; alarm naming the author |
-| `seal/old_epoch` | epoch older than the previous one, a control entry that lost a race against two or more rotations among them (§13.8) | step 9, §9.3 | `Refuse`; the author re-seals a `cmd` (`engine.md` §24.3); an own control entry fails or repeats its operation (`engine.md` §28); no alarm |
+| `seal/old_epoch` | epoch older than the previous one, among them a control entry that lost a race to two or more rotations (§13.8) | step 9, §9.3 | `Refuse`; the author re-seals a `cmd` (`engine.md` §24.3); an own control entry fails or repeats its operation (`engine.md` §28); no alarm |
 | `seal/missing_root` | the receiver lacks a root for an accepted epoch, or holds one that does not match the commitment its membership records (SEAL-KEY-013), or lacks one for a declared snapshot's epoch | step 9; §20.5 (declared mode); §17.9 step 6 | local fault; `engine.md` decides; a rejoin tries its next candidate; in pairing N aborts with `seal/pair_raced` |
 | `seal/aead` | ciphertext does not open | step 10 | `Refuse`; alarm naming the author |
-| `seal/bad_plaintext` | plaintext layout, padding, kind byte or `at_ms` range wrong; when sealing, a `based_on_chain` other than `C_0` for `based_on_seq` 0, an `at_ms` out of range or an empty `cmd` payload | step 11, §10.3; SEAL-PLAIN-003 | `Refuse`; alarm naming the author; when sealing, nothing is sealed (a bug of the caller) |
+| `seal/bad_plaintext` | plaintext layout, padding, kind byte or `at_ms` range wrong; when sealing, a `based_on_chain` other than `C_0` for `based_on_seq` 0, an `at_ms` out of range or an empty `cmd` payload | step 11, §10.3; `seal_frame` (§26), SEAL-PLAIN-003 | `Refuse`; alarm naming the author; when sealing, nothing is sealed (a bug of the caller) |
 | `seal/based_on_future` | `based_on_seq ≥ s` | step 12, §14.8 | `Tamper`; stop and show evidence |
 | `seal/based_on_fork` | `based_on_chain` differs from the local chain | step 12, §14.8 | `Tamper`; stop and show evidence |
 | `seal/not_authorized` | author not allowed for the kind | step 13, §11.1 | `Refuse`; alarm naming the author |
-| `seal/stale_epoch` | previous-epoch entry outside §13.9, a control entry that lost a race against one rotation among them (§13.8) | steps 13 and 14 | `Refuse`; the author re-seals a `cmd` (`engine.md` §24.3); an own control entry fails or repeats its operation (`engine.md` §28) |
+| `seal/stale_epoch` | previous-epoch entry outside §13.9, among them a control entry that lost a race to one other rotation (§13.8) | steps 9, 13 and 14 | `Refuse`; the author re-seals a `cmd` (`engine.md` §24.3); an own control entry fails or repeats its operation (`engine.md` §28) |
 | `seal/bad_payload` | `ctl`, `beat` or `snap` payload invalid; when building, an item or payload its table excludes, or an admin argument the registry excludes | step 15; `ctl_payload`, `beat_payload`, `snap_payload`, `admin_message`, `sign_admin` (§26) | `Refuse`; alarm naming the author; when building, nothing is produced (a bug of the caller) |
 | `seal/bad_ctl_sig` | inner control signature fails | step 15, §11.3 | `Refuse`; alarm naming the author |
-| `seal/ctl_shape` | items form no shape of §12.1 | step 16 | `Refuse`; alarm naming the author |
+| `seal/ctl_shape` | items form no shape of §12.1 | step 16; `ctl_payload` (§26) | `Refuse`; alarm naming the author; from `ctl_payload`, nothing is produced (a bug of the caller) |
 | `seal/ctl_genesis` | a Genesis item or anchor is wrong | step 16, §13.3 | `Refuse`, or at seq 1 the board is unusable: the caller stops bootstrapping |
 | `seal/ctl_author` | the item's author is not allowed | §13.6 | `Refuse`; alarm naming the author |
 | `seal/ctl_target` | the item's target or seq is not allowed | §13.6 | `Refuse` |
@@ -1691,7 +1691,7 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 | `seal/entropy` | the entropy source failed | any sealing or generation | retry later; never fall back to another source |
 | `seal/membership_format` | canonical membership bytes invalid | §13.2 | reject the input that carried them |
 | `seal/challenge_length` | relay nonce not 32 bytes | §16.1, §16.2 | do not sign; treat the relay answer as invalid |
-| `seal/host_format` | a host is not a host of §5.4 (a port of 443 included) | `relay_origin`, `login_message`, `admin_message`, `ctl_payload`, §5.4 | refuse the host; ask the user again |
+| `seal/host_format` | a host is not a host of §5.4 (a port of 443 included) | `relay_origin`, `login_message`, `admin_message`, `sign_admin`, `ctl_payload`, §5.4 | refuse the host; ask the user again |
 | `seal/move_code` | typed move code does not match | §15.4 | ask again (`engine.md` limits tries) |
 | `seal/code_format` | pairing code not 18 alphabet characters; any failure of `base32::decode_typed` | §17.2, §26 | ask again; no request sent; from `decode_typed`, the caller maps it to its own code |
 | `seal/code_check` | pairing code check characters wrong | §17.2 | ask again; no request sent |
@@ -1845,7 +1845,7 @@ Stage `seal` publishes these families under `docs/sync/vectors/`, one JSON file 
 **`device.md`.**
 - Requires: the files of §19.2, their contents, write and fsync order, and the handling of torn and bad tails; the key stores that wrap `L_d` with `ctx("local-key") ‖ board_id ‖ dev` as associated data or entropy where the store accepts it (§6.6).
 - Requires: every accepted control entry's history record (§21.5) is kept for the life of the board, through purges, so backups can carry the full history (SEAL-BKP-002) and every snapshot it seals carries it (SEAL-BLOB-006).
-- Requires: the sealer adapter opens, with `unwrap_root`, the wraps a `login` answer carries for a reinstated device (`device.md` §10.3), as §7 states (SEAL-WRAP-002, SEAL-WRAP-003, SEAL-KEY-013): epoch by epoch, oldest first, each once its membership records that epoch's commitment. `Receipt.learned_root` reports only a root that an entry's own wraps teach. The sealer adapter also carries the caller's duties SEAL-FRAME-005, SEAL-ENV-003, SEAL-ENV-004, SEAL-SIG-005 and SEAL-MEM-016, which the crate's pure functions cannot violate, and the caller's halves of SEAL-WRAP-003 (a wrap delivered outside an entry) and SEAL-SIG-002 (the origin comes from the device's own configuration); stage `device` owns them, SEAL-SIG-005 together with `engine`, which supplies the `register` arguments.
+- Requires: the sealer adapter opens, with `unwrap_root`, the wraps a `login` answer carries for a reinstated device (`device.md` §10.3), as §7 states (SEAL-WRAP-002, SEAL-WRAP-003, SEAL-KEY-013): epoch by epoch, oldest first, each once its membership records that epoch's commitment. `Receipt.learned_root` reports only a root that an entry's own wraps teach. The sealer adapter also carries the caller's duties SEAL-FRAME-005, SEAL-ENV-003, SEAL-ENV-004 and SEAL-MEM-016, which the crate's pure functions cannot violate, and the caller's half of SEAL-WRAP-003 (a wrap delivered outside an entry: the adapter returns `seal/commitment`, the engine halts, `engine.md` §24.4); the transport (`device.md` §10) carries SEAL-SIG-005 and the caller's half of SEAL-SIG-002 (the origin comes from the device's own configuration). Stage `device` owns them, SEAL-SIG-005 and SEAL-WRAP-003 together with `engine`, which supplies the `register` arguments and halts on such a wrap.
 - Requires: backup scheduling, destinations and file names; the pinned recovery fingerprint (SEAL-BKP-006); the `meta` JSON of §21.5.
 - Requires: release builds never enable the `test-entropy` feature (SEAL-GEN-005), which stage `release` checks by the feature resolution and by searching every artifact for `TEST_ENTROPY_MARKER` (SEAL-GEN-014; `device.md` §11.2, DEV-TRUST-003).
 
