@@ -3,5 +3,8 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+#[path = "../common/board.rs"]
+mod board;
 
 mod s1_wraps;
+mod s3_receipt;
