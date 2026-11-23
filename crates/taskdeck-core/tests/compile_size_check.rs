@@ -1,4 +1,5 @@
-//! Reproductions from the verify pass of d-compile.
+//! `compile` makes `apply`'s size check on the view (core.md §13.3 G6, §8.4 step 4, CORE-COMP-008): the
+//! reproductions of the medium finding of task D's check, kept as regression tests.
 
 use taskdeck_core::apply::{Ctx, apply};
 use taskdeck_core::board::{ArchiveRow, BoardData, Item, ItemStamps, Kind, Mark, Outcome, Stamp};

@@ -1,0 +1,59 @@
+# The fuzz targets of core.md §18.6 (SYNC_PLAN.md §6.2 item 9), laid out as
+# `cargo fuzz init` lays them out: a package of its own, with its own
+# [workspace] table and its own committed Cargo.lock, outside the root
+# workspace. Stage `release`'s nightly job runs them (`cargo fuzz run
+# <target>`); `crates/taskdeck-core/ci.sh` only checks that they compile on
+# the pinned stable toolchain, on Linux (`cargo check --locked`).
+[package]
+name = "taskdeck-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# 0.4.13, published 2026-06-04.
+libfuzzer-sys = "=0.4.13"
+taskdeck-core = { path = ".." }
+# The version the root Cargo.lock holds; no `clock`, as in the core.
+chrono = { version = "=0.4.45", default-features = false }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "command_apply"
+path = "fuzz_targets/command_apply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "board_bytes"
+path = "fuzz_targets/board_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "intent_compile"
+path = "fuzz_targets/intent_compile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ics_parse"
+path = "fuzz_targets/ics_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "snapshot"
+path = "fuzz_targets/snapshot.rs"
+test = false
+doc = false
+bench = false

@@ -1,9 +1,9 @@
-//! The fixtures' process zones as `TableZone`s (core.md §5.2, §18.5).
-//!
-//! Tests cannot set `TZ`, so the two zones the fixtures were recorded in are
-//! generated here from today's rules for the years 2000 to 2100, with
-//! standard time outside them. The fixture data lies in 2022 to 2027 plus
-//! winter days of 1970 and 9999, where both zones are on standard time.
+// The fixtures' process zones as `TableZone`s (core.md §5.2, §18.5).
+//
+// Tests cannot set `TZ`, so the two zones the fixtures were recorded in are
+// generated here from today's rules for the years 2000 to 2100, with
+// standard time outside them. The fixture data lies in 2022 to 2027 plus
+// winter days of 1970 and 9999, where both zones are on standard time.
 
 use chrono::{Datelike, NaiveDate, Weekday};
 use taskdeck_core::time::TableZone;

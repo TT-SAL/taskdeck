@@ -1137,9 +1137,13 @@ fn a_local_time_outside_the_range_is_out_of_range_not_a_gap() {
         let mv = Intent::MoveBlock { id: 1, session: Some(7), day: d, start, minutes: 15 };
         assert_eq!(compile_in(zone, &mv).err(), Some(range.clone()), "{mv:?}");
         let naive = d.and_hms_opt(u32::try_from(start / 60).expect("h"), u32::try_from(start % 60).expect("m"), 0).expect("t");
+        // A naive wire time there has no instant: `not a time`, as today
+        // (§13.3 G3, the transcript ruling); only a day and minutes are
+        // `core/date_range`.
         let wire = WireTime::Naive(naive, "t".into());
         let quick = Intent::QuickAdd { name: "q".into(), deadline: Some(wire) };
-        assert_eq!(compile_in(zone, &quick).err(), Some(range.clone()), "{quick:?}");
+        let not_a_time = ("core/intent_json", 400, "not a time: `t`".to_owned());
+        assert_eq!(compile_in(zone, &quick).err(), Some(not_a_time), "{quick:?}");
     }
     // Just inside: 01:00 at UTC+1 is the first instant, 22:45 at UTC-1 the
     // last quarter hour.

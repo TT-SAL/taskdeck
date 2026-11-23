@@ -90,6 +90,7 @@ proptest! {
     #![proptest_config(ProptestConfig { timeout: CASE_TIMEOUT_MS, cases: 1, ..ProptestConfig::default() })]
 
     // spec: CORE-GEN-003
+    // spec: CORE-READ-007
     #[test]
     fn timed_a_repeated_byday_at_eight_mib_is_one_value(_case in Just(())) {
         // Security finding 1: 40,000 `MO`s took 109 s in release; 8 MiB of
@@ -108,6 +109,7 @@ proptest! {
         prop_assert_eq!(read(&text), parsed);
     }
 
+    // spec: CORE-READ-007
     #[test]
     fn timed_sixty_four_distinct_values_at_eight_mib_are_followed(_case in Just(())) {
         // 64 distinct BYDAY values, repeated to 8 MiB, walked monthly from
@@ -238,6 +240,7 @@ proptest! {
     #![proptest_config(ProptestConfig { timeout: CASE_TIMEOUT_MS, cases: 1, ..ProptestConfig::default() })]
 
     // spec: CORE-GEN-003
+    // spec: CORE-READ-007
     #[test]
     fn timed_a_zone_of_thirty_thousand_observances_and_its_exdates_at_eight_mib(_case in Just(())) {
         // Security finding 2: 10,000 DAILY observances and 4,000 EXDATEs
@@ -260,6 +263,7 @@ proptest! {
         prop_assert!(has(&parsed, "excluded dates"), "{:?}", parsed.problems);
     }
 
+    // spec: CORE-READ-007
     #[test]
     fn timed_zoned_times_are_found_by_search_in_a_zone_of_4000_transitions(_case in Just(())) {
         // A defined zone of 4,000 points, and as many events with 1,000
@@ -365,6 +369,7 @@ const SPREAD_DAYS: usize = 400;
 proptest! {
     #![proptest_config(ProptestConfig { timeout: CASE_TIMEOUT_MS, cases: 1, ..ProptestConfig::default() })]
 
+    // spec: CORE-READ-007
     #[test]
     fn timed_overrides_at_eight_mib_stay_inside_the_per_event_limit(_case in Just(())) {
         // Security finding 3 at scale: a 1 MB file of 461 overrides, each
@@ -507,6 +512,7 @@ proptest! {
     #![proptest_config(ProptestConfig { timeout: CASE_TIMEOUT_MS, cases: 1, ..ProptestConfig::default() })]
 
     // spec: CORE-GEN-010
+    // spec: CORE-READ-007
     #[test]
     fn timed_twenty_thousand_distinct_tzids_give_one_line(_case in Just(())) {
         // The finding at scale: 20,000 events with distinct TZIDs sharing a
@@ -591,6 +597,7 @@ proptest! {
     #![proptest_config(ProptestConfig { timeout: CASE_TIMEOUT_MS, cases: 1, ..ProptestConfig::default() })]
 
     // spec: CORE-GEN-003
+    // spec: CORE-READ-007
     #[test]
     fn timed_twenty_thousand_daily_rules_from_year_one_share_one_budget(_case in Just(())) {
         // The reproduction (brief c4): 20,000 events (1.4 MB) each walking
@@ -607,6 +614,7 @@ proptest! {
     }
 
     // spec: CORE-GEN-003
+    // spec: CORE-READ-007
     #[test]
     fn timed_a_zone_of_512_daily_observances_from_year_one_shares_the_budget(_case in Just(())) {
         // 512 DAILY observances from year 1 in one VTIMEZONE: each walked its
