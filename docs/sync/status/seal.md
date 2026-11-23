@@ -280,8 +280,34 @@ go into a second spec change before the exit.
 §21.3, §21.5, §21.6 and ten rows of §22; SEAL-BKP-004 gains the reader's new refusal (Q45), the one
 clause whose text changes; two rows in `CHANGES.md` (the change, and a point left open for `device`
 and `recovery`: what the recovery tool can compare with a relay copy, Q47). It travels in task S5's
-pull request, whose code makes Q45, Q46 and Q48 true. Not yet checked by an agent that did not write
-it: one check runs when the rulings of S5 and S6 have been added, on the whole of the second change.
+pull request, whose code makes Q45, Q46 and Q48 true.
+
+One agent that did not write it checked this part at once (0.19 million tokens, the rest of the
+second window), so that S5's implementer builds on a checked text. It found one high, six medium and
+six low points; twelve were applied on 2026-11-23 08:15 UTC:
+
+- **High: the new text on which roots a file carries contradicted `device.md` §15.3**, which hands
+  `write_backup` every root the device holds. With the writer refusing a root without a commitment
+  (the first form of Q38), every segment that spans a rotation would have failed. Now the writer
+  leaves such roots out and the reader stays strict (Q38 as corrected; code in S5's brief).
+- §21.3 claimed `write_backup` refuses everything its reader would reject; it now lists what the
+  writer checks and says what it does not (Q37 as corrected).
+- "Prefer the newest file" favoured a forger, who chooses its file's `seq` and date; the text now
+  says both are the writer's claims (Q47 as corrected). `seal.md` no longer claims that `device.md`
+  §15.8 compares a file with a relay copy: that stays the open point in `CHANGES.md`.
+- SEAL-BKP-004's new sentence names step 10, so that it does not contradict the step order.
+- §21.3 says exactly how the roots stay out of the compressor, that the block layout is no part of
+  the format, and what stays out of reach.
+- `VerifiedBackup` gains `written_ms` (Q49; code in S5's brief). Four more rows of §22.
+- **Left open for `device` (a row of `CHANGES.md`), older than this stage:** after an honest
+  recovery-key change no monthly segment can be written again. `device.md` §15.2 starts the next
+  segment at a base below the change, whose membership names the old key; `write_backup` refuses it
+  (`seal/backup_unpinned`, SEAL-BKP-006) and a reader would reject it. Nightly files are not affected.
+- Not applied: the check proposed a source for the roots of rotations inside a segment in `device.md`
+  §15.8 step 7; that step tops up nightly files, whose history reaches their `seq`.
+
+Because the check found a high point, the corrected text is checked once more, together with the
+rulings of S5 and S6 when they are written in (the whole of the second change, one agent).
 
 **E2, left open for `engine` and `device` (a row of `CHANGES.md`):** the check found the same kind of
 defect as E1 for an own `Fence`: the relay fences itself in the same transaction that appends the
@@ -330,8 +356,8 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q34 | §19.1 | a record over the limit | `seal_record` refuses with `seal/payload_too_large`, before it draws |
 | Q35 | §19.4, §26 | a corrupt record and the records before it | `open_file` returns `seal/file_corrupt` alone |
 | Q36 | §21.5 | `from_accepted` on what is no accepted control entry | `seal/frame_format`, `seal/bad_payload`, `seal/not_control` |
-| Q37 | §21.3 | `write_backup` with inconsistent inputs | refused with the code of the reader's step that would reject the file |
-| Q38 | §21.5, §21.6 | a segment's roots of epochs rotated inside it | a segment carries only roots whose commitment its membership records; the others are in the rotations' wraps to the recovery key. Spec note |
+| Q37 | §21.3 | `write_backup` with inconsistent inputs | it refuses what it can see without the recovery key and without replaying the history (`seal/membership_format`, `seal/backup_writer`, `seal/backup_history`, `seal/backup_payload`; §21.3 lists them); it does not verify the history, the membership's agreement with it, `hash_version` or `state_hash` (corrected after the check) |
+| Q38 | §21.5, §21.6 | a segment's roots of epochs rotated inside it | a file carries only roots whose commitment its membership records; the others are in the rotations' wraps to the recovery key. `write_backup` is given every root the device holds and leaves the others out; it refuses a root that does not match its commitment; the reader rejects a root without a matching commitment (corrected after the check: the writer first refused, which broke `device.md` §15.3). Code in S5's brief |
 | Q39 | §21.6 step 11 | the segment's recomputed chain has nothing to be compared with | the crate recomputes it; the caller chains segments and nightly files. Spec note |
 | Q40 | §21.6 step 11 | a `hash_version` the rules do not allow | `seal/backup_payload` |
 | Q41 | §21.5 | history records beyond the file's range | after `seq`: step 9; at or after a segment's `first_seq`: step 11; a segment has `first_seq ≥ 2`. Spec note |
@@ -341,7 +367,8 @@ stages that build them; seal's lead recorded it and did not change them.
 
 | Q45 | §21.6 step 10, SEAL-BKP-004 | step 10 compares `recipient` (a `dev_R`, which binds the recovery signing key only) with the projection's recovery identity: a history whose last recovery-key change pairs the sheet's signing key with another HPKE key passes, and a restore would wrap later roots to that key (S4 security, reproduced) | step 10 also requires both public keys of the projection's current recovery record to equal the typed seed's (`seal/backup_writer`). A strengthening. Spec change 2; code in S5's brief |
 | Q46 | §21.6 projection, SEAL-MEM-004 | the projection accepted a first record whose `ctr` is not 1 | refused (`seal/backup_history`): the projection accepts no history a log cannot produce. Code in S5's brief |
-| Q47 | §21.5, §21.6 | nothing in a file says at which seq its membership was taken, so a device revoked at seq `k` can still write a file that reads as a backup at any head with its history cut before `k` (S4 security, reproduced) | by design, and no check inside a file can change it: an authentic backup written before the revocation must stay readable. A backup proves that its writer was a current device at the end of its history and nothing later. Spec change 2 says so in §21.6; `recovery` shows the writer, the date and the last control entry, prefers the newest file, and compares with the relay's copy when one is reachable (the records' `frame_hash`, `head_chain`) |
+| Q47 | §21.5, §21.6 | nothing in a file says at which seq its membership was taken, so a device revoked at seq `k` can still write a file that reads as a backup at any head with its history cut before `k` (S4 security, reproduced) | by design, and no check inside a file can change it: an authentic backup written before the revocation must stay readable. A backup proves that its writer was a current device at the end of its history and nothing later; its `seq` and date are the writer's claims. Spec change 2 says so in §21.6; `recovery` shows the writer, the date and the last control entry and trusts no file for its seq or date alone; what it compares with a relay copy is left open for `device` and `recovery` (`CHANGES.md`) |
+| Q49 | §26 `VerifiedBackup` | the recovery tool is to show a file's written date, which `read_backup` did not return | `VerifiedBackup` gains `written_ms` (the header's, display only). Code in S5's brief |
 | Q48 | SEAL-GEN-006, §21.3 | the DEFLATE compressor and decompressor (a pinned dependency's private state) hold the payload's bytes, the epoch roots among them, and are freed without being erased (S4 security, a note; `unsafe` is forbidden, so the crate cannot wipe them from outside) | as S1's high finding ruled for the hash states: a state that took in roots must not be left behind. The writer keeps the roots and the read token out of the compressor (they travel in stored blocks the crate writes itself, after a full flush); the reader resets the decompressor, which zeroes its window in the pinned version, before dropping it. What stays outside reach is said in the code and in the spec. Code in S5's brief |
 
 Applied with the same change (they were candidates until task S3 confirmed the pattern):
@@ -393,7 +420,8 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S4, the implementer | 1 | 0.44 M | 0.61 M | 0.61 M |
 | | S4, the verifier | 1 | 0.27 M | 0.33 M | 0.33 M |
 | | S4, security passes and the fix pass | 3 | 0.55 M | 0.70 M | 0.70 M |
-| | **window total** (nothing more is started in it: S5's implementer would not fit. The session's worker restarted at 05:41 UTC, when the owner wrote that the limit had reset, so this window ends at 10:41 UTC, 12:41 Helsinki, at the latest; S5 starts after that) | | | | **3.26 M** |
+| | check of the second spec change, part 1 | 1 | 0.15 M | 0.19 M | 0.19 M |
+| | **window total** (nothing more is started in it: S5's implementer would not fit. The session's worker restarted at 05:41 UTC, when the owner wrote that the limit had reset, so this window ends at 10:41 UTC, 12:41 Helsinki, at the latest; S5 starts after that) | | | | **3.45 M** |
 
 ## Low findings left as they are
 
@@ -502,9 +530,13 @@ To be completed at the exit. So far:
   refuses lone surrogates; task S7 checks it against §4.5 as it now stands.
 - For `recovery` (Q47): `read_backup` proves that a file's writer was a current device at the last
   control entry of the file's history, and nothing later. A device revoked afterwards can still write
-  files that read as older backups, with any board content. Show the writer, the written date and the
-  seq of the last control entry; prefer the newest file; when a relay copy is reachable, compare the
-  history records' `frame_hash` and the `head_chain` with it before adopting the state.
+  files that claim any seq and date, with any board content. Show the writer, `written_ms` and the seq
+  of the last control entry, and trust no file over another for its seq or date alone. What the tool
+  compares with a relay copy (a control entry the file's history lacks, a frame whose hash differs
+  from a record's `frame_hash`) is an open point in `CHANGES.md` for `device` and `recovery`.
+- For `device`: `write_backup` takes every root the device holds and writes those whose commitment
+  the file's membership records (Q38). After a recovery-key change no monthly segment can be written
+  under `device.md` §15.2 as it stands (an open point in `CHANGES.md`).
 - For `recovery` (Q45): `read_backup` refuses with `seal/backup_writer` a file whose history ends with
   a recovery key that is not exactly the typed sheet's pair of public keys.
 - For `recovery` and `device`: `read_backup` on a hostile file of the largest size allowed takes time

@@ -1094,7 +1094,7 @@ Each file is `taskdeck_seal::write_backup` (`seal.md` §21) with:
 | `seq` | `B` | the last seq it holds |
 | `history` | the records of `history.tdk` with seq at most `B` | the records with seq at most `first_seq − 1` |
 | `content` | `Nightly { membership: M_B, board, head: (B, C_B), hash_version: 1, state_hash }`, `state_hash` from `taskdeck_sync::state_hash` | `Segment { membership, first_seq, chain_before, frames }`, frames read from the log |
-| `roots` | every root `identity.tdk` holds | the same |
+| `roots` | every root `identity.tdk` holds; `write_backup` writes those whose commitment the file's membership records and leaves out the others (`seal.md` §21.5) | the same |
 | `read_token` | the token of §15.4 | the same |
 | `meta` | §15.3.1 | §15.3.1 |
 | `pinned_recovery` | the pinned recovery public key | the same |
