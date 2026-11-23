@@ -55,8 +55,8 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 |---|---|---|---|---|---|
 | S1 | Primitives, keys, wraps, chain and fingerprints, the sheet, the known-answer suites, the vectors target, `ci.sh` | `error`, `entropy`, `base32`, `encodings` (hosts, names), `ids`, `ctx`, `keys`, `chain`, `prim` | §3–§7, §15, §18 | `seal-kdf`, `seal-wrap`, `seal-chain`, `seal-sheet` | **done**, merged (TT-SAL/taskdeck#4; its high finding fixed by TT-SAL/taskdeck#6) |
 | S2 | Frames, envelope, padding, payloads and control items (encode and strict parse, canonical JSON), login and admin signatures | `entries`, `signatures`, `encodings` (JSON) | §5.3, §8–§12, §16 | `seal-frame`, `seal-padding`, `seal-signatures` | **done**, merged (TT-SAL/taskdeck#9; low findings only) |
-| S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **implemented**, gate green, pushed (draft TT-SAL/taskdeck#10); verify and security passes next: resume workflow run `wf_6a6ca5ab-6c6` if this session still lives, else run the verify and security steps afresh on the committed code |
-| S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | brief written |
+| S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **done**, merged (TT-SAL/taskdeck#10, with the spec change) |
+| S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **implemented**, gate green, pushed as a draft pull request; verify and security passes next (workflow run `wf_a268ae8c-572`) |
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection) | `blob` | §20 | `seal-blob` | brief written |
 | S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | brief written |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `ci.sh` | §3, §24 | all present | brief to write |
@@ -294,6 +294,18 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q32 | §13.2 | does the parser check invariants beyond the layout | yes; every state the transitions produce must pass (the verifier checks the round trip). Spec note |
 | Q33 | §26 `Receipt` | `code` and `opened` per class | with a halt, the halt's code; with `NeedFrames`, none; `opened` from step 11 on. Spec note |
 
+| Q34 | §19.1 | a record over the limit | `seal_record` refuses with `seal/payload_too_large`, before it draws |
+| Q35 | §19.4, §26 | a corrupt record and the records before it | `open_file` returns `seal/file_corrupt` alone |
+| Q36 | §21.5 | `from_accepted` on what is no accepted control entry | `seal/frame_format`, `seal/bad_payload`, `seal/not_control` |
+| Q37 | §21.3 | `write_backup` with inconsistent inputs | refused with the code of the reader's step that would reject the file |
+| Q38 | §21.5, §21.6 | a segment's roots of epochs rotated inside it | a segment carries only roots whose commitment its membership records; the others are in the rotations' wraps to the recovery key. Spec note |
+| Q39 | §21.6 step 11 | the segment's recomputed chain has nothing to be compared with | the crate recomputes it; the caller chains segments and nightly files. Spec note |
+| Q40 | §21.6 step 11 | a `hash_version` the rules do not allow | `seal/backup_payload` |
+| Q41 | §21.5 | history records beyond the file's range | after `seq`: step 9; at or after a segment's `first_seq`: step 11; a segment has `first_seq ≥ 2`. Spec note |
+| Q42 | §21.6 projection | step 2 needs the Genesis key before steps 4 and 5 | the first record's items are parsed at step 2; step 6 binds the key to the board id |
+| Q43 | §21.6 projection step 6 | how much of §13.6 the reduced rules run | the whole rows for `DeviceAdded`, `DeviceRevoked`, `DeviceReinstated`, `EpochRotated`; `RecoveryKeyChange` without the 72 hours; the others their author only |
+| Q44 | §21.6 | where `verify_backup_file` compares the key | after steps 1 and 2, before the signature |
+
 Applied with the same change (they were candidates until task S3 confirmed the pattern):
 
 - Clauses that state a duty of the crate's caller (the device's sealer adapter) and are owned by
@@ -339,7 +351,9 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S3, the verifier | 1 | 0.32 M | 0.39 M | 0.39 M |
 | | second check of the spec change | 1 | 0.20 M | 0.26 M | 0.26 M |
 | | S3, security passes | 2 | 0.45 M | 0.44 M | 0.45 M |
-| | **window so far** | | | | **1.37 M** |
+| | S3, the fix pass | 1 | 0.22 M | 0.25 M | 0.25 M |
+| | S4, the implementer | 1 | 0.44 M | 0.61 M | 0.61 M |
+| | **window so far** | | | | **2.23 M** |
 
 ## Low findings left as they are
 
