@@ -58,7 +58,8 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **done**, merged (TT-SAL/taskdeck#10, with the spec change) |
 | S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done**, merged (TT-SAL/taskdeck#13, 2026-11-23 07:46 UTC; low findings only, four rulings carried into S5's brief) |
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **done** (TT-SAL/taskdeck#14; two high findings of its security passes fixed and checked by the lead) |
-| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | brief written |
+| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | implementer running (workflow run `wf_7055dfcc-29f`) |
+| S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | brief written |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written (to revise with what S5 and S6 leave) |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
 
@@ -344,9 +345,37 @@ six low points; twelve were applied on 2026-11-23 08:02 UTC:
 Because the check found a high point, the corrected text is checked once more, together with the
 rulings of S5 and S6 when they are written in (the whole of the second change, one agent).
 
-**Part 2 (task S5's rulings, Q50 to Q56), written on 2026-11-23 12:00 UTC**, in place: §20.3, §20.4,
+**Part 2 (task S5's rulings, Q50 to Q56), written on 2026-11-23 11:49 UTC**, in place: §20.3, §20.4,
 §20.5 steps 1, 3 and 7 and the declared mode, four rows of §22, §25; SEAL-KEY-012 and SEAL-KEY-013
 gain `device` as an owner for the caller's half. The row of `CHANGES.md` is extended.
+
+**The second check** (one agent, 0.22 million tokens, 2026-11-23 12:06 UTC) covered the corrections
+to part 1 and part 2 fresh: one high, three medium and six low points, all applied at 12:20 UTC.
+
+- **High, in part 2: nobody was clearly named to compare a snapshot's state hash with the signed
+  entry.** Q50 had moved that comparison out of the crate to "the caller", and the change log named
+  `engine`; `engine.md` hands the whole check to the sealer (`open_snapshot` "with every value of
+  `expected`"), and `device.md` gave the adapter no such duty: each lead, reading its own spec,
+  would have left it to the other. The cause was the API: §20.5 step 7 always said "S and the state
+  hash equal the expected values", but `open_snapshot` was given no state hash. Q50 is withdrawn.
+  **Q57: `open_snapshot` takes the expected state hash and its version as arguments** and compares
+  the body's with them, so no caller can leave the comparison out; the crate does not recompute the
+  hash from the board (Q50 did, which would have turned the engine's own alarm for a snapshot whose
+  board does not give its signed hash into a `seal/blob_open`). Built by task S6b.
+- The check also showed that `read_backup` did not return the history it verifies, although
+  `device.md` §15.8 reads rotations, counters and frame hashes "from the backup's verified history":
+  **Q59: `VerifiedBackup` gains `history`, and a history record gives its `dev`, `ctr`, `frame_hash`
+  and items.** Built by task S6b.
+- Q58: the agreement of a membership with its history names the board id (it was implied by the
+  recovery identity's id). §21.3's list of what `write_backup` refuses is complete against the code;
+  §20.4 lists what `seal_snapshot` refuses without claiming more; `device.md` §24 names the two key
+  clauses' caller halves; `engine.md` §19.7 step 5's list gains `hash_version`.
+- For `device` (the check's note, not pursued): scenario S5 of `device.md` §20.2 expects the engine's
+  snapshot-mismatch alarm for a snapshot whose board bytes were corrupted before sealing; with Q57
+  the crate leaves that case to the engine again, as the scenario assumes.
+
+Part 1 has now been checked twice and is closed. Part 2's corrections and the rulings of task S6
+(part 3) get one more check before the exit, by one agent.
 
 **E2, left open for `engine` and `device` (a row of `CHANGES.md`):** the check found the same kind of
 defect as E1 for an own `Fence`: the relay fences itself in the same transaction that appends the
@@ -407,7 +436,10 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q45 | §21.6 step 10, SEAL-BKP-004 | step 10 compares `recipient` (a `dev_R`, which binds the recovery signing key only) with the projection's recovery identity: a history whose last recovery-key change pairs the sheet's signing key with another HPKE key passes, and a restore would wrap later roots to that key (S4 security, reproduced) | step 10 also requires both public keys of the projection's current recovery record to equal the typed seed's (`seal/backup_writer`). A strengthening. Spec change 2; code in S5's brief |
 | Q46 | §21.6 projection, SEAL-MEM-004 | the projection accepted a first record whose `ctr` is not 1 | refused (`seal/backup_history`): the projection accepts no history a log cannot produce. Code in S5's brief |
 | Q47 | §21.5, §21.6 | nothing in a file says at which seq its membership was taken, so a device revoked at seq `k` can still write a file that reads as a backup at any head with its history cut before `k` (S4 security, reproduced) | by design, and no check inside a file can change it: an authentic backup written before the revocation must stay readable. A backup proves that its writer was a current device at the end of its history and nothing later; its `seq` and date are the writer's claims. Spec change 2 says so in §21.6; `recovery` shows the writer, the date and the last control entry and trusts no file for its seq or date alone; what it compares with a relay copy is left open for `device` and `recovery` (`CHANGES.md`) |
-| Q50 | §20.5 step 7, §26 | `open_snapshot` receives no expected state hash | it checks the body in itself: `S` is `s`, the `state_hash` is that of its own `board` and `membership` under its `hash_version`, and the `hash_version` is one the membership's rules allow (`seal/blob_open`); comparing with the signed entry is the caller's. The declared mode makes neither check, as §20.5 says. Spec note |
+| Q50 | §20.5 step 7, §26 | `open_snapshot` receives no expected state hash | *withdrawn after the second check of the spec change (see Q57).* It had the crate check the body in itself and left the comparison with the signed entry to "the caller" |
+| Q57 | §20.5 step 7, §26 | the same question, ruled again | `open_snapshot` takes the expected `state_hash` and `hash_version` (the signed entry's or the bundle's) and compares the body's with them (`seal/blob_open`); the crate does not recompute the hash from the board, the engine does. The declared mode compares neither. An API change of §26; built by S6b |
+| Q58 | §21.6 step 11, §20.5 step 7 | the agreement lists no board id | it names it; `agrees` compares it. Built by S6b |
+| Q59 | §26 `VerifiedBackup`, `HistoryRecord` | `device.md` §15.8 reads "the backup's verified history", which `read_backup` did not return, and a record showed only its seq | `VerifiedBackup` gains `history`; `HistoryRecord` gains `dev()`, `ctr()`, `frame_hash()`, `items()`. Built by S6b |
 | Q51 | §20.4, §20.5 step 7 | a history record with a seq above `S` | `seal/blob_open` (as Q41 for a backup). Spec note |
 | Q52 | §20.2, §22 | a blob of kind 2 too large to seal has no code | `seal_blob` refuses with `seal/payload_too_large`, before it draws. Spec note |
 | Q53 | §20.4, §23 | the padding function rounds to 1,048,576 bytes near the limit, so a body of 64 MiB cannot be sealed | as the spec says (`seal/snapshot_large` when the sealed blob would exceed 67,108,864 bytes); the largest compressed body that fits is 66,060,284 bytes. Spec note |
@@ -471,7 +503,8 @@ output); the higher is booked. Limit: 3.5 million per window.
 | from 2026-11-23 12:46 (the lead's first agent after the second window had ended) | S5, the implementer | 1 | 0.43 M | 0.57 M | 0.57 M |
 | | S5, the verifier | 1 | 0.23 M | 0.26 M | 0.26 M |
 | | S5, security passes and the fix pass | 3 | 0.59 M | 0.60 M | 0.60 M |
-| | **window so far** | | | | **1.43 M** |
+| | second check of the second spec change | 1 | 0.18 M | 0.22 M | 0.22 M |
+| | **window so far** | | | | **1.65 M** |
 
 ## Low findings left as they are
 
@@ -605,9 +638,13 @@ To be completed at the exit. So far:
   container, so about 60 s at the limit of 1,048,576) and up to about 1.5 GB of memory (a 256 MiB
   file inflating to 512 MiB); `open_snapshot` at its largest size about 16 s. Run them off the UI
   thread.
-- For `engine` (Q50): `open_snapshot` checks a snapshot body in itself; comparing its `hash_version`
-  and `state_hash` with the signed `snap` entry is the engine's, in both modes. A beat's ack may name
-  any seq below the beat's own, also one that is no `snap` entry (Q17).
+- For `engine` and `device` (Q57): `open_snapshot` takes the signed entry's state hash and its
+  version and compares the body's with them; the engine recomputes the hash from the board it loads,
+  and that comparison is the engine's alone. In the declared mode the crate compares neither: the
+  engine checks both against the `snap` entry once it has classified it. A beat's ack may name any
+  seq below the beat's own, also one that is no `snap` entry (Q17).
+- For `recovery` and `device` (Q59): `read_backup` returns the verified history; a record gives its
+  seq, author, counter, frame hash and items.
 - For `device` (Q52, Q53): the largest body `seal_blob` and `seal_snapshot` can seal is 66,060,284
   bytes (compressed, for a snapshot). `SymKey` carries no kind: the adapter passes each function the
   key of its own kind (SEAL-KEY-012), and hands `open_snapshot_declared` only roots it has checked
