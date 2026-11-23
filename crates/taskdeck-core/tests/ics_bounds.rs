@@ -563,3 +563,112 @@ proptest! {
         prop_assert_eq!(parsed, read(&listed(&natural)));
     }
 }
+
+/* ─────── 7. One step budget for all the rules of a file (brief c4) ─────── */
+
+/// The budget of one parse is this many times `max_rule_steps` (brief c4).
+const BUDGET_FACTOR: usize = 200;
+
+/// The note a rule cut short gives, by its words.
+const CUT_SHORT: &str = "further than can be worked out";
+
+/// `n` events of the given lines each, numbered by their `SUMMARY`.
+fn events(n: usize, body: &str) -> String {
+    let mut text = String::from("BEGIN:VCALENDAR\r\n");
+    for i in 0..n {
+        text.push_str(&format!("BEGIN:VEVENT\r\nSUMMARY:E{i:05}\r\n{body}\r\nEND:VEVENT\r\n"));
+    }
+    text.push_str("END:VCALENDAR\r\n");
+    text
+}
+
+/// The lines of `problems` that name a rule cut short.
+fn cut_short_lines(parsed: &Parsed) -> usize {
+    parsed.problems.iter().filter(|p| p.contains(CUT_SHORT)).count()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { timeout: CASE_TIMEOUT_MS, cases: 1, ..ProptestConfig::default() })]
+
+    // spec: CORE-GEN-003
+    #[test]
+    fn timed_twenty_thousand_daily_rules_from_year_one_share_one_budget(_case in Just(())) {
+        // The reproduction (brief c4): 20,000 events (1.4 MB) each walking
+        // its full 100,000 steps took about 31 s in release. One budget of
+        // 200 × 100,000 steps for the whole file: the first 200 events spend
+        // it, and every rule cut short is one line with a count.
+        let text = events(20_000, "DTSTART:00010101T090000\r\nRRULE:FREQ=DAILY");
+        prop_assert!(text.len() < 2 * 1024 * 1024, "{}", text.len());
+        let parsed = read(&text);
+        prop_assert!(parsed.occurrences.is_empty(), "{:?}", parsed.occurrences.len());
+        prop_assert_eq!(parsed.problems.len(), 1, "{:?}", &parsed.problems);
+        prop_assert_eq!(cut_short_lines(&parsed), 1);
+        prop_assert!(parsed.problems.iter().all(|p| p.contains("20000 times")), "{:?}", parsed.problems);
+    }
+
+    // spec: CORE-GEN-003
+    #[test]
+    fn timed_a_zone_of_512_daily_observances_from_year_one_shares_the_budget(_case in Just(())) {
+        // 512 DAILY observances from year 1 in one VTIMEZONE: each walked its
+        // full 100,000 steps (51,200,000 together). The budget stops them at
+        // 20,000,000; what they found stands: no point of theirs reaches the
+        // zone's window, so the zone is its observances' starts, +01:00.
+        let observances: String = (0..512).map(|i| observance("00010101", i, "FREQ=DAILY")).collect();
+        let parsed = read(&zoned(&observances));
+        prop_assert_eq!(start_of_meet(&parsed), 8 * 60);
+        prop_assert!(!has(&parsed, "time zone"), "{:?}", parsed.problems);
+    }
+}
+
+#[test]
+fn a_calendar_inside_the_budget_is_read_as_it_was_without_one() {
+    // 2,000 daily events that began ten years before the window: about
+    // 3,650 steps each, 7,300,000 together, inside the 20,000,000 of the
+    // budget. One day's window, so each puts one occurrence in it.
+    let day = NaiveDate::from_ymd_opt(2026, 11, 23).unwrap_or(NaiveDate::MIN);
+    let text = events(2_000, "DTSTART:20161123T090000\r\nRRULE:FREQ=DAILY");
+    let at = |limits: Limits| parse(&text, day, day, limits, &FixedZone(0)).expect("a calendar");
+
+    let parsed = at(Limits::default());
+    // Counted by hand: one occurrence per event, at 09:00 on the day.
+    assert_eq!(parsed.occurrences.len(), 2_000);
+    assert!(parsed.occurrences.iter().all(|o| o.day == day && o.start == 9 * 60));
+    assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+
+    // And the same as under a budget a hundred times larger.
+    let larger = Limits { max_rule_steps: 100 * Limits::default().max_rule_steps, ..Limits::default() };
+    assert_eq!(at(larger), parsed);
+}
+
+#[test]
+fn the_budget_is_spent_in_file_order_and_noted_once() {
+    // max_rule_steps 100, so a budget of 20,000 steps. Each event walks
+    // daily from 16 July 2026 to its UNTIL on 3 October: 80 days, so about
+    // 80 steps, and 10 occurrences in the window (24 September to 3
+    // October). The budget runs out after some 250 of 400 events.
+    let limits = Limits { max_rule_steps: 100, ..Limits::default() };
+    let budget = BUDGET_FACTOR * limits.max_rule_steps;
+    let text = events(400, "DTSTART:20260716T090000\r\nRRULE:FREQ=DAILY;UNTIL=20261003T090000");
+    let parsed = read_with(&text, limits);
+
+    let mut per_event = std::collections::BTreeMap::<String, usize>::new();
+    for o in &parsed.occurrences {
+        *per_event.entry(o.name.clone()).or_default() += 1;
+    }
+    let counts: Vec<usize> = (0..400).map(|i| per_event.get(&format!("E{i:05}")).copied().unwrap_or(0)).collect();
+
+    // The events before the cut have all their occurrences.
+    let whole = counts.iter().take_while(|&&c| c == 10).count();
+    assert!(whole * 80 <= budget && budget <= (whole + 1) * 82, "{whole} whole events of {budget} steps");
+    // At most one is cut in the middle, and none after it has any.
+    assert!(counts.iter().skip(whole + 1).all(|&c| c == 0), "{counts:?}");
+    assert!(counts.get(whole).is_some_and(|&c| c < 10));
+    // The note appears once, with a count.
+    assert_eq!(cut_short_lines(&parsed), 1, "{:?}", parsed.problems);
+    assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+
+    // Without the budget biting (a larger max_rule_steps), all 400 are whole.
+    let parsed = read_with(&text, Limits { max_rule_steps: 1_000, ..limits });
+    assert_eq!(parsed.occurrences.len(), 400 * 10);
+    assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+}

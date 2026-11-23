@@ -570,7 +570,7 @@ fn zones_of(observances: &[(&str, i64)]) -> Vec<(NaiveDateTime, TimeDelta)> {
     let text = wrap(&format!("BEGIN:VTIMEZONE\r\nTZID:Z\r\n{body}END:VTIMEZONE"));
     let lines: Vec<Line> = unfold(&text, 1000).expect("unfolds").iter().filter_map(|l| split_line(l)).collect();
     let harvest = harvest(lines, &Limits::default()).expect("a calendar");
-    let zones = Zones::build(harvest.zones, 2025, 2027, &Limits::default(), &ZONE);
+    let zones = Zones::build(harvest.zones, 2025, 2027, &Limits::default(), &mut StepBudget::for_file(&Limits::default()), &ZONE);
     zones.transitions.get("Z").cloned().unwrap_or_default()
 }
 
@@ -587,7 +587,7 @@ fn transitions_are_found_by_search_as_todays_scan_found_them() {
                      TZOFFSETFROM:+0100\r\nTZOFFSETTO:+0300\r\nEND:STANDARD\r\nEND:VTIMEZONE");
     let lines: Vec<Line> = unfold(&text, 1000).expect("unfolds").iter().filter_map(|l| split_line(l)).collect();
     let harvest = harvest(lines, &Limits::default()).expect("a calendar");
-    let zones = Zones::build(harvest.zones, 2025, 2027, &Limits::default(), &FixedZone(0));
+    let zones = Zones::build(harvest.zones, 2025, 2027, &Limits::default(), &mut StepBudget::for_file(&Limits::default()), &FixedZone(0));
     let at = |text: &str| NaiveDateTime::parse_from_str(text, "%Y%m%dT%H%M%S").expect("a time");
     // Before every point: the offset before the earliest observance (+00:00).
     assert_eq!(zones.resolve("Z", at("20251231T120000")), Some(at("20251231T120000")));

@@ -186,6 +186,42 @@ const MAX_OBSERVANCES: usize = 512;
 /// this is read as an undefined zone.
 const MAX_TRANSITIONS: usize = 4_096;
 
+/// The steps all the rules of one file may take together, as a multiple of
+/// `max_rule_steps` (brief c4, bound 7).
+///
+/// `max_rule_steps` bounds one rule, and a file holds up to `max_events`
+/// events and `MAX_OBSERVANCES` observances per zone: 20,000 daily rules from
+/// year 1 walked two billion steps, half a minute, against the 20 s a device
+/// has for a fetch. So every rule of one `parse`, of events and of
+/// observances alike, spends one counter, in the order the parser follows
+/// them. A calendar of 5,000 daily events that began ten years ago needs 18
+/// million steps; a hostile file can spend no more than the budget, about a
+/// third of a second in a release build. A count of steps, never a time: the
+/// parser reads no clock.
+const RULE_BUDGET_FACTOR: usize = 200;
+
+/// The steps left of one `parse`'s budget (brief c4, bound 7).
+#[derive(Debug)]
+struct StepBudget {
+    left: usize,
+}
+
+impl StepBudget {
+    fn for_file(limits: &Limits) -> Self {
+        StepBudget { left: limits.max_rule_steps.saturating_mul(RULE_BUDGET_FACTOR) }
+    }
+
+    /// The most steps the next rule may take: its own limit, or what is
+    /// left of the file's if that is less.
+    fn allowed(&self, limits: &Limits) -> usize {
+        limits.max_rule_steps.min(self.left)
+    }
+
+    fn spend(&mut self, steps: usize) {
+        self.left = self.left.saturating_sub(steps);
+    }
+}
+
 /// Most lines `Parsed::problems` holds (brief c3, bound 5).
 ///
 /// One line per kind of problem, and the kinds are this module's own fixed
@@ -272,8 +308,19 @@ pub fn parse(
     let harvest = harvest(lines, &limits)?;
 
     let mut problems = Problems::default();
-    let zones =
-        Zones::build(harvest.zones, from.year().saturating_sub(1), until.year().saturating_add(1), &limits, zone);
+    // One budget for every rule this call follows (brief c4, bound 7): the
+    // zones' observances first, as the parser reads them, then the events in
+    // file order.
+    // SPEC-QUESTION: "spent in file order" with a VTIMEZONE listed after the events: zones are worked out first.
+    let mut budget = StepBudget::for_file(&limits);
+    let zones = Zones::build(
+        harvest.zones,
+        from.year().saturating_sub(1),
+        until.year().saturating_add(1),
+        &limits,
+        &mut budget,
+        zone,
+    );
 
     let cap = limits.max_occurrences_per_event;
     let raw: Vec<RawEvent> = harvest.events.iter().map(|lines| read_event(lines, cap)).collect();
@@ -292,7 +339,9 @@ pub fn parse(
         let room = limits.max_occurrences.saturating_sub(occurrences.len());
         let moved = event.uid.as_deref().filter(|uid| !uid.is_empty()).and_then(|uid| overrides.get(uid));
         occurrences.extend(
-            occurrences_of(event, moved, &zones, from, until, &limits, &mut problems).into_iter().take(room),
+            occurrences_of(event, moved, &zones, from, until, &limits, &mut budget, &mut problems)
+                .into_iter()
+                .take(room),
         );
     }
 
@@ -828,7 +877,14 @@ struct Zones<'z, Z: Zone + ?Sized> {
 }
 
 impl<'z, Z: Zone + ?Sized> Zones<'z, Z> {
-    fn build(definitions: Vec<ZoneDefinition>, first_year: i32, last_year: i32, limits: &Limits, zone: &'z Z) -> Self {
+    fn build(
+        definitions: Vec<ZoneDefinition>,
+        first_year: i32,
+        last_year: i32,
+        limits: &Limits,
+        budget: &mut StepBudget,
+        zone: &'z Z,
+    ) -> Self {
         let mut zones = Zones { transitions: BTreeMap::new(), earliest: BTreeMap::new(), zone };
         let from = NaiveDate::from_ymd_opt(first_year.clamp(1, 9999), 1, 1);
         let until = NaiveDate::from_ymd_opt(last_year.clamp(1, 9999), 12, 31);
@@ -838,7 +894,7 @@ impl<'z, Z: Zone + ?Sized> Zones<'z, Z> {
             // A zone over either bound is read as an undefined zone (brief c3,
             // bound 2). A later definition of a TZID replaces an earlier one,
             // as today, so an oversized one leaves the TZID undefined.
-            let read = if definition.oversized { None } else { Self::points_of(&definition, from, until, limits, zone) };
+            let read = if definition.oversized { None } else { Self::points_of(&definition, from, until, limits, budget, zone) };
             match read {
                 Some((points, earliest)) => {
                     if let Some(offset) = earliest {
@@ -870,6 +926,7 @@ impl<'z, Z: Zone + ?Sized> Zones<'z, Z> {
         from: NaiveDate,
         until: NaiveDate,
         limits: &Limits,
+        budget: &mut StepBudget,
         zone: &Z,
     ) -> Option<(Points, Option<TimeDelta>)> {
         let mut points: BTreeMap<NaiveDateTime, TimeDelta> = BTreeMap::new();
@@ -895,7 +952,10 @@ impl<'z, Z: Zone + ?Sized> Zones<'z, Z> {
             }
 
             let Some(rule) = &observance.rule else { continue };
-            let expansion = expand(rule, observance.start.date(), from, until, limits, zone);
+            // A rule cut short, by its own limit or by the file's budget, keeps
+            // what it found and is not noted, as today's observances were not.
+            // SPEC-QUESTION: is an observance cut short by the budget noted? Not noted, as one cut by max_rule_steps is today.
+            let expansion = expand(rule, observance.start.date(), from, until, limits, budget, zone);
             for day in expansion.days {
                 if !add(day.and_time(observance.start.time()), observance.to) {
                     return None;
@@ -1110,8 +1170,28 @@ fn expand<Z: Zone + ?Sized>(
     from: NaiveDate,
     until: NaiveDate,
     limits: &Limits,
+    budget: &mut StepBudget,
     zone: &Z,
 ) -> Expansion {
+    // The walk proper, and what it took spent from the file's budget
+    // (brief c4, bound 7). A rule the budget cuts short is a rule that ran
+    // out of steps, as one that reached `max_rule_steps` on its own.
+    let allowed = budget.allowed(limits);
+    let (expansion, steps) = walk(rule, start, from, until, limits, allowed, zone);
+    budget.spend(steps);
+    expansion
+}
+
+/// `expand`'s walk, taking at most `allowed` steps; also the steps it took.
+fn walk<Z: Zone + ?Sized>(
+    rule: &Recurrence,
+    start: NaiveDate,
+    from: NaiveDate,
+    until: NaiveDate,
+    limits: &Limits,
+    allowed: usize,
+    zone: &Z,
+) -> (Expansion, usize) {
     let mut days: Vec<NaiveDate> = Vec::new();
     let mut produced: u32 = 0;
     let mut steps: usize = 0;
@@ -1135,10 +1215,10 @@ fn expand<Z: Zone + ?Sized>(
     let (mut year, mut month) = (start.year(), start.month());
 
     loop {
-        steps += 1;
-        if steps > limits.max_rule_steps {
-            return Expansion { days, exhausted_budget: true };
+        if steps >= allowed {
+            return (Expansion { days, exhausted_budget: true }, steps);
         }
+        steps += 1;
         if let Some(count) = rule.count
             && produced >= count
         {
@@ -1173,7 +1253,7 @@ fn expand<Z: Zone + ?Sized>(
                 days.push(day);
             }
             if days.len() >= limits.max_occurrences_per_event {
-                return Expansion { days, exhausted_budget: true };
+                return (Expansion { days, exhausted_budget: true }, steps);
             }
         }
 
@@ -1224,7 +1304,7 @@ fn expand<Z: Zone + ?Sized>(
         }
     }
 
-    Expansion { days, exhausted_budget: false }
+    (Expansion { days, exhausted_budget: false }, steps)
 }
 
 fn week_start_of(day: NaiveDate) -> NaiveDate {
@@ -1540,6 +1620,7 @@ fn instant_key<Z: Zone + ?Sized>(
 /// `max_occurrences_per_event` holds for the occurrences an override puts in
 /// place of the series' own (brief c3, bound 3): an override is expanded with
 /// only the room the event has left.
+#[allow(clippy::too_many_arguments)]
 fn occurrences_of<Z: Zone + ?Sized>(
     event: &RawEvent,
     moved: Option<&Moved>,
@@ -1547,6 +1628,7 @@ fn occurrences_of<Z: Zone + ?Sized>(
     from: NaiveDate,
     until: NaiveDate,
     limits: &Limits,
+    budget: &mut StepBudget,
     problems: &mut Problems,
 ) -> Vec<Occurrence> {
     if event.cancelled {
@@ -1582,7 +1664,7 @@ fn occurrences_of<Z: Zone + ?Sized>(
     let mut starts: Vec<NaiveDate> = Vec::new();
     match &event.rule {
         Some(rule) => {
-            let expansion = expand(rule, first_day, from, until, limits, zones.zone);
+            let expansion = expand(rule, first_day, from, until, limits, budget, zones.zone);
             if expansion.exhausted_budget {
                 problems.note(RULE_BUDGET);
             }
@@ -1631,7 +1713,7 @@ fn occurrences_of<Z: Zone + ?Sized>(
                 max_occurrences_per_event: limits.max_occurrences_per_event.saturating_sub(out.len()),
                 ..*limits
             };
-            out.extend(occurrences_of(over, None, zones, from, until, &room, problems));
+            out.extend(occurrences_of(over, None, zones, from, until, &room, budget, problems));
         } else {
             match spread(day, minutes, length_minutes, all_day, event, from, until) {
                 Some(span) => out.extend(span),
