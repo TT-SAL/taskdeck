@@ -352,9 +352,10 @@ fn parse_body(b: &[u8]) -> Option<SnapshotBody> {
 }
 
 /// Step 7 of §20.5 (`seal/blob_open`): the body parses with no trailing
-/// bytes; its `S` is `s`; with `check_hash`, its `state_hash` is the state
-/// hash of its own `board` and `membership` (`engine.md` §18.3); the
-/// membership parses (§13.2); no history record is after `S`; the history
+/// bytes; its `S` is `s`; the membership parses (§13.2); with
+/// `check_hash`, its `hash_version` is one the membership's rules allow and
+/// its `state_hash` is the state hash of its own `board` and `membership`
+/// (`engine.md` §18.3); no history record is after `S`; the history
 /// verifies by the projection of §21.6 for the receiver's own `board`; and
 /// it agrees with the membership as §21.6 step 11 states (SEAL-BLOB-007).
 // SPEC-QUESTION: step 7 compares "S and the state hash" with expected
@@ -372,13 +373,18 @@ fn verify_body(b: &[u8], s: u64, check_hash: bool, board: &BoardId) -> Result<Sn
     if body.seq != s {
         return Err(bad);
     }
+    let m = Membership::from_canonical_bytes(&body.membership).map_err(|_| bad)?;
     if check_hash {
+        // A version the membership's rules do not allow (ruling Q50, as
+        // §21.6 step 11 for a backup).
+        if !crate::membership::transitions::hash_version_allowed(m.rules, body.hash_version) {
+            return Err(bad);
+        }
         let want = state_hash(body.hash_version, &h(&[&body.board]), &body.membership);
         if !bool::from(want.ct_eq(&body.state_hash)) {
             return Err(bad);
         }
     }
-    let m = Membership::from_canonical_bytes(&body.membership).map_err(|_| bad)?;
     if body.history.last().is_some_and(|r| r.seq > s) {
         return Err(bad);
     }

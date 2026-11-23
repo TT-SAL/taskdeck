@@ -83,19 +83,53 @@ thread_local! {
     pub(crate) static COMPRESSOR_INPUT: core::cell::RefCell<Vec<u8>> = const { core::cell::RefCell::new(Vec::new()) };
 }
 
+/// What one more sync-flush call with no input writes when the compressor
+/// holds nothing back (miniz_oxide 0.8.9, `flush_block` with an empty LZ
+/// buffer): a non-final static block holding only its end-of-block code
+/// (bits 0, 01, 0000000), then the empty stored block of the sync flush
+/// (bits 000, padding, `00 00 FF FF`).
+const EMPTY_SYNC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0xFF, 0xFF];
+
+/// The most probe calls `compress_piece` makes after all of a sync piece's
+/// input is in. Each call that does not return `EMPTY_SYNC` writes out what
+/// the compressor still held (at most its 258-byte lookahead and one LZ
+/// buffer, `flush_remaining` included), so a few suffice.
+const PROBES_MAX: usize = 16;
+
+#[cfg(test)]
+thread_local! {
+    /// Test builds only: the bytes `inflate_raw` had its decompressor
+    /// produce on this thread, those over the cap included (SEAL-BLOB-003).
+    pub(crate) static INFLATED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+    /// Test builds only: the resets `Inflater::drop` made on this thread
+    /// (SEAL-GEN-006, ruling Q48).
+    pub(crate) static INFLATER_RESETS: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
 /// Runs a fresh compressor over `data` and appends its output to `out`.
 /// With `finish` the stream ends (its last block carries the final bit);
-/// without, a sync flush ends the output on a byte boundary with no final
-/// bit (an empty stored block `00 00 FF FF` after the data, miniz_oxide's
-/// `flush_block`).
+/// without, a sync flush ends the output on a byte boundary after the last
+/// block, with no final bit.
 ///
-/// The flush loop: a call that consumes all of `data` and leaves room in the
-/// working buffer has written the whole flush, because miniz_oxide holds
-/// back flushed bytes only when the output buffer is full
-/// (`flush_output_buffer`). A call that fills the buffer exactly is
-/// followed by another with the same flush, as zlib documents; when nothing
-/// was left to write, that call emits one more empty sync block (a valid,
-/// non-final block) and ends the loop.
+/// The flush loop (sync): a call that takes in all of `data` and leaves room
+/// in the working buffer has not necessarily written the whole flush. In
+/// the pinned miniz_oxide, when the LZ code buffer fills, `compress_normal`
+/// writes a block in mid-stream and returns with bytes still in its
+/// lookahead; `compress_inner` then skips the sync `flush_block`
+/// (`lookahead_size != 0`), and `deflate` still returns `Ok` because the
+/// input is empty. So once all input is in and a call has left room in the
+/// buffer (nothing is held back in `flush_remaining`), the loop calls again
+/// with no input and the same flush, and stops at the first such call whose
+/// whole output is `EMPTY_SYNC`. That proves the output before it was
+/// complete: every byte of `data` written, no bits pending (pending bits
+/// would shift that output), every block ended on a byte boundary. Any
+/// lookahead, LZ code or held-back byte would make the call's output longer
+/// (a block with one literal or match and the sync marker takes at least 7
+/// bytes). That last call's output, an empty block that the stream does not
+/// need, is not appended, so the output is the same as before the probe
+/// whenever the first flush was already complete. A call that fills the
+/// buffer exactly is followed by another with the same flush, as zlib
+/// documents.
 pub(crate) fn compress_piece(out: &mut Zeroizing<Vec<u8>>, data: &[u8], finish: bool) -> Option<()> {
     use flate2::{Compress, Compression, FlushCompress, Status};
     #[cfg(test)]
@@ -103,19 +137,33 @@ pub(crate) fn compress_piece(out: &mut Zeroizing<Vec<u8>>, data: &[u8], finish: 
     let flush = if finish { FlushCompress::Finish } else { FlushCompress::Sync };
     let mut c = Compress::new(Compression::default(), false);
     let mut buf = Zeroizing::new(vec![0u8; CHUNK]);
+    // Sync only: the previous call took in all of `data` and left room in
+    // the buffer, so this call is a probe.
+    let mut probe = false;
+    let mut probes = 0usize;
     loop {
         let in_before = c.total_in();
         let out_before = c.total_out();
         let input = data.get(usize::try_from(in_before).ok()?..)?;
         let st = c.compress(input, &mut buf[..], flush).ok()?;
         let produced = usize::try_from(c.total_out().checked_sub(out_before)?).ok()?;
-        push_zeroizing(out, buf.get(..produced)?);
+        let written = buf.get(..produced)?;
+        if probe {
+            if written == EMPTY_SYNC {
+                return Some(());
+            }
+            probes = probes.checked_add(1)?;
+            if probes >= PROBES_MAX {
+                return None;
+            }
+        }
+        push_zeroizing(out, written);
         let all_in = usize::try_from(c.total_in()).ok()? == data.len();
         match st {
             Status::StreamEnd => return finish.then_some(()),
-            _ if !finish && all_in && produced < buf.len() => return Some(()),
+            _ if !finish && all_in && produced < buf.len() => probe = true,
             Status::Ok | Status::BufError if produced == 0 && c.total_in() == in_before => return None,
-            Status::Ok | Status::BufError => {}
+            Status::Ok | Status::BufError => probe = false,
         }
     }
 }
@@ -172,6 +220,12 @@ impl Drop for Inflater {
     fn drop(&mut self) {
         self.0.reset(false);
         core::hint::black_box(&mut self.0);
+        // Test builds only: count the reset by its effect (flate2's reset
+        // sets both totals back to 0, as miniz_oxide's zeroes the window).
+        #[cfg(test)]
+        if self.0.total_in() == 0 && self.0.total_out() == 0 {
+            INFLATER_RESETS.with(|c| c.set(c.get().saturating_add(1)));
+        }
     }
 }
 
@@ -194,6 +248,8 @@ pub(crate) fn inflate_raw(data: &[u8], cap: usize) -> Option<Zeroizing<Vec<u8>>>
         let input = data.get(usize::try_from(in_before).ok()?..)?;
         let st = d.decompress(input, &mut buf[..], FlushDecompress::None).ok()?;
         let produced = usize::try_from(d.total_out().checked_sub(out_before)?).ok()?;
+        #[cfg(test)]
+        INFLATED.with(|c| c.set(c.get().saturating_add(produced as u64)));
         if out.len().checked_add(produced)? > cap {
             return None;
         }

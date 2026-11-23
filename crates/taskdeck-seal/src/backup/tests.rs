@@ -1328,3 +1328,45 @@ fn the_compressed_payload_is_one_stream() {
         assert!(x.read(&file).is_ok());
     }
 }
+
+/// Board bytes of which two in three do not compress and one is `a`
+/// (security-1's reproduction of the incomplete sync flush).
+fn mixed_board(n: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(n + 32);
+    let mut i = 3u64 << 32;
+    while out.len() < n {
+        out.extend_from_slice(&h(&[&i.to_be_bytes()]));
+        i += 1;
+    }
+    out.truncate(n);
+    for b in out.iter_mut().step_by(3) {
+        *b = b'a';
+    }
+    out
+}
+
+// Every file `write_backup` writes reads back (§21.3: the payload is one raw
+// DEFLATE stream; ruling Q48's sync flush ends on a byte boundary only once
+// it is complete): boards at whose sizes the compressor's LZ code buffer
+// fills while the last bytes of the head are still in its lookahead, so that
+// the first sync-flush call returns with all input taken and room left in
+// the output but no sync marker written (security-1, S5 finding 1).
+// spec: SEAL-BKP-001
+#[test]
+fn write_then_read_boards_where_the_code_buffer_fills() {
+    let mut x = Hist::new(2);
+    x.rotate(Who::D(1));
+    let recs = x.recs();
+    let mut failed = Vec::new();
+    for n in [120_045usize, 120_256, 181_657] {
+        let board = mixed_board(n);
+        let membership = x.b.m.to_canonical_bytes();
+        let state_hash = state_hash(1, &h(&[&board]), &membership);
+        let c = BackupContent::Nightly { membership, board, head: x.b.head(), hash_version: 1, state_hash };
+        let file = write_backup(&x.b.devs[0], x.input(&recs, c), &mut OsEntropy).unwrap();
+        if let Err(e) = x.read(&file) {
+            failed.push((n, e.code()));
+        }
+    }
+    assert!(failed.is_empty(), "files that do not read back: {failed:?}");
+}

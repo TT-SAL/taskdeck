@@ -211,7 +211,6 @@ impl Fx {
 
 // spec: SEAL-BLOB-001
 // spec: SEAL-BLOB-002
-// spec: SEAL-BLOB-003
 // spec: SEAL-BLOB-004
 // spec: SEAL-BLOB-006
 // spec: SEAL-BLOB-007
@@ -397,6 +396,24 @@ fn seal_blob_vectors() {
     b2.seq += 64;
     let (f, rf) = sealed_body(&mut s, &body_bytes(&b2));
     cases.push(fx.declared("declared step 7: S of the body is not s", &[&f], &rf.sha256, rf.size, fx.s, roots.clone(), Some("seal/blob_open")));
+
+    // Added by the fix pass of task S5 (lead's ruling), after every earlier
+    // case so that none of their draws changes.
+    let f = raw(&mut s, 1, fx.s, &pad(&compressed[..compressed.len() - 1]));
+    cases.push(fx.declared("declared step 6: the stream cut short", &[&f], &sha(&[&f]), f.len() as u64, fx.s, roots.clone(), Some("seal/inflate")));
+    let mut b2 = copy_body(&body);
+    b2.seq = body.history.last().unwrap().seq() - 1;
+    let bb = body_bytes(&b2);
+    let f = raw(&mut s, 1, b2.seq, &pad(&deflate(&bb)));
+    cases.push(fx.snap(
+        "step 7: a history record with a seq above S",
+        &[&f],
+        &blob_ref(&f, bb.len() as u64, 1),
+        b2.seq,
+        &w,
+        snap_key_json.clone(),
+        Some("seal/blob_open"),
+    ));
 
     // Replay every case as another implementation would.
     for c in &cases {

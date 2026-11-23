@@ -310,7 +310,7 @@ impl PayloadParts {
 fn encode_parts(
     history: &[HistoryRecord],
     content: &BackupContent,
-    roots: &[(u32, EpochRoot)],
+    roots: &[&(u32, EpochRoot)],
     token: &[u8],
     meta: &[u8],
 ) -> Result<PayloadParts, SealError> {
@@ -364,7 +364,8 @@ pub(crate) fn encode_payload(
     token: &[u8],
     meta: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, SealError> {
-    let parts = encode_parts(history, content, roots, token, meta)?;
+    let roots: Vec<&(u32, EpochRoot)> = roots.iter().collect();
+    let parts = encode_parts(history, content, &roots, token, meta)?;
     let mut p = Zeroizing::new(Vec::with_capacity(parts.len().ok_or(SealError::BackupPayload)?));
     push_zeroizing(&mut p, &parts.head);
     push_zeroizing(&mut p, &parts.secret);
@@ -450,16 +451,22 @@ pub fn write_backup(writer: &DeviceKeys, input: BackupInput, rng: &mut dyn Entro
             }
         }
     }
-    roots.sort_by_key(|(e, _)| *e);
+    // The roots stay where they are in `roots`'s buffer until it is dropped
+    // (each wiped in place, SEAL-GEN-006): sorted in place without a scratch
+    // buffer (a stable sort copies elements into one on the heap and frees
+    // it unwiped), and read by reference (moving a root out leaves its bytes
+    // in the buffer, which is then freed without them being wiped).
+    roots.sort_unstable_by_key(|(e, _)| *e);
     if roots.windows(2).any(|w| matches!(w, [a, b] if a.0 == b.0)) {
         return Err(bad);
     }
     let mut kept = Vec::with_capacity(roots.len());
-    for (e, r) in roots {
-        match m.commitment(e) {
-            // No commitment in this membership: left out (and wiped on drop).
+    for root in &roots {
+        let (e, r) = root;
+        match m.commitment(*e) {
+            // No commitment in this membership: left out (wiped with `roots`).
             None => {}
-            Some(c) if bool::from(r.commitment(&board, e).ct_eq(c)) => kept.push((e, r)),
+            Some(c) if bool::from(r.commitment(&board, *e).ct_eq(c)) => kept.push(root),
             Some(_) => return Err(bad),
         }
     }

@@ -110,18 +110,70 @@ fn deflate_split_is_one_stream() {
     assert!(c.len() > big.len() + 36 * 5);
 }
 
+/// `inflate_raw(data, cap)`, with the number of resets `Inflater::drop`
+/// made meanwhile on this thread.
+fn inflate_counting_resets(data: &[u8], cap: usize) -> (Option<Zeroizing<Vec<u8>>>, u64) {
+    let before = INFLATER_RESETS.with(|c| c.get());
+    let r = inflate_raw(data, cap);
+    (r, INFLATER_RESETS.with(|c| c.get()) - before)
+}
+
 // The inflater gives the same answers on every path after the reset added
 // for SEAL-GEN-006: a good stream, a bad one, one over the cap, one with a
-// trailing byte, one cut short.
+// trailing byte, one cut short; and on each of them it resets its
+// decompressor exactly once before dropping it (the reader's half of
+// ruling Q48: in the pinned miniz_oxide the reset zeroes the 32 KiB window
+// that holds the last bytes inflated).
+// spec: SEAL-GEN-006
 #[test]
 fn inflate_raw_paths() {
     let d = deflate_raw(&text(100_000)).unwrap();
-    assert_eq!(inflate_raw(&d, 100_000).unwrap().len(), 100_000);
-    assert!(inflate_raw(&d, 99_999).is_none());
-    assert!(inflate_raw(&[&d[..], &[0]].concat(), 100_000).is_none());
-    assert!(inflate_raw(&d[..d.len() - 1], 100_000).is_none());
-    assert!(inflate_raw(&[0xFF; 10], 100).is_none());
-    assert!(inflate_raw(&[], 100).is_none());
+    let (ok, n) = inflate_counting_resets(&d, 100_000);
+    assert_eq!(ok.unwrap().len(), 100_000);
+    assert_eq!(n, 1, "the success path");
+    for (name, data, cap) in [
+        ("output over the cap", d.to_vec(), 99_999),
+        ("input after the stream's end", [&d[..], &[0]].concat(), 100_000),
+        ("a truncated stream", d[..d.len() - 1].to_vec(), 100_000),
+        ("a wrong stream", vec![0xFF; 10], 100),
+        ("an empty stream", Vec::new(), 100),
+    ] {
+        let (r, n) = inflate_counting_resets(&data, cap);
+        assert!(r.is_none(), "{name}");
+        assert_eq!(n, 1, "{name}");
+    }
 }
 
+/// Two bytes in three that do not compress, one `a`.
+fn mixed(n: usize) -> Vec<u8> {
+    let mut out = noise(n, 3);
+    for b in out.iter_mut().step_by(3) {
+        *b = b'a';
+    }
+    out
+}
 
+// A sync flush is written whole (§21.3: the head's output ends on a byte
+// boundary after its last block, so the stored blocks that follow are read
+// as blocks): at these head sizes the LZ code buffer fills while the last
+// bytes are still in miniz_oxide's lookahead, and the first sync-flush call
+// returns having taken all the input, with room left in the output and no
+// sync marker written (security-1, S5 finding 1). The head's own output
+// then ends with the sync marker and inflates to the whole head.
+// spec: SEAL-BKP-001
+#[test]
+fn a_sync_flush_is_complete_when_the_code_buffer_fills() {
+    for n in [122_631usize, 122_788, 184_400] {
+        let head = mixed(n);
+        let mut out = Zeroizing::new(Vec::new());
+        compress_piece(&mut out, &head, false).unwrap();
+        assert!(out.ends_with(&[0, 0, 0xFF, 0xFF]), "head of {n} bytes: no sync marker at the end");
+        let mut d = flate2::Decompress::new(false);
+        let mut got = vec![0u8; n + 1];
+        d.decompress(&out, &mut got, flate2::FlushDecompress::Sync).unwrap();
+        assert_eq!(d.total_in(), out.len() as u64);
+        assert_eq!(d.total_out(), n as u64, "head of {n} bytes: the flushed output holds only part of it");
+        assert_eq!(&got[..n], &head[..]);
+        one_stream(&head, &noise(40, 5), &text(11));
+    }
+}

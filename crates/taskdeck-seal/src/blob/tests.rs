@@ -321,7 +321,6 @@ fn seal_snapshot_refusals() {
 // body.
 // spec: SEAL-BLOB-001
 // spec: SEAL-BLOB-002
-// spec: SEAL-BLOB-003
 // spec: SEAL-GEN-009
 // spec: SEAL-GEN-008
 #[test]
@@ -423,6 +422,28 @@ fn a_snapshot_fails_each_step_in_order() {
     fails(go(&[&f], &rf), SealError::BlobOpen);
 }
 
+// A body whose `hash_version` its membership's rules do not allow is
+// `seal/blob_open` in `open_snapshot`, even with a `state_hash` computed
+// under that version from its own board and membership; the same body with
+// version 1 opens (seal.md §20.5 step 7; ruling Q50, as §21.6 step 11 for a
+// backup). The declared mode makes neither check. No clause of seal.md
+// states this check, so the test cites none.
+#[test]
+fn a_hash_version_the_rules_do_not_allow() {
+    let x = hist();
+    let ok = body_of(&x);
+    let (f, rf) = sealed_body_bytes(&x, &encode_body(&ok).unwrap());
+    assert!(open(&x, &f, &rf).is_ok());
+    let mut b = body_of(&x);
+    b.hash_version = 2;
+    b.state_hash = state_hash(2, &h(&[&b.board]), &b.membership);
+    let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
+    fails(open(&x, &f, &rf), SealError::BlobOpen);
+    let root2 = copy(&x.b.roots[&2]);
+    let roots = |e: u32| if e == 2 { Some(&root2) } else { None };
+    assert_eq!(declared(&x, &[&f], &rf.sha256, rf.size, &roots).unwrap().0.hash_version, 2);
+}
+
 // The history: one that fails a step of the projection (a signature, the
 // order, the first record's counter), one that disagrees with the
 // membership (an older membership; a membership with another device key),
@@ -495,20 +516,26 @@ fn a_history_that_fails_or_disagrees() {
     fails(open_snapshot(&[&bytes], &rf, s, &w, &kb, &other), SealError::BlobOpen);
 }
 
-// A decompression bomb: a small sealed snapshot whose stream inflates to
-// 8 MiB is stopped at the signed `inflated` cap; in the declared mode a
-// stream past 67,108,864 bytes is stopped at that cap.
+// A decompression bomb: a small sealed snapshot whose stream would inflate
+// to 8 MiB is stopped at the signed `inflated` cap: the decompressor
+// produces no more than `inflated` and one working buffer (64 KiB) before
+// it stops, far less than a cap of 67,108,864 bytes would let through; in
+// the declared mode a stream past 67,108,864 bytes is stopped at that cap.
 // spec: SEAL-BLOB-003
 // spec: SEAL-BLOB-008
 #[test]
 fn a_decompression_bomb_stops_at_the_cap() {
+    use crate::prim::INFLATED;
     let x = hist();
     let e = encode_body(&body_of(&x)).unwrap();
     let bomb = [&e[..], &vec![0u8; 8 << 20][..]].concat();
     let c = deflate_raw(&bomb).unwrap();
     assert!(c.len() < 64 * 1024);
     let (f, rf) = sealed_compressed(&x, &c, e.len() as u64);
+    let before = INFLATED.with(|n| n.get());
     fails(open(&x, &f, &rf), SealError::Inflate);
+    let produced = INFLATED.with(|n| n.get()) - before;
+    assert!(produced <= e.len() as u64 + 64 * 1024, "inflated {produced} bytes for a cap of {}", e.len());
     // Over the declared mode's cap: 64 sync-flushed pieces of 1 MiB of
     // zeros and one byte, then a final empty block: 67,108,865 bytes.
     let zeros = vec![0u8; 1 << 20];
