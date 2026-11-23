@@ -347,8 +347,9 @@ fn naive_outside_range(local: chrono::NaiveDateTime, z: &(impl Zone + ?Sized)) -
 /// Whether the local time `resolve_on_day(day, minutes, z)` reads first,
 /// `local_at(day, clamp(minutes, 0, 1439))`, lies outside the instant range
 /// (lead ruling, spec change 5, §5.4). `resolve_on_day` gives none for such a
-/// time without the 60-minute step, and `compile` answers it
-/// `core/date_range`, not as a gap (§13.3 G3 and G5).
+/// time without the 60-minute step; `compile` answers a day and minutes there
+/// `core/date_range`, not as a gap, and a naive wire time there `not a time`
+/// (§13.3 G3 and G5).
 pub(crate) fn outside_range(day: chrono::NaiveDate, minutes: i32, z: &(impl Zone + ?Sized)) -> bool {
     local_naive(day, minutes.clamp(0, 1439)).is_some_and(|local| naive_outside_range(local, z))
 }

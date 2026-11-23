@@ -25,7 +25,7 @@ use common::{boards, transcripts, zones};
 use serde_json::Value;
 use taskdeck_core::CompileError;
 use taskdeck_core::apply::{Ctx, apply};
-use taskdeck_core::board::{ArchiveRow, BoardData, Item, Kind, Outcome};
+use taskdeck_core::board::{ArchiveRow, BoardData, Block, Item, ItemStamps, Kind, Outcome, Stamp};
 use taskdeck_core::compile::{CompileCtx, compile, detab};
 use taskdeck_core::ids::IdMinter;
 use taskdeck_core::intent::{Intent, WireTime, parse_intent};
@@ -225,7 +225,9 @@ fn start_board(name: &str) -> Start {
 /// The id map `M` of core.md §18.4, initially the identity. Items and
 /// archive rows share one map (a `restore` turns a row back into an item);
 /// subscriptions have their own.
-// SPEC-QUESTION: §18.4 names one map M, but today's item and subscription ids repeat across the two lists (`small`'s subscriptions 31–34 and the items 30–38 that every-command adds), so M is kept per list.
+// core.md §18.4: the id map is kept per id list, because today's item and
+// subscription ids overlap (`small`'s subscriptions 31–34 and the items 30–38
+// that every-command adds).
 #[derive(Default)]
 struct IdMap {
     items: BTreeMap<u64, u64>,
@@ -276,7 +278,7 @@ fn translate(wire: &str, ids: &IdMap, board: &BoardData) -> String {
     fields.insert("id".to_owned(), Value::from(id));
     if let Some(index) = fields.get("session").and_then(Value::as_u64) {
         // An index past the item's blocks (or of an item not there) is no
-        // block: sid 0, which no block has (core.md §7.3).
+        // block: sid 0, which no block has (core.md §18.4, §7.3).
         let sid = board
             .item(id)
             .and_then(|item| usize::try_from(index).ok().and_then(|i| sids(item).get(i).copied()))
@@ -306,7 +308,7 @@ struct Fields {
 /// An archive row: the fields of an item plus `archived_at` and `outcome`.
 /// The row's id is not among them (§18.4 lists the fields; the archive is a
 /// multiset).
-// SPEC-QUESTION: §18.4 compares "the archive as a multiset of rows with the same fields plus archived_at and outcome"; read as the item fields after "keyed by id", so a row's id is not compared.
+// core.md §18.4: a row's id is not compared.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Row {
     fields: Fields,
@@ -850,20 +852,6 @@ const EXPECTED: [Expected; 20] = [
     ("europe-berlin", "seeded-06", 20, 0, None),
 ];
 
-/// Steps that differ from the recording although no rule of §13.5 or §18.7
-/// covers them, and the difference looks intended by the spec: left failing
-/// for the lead to rule on (brief f1, settled point 1), and listed exactly,
-/// so that neither a new difference nor a fix goes unseen.
-///
-/// `refusals` step 10, `{"op":"add","name":"x","deadline":"1969-12-31T12:00"}`:
-/// today answers `400 Could not read the command: not a time: …`; the core
-/// answers `core/date_range` (400, "That date is out of range (1970–9999).")
-/// because §13.3 G3 makes a naive local time outside the range (§5.4)
-/// `core/date_range`, while §13.5 classifies no such step changed (its year
-/// rule needs the local and the UTC year on different sides; both are 1969).
-const AWAITING_THE_LEAD: [(&str, &str, u64); 2] =
-    [("america-new-york", "refusals", 10), ("europe-berlin", "refusals", 10)];
-
 // Every transcript replayed from the import of its board folder: each step's
 // outcome, reply id and `moved`, and the state after it compared with the
 // recording through §18.4's projection while every step so far is "same";
@@ -879,22 +867,14 @@ const AWAITING_THE_LEAD: [(&str, &str, u64); 2] =
 #[test]
 fn every_transcript_replays_as_recorded() {
     let mut failures = Vec::new();
-    let mut awaiting = Vec::new();
     let mut counts = Vec::new();
     for (zone_dir, name, text) in transcripts::FILES {
         let r = replay(zone_dir, name, text);
-        for (step, failure) in r.failures {
-            if AWAITING_THE_LEAD.contains(&(zone_dir, name, step)) {
-                awaiting.push((zone_dir, name, step));
-            } else {
-                failures.push(failure);
-            }
-        }
+        failures.extend(r.failures.into_iter().map(|(_, failure)| failure));
         counts.push((zone_dir, name, r.compared, r.not_compared, r.first_changed));
     }
     let table: Vec<String> = counts.iter().map(|c| format!("{c:?},")).collect();
     assert!(failures.is_empty(), "{} differences:\n{}\ncounts:\n{}", failures.len(), failures.join("\n"), table.join("\n"));
-    assert_eq!(awaiting, AWAITING_THE_LEAD, "the steps awaiting the lead differ, and differ only there");
     assert_eq!(counts, EXPECTED, "counts:\n{}", table.join("\n"));
 }
 
@@ -906,26 +886,9 @@ fn every_transcript_replays_as_recorded() {
 fn the_rules_fire_on_their_cases() {
     let berlin = ReplayZone(zones::berlin());
     let new_york = ReplayZone(zones::new_york());
-    let board = BoardData::empty();
-    let state = serde_json::json!({"items": [], "archive": []});
-    let overlay = Overlay::default();
-    let ids = IdMap::default();
-    let removed = Removed { items: BTreeSet::from([21]), rows: BTreeSet::new() };
-    let fires = |rule: Rule, wire: &str, zone: &ReplayZone| {
-        let parsed = parse_intent(wire);
-        let wire: Value = serde_json::from_str(wire).expect("JSON");
-        let b = Before {
-            wire: &wire,
-            intent: parsed.as_ref().ok(),
-            board: &board,
-            state: &state,
-            overlay: &overlay,
-            ids: &ids,
-            removed: &removed,
-            zone,
-        };
-        rule(&b)
-    };
+    let empty = BoardData::empty();
+    let nothing = serde_json::json!({"items": [], "archive": []});
+    let fires = |rule: Rule, wire: &str, zone: &ReplayZone| fires_on(rule, wire, zone, &empty, &nothing);
     // §18.7: an item op naming a removed id.
     assert!(fires(names_a_removed_record, r#"{"op":"rename","id":21,"name":"x"}"#, &berlin));
     assert!(!fires(names_a_removed_record, r#"{"op":"rename","id":22,"name":"x"}"#, &berlin));
@@ -953,4 +916,109 @@ fn the_rules_fire_on_their_cases() {
     assert!(fires(notes_over_the_cap_after_detab, &tabbed, &berlin));
     assert!(!fires(notes_over_the_cap_after_detab, &notes("x".repeat(20_000)), &berlin));
     assert!(!fires(notes_over_the_cap_after_detab, &notes(format!("{}\t", "x".repeat(20_000))), &berlin));
+    // §13.5 `reflow`: equal starts on the day, today's order (the recorded
+    // items' order, 2 before 1) not ascending id. Its neighbours: the same
+    // blocks recorded in ascending id, and today's order with different starts.
+    let day = r#"{"op":"reflow","day":"2026-03-10"}"#;
+    let nine = instant("2026-03-10T08:00:00Z"); // 09:00 in Berlin
+    let ten = instant("2026-03-10T09:00:00Z");
+    let tied = board_of(vec![task_at(1, nine), task_at(2, nine)], vec![]);
+    let apart = board_of(vec![task_at(1, nine), task_at(2, ten)], vec![]);
+    let order = |ids: [u64; 2]| serde_json::json!({"items": [{"id": ids[0]}, {"id": ids[1]}], "archive": []});
+    assert!(fires_on(reflow_ties, day, &berlin, &tied, &order([2, 1])));
+    assert!(!fires_on(reflow_ties, day, &berlin, &tied, &order([1, 2])));
+    assert!(!fires_on(reflow_ties, day, &berlin, &apart, &order([2, 1])));
+    assert!(!fires_on(reflow_ties, r#"{"op":"reflow","day":"2026-03-11"}"#, &berlin, &tied, &order([2, 1])));
+    // §13.5 `restore` and `forget_archived`: two rows share the key (7, at);
+    // today picks the first recorded ("b"), the archive order the first row
+    // of the board ("a"). Its neighbour: the same rows recorded in the
+    // board's order; and a key only one row has.
+    let at = "2026-03-01T12:00:00Z";
+    let rows = board_of(vec![], vec![row_named(7, "a", at), row_named(7, "b", at)]);
+    let recorded = |names: [&str; 2]| {
+        let row = |name: &str| {
+            serde_json::json!({"id": 7, "name": name, "created": "2026-03-01T00:00:00Z", "inactivated": at, "sessions": []})
+        };
+        serde_json::json!({"items": [], "archive": [row(names[0]), row(names[1])]})
+    };
+    let restore = r#"{"op":"restore","id":7,"archived_at":"2026-03-01T12:00:00Z"}"#;
+    let forget = r#"{"op":"forget_archived","id":7,"archived_at":"2026-03-01T13:00:00+01:00"}"#;
+    for wire in [restore, forget] {
+        assert!(fires_on(archive_key_ties, wire, &berlin, &rows, &recorded(["b", "a"])), "{wire}");
+        assert!(!fires_on(archive_key_ties, wire, &berlin, &rows, &recorded(["a", "b"])), "{wire}");
+    }
+    let other = r#"{"op":"restore","id":7,"archived_at":"2026-03-01T12:00:01Z"}"#;
+    assert!(!fires_on(archive_key_ties, other, &berlin, &rows, &recorded(["b", "a"])));
+    let single = board_of(vec![], vec![row_named(7, "a", at), row_named(7, "b", "2026-03-02T12:00:00Z")]);
+    let single_recorded = serde_json::json!({"items": [], "archive": [
+        {"id": 7, "name": "b", "created": "2026-03-01T00:00:00Z", "inactivated": "2026-03-02T12:00:00Z", "sessions": []},
+        {"id": 7, "name": "a", "created": "2026-03-01T00:00:00Z", "inactivated": at, "sessions": []},
+    ]});
+    assert!(!fires_on(archive_key_ties, restore, &berlin, &single, &single_recorded));
+}
+
+/// Whether `rule` classifies the step `wire` changed, on `board` and the
+/// recorded `state` before it, with no overlay, the identity id map and item
+/// 21 removed by §18.7.
+fn fires_on(rule: Rule, wire: &str, zone: &ReplayZone, board: &BoardData, state: &Value) -> bool {
+    let parsed = parse_intent(wire);
+    let wire: Value = serde_json::from_str(wire).expect("JSON");
+    let overlay = Overlay::default();
+    let ids = IdMap::default();
+    let removed = Removed { items: BTreeSet::from([21]), rows: BTreeSet::new() };
+    let b = Before {
+        wire: &wire,
+        intent: parsed.as_ref().ok(),
+        board,
+        state,
+        overlay: &overlay,
+        ids: &ids,
+        removed: &removed,
+        zone,
+    };
+    rule(&b)
+}
+
+const STAMP: Stamp = Stamp { seq: 1, device_no: 0 };
+
+/// A task with one 30-minute block, sid 1, at `start`.
+fn task_at(id: u64, start: Instant) -> Item {
+    Item {
+        id,
+        kind: Kind::Task,
+        name: "t".to_owned(),
+        created: instant("2026-03-01T00:00:00Z"),
+        deadline: None,
+        importance: None,
+        time_importance: None,
+        duration_minutes: None,
+        recurrence: None,
+        blocks: vec![Block { sid: 1, start, minutes: 30, stamp: STAMP }],
+        stamps: ItemStamps { estimate: STAMP, levels: STAMP, name: STAMP, repeat: STAMP, time: STAMP },
+    }
+}
+
+/// A finished task row with no blocks.
+fn row_named(id: u64, name: &str, archived_at: &str) -> ArchiveRow {
+    ArchiveRow {
+        id,
+        kind: Kind::Task,
+        name: name.to_owned(),
+        created: instant("2026-03-01T00:00:00Z"),
+        deadline: None,
+        importance: None,
+        time_importance: None,
+        duration_minutes: None,
+        recurrence: None,
+        blocks: vec![],
+        archived_at: instant(archived_at),
+        outcome: Outcome::Finished,
+    }
+}
+
+fn board_of(items: Vec<Item>, archive: Vec<ArchiveRow>) -> BoardData {
+    let mut board = BoardData::empty();
+    board.items = items;
+    board.archive = archive;
+    board
 }

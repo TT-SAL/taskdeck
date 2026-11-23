@@ -1,15 +1,14 @@
 //! `taskdeck-core`: the pure board. Data, log commands, the deterministic
-//! versioned `apply`, planner, archive, scoring, the ICS parser and the
-//! snapshot builders.
+//! versioned `apply`, planner, archive, scoring, the ICS parser, the snapshot
+//! builders, the compile step and the legacy import.
 //!
-//! Spec: `docs/sync/spec/core.md`. Owner: stage `core` (SYNC_PLAN.md §4,
-//! §6.2). Created as a shell by stage `foundation`; the skeleton types come
-//! from the spec's Public API (§20). Every body is `unimplemented!()` until
-//! stage `core` fills it: `grep -rn 'unimplemented!()' crates/taskdeck-core`
-//! lists what is left.
+//! Spec: `docs/sync/spec/core.md`; the public API is its §20. Owner: stage
+//! `core` (SYNC_PLAN.md §4, §6.2). `README.md` in this directory lists the
+//! modules, how the tests read fixtures, the gate and the budgets.
 //!
 //! No clock, zone, file, network, thread, environment or randomness here
-//! (CORE-GEN-003): `clippy.toml` in this directory disallows them.
+//! (CORE-GEN-003): `clippy.toml` in this directory disallows them, and
+//! `ci.sh` builds the library alone, where `chrono::Local` does not exist.
 #![forbid(unsafe_code)]
 
 /// An error of the catalogue (core.md §16, §20).
