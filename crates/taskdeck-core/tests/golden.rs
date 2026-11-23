@@ -39,9 +39,13 @@ fn uint(v: &Value, key: &str) -> u64 {
 }
 
 /// The generated start board of core.md §18.3: `I` items, `B` blocks, `R`
-/// rows and the one legacy mark.
+/// rows, `U` unreadable lines of 65,536 zero bytes and the one legacy mark.
 fn generated(g: &Value) -> BoardData {
+    if let Some(o) = g.as_object() {
+        assert!(o.keys().all(|k| ["blocks", "items", "rows", "unreadable"].contains(&k.as_str())), "start_gen members");
+    }
     let (i, blocks, r) = (uint(g, "items"), uint(g, "blocks"), uint(g, "rows"));
+    let lines = usize::try_from(uint(g, "unreadable")).expect("usize");
     assert!(blocks <= 1000 * i, "B ≤ 1000 × I");
     let epoch = Instant::MIN;
     let st = Stamp { seq: 1, device_no: 0 };
@@ -81,6 +85,7 @@ fn generated(g: &Value) -> BoardData {
             outcome: Outcome::Finished,
         })
         .collect();
+    b.unreadable = vec![vec![0u8; 65_536]; lines];
     if i + r > 0 || blocks > 0 {
         b.marks = vec![Mark { device_no: 0, item: i + r, block: blocks }];
     }
@@ -208,6 +213,7 @@ fn replay(file: &str, k: usize, case: &Value, out: &mut Vec<String>) {
 // spec: CORE-APPLY-001
 // spec: CORE-APPLY-002
 // spec: CORE-APPLY-004
+// spec: CORE-APPLY-005
 // spec: CORE-CONF-001
 // spec: CORE-CONF-002
 // spec: CORE-CONF-003

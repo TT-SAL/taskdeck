@@ -193,7 +193,7 @@ impl TableZone {
             || transitions.iter().any(|&(_, o)| !offset_ok(o))
             || transitions.windows(2).any(|w| w[0].0 >= w[1].0)
         {
-            // SPEC-QUESTION: §5.2 names no code for a bad table; taken as core/schema.
+            // A bad table is `core/schema` (core.md §5.2).
             return Err(crate::canon::schema());
         }
         Ok(TableZone { initial, transitions })
@@ -227,7 +227,7 @@ fn local_time(found: &[Instant]) -> LocalTime {
     match found {
         [] => LocalTime::None,
         [one] => LocalTime::Single(*one),
-        // SPEC-QUESTION: §5.2 gives two slots; with three or more candidates the first and the last are kept.
+        // Three or more instants: the first and the last (core.md §5.2).
         [first, .., last] => LocalTime::Ambiguous(*first, *last),
     }
 }
@@ -318,7 +318,8 @@ pub fn local_minutes(t: Instant, z: &(impl Zone + ?Sized)) -> i32 {
     i32::try_from(local_secs(t, z).rem_euclid(86_400) / 60).unwrap_or(0)
 }
 
-/// `local_at(d, x)` of core.md §5.4 step 2.
+/// `local_at(d, x)` of core.md §5.4 step 2: on a fold the earlier instant
+/// (CORE-TIME-003), which `from_local` lists first (§5.2).
 fn local_at(day: chrono::NaiveDate, x: i32, z: &(impl Zone + ?Sized)) -> Option<Instant> {
     let hour = u32::try_from((x / 60).min(23)).ok()?;
     let minute = u32::try_from(x % 60).ok()?;

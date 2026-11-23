@@ -119,7 +119,7 @@ fn filled(head: &str, unit: &str, tail: &str, len: usize) -> String {
 }
 
 // (a tree that would take far more memory than its input is refused, not
-// built: one-member objects cost about 125 times their length)
+// built: one-member objects are charged about 113 times their length)
 // spec: CORE-GEN-007
 #[test]
 fn a_tree_over_its_memory_budget_is_schema_and_syntax_still_comes_first() {
@@ -133,6 +133,43 @@ fn a_tree_over_its_memory_budget_is_schema_and_syntax_still_comes_first() {
     assert_eq!(parse_value(broken.as_bytes(), limit), Err(CoreError::code(NOT_JSON)));
     let escaped = filled("[", "\"\\u0041\",", "\"\\x\"]", limit);
     assert_eq!(parse_value(escaped.as_bytes(), limit), Err(CoreError::code(NOT_JSON)));
+}
+
+// (the budget and its charges are fixed numbers, the same on every platform)
+// spec: CORE-ENC-004
+#[test]
+fn the_tree_budget_is_fixed_numbers() {
+    assert_eq!(tree_budget(0), 1_048_576);
+    assert_eq!(tree_budget(32_768), 1_048_576);
+    assert_eq!(tree_budget(32_769), 1_048_608);
+    assert_eq!(tree_budget(62_914_560), 2_013_265_920);
+    assert_eq!(tree_budget(usize::MAX), usize::MAX);
+    // `n` copies of `unit` in an array, then `tail` copies of `{}`.
+    let list = |unit: &str, n: usize, tail: usize| {
+        let mut v = vec![unit; n];
+        v.extend(std::iter::repeat_n("{}", tail));
+        format!("[{}]", v.join(","))
+    };
+    let at = |text: &str, limit: usize| {
+        assert!(text.len() <= limit);
+        parse_value(text.as_bytes(), limit).map(|_| ())
+    };
+    // Limit 40,000: budget 1,280,000.
+    // Six members are two groups: 32 + 2 × 744 + 6 × (1 + 16) = 1,622 each;
+    // 789 of them are 1,279,758, and seven `{}` (32 each, no group) 224 more.
+    let six = r#"{"a":0,"b":0,"c":0,"d":0,"e":0,"f":0}"#;
+    assert_eq!(at(&list(six, 789, 7), 40_000), Ok(()));
+    assert_eq!(at(&list(six, 789, 8), 40_000), Err(schema()));
+    assert_eq!(at(&list(six, 790, 0), 40_000), Err(schema()));
+    // An escaped key is charged as written: `{"\n":0}` is 32 + 744 + 2 + 16 = 794;
+    // 1,612 are 1,279,928, 1,613 are 1,280,722.
+    assert_eq!(at(&list(r#"{"\n":0}"#, 1612, 0), 40_000), Ok(()));
+    assert_eq!(at(&list(r#"{"\n":0}"#, 1613, 0), 40_000), Err(schema()));
+    // Five members are one group: 32 + 744 + 5 × 17 = 861; 1,217 of them,
+    // 38,945 bytes, are 1,047,837, within the budget of their limit.
+    let five = r#"{"a":0,"b":0,"c":0,"d":0,"e":0}"#;
+    let text = list(five, 1217, 0);
+    assert_eq!(at(&text, text.len()), Ok(()));
 }
 
 // (the densest shapes a board holds stay under the budget at the limit)

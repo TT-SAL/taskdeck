@@ -273,6 +273,47 @@
     }
    ],
    "end_text": "{\"notes\":\"first\",\"notes_rev\":1,\"rules\":1}"
+  },
+  {
+   "name": "set_notes: at the last revision",
+   "start_text": "{\"notes_rev\":9007199254740991,\"rules\":1}",
+   "entries": [
+    {
+     "ctx": {
+      "at_ms": 1769904000000,
+      "based_on": 4,
+      "device_no": 1,
+      "seq": 10
+     },
+     "command_text": "{\"base\":9007199254740991,\"op\":\"set_notes\",\"text\":\"x\"}",
+     "expect": {
+      "result": "refused",
+      "code": "core/cap",
+      "board_sha256": "f27e9efb69d0e11391c8f9b9a1b5e62956852f36bdbaefaa104dbeb294d09866"
+     }
+    }
+   ],
+   "end_text": "{\"notes_rev\":9007199254740991,\"rules\":1}"
+  },
+  {
+   "name": "set_notes: one below the last revision",
+   "start_text": "{\"notes_rev\":9007199254740990,\"rules\":1}",
+   "entries": [
+    {
+     "ctx": {
+      "at_ms": 1769904000000,
+      "based_on": 4,
+      "device_no": 1,
+      "seq": 10
+     },
+     "command_text": "{\"base\":9007199254740990,\"op\":\"set_notes\",\"text\":\"x\"}",
+     "expect": {
+      "result": "applied",
+      "board_sha256": "efb0e12c23e1f83b4903aa8f37737262413d4c340d0e52b8f9441c790df778dd"
+     }
+    }
+   ],
+   "end_text": "{\"notes\":\"x\",\"notes_rev\":9007199254740991,\"rules\":1}"
   }
  ]
 }

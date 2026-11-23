@@ -42,8 +42,8 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 | Unit | Steps (writers) | Plan items | State | Tokens |
 |---|---|---|---|---|
 | A `a-base` | canonical encoding, time and zones, board data and `check`, id minting | 2, 4, 6 | **done**: built, checked (one high finding, fixed, second check clean), security pass (one high finding, fixed); lead's gate 2026-11-23 01:39 UTC: 77 tests, clippy, `ci.sh`, the purity item, CI's reads check | 1.16 M |
-| B `b-apply` | B1 log commands and `parse_command`; B2 `apply`, conflict rules, rules versions, `reset`, `rebind`, golden logs (249 cases); B3 the lead's rulings applied (the size check, the tree budget in fixed numbers, `Record::LIMIT`) | 2, 3, 4, 5, 6 | B1 and B2 implemented and in the tree, **not yet checked**; B3, the check and the security pass are running (workflow 2) | 0.64 M so far |
-| C `c-ports` | C1 planner, scoring, archive; C2 ICS parser, overlay types, weather report types | 1 | C1 running (workflow 2) | |
+| B `b-apply` | B1 log commands and `parse_command`; B2 `apply`, conflict rules, rules versions, `reset`, `rebind`, golden logs; B3 the lead's rulings applied (the size check of CORE-APPLY-005, the tree budget in fixed numbers, `Record::LIMIT`) | 2, 3, 4, 5, 6 | **done**: built, checked (all 29 commands against §9 line by line, the conflict boundaries, over 170 golden cases worked by hand: nothing high or medium, one low), security pass (nothing high or medium, two lows); lead's gate 2026-11-23 02:14 UTC: 85 tests, the `golden` item, clippy, `ci.sh`, the purity item, CI's reads check | 1.52 M |
+| C `c-ports` | C1 planner, scoring, archive; C2 ICS parser, overlay types, weather report types | 1 | C1 implemented in the working copy (76 ported tests), not yet checked and not yet in the tree; C2 next | 0.28 M so far |
 | D `d-compile` | intents and the compile step | 3 | not started | |
 | E `e-read` | E1 legacy import; E2 read queries, snapshot builders, reminders, the snapshot-fixtures test | 7, 8 | not started | |
 | F `f-gate` | F1 transcripts test; F2 determinism and rebase property tests, fuzz targets, the budget job, spec coverage | 9 and the gate | not started | |
@@ -95,6 +95,7 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 |---|---|---|
 | 1 | core.md §18.3: a golden case may name a generated start board (`start_gen`) for the caps of §17, whose boards are too large to print (200,000 archive rows is about 22 MB of JSON) | merged, TT-SAL/taskdeck#5 |
 | 2 | core.md §18.4, §18.5: what the transcript and snapshot tests do with a fixture folder that `import` refuses. `dst-edges` holds three records before 1970-01-01T00:00:00Z (`instant_range`) and `id-limits` holds ids outside every range (`id_range`); the spec said only "starting from `import` of the starting folder" | merged, TT-SAL/taskdeck#5 |
+| 4 | From task B's check: `reset` at the last notes revision is `core/cap`; a command text over the tree budget is `core/schema` whatever its `op` (§9.1); CORE-ID-003 does not cover a benign `restore`; the 1,001-block `create_task` of §18.3 is a parse error in the golden logs | to come, after TT-SAL/taskdeck#8 merges |
 | 3 | The lead's rulings on what tasks A and B found: the size check of `apply` (new clause CORE-APPLY-005), the parser's tree budget, `Record::LIMIT`, the fold (D7), and nine smaller points made exact. `docs/sync/spec/CHANGES.md` lists them; `briefs/b3-rulings.md` is the same list as a task | merged, TT-SAL/taskdeck#7 |
 
 ## Token ledger
@@ -104,7 +105,7 @@ Agent tokens as the workflows report them (input, cache writes and output).
 | Window (UTC) | Workflow | Agents | Tokens | Window total |
 |---|---|---|---|---|
 | 2026-11-22 23:57 to 2026-11-23 04:57 | 1: task A whole, B1 and B2 implemented | 8 | 1,514,311 reported; 1,800,254 by transcripts | 1.80 M |
-| | 2: B3, check and security pass of B, C1 implemented | running | | |
+| | 2: B3, check and security pass of B, C1 implemented | 4 | 1,037,538 reported; 1,159,154 by transcripts | 2.96 M |
 
 ## What the checks found
 
@@ -112,10 +113,22 @@ Agent tokens as the workflows report them (input, cache writes and output).
 |---|---|---|---|
 | A | verify | high: `ChronoZone::from_local` took chrono's first candidate as the earlier one; under `TZ=Europe/Berlin` chrono lists the later first, so `resolve_on_day` returned 01:30Z for 02:30 on 2026-10-25 instead of 00:30Z | fixed (candidates checked by a round trip, returned ascending); the second check found nothing |
 | A | security | high: `canon::parse` built a `serde_json` tree with no bound; a 60 MiB text of small objects took 7.6 GB and the process aborted | fixed with a budget; made platform-independent by ruling (D9) |
+| B | verify | nothing high or medium; one low (below) and four points for the lead (spec change 4) | no fix pass needed |
+| B | security | nothing high or medium; two lows, both about the cost of the size check on very large boards | no fix pass needed |
+| A, B | CI (windows-latest) | the dependency test looked for the manifest's table header between bare newlines; a Windows checkout has CRLF | fixed by the lead (the test reads by lines), proven against a CRLF copy |
 
 ## Low findings left as they are
 
-None so far.
+- **`reset` at the last notes revision** (task B, verify). With `notes_rev` at 2^53 − 1 in either board,
+  `reset` returns a board with `notes_rev` 2^53, which fails `check`. Nine quadrillion notepad saves away;
+  settled by spec change 4 (`core/cap`) and fixed with the next writer step, since it costs a line.
+- **The size check counts the whole board on boards over about 15 MB** (task B, security). The cheap bound
+  (six bytes per string byte) passes the cap from about 107,000 archive rows; from then on a command that can
+  lengthen the board pays an exact count (2.5 ms at 200,000 rows), so 5,000 entries take 18 to 32 s instead
+  of 0.3 s. Results are right; the cost is on boards decades away. A cached length in `BoardData` would
+  remove it and is a change to §20.
+- **At the cap, every lengthening command runs on a copy of the board** (task B, security): about 85 ms per
+  entry on a 59 MiB board. Such a board is full; a member that fills a board is answered by revoking it.
 
 ## Measurements
 
@@ -126,6 +139,9 @@ None so far.
 | `BoardData::from_canonical_bytes`, a made-up board of 4.4 MB with 10,000 archive rows, release build | 71 ms median in the container (budget: 150 ms in CI, CORE-PERF-003) | task A's verifier; not the budget job |
 | The `golden` test target, debug build | 25 s (249 cases; the generated boards for the caps dominate) | lead's gate run |
 | A spec-only pull request in CI | 6 minutes | TT-SAL/taskdeck#5, #7 |
+| A pull request that touches the core crate, in CI | 8 minutes; the core job runs on Windows, macOS and Linux | TT-SAL/taskdeck#8 |
+| The size check of `apply` (CORE-APPLY-005), release build, a board of 10,000 items (2.4 MB) | about 12 µs per command; 5,000 renames in 69 ms; an exact count of a 200,000-row board 2.5 ms | task B3's implementer; not the budget job |
+| Workflow 2 | 4 agents, 42 minutes | 2026-11-23 01:28 to 02:10 UTC |
 
 ## Facts found along the way
 
@@ -138,6 +154,13 @@ None so far.
 - A cloud session's stop hook asks for every commit to be pushed when the lead's turn ends, so nothing an
   agent wrote may be committed in the main checkout before the lead's gate has run on it.
 - `rustfmt` is not part of the pinned toolchain, and CI runs no format check.
+- A test that reads one of the crate's own text files must go by lines: a Windows checkout has CRLF line
+  endings (`fixtures/` is exempt through its `.gitattributes`; JSON vectors do not mind).
+- The working copy and the branch share no history for the crate's files (the lead copies files, it does not
+  merge the agents' commits), so the working copy is never merged with the branch: after an integration it is
+  reset to the branch, and a writer's commit that is not yet integrated is cherry-picked on top.
+- The library builds without chrono's `alloc` feature, so `format()` does not exist there; the ported date
+  strings are written out by hand.
 
 ## Open questions for the owner
 

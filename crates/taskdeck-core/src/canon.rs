@@ -56,10 +56,10 @@ pub fn is_canonical(bytes: &[u8], limit: usize) -> bool {
 
 /// A record with a schema and defaults (core.md §4.3).
 pub trait Record: Sized {
-    /// The byte limit of §17 that applies to this record's canonical bytes.
-    /// Defaults to the largest one, the canonical board bytes (60 MiB).
-    // SPEC-QUESTION: §20 gives `Record` no limit; `from_canonical` needs one (CORE-GEN-009).
-    const LIMIT: usize = BOARD_LIMIT;
+    /// The byte limit of §17 that applies to this record's canonical bytes,
+    /// checked before anything is parsed (core.md §4.5 step 1, §20). Every
+    /// record names its own; there is no default.
+    const LIMIT: usize;
 
     /// The record as a value (core.md §4.3).
     fn to_value(&self) -> serde_json::Value;
@@ -238,7 +238,7 @@ pub(crate) fn parse_value_steps(bytes: &[u8], limit: usize) -> Result<(Value, bo
         i: 0,
         dup: false,
         bad: false,
-        left: limit.saturating_mul(TREE_FACTOR).max(TREE_FLOOR),
+        left: tree_budget(limit),
         over: false,
     };
     p.ws();
@@ -247,8 +247,9 @@ pub(crate) fn parse_value_steps(bytes: &[u8], limit: usize) -> Result<(Value, bo
     if p.i != p.b.len() {
         return Err(CoreError::code(NOT_JSON));
     }
-    // Step 3, only once the text is JSON. A tree over its budget is a
-    // step-4 finding (see `TREE_FACTOR`), and also `core/schema`.
+    // Step 3, only once the text is JSON. A tree over its budget is
+    // `core/schema` too, returned only now that the whole text has passed
+    // step 2 (core.md §4.5 "Tree budget").
     if p.dup || p.over {
         return Err(schema());
     }
@@ -263,42 +264,45 @@ struct Parser<'a> {
     dup: bool,
     /// A `null`, float or out-of-range integer was seen (step 4).
     bad: bool,
-    /// Heap bytes the tree may still take (see `TREE_FACTOR`).
+    /// Units of the tree budget still left (core.md §4.5 "Tree budget").
     left: usize,
     /// The budget ran out: from then on the parser only checks the grammar
     /// (step 2) and allocates nothing; the result is `core/schema`.
     over: bool,
 }
 
-/// The heap a parsed tree may take, as a multiple of the input's limit.
+/// The tree budget of core.md §4.5: `max(32 × limit, 1,048,576)` units.
 ///
-/// Without `preserve_order` a `serde_json` object is a `BTreeMap` whose first
-/// member allocates a whole leaf node (over 600 bytes), so `{"":0}` costs about
-/// 125 times its length and a 60 MiB board could take 7 GiB before step 4 ran
-/// (CORE-GEN-007: an error, not an abort, for any input). The parser charges
-/// every string, array buffer and map node it allocates against
-/// `TREE_FACTOR × limit`. The densest value a record of this crate allows,
-/// a three-member `Stamp` of 34 bytes, costs about 21 times its length, so no
-/// input that passes step 4 reaches the budget, and one that does is refused
-/// with `core/schema` (step 4) once the rest of it has passed step 2.
-// SPEC-QUESTION: §4.5 and §17 bound the input, not the parsed tree; a budget of 32 × limit, refused as core/schema, is taken.
+/// Without a bound, a `serde_json` tree costs far more than its text (a
+/// `BTreeMap`'s first member allocates a whole node, so `{"":0}` costs about
+/// 125 times its length and a 60 MiB board could take 7 GiB before step 4
+/// ran; CORE-GEN-007). The charges are fixed numbers, the same on every
+/// platform, so that a text is refused on a 32-bit phone exactly when it is
+/// on a 64-bit desktop (core.md §4.5 "Tree budget").
+pub(crate) fn tree_budget(limit: usize) -> usize {
+    limit.saturating_mul(TREE_FACTOR).max(TREE_FLOOR)
+}
+
+/// The multiple of the input's limit in the tree budget (core.md §4.5).
 pub(crate) const TREE_FACTOR: usize = 32;
 
-/// The least budget, for small limits: 1 MiB.
-const TREE_FLOOR: usize = 1 << 20;
+/// The least tree budget, for small limits: 1,048,576 units (core.md §4.5).
+pub(crate) const TREE_FLOOR: usize = 1 << 20;
 
-/// The heap one `BTreeMap` node of the tree takes, an upper bound: an
-/// internal node (eleven keys and values, twelve edges) plus allocator slack.
-const NODE_BYTES: usize =
-    11 * (size_of::<String>() + size_of::<Value>()) + 12 * size_of::<usize>() + 32;
+/// The charge of a string beyond the bytes between its quotes (core.md §4.5).
+const CHARGE_STRING: usize = 16;
+/// The charge of an array element (core.md §4.5).
+const CHARGE_ELEMENT: usize = 32;
+/// The charge of an object per started group of five members (core.md §4.5).
+const CHARGE_GROUP: usize = 744;
 
 type P<T> = Result<T, ()>;
 
 impl Parser<'_> {
-    /// Charges `bytes` of heap against the budget; false once it is spent.
-    fn charge(&mut self, bytes: usize) -> bool {
+    /// Charges `units` against the tree budget; false once it is spent.
+    fn charge(&mut self, units: usize) -> bool {
         if !self.over {
-            match self.left.checked_sub(bytes) {
+            match self.left.checked_sub(units) {
                 Some(l) => self.left = l,
                 None => self.over = true,
             }
@@ -348,6 +352,8 @@ impl Parser<'_> {
         }
         self.i += 1; // `{`
         let mut map = Map::new();
+        // Members as written, duplicates included (core.md §4.5).
+        let mut members = 0usize;
         self.ws();
         if self.peek() == Some(b'}') {
             self.i += 1;
@@ -366,9 +372,11 @@ impl Parser<'_> {
             self.i += 1;
             self.ws();
             let v = self.value(depth)?;
-            // A node for the first member, then one per five more: a split
-            // leaves at least five members in each node.
-            if self.over || (map.len().is_multiple_of(5) && !self.charge(NODE_BYTES)) {
+            // 744 for each started group of five members: at the 1st, 6th,
+            // 11th member and so on (core.md §4.5).
+            let starts_group = members.is_multiple_of(5);
+            members += 1;
+            if self.over || (starts_group && !self.charge(CHARGE_GROUP)) {
                 // Over budget: the tree is dropped for `core/schema`; keep
                 // reading only to report `core/not_json` first if it applies.
                 map = Map::new();
@@ -404,15 +412,11 @@ impl Parser<'_> {
         loop {
             self.ws();
             let v = self.value(depth)?;
-            if self.over {
-                items = Vec::new();
-            } else {
-                let cap = items.capacity();
+            // 32 for every element (core.md §4.5).
+            if self.charge(CHARGE_ELEMENT) {
                 items.push(v);
-                let grown = (items.capacity() - cap) * size_of::<Value>();
-                if !self.charge(grown) {
-                    items = Vec::new();
-                }
+            } else {
+                items = Vec::new();
             }
             self.ws();
             match self.peek() {
@@ -452,7 +456,8 @@ impl Parser<'_> {
                 b'"' => {
                     let end = self.i;
                     self.i += 1;
-                    if !self.charge(end - start + 16) {
+                    // The bytes between the quotes as written, plus 16.
+                    if !self.charge(end - start + CHARGE_STRING) {
                         return Ok(String::new());
                     }
                     return Ok(self.s.get(start..end).ok_or(())?.to_owned());
@@ -462,8 +467,9 @@ impl Parser<'_> {
                 _ => self.i += 1,
             }
         }
-        // An escaped string is never longer than its text: charge that once.
-        let keep = self.charge(self.string_end()? - start + 16);
+        // The bytes between the quotes as written, escapes included, plus
+        // 16, charged once (core.md §4.5).
+        let keep = self.charge(self.string_end()? - start + CHARGE_STRING);
         let mut out = String::new();
         if keep {
             out.reserve_exact(self.string_end()? - start);
@@ -508,7 +514,8 @@ impl Parser<'_> {
                         }
                         0x10000 + ((hi - 0xd800) << 10) + (lo - 0xdc00)
                     } else if (0xdc00..0xe000).contains(&hi) {
-                        // SPEC-QUESTION: a lone surrogate escape is RFC 8259 syntax but no Unicode text; taken as core/not_json.
+                        // A lone surrogate escape denotes no Unicode text:
+                        // step 2, `core/not_json` (core.md §4.5).
                         return Err(());
                     } else {
                         hi

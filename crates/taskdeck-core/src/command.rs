@@ -198,7 +198,8 @@ impl LogCommand {
             | LogCommand::SetRepeat { id, .. }
             | LogCommand::MoveRoutine { id, .. }
             | LogCommand::SetEventSpan { id, .. }
-            // SPEC-QUESTION: `restore` and `forget_archived` name an archive row by `id` (0 allowed), not a live item; taken as their `id` field, as the brief's point 4 says.
+            // `restore` and `forget_archived`: their `id`, the archive row's
+            // (core.md §10.7 `target`).
             | LogCommand::Restore { id, .. }
             | LogCommand::ForgetArchived { id, .. }
             | LogCommand::AddSubscription { id, .. }

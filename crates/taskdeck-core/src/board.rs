@@ -249,6 +249,9 @@ fn put_list<T>(m: &mut Map<String, Value>, key: &str, v: &[T], f: impl Fn(&T) ->
 // ---------------------------------------------------------------- records
 
 impl Record for ItemStamps {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put(&mut m, "estimate", stamp_value(self.estimate));
@@ -274,6 +277,9 @@ impl Record for ItemStamps {
 }
 
 impl Record for Recurrence {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put(&mut m, "anchor", Value::String(canon::date_text(self.anchor)));
@@ -297,6 +303,9 @@ impl Record for Recurrence {
 }
 
 impl Record for Block {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put(&mut m, "minutes", Value::from(self.minutes));
@@ -320,6 +329,9 @@ impl Record for Block {
 }
 
 impl Record for RowBlock {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put(&mut m, "minutes", Value::from(self.minutes));
@@ -341,6 +353,9 @@ impl Record for RowBlock {
 }
 
 impl Record for Item {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put_list(&mut m, "blocks", &self.blocks, Block::to_value);
@@ -378,6 +393,9 @@ impl Record for Item {
 }
 
 impl Record for ArchiveRow {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put(&mut m, "archived_at", instant_value(self.archived_at));
@@ -423,6 +441,9 @@ impl Record for ArchiveRow {
 }
 
 impl Record for Subscription {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put(&mut m, "color", canon::rgba_value(self.color));
@@ -450,6 +471,9 @@ impl Record for Subscription {
 }
 
 impl Record for Home {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put(&mut m, "lat", Value::from(self.lat));
@@ -466,6 +490,9 @@ impl Record for Home {
 }
 
 impl Record for PictureRef {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put(&mut m, "blob", Value::String(canon::hex_text(&self.blob)));
@@ -491,6 +518,9 @@ impl Record for PictureRef {
 }
 
 impl Record for Mark {
+    /// It occurs only inside a board: the board's limit (core.md §4.5, §17).
+    const LIMIT: usize = canon::BOARD_LIMIT;
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put(&mut m, "block", Value::from(self.block));
@@ -513,6 +543,7 @@ impl Record for Mark {
 }
 
 impl Record for BoardData {
+    /// The canonical board bytes: 62,914,560 (core.md §17).
     const LIMIT: usize = canon::BOARD_LIMIT;
 
     fn to_value(&self) -> Value {
@@ -698,8 +729,8 @@ impl BoardData {
             && (-9000..=9000).contains(&self.home.lat)
             && (-18000..=18000).contains(&self.home.lon)
             && self.picture.is_none_or(|p| p.epoch >= 1 && (1..=64).contains(&p.parts) && (67..=67_108_864).contains(&p.size));
-        // A mark with both numbers 0 is not stored (§6.10).
-        // SPEC-QUESTION: §6.12 does not number this rule; taken as rule 1 (the array's stated content).
+        // A mark with both numbers 0 is not stored (§6.10); one that is
+        // breaks rule 1 (§6.12 rule 1).
         let marks_ok = self
             .marks
             .iter()

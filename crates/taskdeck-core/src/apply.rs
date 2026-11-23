@@ -1,10 +1,10 @@
 //! `Ctx`, `apply`, conflict rules and rules versions (core.md §8, §10, §11, §20).
 //!
-//! `apply` runs the four steps of §8.4: the context (`core/bad_ctx`), the op
-//! table of `board.rules` (`core/rules`), then the command's checks and its
-//! effects under that rules version. Every check of a command runs before its
-//! first change to the board, so a refusal leaves the board as it was
-//! (CORE-APPLY-002). Rules version 1 is `apply_v1`; a later version sits
+//! `apply` runs the five steps of §8.4: the context (`core/bad_ctx`), the op
+//! table of `board.rules` (`core/rules`), the command's checks, the size check
+//! (`core/cap`, CORE-APPLY-005) and the command's effects under that rules
+//! version. Every check of a command runs before its first change to the
+//! board, so a refusal leaves the board as it was (CORE-APPLY-002). Rules version 1 is `apply_v1`; a later version sits
 //! beside it and version 1's code never changes (§11.1).
 //!
 //! Nothing here reads a clock, a zone, a float or a hash-map order
@@ -215,11 +215,13 @@ fn device(v: &Value) -> Result<u16, CoreError> {
     u16::try_from(canon::int(v, 1, i64::from(MAX_DEVICE_NO))?).map_err(|_| schema())
 }
 
-/// §4.5 steps 1 to 3 here, 4 in `read`, 5 by encoding the result once and
-/// comparing (CORE-CONF-006).
-// SPEC-QUESTION: §10.7 gives the records no byte limit; taken as the default limit of `canon::Record` (60 MiB).
+/// The byte limit of a notice or refusal record: 4,096 (core.md §10.7, §17).
+pub(crate) const RECORD_LIMIT: usize = 4096;
+
+/// §4.5 steps 1 to 3 here (the 4,096-byte limit of §10.7 first), 4 in
+/// `read`, 5 by encoding the result once and comparing (CORE-CONF-006).
 fn record_from<T>(b: &[u8], read: impl Fn(&Value) -> Result<T, CoreError>, enc: impl Fn(&T) -> Vec<u8>) -> Result<T, CoreError> {
-    let value = canon::parse_value(b, canon::BOARD_LIMIT)?;
+    let value = canon::parse_value(b, RECORD_LIMIT)?;
     let record = read(&value)?;
     drop(value);
     if enc(&record) != b {
@@ -316,9 +318,8 @@ impl Notice {
 
     /// Whether the notice concerns a device (core.md §10.7).
     ///
-    /// An overwrite concerns its author and the `other` device (§10.2); a
-    /// skip concerns its author alone (§10.3).
-    // SPEC-QUESTION: §10.7 says a device keeps a notice when it is the `author` or `other`, §10.3 that a `skipped` notice is for the author alone; taken as §10.3 for skips.
+    /// An overwrite concerns its author and the `other` device; a skip
+    /// concerns its author alone (§10.7, §10.3).
     pub fn concerns(&self, device_no: u16) -> bool {
         match *self {
             Notice::Overwrite { author, other, .. } => author == device_no || other == device_no,
@@ -356,7 +357,8 @@ impl RefusalRecord {
 
     fn from_value(v: &Value) -> Result<RefusalRecord, CoreError> {
         let mut o = Obj::new(v)?;
-        // SPEC-QUESTION: §10.7 lets `code` be any code of §16, of seal.md §22 or two engine codes, and `op` any op (a newer build's too); taken as any string for both.
+        // `code` and `op` are read as any string, so that a newer build's
+        // record still reads (core.md §10.7).
         let r = RefusalRecord {
             author: device(o.req("author")?)?,
             base: o.opt("base").map(canon::u53).transpose()?,
@@ -367,7 +369,7 @@ impl RefusalRecord {
             target: o.opt("target").map(canon::u53).transpose()?,
         };
         o.done()?;
-        // `base` and `current` belong to `set_notes` only.
+        // `base` and `current` only with `op` `set_notes` (core.md §10.7).
         if (r.base.is_some() || r.current.is_some()) && r.op.as_deref() != Some("set_notes") {
             return Err(schema());
         }
@@ -394,10 +396,370 @@ pub fn apply(board: &mut BoardData, command: &LogCommand, ctx: &Ctx) -> Result<A
     if !op_table(board.rules).contains(&command.op()) {
         return Err(refuse(RULES));
     }
-    // Steps 3 and 4 under the rules of `board.rules` (CORE-RULES-001).
-    match board.rules {
-        1 => V1 { board, ctx, command, out: Applied::default() }.run(),
-        _ => Err(refuse(RULES)),
+    // Steps 3 to 5 under the rules of `board.rules` (CORE-RULES-001).
+    if board.rules != 1 {
+        return Err(refuse(RULES));
+    }
+    // Step 4, the size check (CORE-APPLY-005). The length the effects leave
+    // is at most the length before plus `growth_bound`; when even that is
+    // within the cap, the command cannot be refused for size and runs on the
+    // board itself. The length before is first bounded from lengths alone
+    // (`size_bound`, a pass over the lists), and only when that is not enough
+    // counted exactly (`canonical_len`, no encoding).
+    let growth = growth_bound(command, board);
+    if size_bound(board).saturating_add(growth) <= SIZE_CAP {
+        return V1 { board, ctx, command, out: Applied::default() }.run();
+    }
+    let before = canonical_len(board);
+    if before.saturating_add(growth) <= SIZE_CAP {
+        return V1 { board, ctx, command, out: Applied::default() }.run();
+    }
+    // At the cap: the checks and effects run on a copy and its length is
+    // counted. A refusal of step 3 comes first.
+    let mut copy = board.clone();
+    let out = V1 { board: &mut copy, ctx, command, out: Applied::default() }.run()?;
+    if out.benign {
+        // A benign repeat changes nothing (CORE-APPLY-004).
+        return Ok(out);
+    }
+    let after = canonical_len(&copy);
+    if after > SIZE_CAP && after > before {
+        return Err(refuse(CAP));
+    }
+    *board = copy;
+    Ok(out)
+}
+
+// ---------------------------------------------------------------- the size check (§8.4 step 4)
+
+/// The size cap: a command may not leave canonical board bytes over
+/// 61,865,984 (59 MiB) that are longer than before it (core.md §8.4 step 4,
+/// §17, CORE-APPLY-005).
+pub(crate) const SIZE_CAP: usize = 61_865_984;
+
+/// The most bytes one byte of a string takes in canonical bytes: a control
+/// character is written `\u00XX` (core.md §4.2 rule 4); every other byte is
+/// written as itself or as a two-byte escape.
+pub(crate) const ESC: usize = 6;
+
+// Bounds of what each part of a board takes in canonical bytes, its comma
+// included, without the bytes of its strings (counted with `ESC`) and of its
+// blocks. Each is above the record with every optional field present at its
+// longest; the unit tests encode those records and compare.
+
+/// Everything of a board but its lists' elements and its notes text: every
+/// key, the six lists' brackets, `home`, `notes_rev`, `palette`, `picture`
+/// and `rules` at their longest.
+pub(crate) const BOARD_BOUND: usize = 1024;
+/// A live item, its `blocks` key and brackets included.
+pub(crate) const ITEM_BOUND: usize = 640;
+/// A live block.
+pub(crate) const BLOCK_BOUND: usize = 128;
+/// An archive row, its `blocks` key and brackets included.
+pub(crate) const ROW_BOUND: usize = 576;
+/// A block of an archive row.
+pub(crate) const ROW_BLOCK_BOUND: usize = 96;
+/// A subscription.
+pub(crate) const SUB_BOUND: usize = 160;
+/// A mark.
+pub(crate) const MARK_BOUND: usize = 64;
+/// A list key with its brackets and comma, which a list's first element
+/// adds (`"subscriptions":[],`, the longest, is 19).
+const LIST_BOUND: usize = 32;
+/// What raising a mark adds: a new mark and the `marks` key, or the digits
+/// of an existing one.
+const MARK_GROWTH: usize = MARK_BOUND + LIST_BOUND;
+/// What a changed field group of a live item adds: a field that was absent
+/// at its longest (`"deadline":"…",`, 44) or longer digits, and its stamp's
+/// digits (`[1,0]` to `[9007199254740991,8191]`, 18).
+const FIELD_GROWTH: usize = 128;
+/// What a block a command moves adds: the digits of `minutes` and of its
+/// stamp (`start` is always 30 bytes).
+const MOVE_GROWTH: usize = 32;
+/// What `complete` and `delete` add: an archive row holds the item's fields
+/// but its stamps, plus `archived_at` (46) and `outcome` (20), and the
+/// `archive` key.
+const RETIRE_GROWTH: usize = 128 + LIST_BOUND;
+/// What `restore` adds beyond its row's blocks: an item holds the row's
+/// fields but `archived_at` and `outcome`, plus five stamps, an id of up to
+/// 16 digits where the row's was 0, the `items` key and a mark.
+const RESTORE_GROWTH: usize = 512 + MARK_GROWTH;
+/// What `restore` adds per block of its row: a `stamp` (`"stamp":[…,…],`, 32).
+const RESTORE_BLOCK_GROWTH: usize = 48;
+/// What a settings command adds: a palette, home or picture at its longest.
+const SETTINGS_GROWTH: usize = 512;
+
+/// A bound of a board's canonical length, never below it, from lengths and
+/// counts alone (no encoding): a pass over the lists.
+pub(crate) fn size_bound(b: &BoardData) -> usize {
+    let strings = |s: &str| ESC.saturating_mul(s.len());
+    let items = b.items.iter().fold(0usize, |n, i| {
+        n.saturating_add(ITEM_BOUND).saturating_add(strings(&i.name)).saturating_add(BLOCK_BOUND.saturating_mul(i.blocks.len()))
+    });
+    let rows = b.archive.iter().fold(0usize, |n, r| {
+        n.saturating_add(ROW_BOUND).saturating_add(strings(&r.name)).saturating_add(ROW_BLOCK_BOUND.saturating_mul(r.blocks.len()))
+    });
+    // A line is written as base64 with padding, in quotes, with a comma.
+    let lines = b.unreadable.iter().fold(0usize, |n, l| n.saturating_add(l.len().div_ceil(3).saturating_mul(4)).saturating_add(3));
+    let subs = b.subscriptions.iter().fold(0usize, |n, s| {
+        n.saturating_add(SUB_BOUND).saturating_add(strings(&s.name)).saturating_add(strings(&s.url))
+    });
+    BOARD_BOUND
+        .saturating_add(strings(&b.notes))
+        .saturating_add(items)
+        .saturating_add(rows)
+        .saturating_add(lines)
+        .saturating_add(subs)
+        .saturating_add(MARK_BOUND.saturating_mul(b.marks.len()))
+}
+
+// ------------------------------------------------ the exact canonical length
+
+/// The length of a canonical integer (core.md §4.2 rule 5).
+fn int_len(i: i64) -> usize {
+    let mut m = i.unsigned_abs();
+    let mut n = usize::from(i < 0) + 1;
+    while m >= 10 {
+        m /= 10;
+        n += 1;
+    }
+    n
+}
+
+fn uint_len(u: u64) -> usize {
+    int_len(i64::try_from(u).unwrap_or(i64::MAX))
+}
+
+/// The length of a canonical string, quotes included: the escapes of the
+/// table in core.md §4.2 rule 4 take two bytes, other control characters six.
+fn str_len(s: &str) -> usize {
+    s.bytes().fold(2usize, |n, c| {
+        n.saturating_add(match c {
+            b'"' | b'\\' | 0x08 | 0x09 | 0x0a | 0x0c | 0x0d => 2,
+            0x00..=0x1f => 6,
+            _ => 1,
+        })
+    })
+}
+
+/// An instant's text in quotes: 30 bytes and two (core.md §4.4).
+const INSTANT_LEN: usize = 32;
+/// A date's text in quotes (core.md §4.4).
+const DATE_LEN: usize = 12;
+
+/// The length of a canonical object, member by member: `{`, `"key":value`
+/// joined by commas, `}` (core.md §4.2).
+struct ObjLen {
+    members: usize,
+    len: usize,
+}
+
+impl ObjLen {
+    fn new() -> ObjLen {
+        ObjLen { members: 0, len: 2 }
+    }
+
+    fn field(mut self, key: &str, value: usize) -> ObjLen {
+        // `"key":` and the comma before every member but the first.
+        self.len = self.len.saturating_add(key.len() + 3 + usize::from(self.members > 0)).saturating_add(value);
+        self.members += 1;
+        self
+    }
+
+    fn opt(self, key: &str, value: Option<usize>) -> ObjLen {
+        match value {
+            Some(v) => self.field(key, v),
+            None => self,
+        }
+    }
+
+    fn done(self) -> usize {
+        self.len
+    }
+}
+
+/// The length of a canonical array of elements of these lengths.
+fn array_len(elements: impl Iterator<Item = usize>) -> usize {
+    let (n, sum) = elements.fold((0usize, 0usize), |(n, s), e| (n + 1, s.saturating_add(e)));
+    sum.saturating_add(2 + n.saturating_sub(1))
+}
+
+/// A list field, absent when empty (core.md §4.3).
+fn list_len<T>(v: &[T], f: impl Fn(&T) -> usize) -> Option<usize> {
+    (!v.is_empty()).then(|| array_len(v.iter().map(f)))
+}
+
+fn stamp_len(s: Stamp) -> usize {
+    3 + uint_len(s.seq) + uint_len(u64::from(s.device_no))
+}
+
+fn kind_len(k: Kind) -> usize {
+    match k {
+        Kind::Task => 6,
+        Kind::Event => 7,
+        Kind::Routine => 9,
+    }
+}
+
+fn recurrence_len(r: &Recurrence) -> usize {
+    ObjLen::new()
+        .field("anchor", DATE_LEN)
+        .field("days", uint_len(u64::from(r.days)))
+        .field("minutes", uint_len(u64::from(r.minutes)))
+        .field("start_minutes", int_len(i64::from(r.start_minutes)))
+        .done()
+}
+
+fn block_len(b: &Block) -> usize {
+    ObjLen::new()
+        .field("minutes", uint_len(u64::from(b.minutes)))
+        .field("sid", uint_len(b.sid))
+        .field("stamp", stamp_len(b.stamp))
+        .field("start", INSTANT_LEN)
+        .done()
+}
+
+fn row_block_len(b: &RowBlock) -> usize {
+    ObjLen::new()
+        .field("minutes", uint_len(u64::from(b.minutes)))
+        .field("sid", uint_len(b.sid))
+        .field("start", INSTANT_LEN)
+        .done()
+}
+
+fn item_len(i: &Item) -> usize {
+    let s = &i.stamps;
+    let stamps = ObjLen::new()
+        .field("estimate", stamp_len(s.estimate))
+        .field("levels", stamp_len(s.levels))
+        .field("name", stamp_len(s.name))
+        .field("repeat", stamp_len(s.repeat))
+        .field("time", stamp_len(s.time))
+        .done();
+    ObjLen::new()
+        .opt("blocks", list_len(&i.blocks, block_len))
+        .field("created", INSTANT_LEN)
+        .opt("deadline", i.deadline.map(|_| INSTANT_LEN))
+        .opt("duration_minutes", i.duration_minutes.map(|m| uint_len(u64::from(m))))
+        .field("id", uint_len(i.id))
+        .opt("importance", i.importance.map(|x| uint_len(u64::from(x))))
+        .field("kind", kind_len(i.kind))
+        .field("name", str_len(&i.name))
+        .opt("recurrence", i.recurrence.as_ref().map(recurrence_len))
+        .field("stamps", stamps)
+        .opt("time_importance", i.time_importance.map(|x| uint_len(u64::from(x))))
+        .done()
+}
+
+fn row_len(r: &ArchiveRow) -> usize {
+    ObjLen::new()
+        .field("archived_at", INSTANT_LEN)
+        .opt("blocks", list_len(&r.blocks, row_block_len))
+        .field("created", INSTANT_LEN)
+        .opt("deadline", r.deadline.map(|_| INSTANT_LEN))
+        .opt("duration_minutes", r.duration_minutes.map(|m| uint_len(u64::from(m))))
+        .field("id", uint_len(r.id))
+        .opt("importance", r.importance.map(|x| uint_len(u64::from(x))))
+        .field("kind", kind_len(r.kind))
+        .field("name", str_len(&r.name))
+        .opt("outcome", (r.outcome == Outcome::Dropped).then_some(9))
+        .opt("recurrence", r.recurrence.as_ref().map(recurrence_len))
+        .opt("time_importance", r.time_importance.map(|x| uint_len(u64::from(x))))
+        .done()
+}
+
+fn rgba_len(c: [u8; 4]) -> usize {
+    array_len(c.iter().map(|&x| uint_len(u64::from(x))))
+}
+
+/// The length of a board's canonical bytes (core.md §6.13), counted from
+/// its fields without encoding anything; equal to
+/// `to_canonical_bytes().len()` (the tests compare them on generated boards).
+pub(crate) fn canonical_len(b: &BoardData) -> usize {
+    let home = (b.home != crate::board::Home { lat: 0, lon: 0 })
+        .then(|| ObjLen::new().field("lat", int_len(i64::from(b.home.lat))).field("lon", int_len(i64::from(b.home.lon))).done());
+    let palette = (b.palette != [[0u8; 4]; 6]).then(|| array_len(b.palette.iter().map(|&c| rgba_len(c))));
+    let picture = b.picture.map(|p| {
+        ObjLen::new()
+            .field("blob", 34)
+            .field("epoch", uint_len(u64::from(p.epoch)))
+            .field("parts", uint_len(u64::from(p.parts)))
+            .field("sha256", 66)
+            .field("size", uint_len(p.size))
+            .done()
+    });
+    let mark = |m: &crate::board::Mark| {
+        ObjLen::new()
+            .field("block", uint_len(m.block))
+            .field("device_no", uint_len(u64::from(m.device_no)))
+            .field("item", uint_len(m.item))
+            .done()
+    };
+    let sub = |s: &crate::board::Subscription| {
+        ObjLen::new()
+            .field("color", rgba_len(s.color))
+            .opt("enabled", (!s.enabled).then_some(5))
+            .field("id", uint_len(s.id))
+            .field("name", str_len(&s.name))
+            .field("url", str_len(&s.url))
+            .done()
+    };
+    ObjLen::new()
+        .opt("archive", list_len(&b.archive, row_len))
+        .opt("home", home)
+        .opt("items", list_len(&b.items, item_len))
+        .opt("marks", list_len(&b.marks, mark))
+        .opt("notes", (!b.notes.is_empty()).then(|| str_len(&b.notes)))
+        .opt("notes_rev", (b.notes_rev != 0).then(|| uint_len(b.notes_rev)))
+        .opt("palette", palette)
+        .opt("picture", picture)
+        .field("rules", uint_len(u64::from(b.rules)))
+        .opt("subscriptions", list_len(&b.subscriptions, sub))
+        // A line is base64 with padding, in quotes (core.md §6.7).
+        .opt("unreadable", list_len(&b.unreadable, |l| l.len().div_ceil(3).saturating_mul(4).saturating_add(2)))
+        .done()
+}
+
+/// A bound of how many bytes a command's effects can add to a board's
+/// canonical length, never below what they add.
+pub(crate) fn growth_bound(c: &LogCommand, board: &BoardData) -> usize {
+    let strings = |s: &str| ESC.saturating_mul(s.len());
+    let new_item = ITEM_BOUND + LIST_BOUND + MARK_GROWTH;
+    match c {
+        LogCommand::CreateTask(c) => new_item.saturating_add(strings(&c.name)).saturating_add(BLOCK_BOUND.saturating_mul(c.blocks.len())),
+        LogCommand::CreateEvent(CreateEvent { name, .. }) | LogCommand::CreateRoutine(CreateRoutine { name, .. }) => {
+            new_item.saturating_add(strings(name))
+        }
+        LogCommand::Rename { name, .. } => FIELD_GROWTH.saturating_add(strings(name)),
+        LogCommand::Complete { .. } | LogCommand::Delete { .. } => RETIRE_GROWTH,
+        // These only take something away.
+        LogCommand::Forget { .. }
+        | LogCommand::RemoveBlocks { .. }
+        | LogCommand::ForgetArchived { .. }
+        | LogCommand::RemoveSubscription { .. } => 0,
+        LogCommand::MoveBlock { .. } => MOVE_GROWTH,
+        LogCommand::MoveBlocks { moves } => MOVE_GROWTH.saturating_mul(moves.len()),
+        LogCommand::AddBlock { .. } => BLOCK_BOUND + LIST_BOUND + MARK_GROWTH,
+        LogCommand::SetEstimate { .. }
+        | LogCommand::SetDeadline { .. }
+        | LogCommand::SetSeverity { .. }
+        | LogCommand::SetHorizon { .. }
+        | LogCommand::SetRepeat { .. }
+        | LogCommand::MoveRoutine { .. }
+        | LogCommand::SetEventSpan { .. } => FIELD_GROWTH,
+        // `"notes":"…",` and `"notes_rev":…,` at their longest.
+        LogCommand::SetNotes { text, .. } => FIELD_GROWTH.saturating_add(strings(text)),
+        LogCommand::Restore { id, archived_at, .. } => {
+            let key = ArchiveKey { id: *id, archived_at: *archived_at };
+            let blocks = board.find_archive_row(&key).map_or(0, |r| board.archive[r].blocks.len());
+            RESTORE_GROWTH.saturating_add(RESTORE_BLOCK_GROWTH.saturating_mul(blocks))
+        }
+        LogCommand::AddSubscription { name, url, .. } => {
+            (SUB_BOUND + LIST_BOUND + MARK_GROWTH).saturating_add(strings(name)).saturating_add(strings(url))
+        }
+        LogCommand::RenameSubscription { name, .. } => strings(name),
+        LogCommand::SetSubscriptionColor { .. } | LogCommand::SetSubscriptionEnabled { .. } => MOVE_GROWTH,
+        LogCommand::SetPalette { .. } | LogCommand::SetHome { .. } | LogCommand::SetPicture { .. } => SETTINGS_GROWTH,
     }
 }
 
@@ -414,8 +776,7 @@ fn others_since(s: Stamp, ctx: &Ctx) -> bool {
 
 /// An item's latest stamp (core.md §10.1): the first, in the order
 /// `estimate`, `levels`, `name`, `repeat`, `time`, then the blocks by sid,
-/// with the greatest `seq`.
-// SPEC-QUESTION: §10.1 does not say which stamp is the latest when two with the greatest seq differ in device_no (only a hand-made board has that); taken as the first in field-name order, then blocks.
+/// with the greatest `seq` (§10.1 settles that tie order).
 fn latest_stamp(item: &Item) -> Stamp {
     let s = &item.stamps;
     let mut best = s.estimate;
@@ -664,7 +1025,7 @@ impl V1<'_> {
                 if *base != current {
                     return Err(Refusal { notes: Some(NotesConflict { base: *base, current }), ..self.refuse(NOTES_STALE) });
                 }
-                // SPEC-QUESTION: §9.20 has no check for a `notes_rev` of 2^53 − 1, whose increment would leave a board that fails `check` (CORE-DATA-006); taken as `core/cap`.
+                // Check 2: `notes_rev` below 2^53 − 1, else `core/cap` (core.md §9.20).
                 self.check(current < MAX_U53, CAP)?;
                 self.board.notes.clone_from(text);
                 self.board.notes_rev = current + 1;

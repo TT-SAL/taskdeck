@@ -66,7 +66,9 @@ fn opt_text(v: &Value) -> Option<&str> {
     v.as_str()
 }
 
-// Every encode case and every parse case of canonical.json.
+// Every encode case and every parse case of canonical.json, the tree budget
+// vectors of §4.5 included (charges worked by hand in their names' terms:
+// a text charged exactly the budget, one unit over, and over then not JSON).
 // spec: CORE-ENC-001
 // spec: CORE-ENC-002
 // spec: CORE-ENC-003

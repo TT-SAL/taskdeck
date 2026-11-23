@@ -60,14 +60,3 @@ pub mod snapshot;
 pub mod tasks;
 pub mod time;
 pub mod weather;
-
-#[cfg(test)]
-mod tests {
-    use proptest as _;
-    use sha2 as _;
-
-    #[test]
-    fn the_shell_builds() {
-        assert_eq!(env!("CARGO_PKG_NAME"), "taskdeck-core");
-    }
-}

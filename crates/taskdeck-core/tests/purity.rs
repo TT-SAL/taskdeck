@@ -9,6 +9,14 @@ const BOARD: &str = include_str!("../src/board.rs");
 const IDS: &str = include_str!("../src/ids.rs");
 const TIME: &str = include_str!("../src/time.rs");
 
+// (moved from the shell's inline test in lib.rs, which read `env!`: the crate
+// builds under its own name)
+#[test]
+fn the_shell_builds() {
+    assert!(MANIFEST.lines().any(|l| l.trim() == "name = \"taskdeck-core\""));
+    assert_eq!(taskdeck_core::apply::SUPPORTED_RULES, &[1]);
+}
+
 // spec: CORE-GEN-001
 #[test]
 fn the_crate_forbids_unsafe_code() {

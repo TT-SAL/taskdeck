@@ -173,6 +173,34 @@ fn the_board_limit() {
     assert_eq!(BoardData::from_canonical_bytes(line(LINE_BYTES + 1).as_bytes()), Err(schema()));
 }
 
+// (every record names its byte limit; those that occur only inside a board
+// take the board's, and their parser compares it first)
+// spec: CORE-ENC-004
+// spec: CORE-GEN-009
+#[test]
+fn every_record_names_the_board_limit() {
+    use crate::canon::Record;
+    for limit in [
+        BoardData::LIMIT,
+        Item::LIMIT,
+        ItemStamps::LIMIT,
+        Recurrence::LIMIT,
+        Block::LIMIT,
+        RowBlock::LIMIT,
+        ArchiveRow::LIMIT,
+        Subscription::LIMIT,
+        Home::LIMIT,
+        PictureRef::LIMIT,
+        Mark::LIMIT,
+    ] {
+        assert_eq!(limit, 62_914_560);
+    }
+    let mut big = vec![b' '; 62_914_561];
+    big[0] = 0xff;
+    assert_eq!(Mark::from_canonical(&big), Err(CoreError::code("core/too_large")));
+    assert_eq!(Home::from_canonical(&big[..62_914_560]), Err(CoreError::code("core/not_json")));
+}
+
 #[test]
 fn the_empty_board() {
     assert_eq!(BoardData::empty().to_canonical_bytes(), b"{\"rules\":1}".to_vec());
