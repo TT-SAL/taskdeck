@@ -51,7 +51,13 @@ a container can run. Everything else of the crate is in the working copy.
    `bash scripts/spec-coverage.sh core` pass: it lists each clause the stage owns that no test file cites;
    for each, cite it at the test that proves it, or write the missing test. Then `bash scripts/gate.sh core`
    must pass every `run` item.
-7. Bring `crates/taskdeck-core/README.md` up to date: what the crate is, its modules, how its tests read
+7. Loose ends the earlier steps left for this one: the crate's doc comment at the top of `src/lib.rs` still
+   describes the skeleton and names the macro the gate scans for (`bash scripts/gate-lib.sh no-unimplemented core`
+   fails on it): rewrite it for the finished crate. Two `SPEC-QUESTION` comments are left in `src/ics.rs` (the
+   order the step budget is spent in; an observance cut short is not noted): both are settled as implemented
+   by core.md §14.6, bound 7: replace them by citations. Cite CORE-READ-007 at the timed tests of
+   `tests/ics_bounds.rs` and CORE-APPLY-005 where the size check is tested, if spec coverage asks for them.
+8. Bring `crates/taskdeck-core/README.md` up to date: what the crate is, its modules, how its tests read
    fixtures, how to run the gate, the budgets and where their numbers are printed. Short.
 
 ## Points the lead has settled
