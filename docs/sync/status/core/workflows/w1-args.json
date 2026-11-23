@@ -1,0 +1,10 @@
+{"root": "/home/user/taskdeck", "work": "/home/user/taskdeck/target/work/core", "briefs": "docs/sync/status/core/briefs",
+ "gate": "cargo test --locked -p taskdeck-core && cargo clippy --locked -p taskdeck-core --all-targets -- -D warnings && bash crates/taskdeck-core/ci.sh && bash scripts/gate.sh --only purity-clippy-toml core",
+ "steps": [
+  {"id": "impl:a-base", "kind": "impl", "brief": "a-base.md", "after": []},
+  {"id": "verify:a-base", "kind": "verify", "briefs": ["a-base.md"], "after": ["impl:a-base"]},
+  {"id": "impl:b1-command", "kind": "impl", "brief": "b1-command.md", "after": ["impl:a-base"]},
+  {"id": "impl:b2-apply", "kind": "impl", "brief": "b2-apply.md", "after": ["impl:b1-command", "verify:a-base"]},
+  {"id": "security:a-base", "kind": "security", "briefs": ["a-base.md"], "after": ["verify:a-base"],
+   "focus": "the parsers of task A, which read bytes another party controls: canon::parse and canon::is_canonical, BoardData::from_canonical_bytes with check, the base64 and hex decoding inside them, Instant::parse_canonical, and TableZone::new."}
+ ]}
