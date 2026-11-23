@@ -994,3 +994,55 @@ fn e_refuses_slot_b_when_no_device_no_is_left() {
     let (_, fx) = e_on_b_with(|m| m.next_device_no = 8191);
     accepted(&fx);
 }
+
+// The comparisons of pairing's secret-derived values are made with `ct_eq`
+// (SEAL-GEN-007): the code's check characters (`parse_code`); the slot MAC
+// with its label and role (`open_slot`); slot C's opening with the
+// commitment (N's `slot_c`); the typed digits with the SAS (`sas_entered`);
+// the transcript a `DeviceAdded` carries with N's own (§17.9 step 7,
+// `check_added`); and the repeat check of an accepted slot (`same_slot`, and
+// the two machines' use of it). None of these values is compared with `==`
+// or `!=`: no line of those functions that holds `==` or `!=` names one.
+// spec: SEAL-GEN-007
+#[test]
+fn pairing_secret_comparisons_are_constant_time() {
+    let src = include_str!("../pair.rs");
+    // The one function whose head is `head`, to the line `}` at the
+    // indentation of its first line.
+    let body = |head: &str| -> &str {
+        assert_eq!(src.matches(head).count(), 1, "{head}");
+        let start = src.find(head).unwrap();
+        let line = src[..start].rfind('\n').map_or(0, |i| i + 1);
+        let indent: String = src[line..].chars().take_while(|c| *c == ' ').collect();
+        let end = src[start..].find(&format!("\n{indent}}}\n")).unwrap();
+        &src[start..start + end]
+    };
+    let words = |line: &str| -> Vec<String> {
+        line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(str::to_owned).collect()
+    };
+    let cases: [(&str, &[&str], &[&str]); 6] = [
+        ("pub fn parse_code(", &["typed.as_slice().ct_eq(&want[..])"], &["typed", "want", "check"]),
+        ("fn open_slot<", &["want.ct_eq(mac)", "l.ct_eq(&label)", "r.ct_eq(&role)"], &["want", "mac", "l", "r", "label", "role"]),
+        ("fn slot_c(", &["commitment(epk_e, r_e).ct_eq(&self.commit)"], &["commitment", "commit", "epk_e", "r_e"]),
+        ("fn sas_entered(", &["digits.as_bytes().ct_eq(&sec.sas[..])"], &["digits", "sas"]),
+        ("fn check_added(", &["a.transcript.ct_eq(t)"], &["transcript", "t"]),
+        ("fn same_slot(", &["accepted.ct_eq(bytes)"], &["accepted", "bytes"]),
+    ];
+    for (head, ct, values) in cases {
+        let b = body(head);
+        for c in ct {
+            assert!(b.contains(c), "{head}: {c}");
+        }
+        for line in b.lines().filter(|l| l.contains("==") || l.contains("!=")) {
+            let w = words(line);
+            assert!(!values.iter().any(|v| w.iter().any(|x| x == v)), "{head}: `==` or `!=` on a secret value: {line}");
+        }
+    }
+    // The repeat checks go through `same_slot`, on both machines.
+    assert!(body("fn accepted(").contains("same_slot(s, bytes)"));
+    assert!(src.contains("if same_slot(&self.accepted_b, &bytes) =>"));
+    for line in src.lines().filter(|l| l.contains("==") || l.contains("!=")) {
+        let w = words(line);
+        assert!(!w.iter().any(|x| x == "accepted_b" || x == "slot_a" || x == "slot_c" || x == "slot_d"), "{line}");
+    }
+}
