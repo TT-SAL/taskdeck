@@ -32,7 +32,7 @@ The test target **`tests/transcripts.rs`** (the stage gate runs
    command or a "nothing to do" reply; a recorded 4xx against the `CompileError`'s status and message,
    character for character; for an unparseable body the status and the prefix `Could not read the command: `),
    `M[recorded reply id] = compiled reply id`, the reply's `moved`, and the state through the projection of §18.4.
-5. A step is "changed" only by a row of the table in §13.5 or by §18.7, decided by a rule written in the
+5. A step is "changed" only by §13.5 (a row of its table, or the year rule under the table) or by §18.7, decided by a rule written in the
    test (a function per exception that looks at the step and the state before it), never by "it did not
    match". After a changed step the rest is replayed without comparing.
 
