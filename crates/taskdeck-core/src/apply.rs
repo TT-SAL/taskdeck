@@ -172,7 +172,7 @@ const OPS_V1: [&str; 29] = [
 
 /// The op table of a rules version; empty for a version this build does not
 /// know (core.md §11.1, CORE-RULES-001).
-fn op_table(rules: u32) -> &'static [&'static str] {
+pub(crate) fn op_table(rules: u32) -> &'static [&'static str] {
     match rules {
         1 => &OPS_V1,
         _ => &[],

@@ -33,7 +33,25 @@ pub fn reflow_inputs(
     day: chrono::NaiveDate,
     zone: &(impl Zone + ?Sized),
 ) -> (Vec<planner::Flowable<(u64, u64)>>, Vec<(i32, i32)>) {
-    unimplemented!()
+    let mut flowables = Vec::new();
+    let mut anchors = Vec::new();
+    // Step 1: live items in ascending id (`items` ascends by id, §6.12), each
+    // item's placements in `placements_for`'s order, its blocks ascending by
+    // sid. A block placement with a sid is a task's block and flows; every
+    // other block placement (an event's, a routine's) is an anchor; markers
+    // are dropped.
+    for item in &board.items {
+        for placed in planner::placements_for(item, day, zone) {
+            let planner::Placement::Block { start, minutes } = placed.placement else { continue };
+            match placed.session {
+                Some(sid) => flowables.push(planner::Flowable { key: (item.id, sid), start, minutes }),
+                None => anchors.push((start, start.saturating_add(i32::try_from(minutes).unwrap_or(i32::MAX)))),
+            }
+        }
+    }
+    // Step 2: the overlay's anchors of the day, appended.
+    anchors.extend(overlay.anchors_on(day));
+    (flowables, anchors)
 }
 
 /// The archive in reverse archive order (core.md §14.2, §6.12).
