@@ -76,11 +76,17 @@ impl Code {
         let mac_key: [u8; 32] = hk(&board.0, &s, &cx("pair-mac"), 32).try_into().unwrap();
         Code { s, ticket_key, tid, mac_key }
     }
-    /// A slot of §17.4 under this code.
+    /// A slot of §17.4 under this code. Its `body_len` is a u16: a body over
+    /// 65,535 bytes cannot be laid out, and this refuses it (a panic, in a
+    /// test that asks for one); `try_slot` returns `None` instead.
     pub fn slot(&self, label: u8, role: u8, body: &[u8]) -> Vec<u8> {
-        let len = (body.len() as u16).to_be_bytes();
+        self.try_slot(label, role, body).expect("a slot body is at most 65,535 bytes (§17.4: u16 body_len)")
+    }
+    /// A slot of §17.4 under this code, `None` for a body over 65,535 bytes.
+    pub fn try_slot(&self, label: u8, role: u8, body: &[u8]) -> Option<Vec<u8>> {
+        let len = u16::try_from(body.len()).ok()?.to_be_bytes();
         let m = mac(&self.mac_key, &[&cx("pair")[..], &[label, role], &self.tid, &len, body].concat());
-        [&[label, role][..], &len, body, &m].concat()
+        Some([&[label, role][..], &len, body, &m].concat())
     }
     /// The slot with its MAC made again over its own label, role and body.
     pub fn remac(&self, slot: &[u8]) -> Vec<u8> {
@@ -517,6 +523,11 @@ pub fn code_text(s: &[u8; 10]) -> String {
 }
 
 /// N driven by a test that plays E (`FakeE`) up to `AwaitD`: what both know.
+///
+/// Every draw, the fake E's (`s`, `esk_E`, `r_E`, a nonce for each slot D) and
+/// N's, comes from `board::source`: fixed bytes with `test-entropy`, so that a
+/// run is a function of its seed alone (the fuzz target `pair_bundle`), and
+/// the operating system's without.
 pub struct WithFakeE {
     pub n: New,
     pub fe: FakeE,
@@ -526,41 +537,55 @@ pub struct WithFakeE {
     pub dh: [u8; 32],
     pub t: [u8; 32],
     pub digits: String,
+    rng: std::cell::RefCell<Box<dyn Entropy>>,
 }
 
 impl WithFakeE {
-    /// `dev_e` is the id the fake E names in slot A.
+    /// `dev_e` is the id the fake E names in slot A; the draws of seed 0.
     pub fn new(board: BoardId, dev_e: DevId) -> WithFakeE {
+        WithFakeE::with_seed(board, dev_e, 0)
+    }
+
+    /// As `new`, with the draws of `seed`.
+    pub fn with_seed(board: BoardId, dev_e: DevId, seed: u32) -> WithFakeE {
+        // `s` (10), `esk_E` (32), `r_E` (32), N's four draws (112), then 64
+        // nonces of slot D (24 each).
+        let mut rng = source(Rng::new(0xFA4E_0000 | u64::from(seed)).bytes(186 + 24 * 64));
         let mut s = [0u8; 10];
-        OsEntropy.fill(&mut s).unwrap();
+        rng.fill(&mut s).unwrap();
+        let (mut esk, mut r) = ([0u8; 32], [0u8; 32]);
+        rng.fill(&mut esk).unwrap();
+        rng.fill(&mut r).unwrap();
         let k = Code::from_secret(s, &board);
-        let fe = FakeE::new(&k, board, dev_e, rand32(), rand32());
+        let fe = FakeE::new(&k, board, dev_e, esk, r);
         let mut n = New::new();
         let ev = NewEvent::CodeEntered { code: code_text(&s), host: HOST.into(), board_id: board, door: DOOR, name: NAME.into(), now: PT0 };
-        n.on(ev, &mut OsEntropy);
+        n.on(ev, &mut *rng);
         let a = fe.slot_a();
-        let fx = n.on(NewEvent::Slot { bytes: a.clone() }, &mut OsEntropy);
+        let fx = n.on(NewEvent::Slot { bytes: a.clone() }, &mut *rng);
         let NewEffect::PostSlot { slot: b } = &fx[0] else { panic!("slot B") };
         let b = b.clone();
         let c = fe.slot_c();
-        let fx = n.on(NewEvent::Slot { bytes: c.clone() }, &mut OsEntropy);
+        let fx = n.on(NewEvent::Slot { bytes: c.clone() }, &mut *rng);
         assert_eq!(fx.iter().map(n_name).collect::<Vec<_>>(), ["AskSas"]);
         let (dh, t, digits) = fe.view(&a, &b, &c);
-        WithFakeE { n, fe, a, b, c, dh, t, digits }
+        WithFakeE { n, fe, a, b, c, dh, t, digits, rng: std::cell::RefCell::new(rng) }
     }
 
     /// N accepts the digits.
     pub fn accept(mut self) -> WithFakeE {
-        let fx = self.n.on(NewEvent::SasEntered { digits: self.digits.clone() }, &mut OsEntropy);
+        let fx = self.n.on(NewEvent::SasEntered { digits: self.digits.clone() }, &mut **self.rng.get_mut());
         assert_eq!(fx.iter().map(n_name).collect::<Vec<_>>(), ["ShowAccepted", "FetchSlot"]);
         self
     }
 
-    /// Slot D holding `pt` sealed under the bundle key and the AD of §17.8.
+    /// Slot D holding `pt` sealed under the bundle key and the AD of §17.8;
+    /// the nonce is the next draw. A plaintext whose body would exceed
+    /// 65,535 bytes cannot be laid out (`Code::slot`): bound it first.
     pub fn slot_d(&self, pt: &[u8]) -> Vec<u8> {
         let key = bundle_key(&self.fe.k.s, &self.dh, &self.t);
         let mut nonce = [0u8; 24];
-        OsEntropy.fill(&mut nonce).unwrap();
+        self.rng.borrow_mut().fill(&mut nonce).unwrap();
         self.fe.k.slot(D, ROLE_E, &aead_seal(&key, nonce, &bundle_ad(&self.fe.board, &self.fe.k.tid, &self.t), pt))
     }
 

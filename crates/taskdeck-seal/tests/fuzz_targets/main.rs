@@ -2,7 +2,11 @@
 //! run as ordinary tests over fixed inputs. `ci.sh` only compiles the fuzz
 //! crate and stage `release` runs the fuzzers; this target runs every
 //! target's body and the fixtures it builds, so that a target that cannot
-//! fuzz at all (a fixture that fails on every input) fails here.
+//! fuzz at all (a fixture that fails on every input) fails here. Task S9's
+//! module (`s9_reach`) proves, with inputs it builds, that the targets of
+//! the openers and of pairing reach the parsers their rows of the parser
+//! table name, through the functions of the fuzz crate's library that do
+//! their work and return how far an input got.
 //!
 //! The fuzz crate's library is included unchanged, with its shared helpers
 //! (`common`, `board`, ...) re-exported at the root as they stand in the fuzz
@@ -99,6 +103,7 @@ mod t_unwrap_root;
 mod t_verify_backup_file;
 
 mod s7_fuzz;
+mod s9_reach;
 
 // The body of a target as a function `run(data)`. Defined after the targets,
 // so that each reaches it through its own `use libfuzzer_sys::fuzz_target`.

@@ -1,22 +1,27 @@
 # Stage `seal`: status
 
-**State: in progress** (wave 1). Lead session 1 started 2026-11-23 00:01 UTC on branch
-`claude/stoic-mayer-diyvrp`. This file is the stage's memory (SYNC_PLAN.md §3.5): a fresh session
-resumes from it alone.
+**State: final** (wave 1). The stage's exit pull request is TT-SAL/taskdeck#21. One lead session ran
+the stage, from 2026-11-23 00:01 UTC to about 22:00 UTC, on branch `claude/stoic-mayer-diyvrp`. This
+file is the stage's memory (SYNC_PLAN.md §3.5).
 
-## Resuming: read this first
+## After the exit: read this first
 
-1. Read SYNC_PLAN.md in full, then this file to the end, then `docs/sync/status/seal/briefs/common.md`.
-   `docs/sync/spec/seal.md` is the contract; R4 and V1 (`docs/sync/research/`) are the reasons behind it.
-2. Work on the branch your session names, from `day-planner`. Everything this stage finished is merged
-   there task by task (decision L6); what a session's running workflow had not finished starts again.
-3. Continue at the first task in "Tasks" that is not `done`, with its brief in
-   `docs/sync/status/seal/briefs/` (write the brief first where the table says "to write": the notes
-   under the table say what it must hold). The workflow script every task uses is
-   `docs/sync/status/seal/workflows/task.js`; "How this stage is run" says how it is launched.
-4. Never run two sessions on this stage.
+The stage is finished: every task below is `done`, the stage gate passes, and nothing waits to be
+resumed.
 
-## How this stage is run
+1. What other stages need from this one is the last section, "What the next stages need to know".
+   One question waits for the owner ("Open questions for the owner", O1).
+2. A later stage that needs a change in this stage's paths (`crates/taskdeck-seal`,
+   `docs/sync/vectors/seal-*`) makes it through a small pull request of its own and notes it in
+   both status files (SYNC_PLAN.md §3.2).
+3. Work that may still come to this crate: the owner's choice in O1 (options A and C change items
+   and transitions), and `engine`'s choice about the pairing bundle (Q79). Each is one small task.
+   "How this stage was run" says how a task was launched; the brief every agent read first is
+   `docs/sync/status/seal/briefs/common.md`, the workflow script `docs/sync/status/seal/workflows/task.js`.
+4. `docs/sync/spec/seal.md` is the contract; R4 and V1 (`docs/sync/research/`) are the reasons
+   behind it.
+
+## How this stage was run
 
 - One workflow per task, agents on `model: 'opus'` with effort `high`, set on every call. (When a
   usage window has room for one more agent only, `until = "security-1"` runs the first security pass
@@ -62,10 +67,10 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **done** (TT-SAL/taskdeck#14; two high findings of its security passes fixed and checked by the lead) |
 | S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **done**, merged (TT-SAL/taskdeck#16, 2026-11-23 16:42 UTC; one medium finding of its second security pass fixed) |
 | S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | **done** with S6 (TT-SAL/taskdeck#16); two of its points are completed by S7 (Q57, Q60) |
-| S7b | The last small code changes: rulings the spec states and the code does not yet do (Q57, Q60, Q56, Q18, Q15), and `write_backup` proving its stream before it seals, with a property test | `blob`, `pair`, `signatures`, `backup`, `prim` | §16, §17.10, §20.4, §20.5, §21.3 | `seal-blob`, `seal-signatures` | **done** with S7 (its pull request follows the spec change's, L19): S7's verify pass and both its security passes covered it; no finding in the library |
-| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | **done** (its pull request follows the spec change's, L19): one medium finding of its security passes fixed (six fuzz targets could not run); the stage gate passes in the lead's run, 164 of 164 clauses cited |
-| S8 | Hygiene pass, stage exit review, exit pull request | | | | **the exit review is done** (one high, four medium, six low points: "The exit review" below); the hygiene pass (`docs/sync/status/seal/workflows/exit.js` with `only: "hygiene"`) and the exit pull request follow S9 |
-| S9 | The exit review's two findings in code: the five fuzz targets that do not reach the parsers their rows name; SEAL-GEN-007 proven for pairing's comparisons | `fuzz/`, tests | §3, §17 | | planned, with the task shape of every task (brief: `briefs/s9.md`); it starts when the usage window has reset, about 20:40 UTC |
+| S7b | The last small code changes: rulings the spec states and the code does not yet do (Q57, Q60, Q56, Q18, Q15), and `write_backup` proving its stream before it seals, with a property test | `blob`, `pair`, `signatures`, `backup`, `prim` | §16, §17.10, §20.4, §20.5, §21.3 | `seal-blob`, `seal-signatures` | **done**, merged with S7 (TT-SAL/taskdeck#20, 2026-11-23 21:00 UTC): S7's verify pass and both its security passes covered it; no finding in the library |
+| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | **done**, merged (TT-SAL/taskdeck#20, 2026-11-23 21:00 UTC): one medium finding of its security passes fixed (six fuzz targets could not run); the stage gate passes in the lead's run, 164 of 164 clauses cited |
+| S8 | Hygiene pass, stage exit review, exit pull request | | | | **done**: the exit review and the hygiene pass ("The exit review" and "The hygiene pass" below); the exit pull request is TT-SAL/taskdeck#21 |
+| S9 | The exit review's two findings in code: the five fuzz targets that do not reach the parsers their rows name; SEAL-GEN-007 proven for pairing's comparisons | `fuzz/`, tests | §3, §17 | | **done** (TT-SAL/taskdeck#21; workflow run `wf_c7e0a075-ba6`, brief `briefs/s9.md`): no change to the library and no defect found in it; one medium finding of its verify pass fixed; its security passes found nothing above low |
 
 The briefs of S4, S5 and S6 name line ranges of `seal.md` as it stood on 2026-11-23 02:30 UTC; after
 a change to that file, check them against its headings before launching.
@@ -286,6 +291,42 @@ Notes behind the briefs (the lead's reading of the spec):
   target removed (L17); the budget baseline written, and the 25% rule judged on CI's runner (L18).
 - The lead's checks of the fix pass: with the two fixture lines as they were, the six targets fail in `fuzz_targets`; with one version line of the fuzz lockfile changed, the lockfile test fails; with `classify` dropping the snap context, the new SEAL-KIND-006 test fails; the budget example exits 1 over a baseline only with `--judge-baseline`. Each change was restored and compared byte for byte. The task gate and the stage gate pass in the lead's run on the result (17:28 UTC).
 
+## Task S9: what happened
+
+The exit review's two findings in code ("The exit review" below), run with the shape of every task.
+
+- Implementer (0.35 million tokens): each of the five fuzz targets is now one call to a function of
+  the fuzz crate's library that returns how far its input got. The three openers also shape the
+  plaintext and seal it properly, so the steps after the AEAD run on bytes the input chose; a
+  mutated snapshot body carries its own state hash, so that the parsers behind the hash check are
+  reached. `pair_new`'s fixture is a whole honest run (both machines to `Done` and `Joined`, with a
+  `Skip` so that a `FetchFrames` occurs), and its events are the honest one, a mutated one, one out
+  of place, or a tick. `pair_bundle` expects what §17.4 says at each size and draws from fixed
+  entropy. Six tests prove the reach; where two steps share a code, the failing input differs from
+  an opening one only in the sealed plaintext. A source scan of `pair.rs` proves SEAL-GEN-007 for
+  pairing. It ran each repaired target for a minute as a libFuzzer binary built on the stable
+  toolchain: 48,000 to 1.7 million executions each, no crash. No library defect.
+- Verify pass (0.20 million tokens): **one medium finding: no property test of the `parsers` target
+  reached the refusal of a blob's padding** (every test sealed valid padding or failed at the
+  AEAD), although the parser table said one did. Its fix pass (0.12 million tokens) added a
+  property test that seals random and mutated padded bodies properly and compares `open_blob`'s
+  answer with an oracle written from the spec; the lead checked it by weakening the padding check
+  (the test fails). Two low findings went to the last fix pass because they complete the exit
+  review's two points.
+- Security passes (0.22 and 0.20 million tokens): nothing above low. The harness lens ran every
+  repaired target twice over 3,000 generated inputs and large ones (no panic, no false assertion,
+  equal results) and found the allocations the targets reach bounded. The pairing lens drove both
+  machines through every state with every event out of place, the time limit at its last
+  millisecond, three wrong digit entries, and every one-byte change of the slots, and found no
+  divergence from §17.10; it listed every comparison of a secret-derived value in `src/` with the
+  test that guards it.
+- The last fix pass (0.17 million tokens), the lead's three items: the fuzz crate pins
+  `serde_json` and `flate2` exactly (the hygiene pass); the source scan also names the comparison
+  of a bundle root's commitment and the all-zero check of the Diffie-Hellman output, and says
+  which comparisons of `pair.rs` it leaves out because their values are public; both snapshot
+  targets reach the refusal of the padding, with a test for each.
+- The lead's checks: both gates on each step's result; by mutation, with the padding check of a blob weakened the new property test and the three padding reach tests fail, and with the commitment comparison of §17.9 step 5 written as `!=` the source scan fails. Each change was restored and compared byte for byte.
+
 ## The exit review
 
 One agent that did no work in the stage (0.25 million tokens, 2026-11-23 17:34 UTC) read the plan's
@@ -326,6 +367,33 @@ work (SYNC_PLAN.md §7); what the lead did with each:
 - Low, noted: the budget runs as a step of the seal job's hook and not as a CI job of its own
   (under L18); the review read the stage lists of two open rows against the "specs" column of
   `CHANGES.md`, and they match its "stages affected" column, so nothing changes there.
+
+## The hygiene pass
+
+One agent that did no work in the stage (0.15 million tokens, 2026-11-23 21:12 UTC, after S9's
+implementer, so that S9's files are among the 186 it read): the working copy's files of the stage,
+grepped and sampled for secrets, addresses, names and board content; every hex string of the
+vectors decoded and read; the dependency tree and both lockfiles.
+
+- **Nothing of the kind the plan forbids:** no secret, no real address, token or account name,
+  nothing from a real board (device names are "Laptop" and "Phone", boards are `{"cards":[]}`, hosts
+  are reserved example names), no stray, empty or binary file, no `dbg!` or print in `src`, no
+  commented-out code. Every key-like value it sampled in the vectors comes from a seed its
+  generating test states. Each third-party data file names its source, its SHA-256 and its licence
+  (`tests/kat/README.md`).
+- **Dependencies:** each is one §3.4 approves. `getrandom` is the only entropy crate in the normal
+  tree and SEAL-GEN-005 requires it. The stage's one lockfile change (TT-SAL/taskdeck#6) added two
+  edges and no package. Every package of the fuzz lockfile stands in the root lockfile.
+- **Medium: two dependencies of the fuzz crate are not pinned exactly** (`serde_json`, `flate2`:
+  caret requirements, where every other line of that manifest has `=`). To S9's fix pass.
+- Low, listed: seven `#[allow(...)]` attributes give no reason beside them (five
+  `clippy::too_many_arguments`, two `dead_code` in a test macro); the host checker's unit test uses
+  `a.com` and `1.2.3.4` as syntax inputs, which are not reserved example names; the wording of the
+  pass's own brief about `getrandom` (corrected in `workflows/exit.js`).
+- Low, not this stage's file: the root manifest gives `serde`, `serde_json`, `flate2`, `subtle`,
+  `zeroize` and `proptest` as caret requirements (the lockfile holds them; the manifest's own
+  comment plans `zeroize = "=1.9.2"` once its cooldown ends on 2026-11-24). For whoever next
+  changes the root manifest, in a pull request of its own.
 
 ## Decisions (with reasons)
 
@@ -699,7 +767,9 @@ Applied with the same change (they were candidates until task S3 confirmed the p
 | Task S3, the implementer | 35 minutes; 0.89 million tokens | 2026-11-23 01:42 to 02:17 UTC |
 | The crate's tests after S3 | 152 unit tests, 34 in the four gate targets, 11 vector families (the two largest 412 KB and 213 KB) | the lead's run, 02:19 UTC |
 | The crate's tests after S7 | 262 unit tests, 144 tests in nine integration targets and one doc test with `test-entropy` (407 in all); 16 vector families; 26 fuzz targets, each run over 158 fixed inputs by the target `fuzz_targets` | the lead's run, 2026-11-23 17:28 UTC |
-| The stage gate, `bash scripts/gate.sh seal` | passes: 11 items run, 2 for CI; `spec-coverage` 164 of 164 | the lead's runs of 16:53 and 17:28 UTC; the verifier's run of 17:00 UTC agrees |
+| The crate's tests after S9's implementer | 263 unit tests, 150 tests in nine integration targets and one doc test with `test-entropy` (414 in all); each of the five repaired fuzz targets ran for a minute as a libFuzzer binary (48,000 to 1.7 million executions, no crash) | the lead's run, 2026-11-23 21:10 UTC; the implementer's run |
+| The crate's tests at the exit | 263 unit tests, 153 tests in nine integration targets and one doc test with `test-entropy` (417 in all); 16 vector families; 26 fuzz targets; 164 of 164 clauses cited, in 115 test files | the lead's run, 2026-11-23 21:43 UTC |
+| The stage gate, `bash scripts/gate.sh seal` | passes: 11 items run, 2 for CI; `spec-coverage` 164 of 164 | the lead's runs of 16:53, 17:28, 21:10, 21:24 and 21:43 UTC; the verifier's and the exit reviewer's runs agree |
 | **Budget: 256 entries verified and opened** (limit 100 ms), median of five, release build | **baseline 13,542 µs**: GitHub's `ubuntu-latest` runner measured 13,488 and 13,542 µs in the two CI runs of commit `bfaf3d2` (the slower is the baseline, in `crates/taskdeck-seal/budget-baseline.txt`), and 11,145 µs on another runner in the run of `54a595a`. In the container 14.2 to 16.1 ms (nine runs by the lead and the agents) | the Linux seal jobs of TT-SAL/taskdeck#19's CI, 2026-11-23 17:01 and 17:03 UTC; `examples/budget.rs` |
 | The same on a membership with 100,000 control entries (0.8 MB of state; the per-entry copy) | 16.6, 19.3 and 21.4 ms on CI, 21 to 29 ms in the container; not judged | the same runs |
 | `read_backup` of a nightly file with 2,000 history records | 84, 102 and 103 ms on CI, 104 to 110 ms in the container (one signature check per record); not judged | the same runs |
@@ -748,7 +818,13 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S7, the verifier (S7b and S7) | 1 | 0.22 M | 0.25 M | 0.25 M |
 | | S7, security passes and the fix pass | 3 | 0.64 M | 0.66 M | 0.66 M |
 | | the exit review | 1 | 0.21 M | 0.25 M | 0.25 M |
-| | **window total** (nothing more is started in it: the hygiene pass or S9's implementer would bring it to the level at which the account's limit was hit in the window before) | | | | **2.96 M** |
+| | **window total** (nothing more was started in it. The account's limit was hit all the same at about 17:57 UTC, with this stage's agents at 2.96 M and none of them running: the other session, which finished its stage in this window, and both leads' own turns used the rest. So the room for this stage's agents depends on what else runs, and 3.5 M is an upper bound, not a plan) | | | | **2.96 M** |
+| from 2026-11-23 22:40 (the owner: the limit has reset; 20:40 UTC) | S9, the implementer | 1 | 0.27 M | 0.35 M | 0.35 M |
+| | the hygiene pass | 1 | 0.14 M | 0.15 M | 0.15 M |
+| | S9, the verifier and its fix pass | 2 | 0.28 M | 0.31 M | 0.31 M |
+| | S9, security passes and the fix pass | 3 | 0.55 M | 0.59 M | 0.59 M |
+| | **window total** | | | | **1.40 M** |
+| **The stage in all** | five usage windows, 53 agents | | | | **14.41 M** |
 
 ## Low findings left as they are
 
@@ -840,17 +916,38 @@ output); the higher is booked. Limit: 3.5 million per window.
   `open_snapshot`, `open_snapshot_declared` and `open_blob` mutate sealed bytes and stop at the
   AEAD; only `snapshot_body` seals around a mutated body, in the normal mode, where the recomputed
   state hash now refuses a changed board or membership first. No fuzz target reaches the declared
-  mode's parse of a mutated body (the property tests of `tests/parsers` do). For `release`.
+  mode's parse of a mutated body (the property tests of `tests/parsers` do). Repaired by task S9.
 - **S7, security (parsing).** (1) The fuzz target `pair_new` cannot move N's machine past its wait
   for slot C: its fixture has no valid slot C or D, and its `Entries` frames are at most 255 bytes.
   (2) The fuzz target `pair_bundle` reports a false crash for a bundle plaintext over 16,000 bytes
   (N's correct `seal/slot_mac`), and its helper draws from `OsEntropy`, so a run is not a function
-  of its input alone. Both are for `release` to repair before it relies on these two targets.
+  of its input alone. Both repaired by task S9.
 - **S7, reviewers' notes, not findings.** `write_backup` at a large payload holds about four times
   the payload in memory (the payload's copy and the compressed buffer's doubling). The fuzz target
   `snapshot_body` reaches the body parser only when the mutated length stays within one byte of the
   original. Whether rustdoc on the pinned toolchain enforces the error code of the compile-fail doc
   test (E0277) was not checked; the test fails to compile either way.
+
+- **S9, verify.** Its medium finding is fixed (a property test for a blob's padding check). Its two
+  low findings complete the exit review's two points and went to the fix pass (the source scan for
+  SEAL-GEN-007 did not name one comparison of `pair.rs`; the two snapshot targets did not reach
+  the padding refusal). A note that is no finding: `pair_new` builds arbitrary frames of at most
+  65,535 bytes, so frames near the limit of 262,144 bytes do not come from that fuzz target.
+- **The hygiene pass.** Seven `#[allow(...)]` attributes without a reason beside them; `a.com` and
+  `1.2.3.4` as syntax inputs of the host checker's unit test.
+- **S9, security (the harnesses).** In the declared mode, the branch of `open_snapshot_declared`
+  that mutates sealed bytes takes the declared size from eight input bytes, so on random input it
+  ends at step 1 (`seal/blob_size`) and reaches the declared header, epoch and missing-root checks
+  only when those bytes line up (an input with them zero does; a coverage-guided fuzzer finds
+  it). The branch is as it was before S9.
+- **S9, security (pairing).** (1) The source scans for SEAL-GEN-007 look for the operator forms: a
+  comparison written as `.eq(..)`, or a `ct_eq` kept beside it unused, passes them, and the scan of
+  `keys.rs` does not look for `!=`. A scan guards the ordinary forms (SYNC_PLAN.md §3.3). (2) No
+  scan names the four comparisons of a root's commitment in `receipt.rs` (steps and genesis) and
+  `backup.rs` (`write_backup`, `read_backup`): each is `ct_eq` today, and each could become `==`
+  with every test still passing. The lead leaves both listed: the plan's rule for low findings,
+  and the one fix pass of the task had run. A test in `tests/crate_rules` that pins every `ct_eq`
+  site of `src/` would close both, when a later task touches the crate.
 
 ## Open questions for the owner
 
@@ -1034,14 +1131,16 @@ hostile, "joined" on the new device is not proof; the existing device's result i
 - `crates/taskdeck-seal/fuzz` holds 26 fuzz targets, one per row of the parser table
   (`tests/parsers/main.rs`), in a crate with its own `[workspace]` and lockfile. CI compiles them
   (`cargo check`, Linux), and the test target `fuzz_targets` runs every target's body and fixture
-  over 158 fixed inputs; no fuzzer has run them yet (the fix pass ran three of them for a moment
-  as real libFuzzer binaries). A test in `tests/crate_rules` keeps the fuzz lockfile within the
-  root lockfile, so the root's supply-chain gate covers it (L16).
-- Before relying on them, repair four harnesses (low findings of S7's security passes, listed
-  above): `pair_new` cannot move the new device's machine past its wait for slot C; `pair_bundle`
-  reports a false crash for a plaintext over 16,000 bytes and draws from `OsEntropy`;
-  `open_snapshot`, `open_snapshot_declared` and `open_blob` mutate sealed bytes and stop at the
-  AEAD.
+  over 158 fixed inputs and proves, for the five targets of the openers and of pairing, that each
+  reaches the parsers its row names (`s9_reach`). No fuzzer runs in CI. Eight targets have run for
+  a moment as libFuzzer binaries built on the stable toolchain (the five of S9 for a minute each),
+  with no crash. A test in `tests/crate_rules` keeps the fuzz lockfile within the root lockfile,
+  so the root's supply-chain gate covers it (L16); every dependency of the fuzz crate is pinned
+  exactly.
+- The harnesses' known limits (low findings, listed above): `pair_new` builds arbitrary frames of
+  at most 65,535 bytes; the branch of `open_snapshot_declared` that mutates sealed bytes rarely
+  gets past the size check on random input; `snapshot_body` reaches the body parser only when the
+  mutated length stays within one byte of the original.
 - The budget (256 entries verified and opened within 100 ms) is `examples/budget.rs`, run by `ci.sh`
   on Linux. The baseline, 13,542 µs, is in `crates/taskdeck-seal/budget-baseline.txt`: the number
   GitHub's Linux runner measured. The 100 ms limit is judged everywhere; the 25% rule only on
@@ -1049,8 +1148,21 @@ hostile, "joined" on the new device is not proof; the existing device's result i
   container 14.2 to 16.1 ms alone, more while something else builds; GitHub's own runners gave
   11.1 to 13.5 ms).
 
+**For every stage: two things in shared files that are not this stage's.**
+
+- `scripts/tests/test-ci-changes.sh` has a race in its own harness: it pipes a list of paths into
+  `changes.sh`, which for a head message that asks for the full run exits without reading, and the
+  writer then sometimes gets a broken pipe (one case of 152 failed once, in the CI of
+  TT-SAL/taskdeck#21; the workflow itself is not affected). The fix, feeding the paths from a file,
+  follows this stage's exit in a pull request of its own.
+- The root manifest gives `serde`, `serde_json`, `flate2`, `subtle`, `zeroize` and `proptest` as
+  caret requirements; the lockfile holds them. Pin them with `=` when the root manifest is next
+  changed, in a pull request of its own (the hygiene pass).
+
 **Working on this crate later.** One writer at a time. The coverage scanner reads only `tests/**`,
 `fuzz/fuzz_targets/**`, `src/**/tests.rs` and `src/**/*_tests.rs`. `tests/memory` installs a
 test-only allocator that scans freed blocks (L15); `tests/crate_rules` scans the sources for the
-whole-crate clauses and fixes the set of dependencies. The low findings left as they are stand in
-their section above; none is a defect an honest board meets.
+whole-crate clauses and fixes the set of dependencies. SEAL-GEN-007 is guarded by source scans in
+`chain`, `keys` and `pair`; the commitment comparisons of `receipt.rs` and `backup.rs` are
+constant-time and no scan names them (a low finding, listed). The low findings left as they are
+stand in their section above; none is a defect an honest board meets.
