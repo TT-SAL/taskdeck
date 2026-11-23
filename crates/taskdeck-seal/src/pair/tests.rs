@@ -1000,9 +1000,24 @@ fn e_refuses_slot_b_when_no_device_no_is_left() {
 // with its label and role (`open_slot`); slot C's opening with the
 // commitment (N's `slot_c`); the typed digits with the SAS (`sas_entered`);
 // the transcript a `DeviceAdded` carries with N's own (§17.9 step 7,
-// `check_added`); and the repeat check of an accepted slot (`same_slot`, and
-// the two machines' use of it). None of these values is compared with `==`
-// or `!=`: no line of those functions that holds `==` or `!=` names one.
+// `check_added`); the repeat check of an accepted slot (`same_slot`, and
+// the two machines' use of it); the all-zero check of the Diffie-Hellman
+// output (`diffie_hellman`, SEAL-GEN-013); and each bundle root's commitment
+// with the one `M_h` records (§17.9 step 5, N's `snapshot`). None of these
+// values is compared with `==` or `!=`: no line of those functions that holds
+// `==` or `!=` names one.
+//
+// Left out, because the values are public, not derived from a secret: in
+// N's `snapshot`, the snapshot's chain value with the bundle head's
+// (`body.chain != b.head.chain`) and the recomputed state hash and the
+// body's `state_hash` with the bundle's (`hash_ok`: the state hash a signed
+// entry carries; `ct_eq` there all the same); in N's `frames`, a frame's
+// `frame_hash` with the one its Skip item names; in N's `slot_d`, the
+// bundle's `board_id`, `host` and `door` with those entered with the code
+// (the relay address); in N's `check_added` and E's `slot_b`, device ids,
+// public keys, names and seqs; and the lengths, counts, epochs and seqs
+// compared everywhere, and the JSON literals of the bundle's parser
+// (`Cur::lit`).
 // spec: SEAL-GEN-007
 #[test]
 fn pairing_secret_comparisons_are_constant_time() {
@@ -1020,13 +1035,15 @@ fn pairing_secret_comparisons_are_constant_time() {
     let words = |line: &str| -> Vec<String> {
         line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(str::to_owned).collect()
     };
-    let cases: [(&str, &[&str], &[&str]); 6] = [
+    let cases: [(&str, &[&str], &[&str]); 8] = [
         ("pub fn parse_code(", &["typed.as_slice().ct_eq(&want[..])"], &["typed", "want", "check"]),
         ("fn open_slot<", &["want.ct_eq(mac)", "l.ct_eq(&label)", "r.ct_eq(&role)"], &["want", "mac", "l", "r", "label", "role"]),
         ("fn slot_c(", &["commitment(epk_e, r_e).ct_eq(&self.commit)"], &["commitment", "commit", "epk_e", "r_e"]),
         ("fn sas_entered(", &["digits.as_bytes().ct_eq(&sec.sas[..])"], &["digits", "sas"]),
         ("fn check_added(", &["a.transcript.ct_eq(t)"], &["transcript", "t"]),
         ("fn same_slot(", &["accepted.ct_eq(bytes)"], &["accepted", "bytes"]),
+        ("fn diffie_hellman(", &["out.ct_eq(&[0u8; 32])"], &["out"]),
+        ("fn snapshot(", &["r.commitment(&self.board, *e).ct_eq(recorded)"], &["commitment", "recorded"]),
     ];
     for (head, ct, values) in cases {
         let b = body(head);

@@ -299,7 +299,8 @@ pub fn blobs() -> &'static Blobs {
 /// for the `S` and writer of the call (checked here with the pinned crates,
 /// apart from the crate), so that a `seal/blob_open` after the AEAD can be
 /// told from the AEAD's own; and what the harness shaped and sealed: the
-/// padded body of a blob, or a snapshot body before compression.
+/// padded body of a blob, or a snapshot body before compression, or the
+/// padded stream of a snapshot where the input chose it.
 pub struct Reach {
     pub result: Result<(), SealError>,
     pub aead_opens: bool,
@@ -417,6 +418,8 @@ pub struct SnapCase {
     pub hash_version: u32,
     /// The body before compression, where the harness shaped one.
     pub body: Option<Vec<u8>>,
+    /// The padded stream (§20.3) sealed as it is, where the input chose it.
+    pub padded: Option<Vec<u8>>,
 }
 
 /// The key of the fixture's snapshots (epoch 2), computed here.
@@ -427,9 +430,20 @@ pub fn snap_key_bytes() -> [u8; 32] {
 
 /// Sealed bytes of kind 1 at epoch 2 around `compressed`, for `S = seq`.
 fn seal_snap(seq: u64, compressed: &[u8]) -> Vec<u8> {
+    seal_snap_padded(seq, &blob::pad(compressed))
+}
+
+/// Sealed bytes of kind 1 at epoch 2 with `padded` as the plaintext, as it
+/// is (no padding added), for `S = seq`.
+fn seal_snap_padded(seq: u64, padded: &[u8]) -> Vec<u8> {
     let b = blobs();
     let raw = blob::Raw::new(1, 2, b.sim.board, seq, b.writer, [3; 16], [4; 24]);
-    raw.seal(&snap_key_bytes(), &blob::pad(compressed))
+    raw.seal(&snap_key_bytes(), padded)
+}
+
+/// The padded stream of §20.3 around the fixture's compressed body.
+pub fn padded_snapshot_stream() -> Vec<u8> {
+    blob::pad(&blobs().compressed)
 }
 
 /// The snapshot an input shapes, for `open_snapshot` and
@@ -438,9 +452,12 @@ fn seal_snap(seq: u64, compressed: &[u8]) -> Vec<u8> {
 ///   (with bit 2, the rest itself), with their own hash: steps 1 to 4; the
 ///   next byte is a split point (used with bit 3), the next 8 the expected
 ///   `inflated` (or the declared size);
-/// - `% 4 == 1`: the fixture's compressed body mutated by the rest, sealed
-///   properly here: the inflate (step 6) and, when it inflates, the body;
-///   the next byte gives `inflated` as the body's length − 1, + 0, or + 1;
+/// - `% 4 == 1`: the fixture's compressed body mutated by the rest, padded
+///   and sealed properly here: the inflate (step 6) and, when it inflates,
+///   the body; the next byte gives `inflated` as the body's length − 1, + 0,
+///   or + 1. With bit 2, the fixture's padded stream (§20.3) mutated by the
+///   rest, and with bit 3 (not bit 2) the rest itself, is sealed properly
+///   here as it is, with no padding added: the padding (step 5) judges it;
 /// - `% 4 == 2`: the fixture's body mutated by the rest, compressed and
 ///   sealed here, with `inflated` its length; when its lengths still frame a
 ///   board and a membership (and the next byte is even), its `state_hash` is
@@ -464,6 +481,7 @@ pub fn snap_case(i: &mut Input<'_>) -> SnapCase {
         hash: b.hash,
         hash_version: 1,
         body,
+        padded: None,
     };
     match mode % 4 {
         0 => {
@@ -475,8 +493,14 @@ pub fn snap_case(i: &mut Input<'_>) -> SnapCase {
         }
         1 => {
             let slack = u64::from(i.byte() % 3);
-            let sealed = seal_snap(s.seq(), &mutate(&b.compressed, i.rest()));
-            honest(sealed, (b.body.len() as u64).saturating_sub(1) + slack, None)
+            let inflated = (b.body.len() as u64).saturating_sub(1) + slack;
+            let padded = match mode & 12 {
+                0 => return honest(seal_snap(s.seq(), &mutate(&b.compressed, i.rest())), inflated, None),
+                4 | 12 => mutate(&padded_snapshot_stream(), i.rest()),
+                _ => i.rest().to_vec(),
+            };
+            let sealed = seal_snap_padded(s.seq(), &padded);
+            SnapCase { padded: Some(padded), ..honest(sealed, inflated, None) }
         }
         2 => {
             let fix = i.byte() % 2 == 0;
@@ -522,7 +546,11 @@ pub fn reach_open_snapshot(data: &[u8]) -> Reach {
     let c = snap_case(&mut Input::new(data));
     let r = BlobRef { sha256: backup::sha(&[&c.sealed]), ..blob::blob_ref(&c.sealed, c.inflated, 2) };
     let result = open_snapshot(&cut(&c.sealed, c.at), &r, c.s, &c.hash, c.hash_version, &b.writer, &blob::snap_key(s), &s.board);
-    Reach { result: result.map(|_| ()), aead_opens: aead_opens(&c.sealed, &snap_key_bytes(), &s.board, c.s, &b.writer), shaped: c.body }
+    Reach {
+        result: result.map(|_| ()),
+        aead_opens: aead_opens(&c.sealed, &snap_key_bytes(), &s.board, c.s, &b.writer),
+        shaped: c.body.or(c.padded),
+    }
 }
 
 /// The work of the fuzz target `open_snapshot_declared` (§20.5, the declared
@@ -538,7 +566,11 @@ pub fn reach_open_snapshot_declared(data: &[u8]) -> Reach {
     let c = snap_case(&mut Input::new(data));
     let sha = backup::sha(&[&c.sealed]);
     let result = open_snapshot_declared(&cut(&c.sealed, c.at), &sha, c.size, c.s, &b.writer, &roots, &s.board);
-    Reach { result: result.map(|_| ()), aead_opens: aead_opens(&c.sealed, &snap_key_bytes(), &s.board, c.s, &b.writer), shaped: c.body }
+    Reach {
+        result: result.map(|_| ()),
+        aead_opens: aead_opens(&c.sealed, &snap_key_bytes(), &s.board, c.s, &b.writer),
+        shaped: c.body.or(c.padded),
+    }
 }
 
 // ------------------------------------------------------------ pairing

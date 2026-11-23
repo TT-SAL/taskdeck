@@ -31,7 +31,7 @@
 //! | `read_backup`                             | `s4_parsers::backup_readers_never_panic`                               | `read_backup`            |
 //! | `verify_backup_file`                      | `s4_parsers::backup_readers_never_panic`                               | `verify_backup_file`     |
 //! | `open_blob`, its header, AEAD and padding | `s5_parsers::openers_never_panic_on_sealed_bytes` (header, AEAD); `s9_parsers::open_blob_never_panics_on_padded_bodies` (padding) | `open_blob` (mutated sealed bytes; padded bodies sealed in the target) |
-//! | `open_snapshot`, every step of §20.5      | `s5_parsers::openers_never_panic_on_sealed_bytes`, `..._on_bodies`     | `open_snapshot` (mutated sealed bytes; streams, bodies and body fields sealed in the target, the expected hash the body's own) |
+//! | `open_snapshot`, every step of §20.5      | `s5_parsers::openers_never_panic_on_sealed_bytes`, `..._on_bodies`     | `open_snapshot` (mutated sealed bytes; padded streams, compressed streams, bodies and body fields sealed in the target, the expected hash the body's own) |
 //! | `open_snapshot_declared`, every step      | `s5_parsers::openers_never_panic_on_sealed_bytes`, `..._on_bodies`     | `open_snapshot_declared` (as `open_snapshot`, sealed under the declared root's key) |
 //! | `pair::parse_code`                        | `s6_pairing::parse_code_never_panics`                                  | `parse_code`             |
 //! | N's machine (`New::on`), any events       | `s6_pairing::the_machines_never_panic_on_random_events`, `mutated_slots_never_panic`, `a_mutated_join_never_panics` | `pair_new` (a whole honest run's events, mutated, out of place, ticks, any event of real size) |

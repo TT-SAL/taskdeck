@@ -13,7 +13,7 @@
 use taskdeck_seal::*;
 
 use crate::{
-    BLOB_BODY, BUNDLE_PT_BOUND, Reach, blobs, fields, reach_open_blob, reach_open_snapshot, reach_open_snapshot_declared,
+    BLOB_BODY, BUNDLE_PT_BOUND, Reach, blobs, fields, padded_snapshot_stream, reach_open_blob, reach_open_snapshot, reach_open_snapshot_declared,
     reach_pair_bundle, reach_pair_new,
 };
 
@@ -144,6 +144,57 @@ fn open_snapshot_declared_reaches_its_parsers() {
     let half = blobs().compressed.len() / 2;
     snapshot_cases(reach_open_snapshot_declared, &input(&[1, 0], &[edit(half, 4, 0)]));
     opens(&reach_open_snapshot_declared(&[1, 0]));
+}
+
+/// The padding (step 5) of a snapshot, for either mode, on padded streams
+/// the input chose (mode 1 with bit 2: the fixture's padded stream mutated
+/// by the rest; with bit 3: the rest itself), sealed properly in the
+/// harness; `slack` is the byte that gives `inflated`, chosen so that the
+/// honest stream opens in that mode.
+fn snapshot_padding(open: fn(&[u8]) -> Reach, slack: u8) {
+    let padded = padded_snapshot_stream();
+    let last = padded.len() - 1;
+    // The stream holds padding: its length field and the compressed body
+    // leave at least one zero byte at its end.
+    assert!(4 + blobs().compressed.len() < padded.len());
+    assert_eq!(padded[last], 0);
+
+    // The fixture's padded stream, sealed as it is: opens.
+    let ok = open(&[1 | 4, slack]);
+    opens(&ok);
+    assert_eq!(ok.shaped.as_deref(), Some(&padded[..]));
+    // The same stream with its last padding byte set, nothing else: the
+    // AEAD opens it, and the padding (step 5) refuses it. The compressed
+    // body and its length are those of the stream that opens, so no later
+    // step can be the one that fails.
+    let r = open(&input(&[1 | 4, slack], &[edit(last, 0, 1)]));
+    after_aead(&r, SealError::BlobOpen);
+    let shaped = r.shaped.unwrap();
+    assert_eq!((&shaped[..last], shaped[last]), (&padded[..last], 1));
+    // The rest itself as the padded stream: the honest stream opens; with
+    // its length field the stream's whole length (more than the bytes after
+    // it), it fails at the padding.
+    opens(&open(&[&[1 | 8, slack][..], &padded].concat()));
+    let mut long = padded.clone();
+    long[..4].copy_from_slice(&u32::try_from(padded.len()).unwrap().to_be_bytes());
+    let r = open(&[&[1 | 8, slack][..], &long].concat());
+    after_aead(&r, SealError::BlobOpen);
+    assert_eq!(r.shaped.as_deref(), Some(&long[..]));
+}
+
+// `open_snapshot`: the padding of a snapshot (step 5) refuses a padded
+// stream the input chose, after the AEAD has opened it.
+// spec: SEAL-GEN-011
+#[test]
+fn open_snapshot_reaches_the_padding() {
+    snapshot_padding(reach_open_snapshot, 1);
+}
+
+// `open_snapshot_declared`: the same in the declared mode.
+// spec: SEAL-GEN-011
+#[test]
+fn open_snapshot_declared_reaches_the_padding() {
+    snapshot_padding(reach_open_snapshot_declared, 0);
 }
 
 // ------------------------------------------------------------ pairing
