@@ -31,6 +31,29 @@ pub(crate) fn hkdf32(salt: &[u8], ikm: &[u8], info_parts: &[&[u8]]) -> Zeroizing
     okm
 }
 
+/// `HKDF(salt, ikm, info_parts[0] ‖ info_parts[1] ‖ …, 8)` (seal.md §2; the
+/// SAS of §17.7).
+pub(crate) fn hkdf8(salt: &[u8], ikm: &[u8], info_parts: &[&[u8]]) -> Zeroizing<[u8; 8]> {
+    let mut okm = Zeroizing::new([0u8; 8]);
+    let hk = hkdf::Hkdf::<Sha256>::new(Some(salt), ikm);
+    // 8 bytes is far below HKDF-SHA256's limit; the length is a constant.
+    hk.expand_multi_info(info_parts, &mut okm[..])
+        .expect("8 bytes is a valid HKDF-SHA256 output length");
+    okm
+}
+
+/// `HMAC(key, parts[0] ‖ parts[1] ‖ …)` with HMAC-SHA256 (seal.md §2), from
+/// the `hmac` crate that `hkdf` re-exports (SEAL-GEN-003).
+pub(crate) fn hmac32(key: &[u8; 32], parts: &[&[u8]]) -> [u8; 32] {
+    use hkdf::hmac::{Hmac, KeyInit as _, Mac as _};
+    // HMAC takes a key of any length; a 32-byte key never fails.
+    let mut m = Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts a 32-byte key");
+    for p in parts {
+        m.update(p);
+    }
+    m.finalize().into_bytes().into()
+}
+
 /// HPKE `DeriveKeyPair(ikm)` (RFC 9180 §7.1.3) for DHKEM(X25519, HKDF-SHA256):
 /// the private key as an X25519 static secret, and the 32-byte public key.
 pub(crate) fn hpke_derive(ikm: &[u8]) -> (x25519_dalek::StaticSecret, [u8; 32]) {

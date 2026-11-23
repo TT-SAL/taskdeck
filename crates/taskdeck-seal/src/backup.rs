@@ -356,7 +356,9 @@ fn encode_parts(
     Ok(PayloadParts { head: p, secret, tail })
 }
 
-/// The payload of §21.5 in one zeroizing buffer (it holds the roots).
+/// The payload of §21.5 in one zeroizing buffer (it holds the roots); the
+/// unit tests' reference for the split encoding the writer uses.
+#[cfg(test)]
 pub(crate) fn encode_payload(
     history: &[HistoryRecord],
     content: &BackupContent,

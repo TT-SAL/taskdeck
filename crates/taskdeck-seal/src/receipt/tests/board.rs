@@ -489,10 +489,6 @@ impl WithPurge for EpochRotated {
     }
 }
 
-pub fn code(r: &Receipt) -> Option<&'static str> {
-    r.code
-}
-
 pub fn class_name(r: &Receipt) -> &'static str {
     match r.class {
         Class::Skip => "Skip",

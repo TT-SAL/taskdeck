@@ -12,6 +12,8 @@ mod board;
 mod backup;
 #[path = "../common/blob.rs"]
 mod blob;
+#[path = "../common/pairing.rs"]
+mod pairing;
 
 mod s1_chain;
 mod s1_kdf;
@@ -27,6 +29,8 @@ mod s3_rotation;
 mod s4_backup;
 mod s4_file;
 mod s5_blob;
+mod s6_code;
+mod s6_pairing;
 
 use serde_json::Value;
 

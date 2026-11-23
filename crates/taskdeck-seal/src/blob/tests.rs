@@ -32,6 +32,7 @@ fn body_of(x: &Hist) -> SnapshotBody {
     }
 }
 
+#[cfg(feature = "test-entropy")]
 fn copy_body(b: &SnapshotBody) -> SnapshotBody {
     SnapshotBody {
         seq: b.seq,
@@ -579,7 +580,6 @@ fn the_declared_mode() {
     let x = hist();
     let (sb, r) = sealed(&x);
     let b = &sb.bytes;
-    let s = x.b.seq();
     let w = writer(&x);
     let r1 = copy(&x.b.roots[&1]);
     let r2 = copy(&x.b.roots[&2]);
