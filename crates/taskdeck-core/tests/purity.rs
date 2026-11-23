@@ -58,12 +58,14 @@ fn clippy_disallows_the_clock_and_the_local_zone() {
 // spec: CORE-GEN-005
 #[test]
 fn exactly_three_dependencies() {
-    let start = MANIFEST.find("\n[dependencies]\n").expect("a [dependencies] table") + "\n[dependencies]\n".len();
-    let body = &MANIFEST[start..];
-    let body = &body[..body.find("\n[").unwrap_or(body.len())];
-    let mut names: Vec<&str> = body
+    // By lines, so that a checkout with CRLF line endings (Windows) reads the same.
+    assert!(MANIFEST.lines().any(|l| l.trim() == "[dependencies]"), "a [dependencies] table");
+    let mut names: Vec<&str> = MANIFEST
         .lines()
         .map(str::trim)
+        .skip_while(|l| *l != "[dependencies]")
+        .skip(1)
+        .take_while(|l| !l.starts_with('['))
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(|l| {
             // At the workspace's pinned version.
