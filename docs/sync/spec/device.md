@@ -355,7 +355,7 @@ The sealer adapter's export (`Sealer::export_identity`, `engine.md` §6.1), held
 | Field | Width | Type | Value |
 |---|---|---|---|
 | `magic` | 4 | ASCII | `"TDI1"` |
-| `keys` | 2 + k | vb16 | `DeviceKeys::to_identity_bytes` (`seal.md` §26) |
+| `keys` | 2 + k | vb16 | `DeviceKeys::to_identity_bytes` (`seal.md` §26): 80 bytes, so `k = 80` |
 | `n_roots` | 2 | u16 | 0 to 65,535 |
 | roots | 36 × `n_roots` | | `epoch u32 ‖ root[32]`, strictly ascending by epoch |
 | `n_pending` | 1 | u8 | 0 to 16 |
@@ -1864,7 +1864,7 @@ Stage `device` publishes these families under `crates/taskdeck-device/tests/vect
 **`seal.md`.**
 - Requires: the file kinds 1 to 18 of `seal.md` §19.2, kind 1 being the segments `log-<first seq>.tdl` (§6.1), and kind 19 for the phone's own picture (ruling S29), with the matching `FileKind` variants of `seal.md` §26. Kinds 9 and 10 are `engine.md` §36's request; the others are this spec's.
 - Relies on: `taskdeck_seal::verify_backup_file(bytes, writer_sign_pk) -> Result<BackupHeader, SealError>` (`seal.md` §21.6, §26, SEAL-BKP-009), which runs §21.6 steps 1, 2 and 5 only, so a writer checks what it wrote without the recovery key (§15.3.2).
-- Requires: the sealer adapter of `taskdeck-device` composes the identity export of §6.4.7 from `DeviceKeys::to_identity_bytes`, the roots and the anchor; `seal.md` §19.2's description of kind 7 ("its private keys and the epoch roots it holds") is that layout.
+- Requires: the sealer adapter of `taskdeck-device` composes the identity export of §6.4.7 from `DeviceKeys::to_identity_bytes`, the roots and the anchor; `seal.md` §19.2's description of kind 7 ("its private keys and the epoch roots it holds") is that layout. The adapter and the transport (§10) carry the duties `seal.md` §25 names for them (SEAL-FRAME-005, SEAL-ENV-003, SEAL-ENV-004, SEAL-SIG-005, SEAL-MEM-016, and the caller's halves of SEAL-WRAP-003 and SEAL-SIG-002); stage `device` tests them.
 - Assumes: `StorageKey::from_bytes` and `open_file`'s `FileTail { Torn, Bad }` with `valid_bytes` are what §7.4 uses; `sign_login` takes the origin from the caller (SEAL-SIG-002); `seal_frame` and `ctl_payload` with `Signer::Recovery` compose the recovery-authored `Fence` of §15.8; `open_blob` takes the writer as an argument (§14.2 step 3).
 - Relies on: `taskdeck_seal::TEST_ENTROPY_MARKER` (`seal.md` SEAL-GEN-014), which a build with `test-entropy` contains and `release` searches for together with the `test-trust` marker (§11.2, DEV-TRUST-003).
 - Provides: the contents, write and fsync order of every sealed file, torn and bad tails (§7), the key stores that wrap `L_d` with `ctx("local-key") ‖ board_id ‖ dev` (§12), history records kept for life (§8.3, DEV-FILE-011), backup scheduling, destinations, names and `meta` (§15), the pinned recovery fingerprint (§15.5), release builds without `test-entropy` (§11.2).
