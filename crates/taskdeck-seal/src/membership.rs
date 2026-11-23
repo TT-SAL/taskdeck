@@ -449,49 +449,57 @@ fn put_vb8(o: &mut Vec<u8>, x: &[u8]) {
     o.extend_from_slice(x.get(..usize::from(n)).unwrap_or(x));
 }
 
-/// A cursor over input bytes; every read checks the bytes remaining.
-struct Reader<'a> {
+/// A cursor over input bytes; every read checks the bytes remaining (also
+/// the backup payload's parser, `backup.rs`).
+pub(crate) struct Reader<'a> {
     b: &'a [u8],
     at: usize,
 }
 
 impl<'a> Reader<'a> {
-    fn arr<const N: usize>(&mut self) -> Option<[u8; N]> {
+    pub(crate) fn new(b: &'a [u8]) -> Reader<'a> {
+        Reader { b, at: 0 }
+    }
+    /// The offset of the next byte.
+    pub(crate) fn pos(&self) -> usize {
+        self.at
+    }
+    pub(crate) fn arr<const N: usize>(&mut self) -> Option<[u8; N]> {
         let v = *take::<N>(self.b, self.at)?;
         self.at = self.at.checked_add(N)?;
         Some(v)
     }
-    fn bytes(&mut self, n: usize) -> Option<&'a [u8]> {
+    pub(crate) fn bytes(&mut self, n: usize) -> Option<&'a [u8]> {
         let end = self.at.checked_add(n)?;
         let v = self.b.get(self.at..end)?;
         self.at = end;
         Some(v)
     }
-    fn u8(&mut self) -> Option<u8> {
+    pub(crate) fn u8(&mut self) -> Option<u8> {
         self.arr::<1>().map(|[x]| x)
     }
-    fn u16(&mut self) -> Option<u16> {
+    pub(crate) fn u16(&mut self) -> Option<u16> {
         self.arr().map(u16::from_be_bytes)
     }
-    fn u32(&mut self) -> Option<u32> {
+    pub(crate) fn u32(&mut self) -> Option<u32> {
         self.arr().map(u32::from_be_bytes)
     }
-    fn u64(&mut self) -> Option<u64> {
+    pub(crate) fn u64(&mut self) -> Option<u64> {
         self.arr().map(u64::from_be_bytes)
     }
-    fn i64(&mut self) -> Option<i64> {
+    pub(crate) fn i64(&mut self) -> Option<i64> {
         self.arr().map(i64::from_be_bytes)
     }
-    fn remaining(&self) -> usize {
+    pub(crate) fn remaining(&self) -> usize {
         self.b.len().saturating_sub(self.at)
     }
     /// A count of records of at least `min_len` bytes each, at most `max`,
     /// that the bytes remaining can hold (SEAL-GEN-008).
-    fn count(&self, n: usize, max: usize, min_len: usize) -> Option<usize> {
+    pub(crate) fn count(&self, n: usize, max: usize, min_len: usize) -> Option<usize> {
         (n <= max && n.checked_mul(min_len)? <= self.remaining()).then_some(n)
     }
     /// A flag byte: 0 or 1.
-    fn flag(&mut self) -> Option<bool> {
+    pub(crate) fn flag(&mut self) -> Option<bool> {
         match self.u8()? {
             0 => Some(false),
             1 => Some(true),

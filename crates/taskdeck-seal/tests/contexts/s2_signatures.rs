@@ -13,7 +13,7 @@ fn sha(b: &[u8]) -> [u8; 32] {
     <sha2::Sha256 as sha2::Digest>::digest(b).into()
 }
 
-fn verifies(pk: &[u8; 32], msg: &[u8], sig: &[u8; 64]) -> bool {
+pub fn verifies(pk: &[u8; 32], msg: &[u8], sig: &[u8; 64]) -> bool {
     ed25519_dalek::VerifyingKey::from_bytes(pk)
         .unwrap()
         .verify_strict(msg, &ed25519_dalek::Signature::from_bytes(sig))
@@ -21,13 +21,13 @@ fn verifies(pk: &[u8; 32], msg: &[u8], sig: &[u8; 64]) -> bool {
 }
 
 /// One signature the crate made, with the bytes it signed.
-struct Made {
-    use_: &'static [u8],
-    signed: Vec<u8>,
-    sig: [u8; 64],
+pub struct Made {
+    pub use_: &'static [u8],
+    pub signed: Vec<u8>,
+    pub sig: [u8; 64],
 }
 
-fn made(signer: &Signer, dev: DevId, keys: Option<&DeviceKeys>) -> Vec<Made> {
+pub fn made(signer: &Signer, dev: DevId, keys: Option<&DeviceKeys>) -> Vec<Made> {
     let nonce = [0x4E; 32];
     let mut out = Vec::new();
     // frame

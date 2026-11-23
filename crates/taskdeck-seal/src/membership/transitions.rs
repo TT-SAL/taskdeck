@@ -105,7 +105,7 @@ pub(crate) fn apply(w: &mut Membership, shape: Shape, items: &[CtlItem], cx: &En
             CtlItem::DeviceRevoked(t) => revoke(w, t, rest, cx),
             CtlItem::DeviceReinstated(t) => reinstate(w, t, cx),
             CtlItem::EpochRotated(r) => rotate(w, r, cx),
-            CtlItem::RecoveryKeyChange(k) => recovery_key_change(w, k, cx),
+            CtlItem::RecoveryKeyChange(k) => recovery_key_change(w, k, cx, true),
             CtlItem::Fence(f) => {
                 if Some(f.home_gen) != w.home_gen.checked_add(1) {
                     Err(SealError::CtlHomeGen)
@@ -151,7 +151,7 @@ fn recorded_hpke_pk(w: &Membership, pk: &[u8; 32]) -> bool {
 // `confirm` must repeat, so they cannot count as recorded).
 
 /// `DeviceAdded` (§13.6, §13.7; SEAL-MEM-013, SEAL-MEM-014).
-fn device_added(w: &mut Membership, a: &DeviceAdded, cx: &EntryCx<'_>) -> Result<(), SealError> {
+pub(crate) fn device_added(w: &mut Membership, a: &DeviceAdded, cx: &EntryCx<'_>) -> Result<(), SealError> {
     let Auth::Device(author) = cx.author else { return Err(SealError::CtlAuthor) };
     if recorded_dev(w, &a.dev) || recorded_sign_pk(w, &a.sign_pk) || recorded_hpke_pk(w, &a.hpke_pk) {
         return Err(SealError::CtlDuplicateKey);
@@ -192,7 +192,7 @@ fn device_added(w: &mut Membership, a: &DeviceAdded, cx: &EntryCx<'_>) -> Result
 // remaining revocations and reinstatements of the entry, each counted with
 // its effect (a later item that fails refuses the entry with its own code
 // anyway); the failure is this item's, the first in order.
-fn revoke(w: &mut Membership, target: &DevId, rest: &[CtlItem], cx: &EntryCx<'_>) -> Result<(), SealError> {
+pub(crate) fn revoke(w: &mut Membership, target: &DevId, rest: &[CtlItem], cx: &EntryCx<'_>) -> Result<(), SealError> {
     if cx.author == Auth::Device(*target) {
         return Err(SealError::CtlAuthor);
     }
@@ -228,7 +228,7 @@ fn revoke(w: &mut Membership, target: &DevId, rest: &[CtlItem], cx: &EntryCx<'_>
 }
 
 /// `DeviceReinstated` (§13.6, §13.12).
-fn reinstate(w: &mut Membership, target: &DevId, cx: &EntryCx<'_>) -> Result<(), SealError> {
+pub(crate) fn reinstate(w: &mut Membership, target: &DevId, cx: &EntryCx<'_>) -> Result<(), SealError> {
     let Auth::Recovery(by) = cx.author else { return Err(SealError::CtlAuthor) };
     let revoked_by_device = match w.device(target) {
         Some(d) => !d.is_current() && w.devices.iter().any(|x| x.dev == d.status_by),
@@ -261,7 +261,7 @@ pub(crate) fn rotation_recipients(w: &Membership) -> Vec<[u8; 16]> {
 }
 
 /// `EpochRotated` (§13.6, §13.8; SEAL-MEM-015, SEAL-MEM-017).
-fn rotate(w: &mut Membership, r: &EpochRotated, cx: &EntryCx<'_>) -> Result<(), SealError> {
+pub(crate) fn rotate(w: &mut Membership, r: &EpochRotated, cx: &EntryCx<'_>) -> Result<(), SealError> {
     if Some(r.epoch) != w.epoch.checked_add(1) {
         return Err(SealError::CtlEpoch);
     }
@@ -316,7 +316,15 @@ fn install_recovery(w: &mut Membership, sign_pk: &[u8; 32], hpke_pk: &[u8; 32], 
 
 /// `RecoveryKeyChange` in its four modes (§13.6, §13.11; SEAL-MEM-023 to
 /// SEAL-MEM-025).
-fn recovery_key_change(w: &mut Membership, k: &RecoveryKeyChange, cx: &EntryCx<'_>) -> Result<(), SealError> {
+///
+/// `window` is false only for the backup reader's projection (§21.6 step 6:
+/// "without the time check"), which cannot repeat the 72-hour window.
+pub(crate) fn recovery_key_change(
+    w: &mut Membership,
+    k: &RecoveryKeyChange,
+    cx: &EntryCx<'_>,
+    window: bool,
+) -> Result<(), SealError> {
     // The parser of §12.6 makes both keys present for every mode but
     // `cancel`; a missing one here is refused as a wrong target.
     let keys = || match (k.sign_pk, k.hpke_pk) {
@@ -360,6 +368,7 @@ fn recovery_key_change(w: &mut Membership, k: &RecoveryKeyChange, cx: &EntryCx<'
             // are below 2^53 in a valid log) can never be reached by at_ms.
             match p.start_ms.checked_add(RECOVERY_DELAY_MS) {
                 Some(open) if cx.at_ms >= open => {}
+                _ if !window => {}
                 _ => return Err(SealError::CtlWindow),
             }
             if !fresh_recovery(w, &s, &h, &cx.board) {
