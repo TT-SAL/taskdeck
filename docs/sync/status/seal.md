@@ -62,7 +62,8 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **done** (TT-SAL/taskdeck#14; two high findings of its security passes fixed and checked by the lead) |
 | S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **done** (TT-SAL/taskdeck#16; one medium finding of its second security pass fixed) |
 | S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | **done** with S6 (TT-SAL/taskdeck#16); two of its points are completed by S7 (Q57, Q60) |
-| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written (to revise with what S5 and S6 leave) |
+| S7b | The last small code changes: rulings the spec states and the code does not yet do (Q57, Q60, Q56, Q18, Q15), and `write_backup` proving its stream before it seals, with a property test | `blob`, `pair`, `signatures`, `backup`, `prim` | §16, §17.10, §20.4, §20.5, §21.3 | `seal-blob` | implementer running |
+| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written; follows S7b, one verify pass and the two security passes over both |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
 
 The briefs of S4, S5 and S6 name line ranges of `seal.md` as it stood on 2026-11-23 02:30 UTC; after
@@ -629,7 +630,11 @@ output); the higher is booked. Limit: 3.5 million per window.
   a caller's copy stays on the stack, as with every move of a secret. A segment's chain is recomputed
   and compared with nothing (Q39).
 
-- **S5, for S7.** A property test of the split DEFLATE stream (random mixes of compressible and
+- **Left as they are, by the plan's rule that low findings are listed and not chased** (they were on
+  S7's list until the list was cut to what the spec states): the lookup of a typed character in
+  `base32` stops at its match (S1, S6); `seal_frame` seals under epoch 0, which no receiver accepts
+  (S2); a beat's ack may name seq 0 (S2).
+- **S5, for S7b.** A property test of the split DEFLATE stream (random mixes of compressible and
   incompressible data, sizes to a few hundred kilobytes, read back by `inflate_raw`): the defect the
   security pass found shows only on some data. And a check inside `write_backup` before it seals:
   the compressed head followed by an empty final stored block inflates to exactly the head, and the
