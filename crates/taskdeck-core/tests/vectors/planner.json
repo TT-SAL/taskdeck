@@ -1,0 +1,1143 @@
+{
+ "spec": "core.md §5",
+ "cases": [
+  {
+   "name": "snap(7)",
+   "snap": 7,
+   "result": 0
+  },
+  {
+   "name": "snap(8)",
+   "snap": 8,
+   "result": 15
+  },
+  {
+   "name": "snap(0)",
+   "snap": 0,
+   "result": 0
+  },
+  {
+   "name": "snap(-1)",
+   "snap": -1,
+   "result": 0
+  },
+  {
+   "name": "snap(22)",
+   "snap": 22,
+   "result": 15
+  },
+  {
+   "name": "snap(23)",
+   "snap": 23,
+   "result": 30
+  },
+  {
+   "name": "snap(1440)",
+   "snap": 1440,
+   "result": 1440
+  },
+  {
+   "name": "snap(1447)",
+   "snap": 1447,
+   "result": 1440
+  },
+  {
+   "name": "snap(1453)",
+   "snap": 1453,
+   "result": 1440
+  },
+  {
+   "name": "snap(9223372036854775807)",
+   "snap": 9223372036854775807,
+   "result": 1440
+  },
+  {
+   "name": "snap(-9223372036854775808)",
+   "snap": -9223372036854775808,
+   "result": 0
+  },
+  {
+   "name": "clamp_block(547, 100)",
+   "clamp_block": [
+    547,
+    100
+   ],
+   "result": [
+    540,
+    105
+   ]
+  },
+  {
+   "name": "clamp_block(-2147483648, 4294967295)",
+   "clamp_block": [
+    -2147483648,
+    4294967295
+   ],
+   "result": [
+    0,
+    1440
+   ]
+  },
+  {
+   "name": "clamp_block(1440, 30)",
+   "clamp_block": [
+    1440,
+    30
+   ],
+   "result": [
+    1410,
+    30
+   ]
+  },
+  {
+   "name": "clamp_block(1425, 60)",
+   "clamp_block": [
+    1425,
+    60
+   ],
+   "result": [
+    1380,
+    60
+   ]
+  },
+  {
+   "name": "clamp_block(1430, 5)",
+   "clamp_block": [
+    1430,
+    5
+   ],
+   "result": [
+    1425,
+    15
+   ]
+  },
+  {
+   "name": "clamp_block(0, 0)",
+   "clamp_block": [
+    0,
+    0
+   ],
+   "result": [
+    0,
+    15
+   ]
+  },
+  {
+   "name": "clamp_block(-100, 1440)",
+   "clamp_block": [
+    -100,
+    1440
+   ],
+   "result": [
+    0,
+    1440
+   ]
+  },
+  {
+   "name": "clamp_block(700, 14)",
+   "clamp_block": [
+    700,
+    14
+   ],
+   "result": [
+    705,
+    15
+   ]
+  },
+  {
+   "name": "clamp_block(100, 1441)",
+   "clamp_block": [
+    100,
+    1441
+   ],
+   "result": [
+    0,
+    1440
+   ]
+  },
+  {
+   "name": "clamp_block(-9223372036854775808, 9223372036854775807)",
+   "clamp_block": [
+    -9223372036854775808,
+    9223372036854775807
+   ],
+   "result": [
+    0,
+    1440
+   ]
+  },
+  {
+   "name": "snap_up(1)",
+   "snap_up": 1,
+   "result": 15
+  },
+  {
+   "name": "snap_up(1441)",
+   "snap_up": 1441,
+   "result": 1440
+  },
+  {
+   "name": "snap_up(0)",
+   "snap_up": 0,
+   "result": 0
+  },
+  {
+   "name": "snap_up(15)",
+   "snap_up": 15,
+   "result": 15
+  },
+  {
+   "name": "snap_up(16)",
+   "snap_up": 16,
+   "result": 30
+  },
+  {
+   "name": "snap_up(-1)",
+   "snap_up": -1,
+   "result": 0
+  },
+  {
+   "name": "snap_up(-16)",
+   "snap_up": -16,
+   "result": 0
+  },
+  {
+   "name": "snap_up(1425)",
+   "snap_up": 1425,
+   "result": 1425
+  },
+  {
+   "name": "snap_up(1426)",
+   "snap_up": 1426,
+   "result": 1440
+  },
+  {
+   "name": "snap_up(2147483647)",
+   "snap_up": 2147483647,
+   "result": 1440
+  },
+  {
+   "name": "snap_up(-2147483648)",
+   "snap_up": -2147483648,
+   "result": 0
+  },
+  {
+   "name": "resolve_on_day: before spring-forward",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     3,
+     29
+    ],
+    "minutes": 60,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-03-29T00:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: 02:00 in the gap steps to 03:00",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     3,
+     29
+    ],
+    "minutes": 120,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-03-29T01:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: 02:30 in the gap steps to 03:30",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     3,
+     29
+    ],
+    "minutes": 150,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-03-29T01:30:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: 02:59 in the gap steps to 03:59",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     3,
+     29
+    ],
+    "minutes": 179,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-03-29T01:59:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: 03:00 after the gap",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     3,
+     29
+    ],
+    "minutes": 180,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-03-29T01:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: fall-back 02:00 is ambiguous: the earlier",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     10,
+     25
+    ],
+    "minutes": 120,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-10-25T00:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: fall-back 02:30 is ambiguous: the earlier",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     10,
+     25
+    ],
+    "minutes": 150,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-10-25T00:30:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: fall-back 03:00 is single",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     10,
+     25
+    ],
+    "minutes": 180,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-10-25T02:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: fall-back 01:59 is single",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     10,
+     25
+    ],
+    "minutes": 119,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-10-24T23:59:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: negative minutes clamp to 0",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     3,
+     29
+    ],
+    "minutes": -5,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-03-28T23:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: minutes above 1439 clamp to 23:59",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     3,
+     29
+    ],
+    "minutes": 2000,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-03-29T21:59:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: a gap at the end of the day: 23:59 gives none",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     5,
+     1
+    ],
+    "minutes": 1439,
+    "zone": {
+     "table": {
+      "initial": 0,
+      "transitions": [
+       [
+        1777678200000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": null
+  },
+  {
+   "name": "resolve_on_day: a gap at the end of the day: the step stops at 23:59",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     5,
+     1
+    ],
+    "minutes": 1420,
+    "zone": {
+     "table": {
+      "initial": 0,
+      "transitions": [
+       [
+        1777678200000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": null
+  },
+  {
+   "name": "resolve_on_day: before a late gap",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     5,
+     1
+    ],
+    "minutes": 1400,
+    "zone": {
+     "table": {
+      "initial": 0,
+      "transitions": [
+       [
+        1777678200000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-05-01T23:20:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: midnight in a gap steps to 01:00",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     5,
+     2
+    ],
+    "minutes": 0,
+    "zone": {
+     "table": {
+      "initial": 0,
+      "transitions": [
+       [
+        1777678200000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "2026-05-02T00:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: fixed UTC",
+   "resolve_on_day": {
+    "day": [
+     2026,
+     9,
+     4
+    ],
+    "minutes": 540,
+    "zone": {
+     "fixed": 0
+    }
+   },
+   "result": "2026-09-04T09:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: before the range steps into it",
+   "resolve_on_day": {
+    "day": [
+     1970,
+     1,
+     1
+    ],
+    "minutes": 0,
+    "zone": {
+     "fixed": 3600
+    }
+   },
+   "result": "1970-01-01T00:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: after the range gives none",
+   "resolve_on_day": {
+    "day": [
+     9999,
+     12,
+     31
+    ],
+    "minutes": 1439,
+    "zone": {
+     "fixed": -3600
+    }
+   },
+   "result": null
+  },
+  {
+   "name": "offset_at: before every transition",
+   "offset_at": {
+    "at": "1970-01-01T00:00:00.000000000Z",
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": 3600
+  },
+  {
+   "name": "offset_at: one nanosecond before spring-forward",
+   "offset_at": {
+    "at": "2026-03-29T00:59:59.999999999Z",
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": 3600
+  },
+  {
+   "name": "offset_at: at spring-forward",
+   "offset_at": {
+    "at": "2026-03-29T01:00:00.000000000Z",
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": 7200
+  },
+  {
+   "name": "offset_at: one millisecond before fall-back",
+   "offset_at": {
+    "at": "2026-10-25T00:59:59.999000000Z",
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": 7200
+  },
+  {
+   "name": "offset_at: at fall-back",
+   "offset_at": {
+    "at": "2026-10-25T01:00:00.000000000Z",
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": 3600
+  },
+  {
+   "name": "offset_at: fixed",
+   "offset_at": {
+    "at": "2026-10-25T01:00:00.000000000Z",
+    "zone": {
+     "fixed": -36000
+    }
+   },
+   "result": -36000
+  },
+  {
+   "name": "from_local: fall-back 02:30: both",
+   "from_local": {
+    "local": [
+     2026,
+     10,
+     25,
+     2,
+     30
+    ],
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": [
+    "2026-10-25T00:30:00.000000000Z",
+    "2026-10-25T01:30:00.000000000Z"
+   ]
+  },
+  {
+   "name": "from_local: spring-forward 02:30: none",
+   "from_local": {
+    "local": [
+     2026,
+     3,
+     29,
+     2,
+     30
+    ],
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": []
+  },
+  {
+   "name": "from_local: summer noon",
+   "from_local": {
+    "local": [
+     2026,
+     6,
+     1,
+     12,
+     0
+    ],
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": [
+    "2026-06-01T10:00:00.000000000Z"
+   ]
+  },
+  {
+   "name": "from_local: winter noon",
+   "from_local": {
+    "local": [
+     2026,
+     1,
+     15,
+     12,
+     0
+    ],
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": [
+    "2026-01-15T11:00:00.000000000Z"
+   ]
+  },
+  {
+   "name": "from_local: fixed, before the range",
+   "from_local": {
+    "local": [
+     1970,
+     1,
+     1,
+     0,
+     30
+    ],
+    "zone": {
+     "fixed": 3600
+    }
+   },
+   "result": []
+  },
+  {
+   "name": "local: east of UTC crosses midnight",
+   "local": {
+    "at": "2026-09-04T23:30:00.000000000Z",
+    "zone": {
+     "fixed": 3600
+    }
+   },
+   "day": [
+    2026,
+    9,
+    5
+   ],
+   "minutes": 30
+  },
+  {
+   "name": "local: west of UTC before 1970",
+   "local": {
+    "at": "1970-01-01T05:00:00.000000000Z",
+    "zone": {
+     "fixed": -36000
+    }
+   },
+   "day": [
+    1969,
+    12,
+    31
+   ],
+   "minutes": 1140
+  },
+  {
+   "name": "local: east of UTC after 9999",
+   "local": {
+    "at": "9999-12-31T23:59:59.999999999Z",
+    "zone": {
+     "fixed": 86399
+    }
+   },
+   "day": [
+    10000,
+    1,
+    1
+   ],
+   "minutes": 1439
+  },
+  {
+   "name": "local: seconds dropped",
+   "local": {
+    "at": "2026-09-04T09:00:59.999999999Z",
+    "zone": {
+     "fixed": 0
+    }
+   },
+   "day": [
+    2026,
+    9,
+    4
+   ],
+   "minutes": 540
+  },
+  {
+   "name": "local: just before spring-forward",
+   "local": {
+    "at": "2026-03-29T00:59:59.999999999Z",
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "day": [
+    2026,
+    3,
+    29
+   ],
+   "minutes": 119
+  },
+  {
+   "name": "local: at spring-forward",
+   "local": {
+    "at": "2026-03-29T01:00:00.000000000Z",
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        7200
+       ],
+       [
+        1792890000000,
+        3600
+       ]
+      ]
+     }
+    }
+   },
+   "day": [
+    2026,
+    3,
+    29
+   ],
+   "minutes": 180
+  },
+  {
+   "name": "now_marker: today",
+   "now_marker": {
+    "day": [
+     2026,
+     9,
+     5
+    ],
+    "now": "2026-09-04T23:30:00.000000000Z",
+    "zone": {
+     "fixed": 3600
+    }
+   },
+   "result": 30
+  },
+  {
+   "name": "now_marker: another day",
+   "now_marker": {
+    "day": [
+     2026,
+     9,
+     4
+    ],
+    "now": "2026-09-04T23:30:00.000000000Z",
+    "zone": {
+     "fixed": 3600
+    }
+   },
+   "result": null
+  },
+  {
+   "name": "table: valid",
+   "table_new": {
+    "initial": 3600,
+    "transitions": [
+     [
+      0,
+      7200
+     ],
+     [
+      1,
+      3600
+     ]
+    ]
+   },
+   "ok": true
+  },
+  {
+   "name": "table: equal transition times",
+   "table_new": {
+    "initial": 3600,
+    "transitions": [
+     [
+      5,
+      7200
+     ],
+     [
+      5,
+      3600
+     ]
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "table: descending",
+   "table_new": {
+    "initial": 0,
+    "transitions": [
+     [
+      6,
+      0
+     ],
+     [
+      5,
+      0
+     ]
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "table: offset of a whole day",
+   "table_new": {
+    "initial": 0,
+    "transitions": [
+     [
+      5,
+      86400
+     ]
+    ]
+   },
+   "ok": false
+  },
+  {
+   "name": "table: initial offset of minus a whole day",
+   "table_new": {
+    "initial": -86400,
+    "transitions": []
+   },
+   "ok": false
+  },
+  {
+   "name": "table: offsets at the range ends",
+   "table_new": {
+    "initial": -86399,
+    "transitions": [
+     [
+      5,
+      86399
+     ]
+    ]
+   },
+   "ok": true
+  }
+ ]
+}

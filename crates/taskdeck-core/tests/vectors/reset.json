@@ -1,0 +1,52 @@
+{
+ "spec": "core.md §11.3",
+ "cases": [
+  {
+   "name": "a mark in only one board, the current notes_rev larger",
+   "target_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":3},{\"block\":0,\"device_no\":1,\"item\":5}],\"notes\":\"target notes\",\"notes_rev\":2,\"rules\":1}",
+   "current_text": "{\"home\":{\"lat\":5,\"lon\":5},\"marks\":[{\"block\":2,\"device_no\":0,\"item\":3},{\"block\":7,\"device_no\":2,\"item\":4}],\"notes\":\"current notes\",\"notes_rev\":6,\"rules\":1}",
+   "result_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":3},{\"block\":0,\"device_no\":1,\"item\":5},{\"block\":7,\"device_no\":2,\"item\":4}],\"notes\":\"target notes\",\"notes_rev\":7,\"rules\":1}",
+   "result_sha256": "8180589eeae1f6b868d4a9cfb129c8ba488a126335b5f099b716752469f38b43"
+  },
+  {
+   "name": "a mark in both boards, the target notes_rev larger",
+   "target_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":1,\"device_no\":0,\"item\":1},{\"block\":3,\"device_no\":1,\"item\":10}],\"notes_rev\":9,\"rules\":1}",
+   "current_text": "{\"marks\":[{\"block\":12,\"device_no\":1,\"item\":8}],\"notes_rev\":4,\"rules\":1}",
+   "result_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":1,\"device_no\":0,\"item\":1},{\"block\":12,\"device_no\":1,\"item\":10}],\"notes_rev\":10,\"rules\":1}",
+   "result_sha256": "410b9e2bf457c59db9359cc8fcccf378b313fb226c02e7833758867ba7ca1ee0"
+  },
+  {
+   "name": "equal boards and equal rules",
+   "target_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"notes_rev\":5,\"rules\":1}",
+   "current_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"notes_rev\":5,\"rules\":1}",
+   "result_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"notes_rev\":6,\"rules\":1}",
+   "result_sha256": "295929c092efbc2c26df7596d1f3694101c541ad2d27e357fed85ab50357e0f3"
+  },
+  {
+   "name": "empty boards",
+   "target_text": "{\"rules\":1}",
+   "current_text": "{\"rules\":1}",
+   "result_text": "{\"notes_rev\":1,\"rules\":1}",
+   "result_sha256": "36a0f9ee029169bd989da278ea3e4c4d8b321041f5a6f0b7c721fabff13cd520"
+  },
+  {
+   "name": "equal notes_rev",
+   "target_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"notes_rev\":4,\"rules\":1}",
+   "current_text": "{\"notes_rev\":4,\"rules\":1}",
+   "result_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"notes_rev\":5,\"rules\":1}",
+   "result_sha256": "6f48884c2e1757e0b441b33ec1b137fca7d573fbc0c559c4904121ca339dff78"
+  },
+  {
+   "name": "a target newer than the current board",
+   "target_text": "{\"rules\":2}",
+   "current_text": "{\"rules\":1}",
+   "code": "core/unknown_rules"
+  },
+  {
+   "name": "a current board on rules this build lacks",
+   "target_text": "{\"rules\":1}",
+   "current_text": "{\"rules\":2}",
+   "code": "core/unknown_rules"
+  }
+ ]
+}

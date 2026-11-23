@@ -1,0 +1,295 @@
+{
+ "spec": "core.md §4.4, §5.1",
+ "cases": [
+  {
+   "name": "parts: the epoch",
+   "secs": 0,
+   "nanos": 0,
+   "text": "1970-01-01T00:00:00.000000000Z"
+  },
+  {
+   "name": "parts: the spec's example",
+   "secs": 1788512400,
+   "nanos": 0,
+   "text": "2026-09-04T09:00:00.000000000Z"
+  },
+  {
+   "name": "parts: the end of the range",
+   "secs": 253402300799,
+   "nanos": 999999999,
+   "text": "9999-12-31T23:59:59.999999999Z"
+  },
+  {
+   "name": "parts: a leap day and one nanosecond",
+   "secs": 1709208000,
+   "nanos": 1,
+   "text": "2024-02-29T12:00:00.000000001Z"
+  },
+  {
+   "name": "parts: nine digits",
+   "secs": 946684800,
+   "nanos": 123456789,
+   "text": "2000-01-01T00:00:00.123456789Z"
+  },
+  {
+   "name": "parts: one second after the range",
+   "secs": 253402300800,
+   "nanos": 0,
+   "text": null
+  },
+  {
+   "name": "parts: before 1970",
+   "secs": -1,
+   "nanos": 999999999,
+   "text": null
+  },
+  {
+   "name": "parts: nanos of a whole second",
+   "secs": 0,
+   "nanos": 1000000000,
+   "text": null
+  },
+  {
+   "name": "at_ms: zero",
+   "at_ms": 0,
+   "text": "1970-01-01T00:00:00.000000000Z"
+  },
+  {
+   "name": "at_ms: milliseconds",
+   "at_ms": 1786814921882,
+   "text": "2026-08-15T17:28:41.882000000Z"
+  },
+  {
+   "name": "at_ms: the largest",
+   "at_ms": 253402300799999,
+   "text": "9999-12-31T23:59:59.999000000Z"
+  },
+  {
+   "name": "at_ms: one above the largest",
+   "at_ms": 253402300800000,
+   "text": null
+  },
+  {
+   "name": "at_ms: negative",
+   "at_ms": -1,
+   "text": null
+  },
+  {
+   "name": "rfc3339: the spec's offset example",
+   "rfc3339": "2026-08-15T20:28:41.882008+03:00",
+   "text": "2026-08-15T17:28:41.882008000Z"
+  },
+  {
+   "name": "rfc3339: UTC",
+   "rfc3339": "2026-09-04T09:00:00Z",
+   "text": "2026-09-04T09:00:00.000000000Z"
+  },
+  {
+   "name": "rfc3339: before the range",
+   "rfc3339": "1969-12-31T23:59:59Z",
+   "text": null
+  },
+  {
+   "name": "parse: the spec's example",
+   "parse": "2026-09-04T09:00:00.000000000Z",
+   "secs": 1788512400,
+   "nanos": 0
+  },
+  {
+   "name": "parse: a leap day",
+   "parse": "2024-02-29T12:00:00.000000001Z",
+   "secs": 1709208000,
+   "nanos": 1
+  },
+  {
+   "name": "parse: the start of the range",
+   "parse": "1970-01-01T00:00:00.000000000Z",
+   "secs": 0,
+   "nanos": 0
+  },
+  {
+   "name": "parse: the end of the range",
+   "parse": "9999-12-31T23:59:59.999999999Z",
+   "secs": 253402300799,
+   "nanos": 999999999
+  },
+  {
+   "name": "parse: second 60",
+   "parse": "2026-09-04T09:00:60.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: lowercase t",
+   "parse": "2026-09-04t09:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: lowercase z",
+   "parse": "2026-09-04T09:00:00.000000000z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: offset +00:00",
+   "parse": "2026-09-04T09:00:00.000000000+00:00",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: 8 fraction digits",
+   "parse": "2026-09-04T09:00:00.00000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: 10 fraction digits",
+   "parse": "2026-09-04T09:00:00.0000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: no fraction",
+   "parse": "2026-09-04T09:00:00Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: year 1969",
+   "parse": "1969-12-31T23:59:59.999999999Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: year 10000",
+   "parse": "10000-01-01T00:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: 2026-02-29",
+   "parse": "2026-02-29T00:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: April 31",
+   "parse": "2026-04-31T00:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: month 13",
+   "parse": "2026-13-01T00:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: month 00",
+   "parse": "2026-00-01T00:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: day 00",
+   "parse": "2026-01-00T00:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: hour 24",
+   "parse": "2026-09-04T24:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: minute 60",
+   "parse": "2026-09-04T09:60:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: space for T",
+   "parse": "2026-09-04 09:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: comma for the point",
+   "parse": "2026-09-04T09:00:00,000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: signed year",
+   "parse": "+026-09-04T09:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: short month",
+   "parse": "2026-9-04T09:00:00.000000000Z0",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: fullwidth digit",
+   "parse": "２026-09-04T09:00:00.000000000Z",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "parse: empty",
+   "parse": "",
+   "secs": null,
+   "nanos": null
+  },
+  {
+   "name": "plus_seconds: one day",
+   "plus_seconds": 86400,
+   "at": "2026-09-04T09:00:00.000000000Z",
+   "text": "2026-09-05T09:00:00.000000000Z"
+  },
+  {
+   "name": "plus_seconds: saturates at MAX",
+   "plus_seconds": 86400,
+   "at": "9999-12-31T00:00:00.000000000Z",
+   "text": "9999-12-31T23:59:59.999999999Z"
+  },
+  {
+   "name": "plus_seconds: MAX plus one day",
+   "plus_seconds": 86400,
+   "at": "9999-12-31T23:59:59.999999999Z",
+   "text": "9999-12-31T23:59:59.999999999Z"
+  },
+  {
+   "name": "plus_seconds: i64 max",
+   "plus_seconds": 9223372036854775807,
+   "at": "2026-09-04T09:00:00.000000000Z",
+   "text": "9999-12-31T23:59:59.999999999Z"
+  },
+  {
+   "name": "plus_seconds: below the range",
+   "plus_seconds": -1,
+   "at": "1970-01-01T00:00:00.000000000Z",
+   "text": null
+  },
+  {
+   "name": "plus_seconds: minus one day",
+   "plus_seconds": -86400,
+   "at": "2026-09-05T09:00:00.000000001Z",
+   "text": "2026-09-04T09:00:00.000000001Z"
+  },
+  {
+   "name": "as_unix_ms: floored",
+   "unix_ms": 1786814921882,
+   "at": "2026-08-15T17:28:41.882999999Z"
+  },
+  {
+   "name": "as_unix_ms: MAX",
+   "unix_ms": 253402300799999,
+   "at": "9999-12-31T23:59:59.999999999Z"
+  }
+ ]
+}
