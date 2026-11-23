@@ -65,7 +65,7 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S7b | The last small code changes: rulings the spec states and the code does not yet do (Q57, Q60, Q56, Q18, Q15), and `write_backup` proving its stream before it seals, with a property test | `blob`, `pair`, `signatures`, `backup`, `prim` | §16, §17.10, §20.4, §20.5, §21.3 | `seal-blob`, `seal-signatures` | **done** with S7 (its pull request follows the spec change's, L19): S7's verify pass and both its security passes covered it; no finding in the library |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | **done** (its pull request follows the spec change's, L19): one medium finding of its security passes fixed (six fuzz targets could not run); the stage gate passes in the lead's run, 164 of 164 clauses cited |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | **the exit review is done** (one high, four medium, six low points: "The exit review" below); the hygiene pass (`docs/sync/status/seal/workflows/exit.js` with `only: "hygiene"`) and the exit pull request follow S9 |
-| S9 | The exit review's two findings in code: the five fuzz targets that do not reach the parsers their rows name; SEAL-GEN-007 proven for pairing's comparisons | `fuzz/`, tests | §3, §17 | | planned, with the task shape of every task (brief to write: the two medium points of "The exit review"); it starts when the usage window has reset, about 20:40 UTC |
+| S9 | The exit review's two findings in code: the five fuzz targets that do not reach the parsers their rows name; SEAL-GEN-007 proven for pairing's comparisons | `fuzz/`, tests | §3, §17 | | planned, with the task shape of every task (brief: `briefs/s9.md`); it starts when the usage window has reset, about 20:40 UTC |
 
 The briefs of S4, S5 and S6 name line ranges of `seal.md` as it stood on 2026-11-23 02:30 UTC; after
 a change to that file, check them against its headings before launching.
@@ -300,8 +300,8 @@ work (SYNC_PLAN.md §7); what the lead did with each:
 - **High: the stage's spec changes went into task pull requests, not into spec-change pull
   requests of their own** (§3.3), and this file recorded no deviation. True, and recorded now as
   decision L19. What is merged stays as it is; the part not yet merged (the wording after the
-  fourth check, and two points of this review) merges first and alone, in TT-SAL/taskdeck#19, and
-  the work of S7b and S7 follows in the next pull request.
+  fourth check, and two points of this review) merged first and alone, as TT-SAL/taskdeck#19
+  (2026-11-23 17:57 UTC), and the work of S7b and S7 follows in the next pull request.
 - **Medium: SEAL-GEN-007 is proven only for the move code, the sheet and the wraps.** Its citations
   are source scans of `chain.rs` and `keys.rs`; the clause also names a MAC, a commitment, a SAS and
   a ticket proof, which are compared in `pair.rs` (constant-time today, with no test that would
@@ -421,8 +421,8 @@ work (SYNC_PLAN.md §7); what the lead did with each:
   change is then found in the base branch's history under its own title, and it merges without
   waiting for a task. This is a deviation from §3.3, found at the exit. What is merged cannot be
   split; every change and the stages it affects stand in the rows of `CHANGES.md` dated 2026-11-23
-  that name `seal`. The spec text not yet merged goes first and alone (TT-SAL/taskdeck#19: the
-  branch is brought to the base branch's tree plus the spec files by one commit, merged, and the
+  that name `seal`. The spec text not yet merged went first and alone (TT-SAL/taskdeck#19: the
+  branch was brought to the base branch's tree plus the spec files by one commit, merged, and the
   task's work restored by reverting that commit; the session may push to one branch only, so two
   pull requests cannot be open at once).
 - **L12. A hook step that needs `python3` runs on Linux only** (the vectors' format check in `ci.sh`):
