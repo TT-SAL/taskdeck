@@ -45,6 +45,7 @@ fn read_result(file: &[u8], board: &BoardId, seed: &[u8; 32]) -> Map<String, Val
             m.insert("writer_dev".into(), json!(hex(&v.writer.dev.0)));
             m.insert("writer_sign_pk".into(), json!(hex(&v.writer.sign_pk)));
             m.insert("seq".into(), json!(v.seq));
+            m.insert("written_ms".into(), json!(v.written_ms));
             m.insert("file_type".into(), json!(v.file_type));
             m.insert("read_token".into(), json!(v.read_token));
             m.insert("meta".into(), json!(hex(&v.meta)));
@@ -308,6 +309,37 @@ fn seal_backup() {
     let mut q = p.bytes();
     q.push(0);
     cases.push(read_case("step 11: a trailing byte", &seal_compressed(&base, &s.devs[0], &deflate(&q), [2; 32]), &board, &seed, Some("seal/backup_payload")));
+
+    // Step 10 compares the recovery keys, not only `dev_R` (SEAL-BKP-004,
+    // ruling Q45): two devices propose and confirm a recovery key made of a
+    // new sheet's signing key and a third party's HPKE key; device 0 seals a
+    // file to the new sheet's real keys. Read with the new sheet's seed, it
+    // passes steps 1 to 9 and fails step 10.
+    {
+        let mut t = Sim::new(86, 2);
+        let (sheet_seed, sheet) = t.new_recovery_seed();
+        let (_, third) = t.new_recovery_seed();
+        let mixed = RecoveryPublic { sign_pk: sheet.public().sign_pk, hpke_pk: third.public().hpke_pk };
+        let change = |mode| {
+            CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode, sign_pk: Some(mixed.sign_pk), hpke_pk: Some(mixed.hpke_pk) })
+        };
+        let f = t.ctl(Who::D(0), vec![change(RecoveryKeyMode::Propose)], &Spec::default());
+        t.accept(f);
+        t.now += 259_200_000;
+        let items = t.rotate_items(vec![change(RecoveryKeyMode::Confirm)]);
+        let f = t.ctl(Who::D(1), items, &Spec::default());
+        t.accept(f);
+        let mut hd = Header::of(&t, &t.devs[0], 1, t.seq());
+        hd.recipient = sheet.public();
+        let sealed = seal_compressed(&hd, &t.devs[0], &deflate(&Payload::nightly(&t).bytes()), [6; 32]);
+        cases.push(read_case(
+            "step 10: the current recovery key pairs the sheet's signing key with another HPKE key",
+            &sealed,
+            &t.board,
+            &sheet_seed,
+            Some("seal/backup_writer"),
+        ));
+    }
 
     // verify_backup_file.
     cases.push(verify_case("verify: good file", &file, &pk0, None));

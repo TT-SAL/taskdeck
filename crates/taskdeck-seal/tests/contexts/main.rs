@@ -7,7 +7,10 @@ mod common;
 mod board;
 #[path = "../common/backup.rs"]
 mod backup;
+#[path = "../common/blob.rs"]
+mod blob;
 
 mod s1_contexts;
 mod s2_signatures;
 mod s4_contexts;
+mod s5_contexts;

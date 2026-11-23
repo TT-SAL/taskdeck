@@ -13,7 +13,7 @@ use zeroize::Zeroizing;
 use crate::keys::hpke_sender;
 use crate::membership::Reader;
 use crate::payloads::parse_ctl_unsigned;
-use crate::prim::{HpkeAead, Kdf, Kem, deflate_raw, h, inflate_raw, push_zeroizing, take};
+use crate::prim::{HpkeAead, Kdf, Kem, deflate_split, h, inflate_raw, push_zeroizing, take};
 use crate::signatures::{sign_with, verify_strict_parts};
 use crate::{
     BoardId, Chain, DevId, DeviceKeys, DevicePublic, Entropy, EntryId, EpochRoot, FrameHash, Head, Kind,
@@ -111,7 +111,7 @@ impl HistoryRecord {
         o
     }
 
-    fn write(&self, o: &mut Vec<u8>) {
+    pub(crate) fn write(&self, o: &mut Vec<u8>) {
         o.extend_from_slice(&self.seq.to_be_bytes());
         o.extend_from_slice(&self.dev.0);
         o.extend_from_slice(&self.ctr.to_be_bytes());
@@ -209,7 +209,7 @@ pub struct BackupInput<'a> {
 }
 
 /// The fields of the header of §21.2 before `enc`.
-struct HeaderFields {
+pub(crate) struct HeaderFields {
     file_type: u8,
     board: BoardId,
     writer_dev: DevId,
@@ -285,58 +285,90 @@ fn seal_file(
     Ok(file)
 }
 
-fn put_vb32(o: &mut Zeroizing<Vec<u8>>, x: &[u8]) -> Result<(), SealError> {
+fn put_vb32(o: &mut Vec<u8>, x: &[u8]) -> Result<(), SealError> {
     let n = u32::try_from(x.len()).map_err(|_| SealError::BackupPayload)?;
-    push_zeroizing(o, &n.to_be_bytes());
-    push_zeroizing(o, x);
+    o.extend_from_slice(&n.to_be_bytes());
+    o.extend_from_slice(x);
     Ok(())
 }
 
-/// The payload of §21.5, in a zeroizing buffer (it holds the roots).
-fn encode_payload(
+/// The payload of §21.5 in three pieces: `head`, the bytes before
+/// `n_roots`; `secret`, the bytes from `n_roots` to the end of `read_token`
+/// (the roots and the token), in a zeroizing buffer; `tail`, `vb32(meta)`.
+pub(crate) struct PayloadParts {
+    pub(crate) head: Vec<u8>,
+    pub(crate) secret: Zeroizing<Vec<u8>>,
+    pub(crate) tail: Vec<u8>,
+}
+
+impl PayloadParts {
+    fn len(&self) -> Option<usize> {
+        self.head.len().checked_add(self.secret.len())?.checked_add(self.tail.len())
+    }
+}
+
+fn encode_parts(
+    history: &[HistoryRecord],
+    content: &BackupContent,
+    roots: &[(u32, EpochRoot)],
+    token: &[u8],
+    meta: &[u8],
+) -> Result<PayloadParts, SealError> {
+    let mut p = Vec::new();
+    p.extend_from_slice(PAYLOAD_MAGIC);
+    p.extend_from_slice(&1u32.to_be_bytes());
+    p.push(content.file_type());
+    let n = u32::try_from(history.len()).map_err(|_| SealError::BackupPayload)?;
+    p.extend_from_slice(&n.to_be_bytes());
+    for r in history {
+        r.write(&mut p);
+    }
+    put_vb32(&mut p, content.membership())?;
+    match content {
+        BackupContent::Nightly { board, head, hash_version, state_hash, .. } => {
+            put_vb32(&mut p, board)?;
+            p.extend_from_slice(&head.chain.0);
+            p.extend_from_slice(&hash_version.to_be_bytes());
+            p.extend_from_slice(state_hash);
+        }
+        BackupContent::Segment { first_seq, chain_before, frames, .. } => {
+            p.extend_from_slice(&first_seq.to_be_bytes());
+            p.extend_from_slice(&chain_before.0);
+            let n = u32::try_from(frames.len()).map_err(|_| SealError::BackupPayload)?;
+            p.extend_from_slice(&n.to_be_bytes());
+            for f in frames {
+                put_vb32(&mut p, f)?;
+            }
+        }
+    }
+    let mut secret = Zeroizing::new(Vec::with_capacity(2 + 36 * roots.len() + 2 + token.len()));
+    let n = u16::try_from(roots.len()).map_err(|_| SealError::BackupPayload)?;
+    push_zeroizing(&mut secret, &n.to_be_bytes());
+    for (e, r) in roots {
+        push_zeroizing(&mut secret, &e.to_be_bytes());
+        push_zeroizing(&mut secret, &r.to_bytes()[..]);
+    }
+    let n = u16::try_from(token.len()).map_err(|_| SealError::BackupPayload)?;
+    push_zeroizing(&mut secret, &n.to_be_bytes());
+    push_zeroizing(&mut secret, token);
+    let mut tail = Vec::with_capacity(4 + meta.len());
+    put_vb32(&mut tail, meta)?;
+    Ok(PayloadParts { head: p, secret, tail })
+}
+
+/// The payload of §21.5 in one zeroizing buffer (it holds the roots).
+pub(crate) fn encode_payload(
     history: &[HistoryRecord],
     content: &BackupContent,
     roots: &[(u32, EpochRoot)],
     token: &[u8],
     meta: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, SealError> {
-    let mut p = Zeroizing::new(Vec::new());
-    push_zeroizing(&mut p, PAYLOAD_MAGIC);
-    push_zeroizing(&mut p, &1u32.to_be_bytes());
-    push_zeroizing(&mut p, &[content.file_type()]);
-    let n = u32::try_from(history.len()).map_err(|_| SealError::BackupPayload)?;
-    push_zeroizing(&mut p, &n.to_be_bytes());
-    for r in history {
-        push_zeroizing(&mut p, &r.to_bytes());
-    }
-    put_vb32(&mut p, content.membership())?;
-    match content {
-        BackupContent::Nightly { board, head, hash_version, state_hash, .. } => {
-            put_vb32(&mut p, board)?;
-            push_zeroizing(&mut p, &head.chain.0);
-            push_zeroizing(&mut p, &hash_version.to_be_bytes());
-            push_zeroizing(&mut p, state_hash);
-        }
-        BackupContent::Segment { first_seq, chain_before, frames, .. } => {
-            push_zeroizing(&mut p, &first_seq.to_be_bytes());
-            push_zeroizing(&mut p, &chain_before.0);
-            let n = u32::try_from(frames.len()).map_err(|_| SealError::BackupPayload)?;
-            push_zeroizing(&mut p, &n.to_be_bytes());
-            for f in frames {
-                put_vb32(&mut p, f)?;
-            }
-        }
-    }
-    let n = u16::try_from(roots.len()).map_err(|_| SealError::BackupPayload)?;
-    push_zeroizing(&mut p, &n.to_be_bytes());
-    for (e, r) in roots {
-        push_zeroizing(&mut p, &e.to_be_bytes());
-        push_zeroizing(&mut p, &r.to_bytes()[..]);
-    }
-    let n = u16::try_from(token.len()).map_err(|_| SealError::BackupPayload)?;
-    push_zeroizing(&mut p, &n.to_be_bytes());
-    push_zeroizing(&mut p, token);
-    put_vb32(&mut p, meta)?;
+    let parts = encode_parts(history, content, roots, token, meta)?;
+    let mut p = Zeroizing::new(Vec::with_capacity(parts.len().ok_or(SealError::BackupPayload)?));
+    push_zeroizing(&mut p, &parts.head);
+    push_zeroizing(&mut p, &parts.secret);
+    push_zeroizing(&mut p, &parts.tail);
     Ok(p)
 }
 
@@ -365,20 +397,25 @@ fn token_is_valid(t: &[u8]) -> bool {
 ///   that is not 1 to 512 ASCII bytes, `meta` over 1,048,576 bytes, a
 ///   payload over 512 MiB or a file over 256 MiB.
 ///
-/// Then: raw DEFLATE of the payload, HPKE base mode to the recovery key with
-/// the `info` and `aad` of §21.3 (the ephemeral key from 32 drawn bytes,
-/// `DeriveKeyPair`, as `wrap_root` makes it), and the signature of §16.3.
-/// It keeps and returns nothing that opens the file: the payload and its
-/// compression are wiped, the HPKE context dropped (SEAL-BKP-007).
+/// `roots` is every root the device holds (`device.md` §15.3): a root of an
+/// epoch for which the file's membership records no commitment (for a
+/// segment, an epoch rotated inside it or after it; for a nightly file, a
+/// rotation not yet accepted) is left out, not refused (the `n_roots` row of
+/// §21.5, ruling Q38).
+///
+/// Then: raw DEFLATE of the payload with the roots and the read token kept
+/// out of the compressor (`prim::deflate_split`, §21.3, SEAL-GEN-006), HPKE
+/// base mode to the recovery key with the `info` and `aad` of §21.3 (the
+/// ephemeral key from 32 drawn bytes, `DeriveKeyPair`, as `wrap_root` makes
+/// it), and the signature of §16.3. It keeps and returns nothing that opens
+/// the file: the secret bytes and the compressed stream are wiped, the HPKE
+/// context dropped (SEAL-BKP-007). What stays outside the crate's reach: the
+/// compressors' private buffers, which hold only the bytes before `n_roots`
+/// and `meta`.
 // SPEC-QUESTION: §21.3 states the writer's refusal for an unpinned key and
 // §22 no code for the other inconsistent inputs; this refuses them with the
 // code of the step of §21.6 that would reject the file, so that the writer
 // never writes a file its reader rejects for its layout.
-// SPEC-QUESTION: §21.5 has a segment carry "every root the writer holds"
-// next to `M_{first_seq − 1}`, and §21.6 step 11 checks "every root" against
-// its commitment; a root of an epoch rotated inside the segment has no
-// commitment in that membership. This takes the refusing reading: the
-// writer may put only roots whose commitment the file's membership records.
 pub fn write_backup(writer: &DeviceKeys, input: BackupInput, rng: &mut dyn Entropy) -> Result<Vec<u8>, SealError> {
     let BackupInput { board, seq, written_ms, history, content, mut roots, read_token, meta, pinned_recovery } = input;
     let bad = SealError::BackupPayload;
@@ -417,10 +454,13 @@ pub fn write_backup(writer: &DeviceKeys, input: BackupInput, rng: &mut dyn Entro
     if roots.windows(2).any(|w| matches!(w, [a, b] if a.0 == b.0)) {
         return Err(bad);
     }
-    for (e, r) in &roots {
-        let ok = m.commitment(*e).is_some_and(|c| bool::from(r.commitment(&board, *e).ct_eq(c)));
-        if !ok {
-            return Err(bad);
+    let mut kept = Vec::with_capacity(roots.len());
+    for (e, r) in roots {
+        match m.commitment(e) {
+            // No commitment in this membership: left out (and wiped on drop).
+            None => {}
+            Some(c) if bool::from(r.commitment(&board, e).ct_eq(c)) => kept.push((e, r)),
+            Some(_) => return Err(bad),
         }
     }
     let token: &[u8] = match &read_token {
@@ -431,12 +471,13 @@ pub fn write_backup(writer: &DeviceKeys, input: BackupInput, rng: &mut dyn Entro
     if meta.len() > META_MAX {
         return Err(bad);
     }
-    let payload = encode_payload(history, &content, &roots, token, &meta)?;
-    if payload.len() > INFLATE_CAP {
+    let parts = encode_parts(history, &content, &kept, token, &meta)?;
+    drop(kept);
+    if parts.len().is_none_or(|n| n > INFLATE_CAP) {
         return Err(bad);
     }
-    let compressed = deflate_raw(&payload).ok_or(bad)?;
-    drop(payload);
+    let compressed = deflate_split(&parts.head, &parts.secret, &parts.tail).ok_or(bad)?;
+    drop(parts);
     let f = HeaderFields {
         file_type: content.file_type(),
         board,
@@ -458,6 +499,8 @@ pub fn write_backup(writer: &DeviceKeys, input: BackupInput, rng: &mut dyn Entro
 pub struct VerifiedBackup {
     pub writer: DevicePublic,
     pub seq: u64,
+    /// The header's `written_ms`: the writer's clock, for display only.
+    pub written_ms: i64,
     pub file_type: u8,
     pub content: BackupContent,
     pub roots: Vec<(u32, EpochRoot)>,
@@ -623,7 +666,7 @@ fn parse_rest(r: &mut Reader<'_>, hdr: &BackupHeader) -> Option<Rest> {
 /// the same devices with the same keys and statuses, the same current
 /// recovery key, the same epochs and commitments, the same `ctl_seqs`; and
 /// nothing else of either state.
-fn agrees(m: &Membership, p: &Membership) -> bool {
+pub(crate) fn agrees(m: &Membership, p: &Membership) -> bool {
     let devices = m.devices.len() == p.devices.len()
         && m.devices.iter().zip(&p.devices).all(|(a, b)| {
             a.dev == b.dev && a.sign_pk == b.sign_pk && a.hpke_pk == b.hpke_pk && a.is_current() == b.is_current()
@@ -652,8 +695,10 @@ fn agrees(m: &Membership, p: &Membership) -> bool {
 /// 9. the projection (`seal/backup_history`), and no record after the
 ///    file's `seq`;
 /// 10. the writer is a current device of the projection with
-///     `writer_sign_pk`, and `recipient` its current recovery identity
-///     (`seal/backup_writer`);
+///     `writer_sign_pk`, and the projection's current recovery record is
+///     the sheet's: its `dev` is `recipient` and its two public keys are
+///     those of the typed seed (`seal/backup_writer`, SEAL-BKP-004; ruling
+///     Q45: `dev_R` binds the signing key alone);
 /// 11. the rest, strictly (`seal/backup_payload`): the layout; the
 ///     membership parses (§13.2) and agrees with the projection; every root
 ///     matches its commitment (SEAL-KEY-013); a nightly file's state hash
@@ -715,7 +760,8 @@ pub fn read_backup(bytes: &[u8], sheet_board: &BoardId, recovery: &RecoveryKeys)
     let writer = projection.device(&hdr.writer_dev).filter(|d| d.is_current() && d.sign_pk == hdr.writer_sign_pk);
     let Some(writer) = writer else { return Err(SealError::BackupWriter) };
     let writer = DevicePublic { dev: writer.dev, sign_pk: writer.sign_pk, hpke_pk: writer.hpke_pk };
-    if projection.current_recovery().dev != hdr.recipient {
+    let cur = projection.current_recovery();
+    if cur.dev != hdr.recipient || cur.sign_pk != rp.sign_pk || cur.hpke_pk != rp.hpke_pk {
         return Err(SealError::BackupWriter);
     }
     // 11.
@@ -756,6 +802,7 @@ pub fn read_backup(bytes: &[u8], sheet_board: &BoardId, recovery: &RecoveryKeys)
     Ok(VerifiedBackup {
         writer,
         seq: hdr.seq,
+        written_ms: hdr.written_ms,
         file_type: hdr.file_type,
         content: rest.content,
         roots: rest.roots,
@@ -766,4 +813,4 @@ pub fn read_backup(bytes: &[u8], sheet_board: &BoardId, recovery: &RecoveryKeys)
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
