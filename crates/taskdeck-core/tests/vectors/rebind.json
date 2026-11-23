@@ -1,0 +1,341 @@
+{
+ "spec": "core.md §7.5",
+ "cases": [
+  {
+   "name": "every minting field",
+   "commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":3298534883329,\"start\":\"2026-02-03T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":3298534883330,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":3298534883329,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":3298534883330,\"name\":\"e\",\"op\":\"create_event\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"anchor\":\"2026-02-02\",\"days\":1,\"id\":3298534883331,\"minutes\":60,\"name\":\"r\",\"op\":\"create_routine\",\"start_minutes\":60}",
+    "{\"id\":3298534883329,\"minutes\":30,\"op\":\"add_block\",\"sid\":3298534883331,\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"fallback\":3298534883332,\"id\":3298534883337,\"op\":\"restore\"}",
+    "{\"color\":[0,0,0,0],\"id\":3298534883333,\"name\":\"s\",\"op\":\"add_subscription\",\"url\":\"https://example.com/s\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":30,\"device_no\":5,\"item\":20}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "expect_commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":5497558138911,\"start\":\"2026-02-03T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":5497558138912,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":5497558138901,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":5497558138902,\"name\":\"e\",\"op\":\"create_event\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"anchor\":\"2026-02-02\",\"days\":1,\"id\":5497558138903,\"minutes\":60,\"name\":\"r\",\"op\":\"create_routine\",\"start_minutes\":60}",
+    "{\"id\":5497558138901,\"minutes\":30,\"op\":\"add_block\",\"sid\":5497558138913,\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"fallback\":5497558138904,\"id\":3298534883337,\"op\":\"restore\"}",
+    "{\"color\":[0,0,0,0],\"id\":5497558138905,\"name\":\"s\",\"op\":\"add_subscription\",\"url\":\"https://example.com/s\"}"
+   ],
+   "expect_minter": {
+    "device_no": 5,
+    "next_block": 34,
+    "next_item": 26
+   }
+  },
+  {
+   "name": "every referring field",
+   "commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":3298534883329,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":3298534883329,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":3298534883330,\"name\":\"e\",\"op\":\"create_event\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"anchor\":\"2026-02-02\",\"days\":1,\"id\":3298534883331,\"minutes\":60,\"name\":\"r\",\"op\":\"create_routine\",\"start_minutes\":60}",
+    "{\"color\":[0,0,0,0],\"id\":3298534883332,\"name\":\"s\",\"op\":\"add_subscription\",\"url\":\"https://example.com/s\"}",
+    "{\"id\":3298534883329,\"name\":\"x\",\"op\":\"rename\"}",
+    "{\"at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":3298534883329,\"op\":\"complete\"}",
+    "{\"at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":3298534883330,\"op\":\"delete\"}",
+    "{\"id\":3298534883331,\"op\":\"forget\"}",
+    "{\"id\":3298534883329,\"minutes\":30,\"op\":\"move_block\",\"sid\":3298534883329,\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"moves\":[{\"id\":3298534883329,\"minutes\":30,\"sid\":3298534883329,\"start\":\"2026-02-03T09:00:00.000000000Z\"},{\"id\":1099511627783,\"minutes\":30,\"sid\":1099511627783,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"op\":\"move_blocks\"}",
+    "{\"blocks\":[{\"id\":3298534883329,\"sid\":3298534883329}],\"op\":\"remove_blocks\"}",
+    "{\"id\":3298534883329,\"minutes\":30,\"op\":\"set_estimate\"}",
+    "{\"id\":3298534883329,\"op\":\"set_deadline\",\"seed\":2}",
+    "{\"id\":3298534883329,\"level\":1,\"op\":\"set_severity\"}",
+    "{\"id\":3298534883329,\"level\":1,\"op\":\"set_horizon\"}",
+    "{\"anchor\":\"2026-02-02\",\"days\":3,\"id\":3298534883331,\"op\":\"set_repeat\"}",
+    "{\"id\":3298534883331,\"minutes\":30,\"op\":\"move_routine\",\"start_minutes\":0}",
+    "{\"id\":3298534883330,\"minutes\":30,\"op\":\"set_event_span\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":3298534883329,\"op\":\"forget_archived\"}",
+    "{\"id\":3298534883332,\"op\":\"remove_subscription\"}",
+    "{\"id\":3298534883332,\"name\":\"x\",\"op\":\"rename_subscription\"}",
+    "{\"color\":[1,1,1,1],\"id\":3298534883332,\"op\":\"set_subscription_color\"}",
+    "{\"enabled\":false,\"id\":3298534883332,\"op\":\"set_subscription_enabled\"}",
+    "{\"base\":2,\"op\":\"set_notes\",\"text\":\"n\"}",
+    "{\"lat\":1,\"lon\":1,\"op\":\"set_home\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"fallback\":1099511627785,\"id\":3298534883329,\"op\":\"restore\"}",
+    "{\"id\":3298534883329,\"minutes\":30,\"op\":\"add_block\",\"sid\":1099511627779,\"start\":\"2026-02-03T09:00:00.000000000Z\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":30,\"device_no\":5,\"item\":20}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "expect_commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":5497558138911,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":5497558138901,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":5497558138902,\"name\":\"e\",\"op\":\"create_event\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"anchor\":\"2026-02-02\",\"days\":1,\"id\":5497558138903,\"minutes\":60,\"name\":\"r\",\"op\":\"create_routine\",\"start_minutes\":60}",
+    "{\"color\":[0,0,0,0],\"id\":5497558138904,\"name\":\"s\",\"op\":\"add_subscription\",\"url\":\"https://example.com/s\"}",
+    "{\"id\":5497558138901,\"name\":\"x\",\"op\":\"rename\"}",
+    "{\"at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":5497558138901,\"op\":\"complete\"}",
+    "{\"at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":5497558138902,\"op\":\"delete\"}",
+    "{\"id\":5497558138903,\"op\":\"forget\"}",
+    "{\"id\":5497558138901,\"minutes\":30,\"op\":\"move_block\",\"sid\":5497558138911,\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"moves\":[{\"id\":5497558138901,\"minutes\":30,\"sid\":5497558138911,\"start\":\"2026-02-03T09:00:00.000000000Z\"},{\"id\":1099511627783,\"minutes\":30,\"sid\":1099511627783,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"op\":\"move_blocks\"}",
+    "{\"blocks\":[{\"id\":5497558138901,\"sid\":5497558138911}],\"op\":\"remove_blocks\"}",
+    "{\"id\":5497558138901,\"minutes\":30,\"op\":\"set_estimate\"}",
+    "{\"id\":5497558138901,\"op\":\"set_deadline\",\"seed\":2}",
+    "{\"id\":5497558138901,\"level\":1,\"op\":\"set_severity\"}",
+    "{\"id\":5497558138901,\"level\":1,\"op\":\"set_horizon\"}",
+    "{\"anchor\":\"2026-02-02\",\"days\":3,\"id\":5497558138903,\"op\":\"set_repeat\"}",
+    "{\"id\":5497558138903,\"minutes\":30,\"op\":\"move_routine\",\"start_minutes\":0}",
+    "{\"id\":5497558138902,\"minutes\":30,\"op\":\"set_event_span\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":5497558138901,\"op\":\"forget_archived\"}",
+    "{\"id\":5497558138904,\"op\":\"remove_subscription\"}",
+    "{\"id\":5497558138904,\"name\":\"x\",\"op\":\"rename_subscription\"}",
+    "{\"color\":[1,1,1,1],\"id\":5497558138904,\"op\":\"set_subscription_color\"}",
+    "{\"enabled\":false,\"id\":5497558138904,\"op\":\"set_subscription_enabled\"}",
+    "{\"base\":2,\"op\":\"set_notes\",\"text\":\"n\"}",
+    "{\"lat\":1,\"lon\":1,\"op\":\"set_home\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"fallback\":1099511627785,\"id\":5497558138901,\"op\":\"restore\"}",
+    "{\"id\":5497558138901,\"minutes\":30,\"op\":\"add_block\",\"sid\":1099511627779,\"start\":\"2026-02-03T09:00:00.000000000Z\"}"
+   ],
+   "expect_minter": {
+    "device_no": 5,
+    "next_block": 32,
+    "next_item": 25
+   }
+  },
+  {
+   "name": "references to ids accepted before are kept",
+   "commands": [
+    "{\"id\":3298534883336,\"name\":\"x\",\"op\":\"rename\"}",
+    "{\"at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":3298534883336,\"op\":\"complete\"}",
+    "{\"at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":3298534883337,\"op\":\"delete\"}",
+    "{\"id\":3298534883338,\"op\":\"forget\"}",
+    "{\"id\":3298534883336,\"minutes\":30,\"op\":\"move_block\",\"sid\":3298534883340,\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"moves\":[{\"id\":3298534883336,\"minutes\":30,\"sid\":3298534883340,\"start\":\"2026-02-03T09:00:00.000000000Z\"},{\"id\":1099511627783,\"minutes\":30,\"sid\":1099511627783,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"op\":\"move_blocks\"}",
+    "{\"blocks\":[{\"id\":3298534883336,\"sid\":3298534883340}],\"op\":\"remove_blocks\"}",
+    "{\"id\":3298534883336,\"minutes\":30,\"op\":\"set_estimate\"}",
+    "{\"id\":3298534883336,\"op\":\"set_deadline\",\"seed\":2}",
+    "{\"id\":3298534883336,\"level\":1,\"op\":\"set_severity\"}",
+    "{\"id\":3298534883336,\"level\":1,\"op\":\"set_horizon\"}",
+    "{\"anchor\":\"2026-02-02\",\"days\":3,\"id\":3298534883338,\"op\":\"set_repeat\"}",
+    "{\"id\":3298534883338,\"minutes\":30,\"op\":\"move_routine\",\"start_minutes\":0}",
+    "{\"id\":3298534883337,\"minutes\":30,\"op\":\"set_event_span\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":3298534883336,\"op\":\"forget_archived\"}",
+    "{\"id\":3298534883339,\"op\":\"remove_subscription\"}",
+    "{\"id\":3298534883339,\"name\":\"x\",\"op\":\"rename_subscription\"}",
+    "{\"color\":[1,1,1,1],\"id\":3298534883339,\"op\":\"set_subscription_color\"}",
+    "{\"enabled\":false,\"id\":3298534883339,\"op\":\"set_subscription_enabled\"}",
+    "{\"base\":2,\"op\":\"set_notes\",\"text\":\"n\"}",
+    "{\"lat\":1,\"lon\":1,\"op\":\"set_home\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"fallback\":1099511627785,\"id\":3298534883336,\"op\":\"restore\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":30,\"device_no\":5,\"item\":20}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "expect_commands": [
+    "{\"id\":3298534883336,\"name\":\"x\",\"op\":\"rename\"}",
+    "{\"at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":3298534883336,\"op\":\"complete\"}",
+    "{\"at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":3298534883337,\"op\":\"delete\"}",
+    "{\"id\":3298534883338,\"op\":\"forget\"}",
+    "{\"id\":3298534883336,\"minutes\":30,\"op\":\"move_block\",\"sid\":3298534883340,\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"moves\":[{\"id\":3298534883336,\"minutes\":30,\"sid\":3298534883340,\"start\":\"2026-02-03T09:00:00.000000000Z\"},{\"id\":1099511627783,\"minutes\":30,\"sid\":1099511627783,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"op\":\"move_blocks\"}",
+    "{\"blocks\":[{\"id\":3298534883336,\"sid\":3298534883340}],\"op\":\"remove_blocks\"}",
+    "{\"id\":3298534883336,\"minutes\":30,\"op\":\"set_estimate\"}",
+    "{\"id\":3298534883336,\"op\":\"set_deadline\",\"seed\":2}",
+    "{\"id\":3298534883336,\"level\":1,\"op\":\"set_severity\"}",
+    "{\"id\":3298534883336,\"level\":1,\"op\":\"set_horizon\"}",
+    "{\"anchor\":\"2026-02-02\",\"days\":3,\"id\":3298534883338,\"op\":\"set_repeat\"}",
+    "{\"id\":3298534883338,\"minutes\":30,\"op\":\"move_routine\",\"start_minutes\":0}",
+    "{\"id\":3298534883337,\"minutes\":30,\"op\":\"set_event_span\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"id\":3298534883336,\"op\":\"forget_archived\"}",
+    "{\"id\":3298534883339,\"op\":\"remove_subscription\"}",
+    "{\"id\":3298534883339,\"name\":\"x\",\"op\":\"rename_subscription\"}",
+    "{\"color\":[1,1,1,1],\"id\":3298534883339,\"op\":\"set_subscription_color\"}",
+    "{\"enabled\":false,\"id\":3298534883339,\"op\":\"set_subscription_enabled\"}",
+    "{\"base\":2,\"op\":\"set_notes\",\"text\":\"n\"}",
+    "{\"lat\":1,\"lon\":1,\"op\":\"set_home\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"fallback\":1099511627785,\"id\":3298534883336,\"op\":\"restore\"}"
+   ],
+   "expect_minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   }
+  },
+  {
+   "name": "a reference before the mint is kept, one after it is replaced",
+   "commands": [
+    "{\"id\":3298534883329,\"name\":\"x\",\"op\":\"rename\"}",
+    "{\"id\":3298534883329,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":3298534883329,\"name\":\"y\",\"op\":\"rename\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":30,\"device_no\":5,\"item\":20}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "expect_commands": [
+    "{\"id\":3298534883329,\"name\":\"x\",\"op\":\"rename\"}",
+    "{\"id\":5497558138901,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":5497558138901,\"name\":\"y\",\"op\":\"rename\"}"
+   ],
+   "expect_minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 22
+   }
+  },
+  {
+   "name": "remove_blocks and create_task blocks sorted again",
+   "commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":3298534883329,\"start\":\"2026-02-03T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":4398046511105,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":3298534883329,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"blocks\":[{\"id\":3298534883329,\"sid\":3298534883329},{\"id\":4398046511106,\"sid\":4398046511105}],\"op\":\"remove_blocks\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":30,\"device_no\":5,\"item\":20}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "expect_commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":4398046511105,\"start\":\"2026-02-03T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":5497558138911,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":5497558138901,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"blocks\":[{\"id\":4398046511106,\"sid\":4398046511105},{\"id\":5497558138901,\"sid\":5497558138911}],\"op\":\"remove_blocks\"}"
+   ],
+   "expect_minter": {
+    "device_no": 5,
+    "next_block": 32,
+    "next_item": 22
+   }
+  },
+  {
+   "name": "ids of other devices are kept",
+   "commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":8796093022209,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":1099511627787,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":1099511627787,\"minutes\":30,\"op\":\"add_block\",\"sid\":4398046511105,\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"fallback\":1099511627788,\"id\":1,\"op\":\"restore\"}",
+    "{\"color\":[0,0,0,0],\"id\":7,\"name\":\"s\",\"op\":\"add_subscription\",\"url\":\"https://example.com/s\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":30,\"device_no\":5,\"item\":20}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "expect_commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":8796093022209,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":1099511627787,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":1099511627787,\"minutes\":30,\"op\":\"add_block\",\"sid\":4398046511105,\"start\":\"2026-02-03T09:00:00.000000000Z\"}",
+    "{\"archived_at\":\"2026-01-10T12:00:00.000000000Z\",\"fallback\":1099511627788,\"id\":1,\"op\":\"restore\"}",
+    "{\"color\":[0,0,0,0],\"id\":7,\"name\":\"s\",\"op\":\"add_subscription\",\"url\":\"https://example.com/s\"}"
+   ],
+   "expect_minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   }
+  },
+  {
+   "name": "a minter ahead of the view's mark",
+   "commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":3298534883329,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":3298534883329,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":3298534883330,\"name\":\"t\",\"op\":\"create_task\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":30,\"device_no\":5,\"item\":20}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 70,
+    "next_item": 50
+   },
+   "expect_commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":5497558138950,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":5497558138930,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":5497558138931,\"name\":\"t\",\"op\":\"create_task\"}"
+   ],
+   "expect_minter": {
+    "device_no": 5,
+    "next_block": 71,
+    "next_item": 52
+   }
+  },
+  {
+   "name": "a device without a mark in the view",
+   "commands": [
+    "{\"id\":3298534883329,\"name\":\"e\",\"op\":\"create_event\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "expect_commands": [
+    "{\"id\":5497558138881,\"name\":\"e\",\"op\":\"create_event\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}"
+   ],
+   "expect_minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 2
+   }
+  },
+  {
+   "name": "no item number left",
+   "commands": [
+    "{\"id\":3298534883329,\"name\":\"e\",\"op\":\"create_event\",\"start\":\"2026-02-03T09:00:00.000000000Z\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":0,\"device_no\":5,\"item\":1099511627775}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "code": "core/bad_id"
+  },
+  {
+   "name": "no block number left after an item was minted",
+   "commands": [
+    "{\"id\":3298534883329,\"name\":\"t\",\"op\":\"create_task\"}",
+    "{\"id\":3298534883329,\"minutes\":30,\"op\":\"add_block\",\"sid\":3298534883329,\"start\":\"2026-02-03T09:00:00.000000000Z\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":1099511627775,\"device_no\":5,\"item\":1}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "code": "core/bad_id"
+  },
+  {
+   "name": "the last numbers",
+   "commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":3298534883329,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":3298534883329,\"name\":\"t\",\"op\":\"create_task\"}"
+   ],
+   "from_device_no": 3,
+   "view_text": "{\"marks\":[{\"block\":1099511627774,\"device_no\":5,\"item\":1099511627774}],\"rules\":1}",
+   "minter": {
+    "device_no": 5,
+    "next_block": 1,
+    "next_item": 1
+   },
+   "expect_commands": [
+    "{\"blocks\":[{\"minutes\":30,\"sid\":6597069766655,\"start\":\"2026-02-03T09:00:00.000000000Z\"}],\"id\":6597069766655,\"name\":\"t\",\"op\":\"create_task\"}"
+   ],
+   "expect_minter": {
+    "device_no": 5,
+    "next_block": 1099511627776,
+    "next_item": 1099511627776
+   }
+  }
+ ]
+}

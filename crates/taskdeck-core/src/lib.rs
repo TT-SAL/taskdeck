@@ -16,16 +16,30 @@
 #![allow(unused_variables)]
 
 /// An error of the catalogue (core.md §16, §20).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoreError {
     pub code: &'static str,
     pub detail: Option<u32>,
 }
 
 /// An error of the compile step: code, HTTP status, message (core.md §13.1, §16, §20).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompileError {
     pub code: &'static str,
     pub status: u16,
     pub message: String,
+}
+
+impl CoreError {
+    /// An error with a code and no detail.
+    pub(crate) const fn code(code: &'static str) -> CoreError {
+        CoreError { code, detail: None }
+    }
+
+    /// `core/invariant` naming the first failing rule of core.md §6.12.
+    pub(crate) const fn invariant(rule: u32) -> CoreError {
+        CoreError { code: "core/invariant", detail: Some(rule) }
+    }
 }
 
 pub mod apply;
@@ -46,14 +60,3 @@ pub mod snapshot;
 pub mod tasks;
 pub mod time;
 pub mod weather;
-
-#[cfg(test)]
-mod tests {
-    use proptest as _;
-    use sha2 as _;
-
-    #[test]
-    fn the_shell_builds() {
-        assert_eq!(env!("CARGO_PKG_NAME"), "taskdeck-core");
-    }
-}

@@ -390,7 +390,7 @@ A `restore` carries the row key and a `fallback` id minted by the origin. `apply
 
 - **CORE-ID-001** (core) Every id and sid in `BoardData`, except the id 0 of a pre-id archive row, MUST have the form of §7.1 with a non-zero low part and a high part from 0 to 8191.
 - **CORE-ID-002** (core) `apply` MUST refuse with `core/bad_id` a command that mints an item, subscription or block id whose high part differs from `Ctx.device_no` or whose low part is not above the author's mark for that kind.
-- **CORE-ID-003** (core) `apply` MUST raise the author's mark to the low part of every id it accepts as newly minted, including a `restore`'s `fallback` whether or not the restore used it.
+- **CORE-ID-003** (core) `apply` MUST raise the author's mark to the low part of every id it accepts as newly minted, including a `restore`'s `fallback` whether or not the restore used it. A benign repeat (§10.6) accepts no id and raises no mark.
 - **CORE-ID-004** (core) The compile step MUST mint each number as `max(minter.next, mark + 1)` of §7.2 and MUST advance the minter past it, so that one minter never yields the same number twice.
 - **CORE-ID-007** (core) `IdMinter::new(device_no)` MUST return a minter with that `device_no`, `next_item = 1` and `next_block = 1`.
 - **CORE-ID-005** (core) `apply` MUST restore a row under its own id when that id is not 0 and not held by a live item, and under the command's `fallback` otherwise, without applying the range check to the row's own id.
@@ -492,6 +492,8 @@ A log command is one record of the canonical encoding with a field `op` naming i
 5. §4.5 step 4 against that command's schema, else `core/schema`;
 6. §4.5 step 5, else `core/not_canonical`;
 7. the command's cross-field constraints in its section ("Schema rule"), else `core/schema`.
+
+A text over the tree budget of §4.5 is `core/schema` whatever its `op`: the budget is spent before step 4 reads one.
 
 A command that parses is not yet valid against the board: that is `apply`'s business (§8.4). The engine maps a parse failure of a sequenced `cmd` entry to a refusal on every device (`seal.md` §14.4, `engine.md`); it is not an `apply` refusal and changes nothing.
 
@@ -812,12 +814,12 @@ A `ResetTo` (`seal.md` §13.6, `engine.md` §28.1) installs an earlier state of 
 1. `target.rules ≤ current.rules`, else `core/unknown_rules`;
 2. the result `b` is `target` with every field kept, except:
    - `marks`: one mark for each `device_no` that has a mark in `target` or in `current`, its `item` and its `block` each the larger of the two boards' values (an absent mark counts as 0), ascending by `device_no`;
-   - `notes_rev = max(target.notes_rev, current.notes_rev) + 1`;
+   - `notes_rev = max(target.notes_rev, current.notes_rev) + 1`; when the larger of the two is already 2^53 − 1, `reset` returns `core/cap` instead;
 3. when `b.rules < current.rules`: `upgrade_rules(&mut b, current.rules)` (§11.2); its error is returned.
 
 The marks keep every number minted since the target from being minted again (§7.2); the raised revision makes every `set_notes` based on a revision of either board stale (§10.5); and `b.rules` mirrors the unchanged membership. `reset` produces no notices and, like `apply`, is a function of its arguments alone (CORE-CTX-002).
 
-- **CORE-RULES-005** (core) `reset` MUST return `target` unchanged except that its marks are the elementwise maximum of both boards' marks, its `notes_rev` is one above the larger of the two, and its rules version is raised to `current.rules` by `upgrade_rules`, and MUST return `core/unknown_rules` when `target.rules` exceeds `current.rules`.
+- **CORE-RULES-005** (core) `reset` MUST return `target` unchanged except that its marks are the elementwise maximum of both boards' marks, its `notes_rev` is one above the larger of the two, and its rules version is raised to `current.rules` by `upgrade_rules`, and MUST return `core/unknown_rules` when `target.rules` exceeds `current.rules`, and `core/cap` when the larger `notes_rev` is already 2^53 − 1.
 
 ## 12. Intents
 
@@ -1227,7 +1229,7 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 | `core/kind` | the item's kind does not take this command | §9 | record the refusal |
 | `core/bad_id` | a minted id or sid is not the author's or not above its mark | CORE-ID-002 | record the refusal; the author's minter is behind its mark: the device advances it (`device.md`) |
 | `core/id_taken` | a restored row's sid is held by a live block | §9.21 step 4 | record the refusal |
-| `core/cap` | a cap of §17 would be exceeded | §9; §8.4 step 4 | record the refusal; the UI says the board is full |
+| `core/cap` | a cap of §17 would be exceeded; from `reset`, the notes revision cannot be raised past 2^53 − 1 | §9; §8.4 step 4; §11.3 | record the refusal; the UI says the board is full. From `reset`: the local fault `engine/local_fault`, as for its `core/unknown_rules` (`engine.md` §28.1) |
 | `core/duplicate_url` | that calendar URL is already subscribed | §9.23 | record the refusal |
 | `core/notes_stale` | `set_notes` base is not the current revision | §9.20 | record the refusal with `base` and `current`; the origin offers its draft and the merge view |
 
@@ -1330,6 +1332,8 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 - **CORE-PERF-002** (core) Applying 5,000 log commands of the budget workload to the 10,000-row fixture MUST complete within 1 s as the median of five runs.
 - **CORE-PERF-003** (core) `BoardData::from_canonical_bytes` of the 10,000-row fixture's canonical bytes MUST complete within 150 ms as the median of five runs.
 
+The 10,000-row fixture is the board that `import` makes of `fixtures/boards/archive-10k`. The snapshot of CORE-PERF-001 is the request of that board's recorded 31-day snapshot (§18.5). The budget workload of CORE-PERF-002 is 1,000 rounds of five commands on that board, authored by `device_no` 2, each with `based_on` one below its `seq`: a `create_task` with one block of 30 minutes, a `rename` of that task, a `move_block` of its block by 15 minutes, a `set_deadline`, and its `complete`. Only `apply` is timed; the commands are built beforehand.
+
 ## 18. Test vectors
 
 ### 18.1 Location and format
@@ -1376,7 +1380,7 @@ One file per topic (for example `create.json`, `blocks.json`, `archive.json`, `n
    "end_text": "<canonical board bytes>"}]}
 ```
 
-`code` is present for `refused` and `parse_error`; `notices`, `moved`, `skipped` and `restored_as` when they apply; `board_sha256` always (unchanged for a refusal). Rules version 1's golden logs, which CORE-RULES-003 requires, cover: every check of every op of §9 with a refused case; every row of §10.6; every notice kind and group; skips for both reasons; and the boundary values 200 and 201 scalars, 14, 15, 1,440 and 1,441 minutes, levels 4 and 5 (severity) and 3 and 4 (horizon), notes of 20,000 and 20,001 scalars, ids at and above the mark, `device_no` 8191, the id 2^53 − 1, instants at both ends of the range, every cap at its value and one above, `based_on` equal to a stamp's seq and one below it, and a `complete` whose `ctx.at` is less than a day before the end of the instant range (the saturating clamp). Golden logs contain no zone, so they hold under any `TZ` (V2-4).
+`code` is present for `refused` and `parse_error`; `notices`, `moved`, `skipped` and `restored_as` when they apply; `board_sha256` always (unchanged for a refusal). Rules version 1's golden logs, which CORE-RULES-003 requires, cover: every check of every op of §9 with a refused case; every row of §10.6; every notice kind and group; skips for both reasons; and the boundary values 200 and 201 scalars, 14, 15, 1,440 and 1,441 minutes, levels 4 and 5 (severity) and 3 and 4 (horizon), notes of 20,000 and 20,001 scalars, ids at and above the mark, `device_no` 8191, the id 2^53 − 1, instants at both ends of the range, every cap at its value and one above, `based_on` equal to a stamp's seq and one below it, and a `complete` whose `ctx.at` is less than a day before the end of the instant range (the saturating clamp). Golden logs contain no zone, so they hold under any `TZ` (V2-4). Where one above a cap cannot be written as a command (1,001 blocks in a `create_task`, 1,001 moves or pairs), the case is a `parse_error`.
 
 **Generated start boards.** A case that needs a start board too large to print (the caps of §17: 200,000 archive rows are about 22 MB of JSON) gives `start_gen` in place of `start_text`, and `end_sha256`, lowercase hex of SHA-256 of the end board's canonical bytes, in place of `end_text`. `start_gen` is `{"blocks": B, "items": I, "rows": R, "unreadable": U}`, each an integer from 0, an absent member being 0, and names this board, which the test builds:
 
