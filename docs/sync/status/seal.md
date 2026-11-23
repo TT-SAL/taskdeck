@@ -63,7 +63,7 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **done**, merged (TT-SAL/taskdeck#16, 2026-11-23 16:42 UTC; one medium finding of its second security pass fixed) |
 | S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | **done** with S6 (TT-SAL/taskdeck#16); two of its points are completed by S7 (Q57, Q60) |
 | S7b | The last small code changes: rulings the spec states and the code does not yet do (Q57, Q60, Q56, Q18, Q15), and `write_backup` proving its stream before it seals, with a property test | `blob`, `pair`, `signatures`, `backup`, `prim` | §16, §17.10, §20.4, §20.5, §21.3 | `seal-blob`, `seal-signatures` | **implemented**, gate green in the lead's run (workflow run `wf_a9f0609a-1a1`); reviewed by S7's passes |
-| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | implementer running (workflow run `wf_1b7d8d3f-3ff`); one verify pass and the two security passes over S7b and S7 follow |
+| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | **implemented**: the stage gate passes in the lead's run, 164 of 164 clauses cited (workflow run `wf_1b7d8d3f-3ff`); one verify pass and the two security passes over S7b and S7 follow |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
 
 The briefs of S4, S5 and S6 name line ranges of `seal.md` as it stood on 2026-11-23 02:30 UTC; after
@@ -305,6 +305,13 @@ Notes behind the briefs (the lead's reading of the spec):
   stays in a freed heap block, the test binary installs a global allocator that scans what is freed
   on the test's own thread. That needs `unsafe` in the test binary; the library keeps
   `#![forbid(unsafe_code)]`, and nothing else can observe freed memory.
+- **L16. The fuzz crate's lockfile is covered by the root's.** `crates/taskdeck-seal/fuzz` has its own
+  `[workspace]` table and lockfile (foundation's note: such a lockfile is outside the supply-chain
+  gate). It started as a copy of the root `Cargo.lock`; the lead compared the two: every one of its
+  64 packages stands in the root lockfile with the same version and checksum, except the fuzz
+  package itself (`libfuzzer-sys` 0.4.13 and `arbitrary` 1.4.2 were pinned by foundation). So the
+  root's supply-chain gate and cooldown cover it; a test in `tests/crate_rules` keeps it a subset
+  (handed to S7's fix pass).
 - **L12. A hook step that needs `python3` runs on Linux only** (the vectors' format check in `ci.sh`):
   a Windows runner's bash may lack it, and the files are the same on every system.
 
@@ -522,6 +529,9 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q78 | §17.9 step 5 | with Q57, nothing checks a bundle snapshot's `hash_version` against the rules | the pairing machine, which recomputes the state hash, refuses a version the membership's rules do not allow (`seal/bundle_invalid`), as the backup reader does (Q40). Spec note |
 | Q79 | §17.9 | nothing E signs binds the entries between the bundle's head and `added_seq`: a relay that swaps a racing rotation for junk makes N report `Joined` although the board refused its `DeviceAdded` (S6 security, reproduced) | the design's limit, bounded: E reports the failure and revokes the device at the relay, nobody accepts N's entries, N meets the fork at the first honest entry after `h`. §17.9 says so. The remedy (the bundle carries `C_{added_seq}`) needs E to classify its own entry before it seals the bundle: left open for `engine` in `CHANGES.md`. No code change |
 | Q80 | §16.2 (Q15) | which admin operations the registry's words exclude | the four the lows named: `mint_read_token` for a `dev` that is not the signer; `reinstate` by a device signer (`sign_admin` only: `admin_message` sees an id, not a role) or with `first_epoch` below 2; `recovery_register` whose `dev` is not the `dev_R` of its key; a `seed` of more than 320 entries. Nothing else is refused |
+| Q81 | SYNC_PLAN.md §6.3 (the gate's words), §17.2, §18.1 | "flipping any byte is rejected" against typed codes with 10 and 20 check bits | a changed character counts as rejected when the check fails, or, when it happens to match, when the text names another secret that is refused where it is used (another ticket, a recovery key that is not the board's) |
+| Q82 | §26 `Receipt.opened` | an entry whose own author reseals a broken payload | `opened` is set although the entry is refused (step 11 passed); "nothing of the plaintext returned" is about bytes a third party flips |
+| Q83 | §5.3, `core.md` §4.5 | seal's canonical parser works in one pass and has no tree budget | both stay: every failure is `seal/bad_payload` either way, and a payload is at most 262,144 bytes and already authenticated |
 | Q49 | §26 `VerifiedBackup` | the recovery tool is to show a file's written date, which `read_backup` did not return | `VerifiedBackup` gains `written_ms` (the header's, display only). Code in S5's brief |
 | Q48 | SEAL-GEN-006, §21.3 | the DEFLATE compressor and decompressor (a pinned dependency's private state) hold the payload's bytes, the epoch roots among them, and are freed without being erased (S4 security, a note; `unsafe` is forbidden, so the crate cannot wipe them from outside) | as S1's high finding ruled for the hash states: a state that took in roots must not be left behind. The writer keeps the roots and the read token out of the compressor (they travel in stored blocks the crate writes itself, after a full flush); the reader resets the decompressor, which zeroes its window in the pinned version, before dropping it. What stays outside reach is said in the code and in the spec. Code in S5's brief |
 
@@ -552,6 +562,11 @@ Applied with the same change (they were candidates until task S3 confirmed the p
 | A pull-request CI run of the seal area | 6 to 9 minutes; with a lockfile change (every area) 19 minutes | TT-SAL/taskdeck#4, TT-SAL/taskdeck#6 |
 | Task S3, the implementer | 35 minutes; 0.89 million tokens | 2026-11-23 01:42 to 02:17 UTC |
 | The crate's tests after S3 | 152 unit tests, 34 in the four gate targets, 11 vector families (the two largest 412 KB and 213 KB) | the lead's run, 02:19 UTC |
+| The crate's tests after S7 | 262 unit tests with `test-entropy`; nine integration targets; 16 vector families; 26 fuzz targets (compiled, not run) | the lead's run, 2026-11-23 17:05 UTC |
+| The stage gate, `bash scripts/gate.sh seal` | passes: 11 items run, 2 for CI; `spec-coverage` 164 of 164 | the lead's run, 17:05 UTC |
+| **Budget: 256 entries verified and opened** (limit 100 ms), median of five, release build | **14.8 ms in the container** (14.2 and 15.3 ms in the implementer's runs); the CI job's number becomes the baseline | `examples/budget.rs`, the lead's run |
+| The same on a membership with 100,000 control entries (0.8 MB of state; the per-entry copy) | 21 to 29 ms; not judged | the same run |
+| `read_backup` of a nightly file with 2,000 history records | 109 ms (one signature check per record); not judged | the same run |
 
 ## Token ledger
 
@@ -590,7 +605,8 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | two agents started by a resume that could not reuse the first security pass, stopped after two minutes | 2 | | 0.21 M | 0.21 M |
 | | S6, the second security pass and the fix pass | 2 | 0.37 M | 0.38 M | 0.38 M |
 | | S7b, the implementer | 1 | 0.31 M | 0.38 M | 0.38 M |
-| | **window so far** | | | | **1.20 M** |
+| | S7, the implementer | 1 | 0.36 M | 0.43 M | 0.43 M |
+| | **window so far** | | | | **1.63 M** |
 
 ## Low findings left as they are
 
