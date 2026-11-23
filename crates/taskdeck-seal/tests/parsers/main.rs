@@ -5,7 +5,10 @@
 mod common;
 #[path = "../common/board.rs"]
 mod board;
+#[path = "../common/backup.rs"]
+mod backup;
 
 mod s1_parsers;
 mod s2_frames;
 mod s3_membership;
+mod s4_parsers;

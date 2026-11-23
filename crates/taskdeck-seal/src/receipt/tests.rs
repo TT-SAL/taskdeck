@@ -109,7 +109,7 @@ fn step4_signature() {
 
 /// `x mod L` and `(x · y) mod L` over 256-bit little-endian integers, for
 /// building an Ed25519 signature with a chosen `R` (test only).
-mod scalar {
+pub(crate) mod scalar {
     pub const L: [u64; 4] = [0x5812631a5cf5d3ed, 0x14def9dea2f79cd6, 0, 0x1000000000000000];
 
     fn ge(a: &[u64; 4], b: &[u64; 4]) -> bool {

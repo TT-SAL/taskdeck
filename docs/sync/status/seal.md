@@ -55,9 +55,9 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 |---|---|---|---|---|---|
 | S1 | Primitives, keys, wraps, chain and fingerprints, the sheet, the known-answer suites, the vectors target, `ci.sh` | `error`, `entropy`, `base32`, `encodings` (hosts, names), `ids`, `ctx`, `keys`, `chain`, `prim` | §3–§7, §15, §18 | `seal-kdf`, `seal-wrap`, `seal-chain`, `seal-sheet` | **done**, merged (TT-SAL/taskdeck#4; its high finding fixed by TT-SAL/taskdeck#6) |
 | S2 | Frames, envelope, padding, payloads and control items (encode and strict parse, canonical JSON), login and admin signatures | `entries`, `signatures`, `encodings` (JSON) | §5.3, §8–§12, §16 | `seal-frame`, `seal-padding`, `seal-signatures` | **done**, merged (TT-SAL/taskdeck#9; low findings only) |
-| S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **implemented**, gate green, pushed (draft TT-SAL/taskdeck#10); verify and security passes next: resume workflow run `wf_6a6ca5ab-6c6` if this session still lives, else run the verify and security steps afresh on the committed code |
-| S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | brief written |
-| S5 | Blobs and snapshots (opening a snapshot uses S4's projection) | `blob` | §20 | `seal-blob` | brief written |
+| S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **done**, merged (TT-SAL/taskdeck#10, with the spec change) |
+| S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done** (TT-SAL/taskdeck#13; low findings only, three of them carried into S5's brief) |
+| S5 | Blobs and snapshots (opening a snapshot uses S4's projection); four rulings carried over from S4's security passes | `blob`, `backup`, `prim` | §20 | `seal-blob` | brief written; next to launch |
 | S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | brief written |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `ci.sh` | §3, §24 | all present | brief to write |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
@@ -169,6 +169,31 @@ Notes behind the briefs (the lead's reading of the spec), and for the brief of S
 - **E4, left open for `engine`** (a row of `CHANGES.md`): `engine.md` §24.3 re-seals every later own
   record after a re-sealable refusal, a pending revocation among them, and §28.5 now composes a raced
   revocation again on the same codes; the two rules can meet on one record.
+
+## Task S4: what happened
+
+- Implementer (0.61 million tokens): `file.rs` (the storage key, the per-kind file keys, `FileSealer`,
+  `open_file` with the tail rules of §19.4), `backup.rs` (history records, `write_backup`,
+  `read_backup` with its eleven steps, `verify_backup_file`) and the private module
+  `backup/projection.rs`, which runs the rows of §13.6 through S3's transitions and which S5's
+  `open_snapshot` calls. Eleven spec questions (Q34 to Q44).
+- Verify pass: no code defect. The verifier recomputed both vector families independently and ran an
+  honest history through every transition. It then removed checks one at a time: four security checks
+  could each be deleted without a test failing, among them the Genesis `board_id` comparison, the one
+  check that stops a backup history forged by someone who is no member. The lead handed the four to
+  the fix pass as test-only rulings; each now has a test that fails without the check (the fixer
+  showed that by mutation), and the vector case "verify: header names another key" is now a file
+  signed by the given key.
+- Security passes: lows only; no fix pass was owed for them. The protocol lens recomputed the vectors
+  with a hand-written HPKE and went through the binding of every field; it found three places where
+  the reader accepts what no honest writer produces (rulings Q45 to Q47). Both lenses measured the
+  projection: it copied the whole membership for every history record, so a hostile history at the
+  limit (1,048,576 records, an 80 MB file, writable by any device that ever was a member) held
+  `read_backup` for 516 seconds in a release build. S5's `open_snapshot` calls the same function, so
+  the lead carried the fix into S5's brief with the two few-line rulings (Q45, Q46) and the
+  compressor's state (Q48) instead of leaving them for S7.
+- Nothing of the crate's code changed after the implementer; the lead's gate passed on the final tree
+  (205 unit tests with `test-entropy`, 13 vector families).
 
 ## Decisions (with reasons)
 
@@ -294,6 +319,23 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q32 | §13.2 | does the parser check invariants beyond the layout | yes; every state the transitions produce must pass (the verifier checks the round trip). Spec note |
 | Q33 | §26 `Receipt` | `code` and `opened` per class | with a halt, the halt's code; with `NeedFrames`, none; `opened` from step 11 on. Spec note |
 
+| Q34 | §19.1 | a record over the limit | `seal_record` refuses with `seal/payload_too_large`, before it draws |
+| Q35 | §19.4, §26 | a corrupt record and the records before it | `open_file` returns `seal/file_corrupt` alone |
+| Q36 | §21.5 | `from_accepted` on what is no accepted control entry | `seal/frame_format`, `seal/bad_payload`, `seal/not_control` |
+| Q37 | §21.3 | `write_backup` with inconsistent inputs | refused with the code of the reader's step that would reject the file |
+| Q38 | §21.5, §21.6 | a segment's roots of epochs rotated inside it | a segment carries only roots whose commitment its membership records; the others are in the rotations' wraps to the recovery key. Spec note |
+| Q39 | §21.6 step 11 | the segment's recomputed chain has nothing to be compared with | the crate recomputes it; the caller chains segments and nightly files. Spec note |
+| Q40 | §21.6 step 11 | a `hash_version` the rules do not allow | `seal/backup_payload` |
+| Q41 | §21.5 | history records beyond the file's range | after `seq`: step 9; at or after a segment's `first_seq`: step 11; a segment has `first_seq ≥ 2`. Spec note |
+| Q42 | §21.6 projection | step 2 needs the Genesis key before steps 4 and 5 | the first record's items are parsed at step 2; step 6 binds the key to the board id |
+| Q43 | §21.6 projection step 6 | how much of §13.6 the reduced rules run | the whole rows for `DeviceAdded`, `DeviceRevoked`, `DeviceReinstated`, `EpochRotated`; `RecoveryKeyChange` without the 72 hours; the others their author only |
+| Q44 | §21.6 | where `verify_backup_file` compares the key | after steps 1 and 2, before the signature |
+
+| Q45 | §21.6 step 10, SEAL-BKP-004 | step 10 compares `recipient` (a `dev_R`, which binds the recovery signing key only) with the projection's recovery identity: a history whose last recovery-key change pairs the sheet's signing key with another HPKE key passes, and a restore would wrap later roots to that key (S4 security, reproduced) | step 10 also requires both public keys of the projection's current recovery record to equal the typed seed's (`seal/backup_writer`). A strengthening. Spec change 2; code in S5's brief |
+| Q46 | §21.6 projection, SEAL-MEM-004 | the projection accepted a first record whose `ctr` is not 1 | refused (`seal/backup_history`): the projection accepts no history a log cannot produce. Code in S5's brief |
+| Q47 | §21.5, §21.6 | nothing in a file says at which seq its membership was taken, so a device revoked at seq `k` can still write a file that reads as a backup at any head with its history cut before `k` (S4 security, reproduced) | by design, and no check inside a file can change it: an authentic backup written before the revocation must stay readable. A backup proves that its writer was a current device at the end of its history and nothing later. Spec change 2 says so in §21.6; `recovery` shows the writer, the date and the last control entry, prefers the newest file, and compares with the relay's copy when one is reachable (the records' `frame_hash`, `head_chain`) |
+| Q48 | SEAL-GEN-006, §21.3 | the DEFLATE compressor and decompressor (a pinned dependency's private state) hold the payload's bytes, the epoch roots among them, and are freed without being erased (S4 security, a note; `unsafe` is forbidden, so the crate cannot wipe them from outside) | as S1's high finding ruled for the hash states: a state that took in roots must not be left behind. The writer keeps the roots and the read token out of the compressor (they travel in stored blocks the crate writes itself, after a full flush); the reader resets the decompressor, which zeroes its window in the pinned version, before dropping it. What stays outside reach is said in the code and in the spec. Code in S5's brief |
+
 Applied with the same change (they were candidates until task S3 confirmed the pattern):
 
 - Clauses that state a duty of the crate's caller (the device's sealer adapter) and are owned by
@@ -339,7 +381,11 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S3, the verifier | 1 | 0.32 M | 0.39 M | 0.39 M |
 | | second check of the spec change | 1 | 0.20 M | 0.26 M | 0.26 M |
 | | S3, security passes | 2 | 0.45 M | 0.44 M | 0.45 M |
-| | **window so far** | | | | **1.37 M** |
+| | S3, the fix pass | 1 | 0.22 M | 0.25 M | 0.25 M |
+| | S4, the implementer | 1 | 0.44 M | 0.61 M | 0.61 M |
+| | S4, the verifier | 1 | 0.27 M | 0.33 M | 0.33 M |
+| | S4, security passes and the fix pass | 3 | 0.55 M | 0.70 M | 0.70 M |
+| | **window total** (nothing more is started in it: S5's implementer would not fit) | | | | **3.26 M** |
 
 ## Low findings left as they are
 
@@ -367,6 +413,19 @@ output); the higher is booked. Limit: 3.5 million per window.
 - **S2, verify.** Two citations claim more than their tests prove: SEAL-SIG-005 on a test of the
   `register` layout (a caller's clause, see the spec-change candidates), SEAL-PLAIN-001 on the test of
   the sealing-side `at_ms` refusal. On S7's list.
+
+- **S4, security (both lenses).** The projection copied the membership once per history record
+  (quadratic time; 516 s at the limit). Carried into S5's brief: a failing record ends the projection,
+  so the items are applied in place.
+- **S4, security, for S7's budget job.** `classify` returns a new membership for every entry, so each
+  call copies the state, `ctl_seqs` included (8 bytes per control entry the board ever accepted, at
+  most 8 MB at the limit of 1,048,576). An honest board has a few hundred control entries; a member
+  who fills the log with control entries makes every later entry cost that copy on every device. S7
+  measures it in the budget job (a board with 16 devices and 1,000 control entries) and records the
+  number; a cheaper representation of `ctl_seqs` is a change to consider only if the budget needs it.
+- **S4, reviewers' notes, not findings.** `EpochRoot::from_bytes` takes its 32 bytes by value (§26), so
+  a caller's copy stays on the stack, as with every move of a secret. A segment's chain is recomputed
+  and compared with nothing (Q39).
 
 ## Open questions for the owner
 
@@ -433,3 +492,13 @@ To be completed at the exit. So far:
 - `core` changed `core.md` §4.5 (TT-SAL/taskdeck#7: a tree budget for the canonical parser, a lone
   surrogate escape is an error). Seal's own parser handles payloads of at most 257,979 bytes and
   refuses lone surrogates; task S7 checks it against §4.5 as it now stands.
+- For `recovery` (Q47): `read_backup` proves that a file's writer was a current device at the last
+  control entry of the file's history, and nothing later. A device revoked afterwards can still write
+  files that read as older backups, with any board content. Show the writer, the written date and the
+  seq of the last control entry; prefer the newest file; when a relay copy is reachable, compare the
+  history records' `frame_hash` and the `head_chain` with it before adopting the state.
+- For `recovery` (Q45): `read_backup` refuses with `seal/backup_writer` a file whose history ends with
+  a recovery key that is not exactly the typed sheet's pair of public keys.
+- For `recovery` and `device`: `read_backup` on a hostile file of the largest size allowed takes time
+  linear in the history (one signature check per record, up to 1,048,576) and up to about 1.5 GB of
+  memory (a 256 MiB file inflating to 512 MiB); run it off the UI thread.

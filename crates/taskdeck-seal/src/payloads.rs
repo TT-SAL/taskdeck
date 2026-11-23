@@ -515,6 +515,26 @@ pub(crate) fn parse_ctl_unsigned(payload: &[u8]) -> Result<UnsignedCtl, JsonErro
     Ok(UnsignedCtl { items, items_bytes, sig })
 }
 
+/// The `items` of a history record (seal.md §21.5, §21.6 step 5): the bytes
+/// must be exactly the canonical encoding (§5.3) of an array of 1 to 16
+/// items, each its table of §12, as `parse_ctl_unsigned` re-encodes them.
+/// The shape is `ctl_shape`'s.
+pub(crate) fn parse_items_bytes(bytes: &[u8]) -> Result<Vec<CtlItem>, JsonError> {
+    let v = canon::parse(bytes)?;
+    let a = array(&v, 1, CTL_ITEMS_MAX)?;
+    let mut items = Vec::with_capacity(a.len());
+    let mut re = Vec::with_capacity(a.len());
+    for i in a {
+        let item = item_from_value(i)?;
+        re.push(item_value(&item)?);
+        items.push(item);
+    }
+    if canon::encode(&Value::Array(re))? != bytes {
+        return Err(JsonError::NotCanonical);
+    }
+    Ok(items)
+}
+
 // ----------------------------------------------------------- beat (§11.4)
 
 fn beat_value(b: &Beat) -> Result<Value, JsonError> {

@@ -3,6 +3,11 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+#[path = "../common/board.rs"]
+mod board;
+#[path = "../common/backup.rs"]
+mod backup;
 
 mod s1_contexts;
 mod s2_signatures;
+mod s4_contexts;

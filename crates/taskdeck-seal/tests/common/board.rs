@@ -52,6 +52,16 @@ pub fn source(_bytes: Vec<u8>) -> Box<dyn Entropy> {
     Box::new(OsEntropy)
 }
 
+/// The recovery keys of a known seed, through its sheet (§18.1): the 52
+/// characters of the seed, then the first 20 bits of
+/// `H(ctx("sheet-check") ‖ seed)` as 4 characters.
+pub fn recovery_from_seed(seed: &[u8; 32]) -> RecoveryKeys {
+    let d: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest([b"taskdeck/v1/sheet-check\0".as_slice(), seed].concat()).into();
+    let check = base32::encode(&d[..3]);
+    let sheet = format!("{}{}", base32::encode(seed), &check[..4]);
+    RecoverySeed::from_sheet(&sheet).unwrap().keys()
+}
+
 /// The canonical bytes of the empty state `M_0` (every field zero or empty).
 pub fn empty_membership() -> Vec<u8> {
     let mut v = b"TDM1".to_vec();
@@ -104,6 +114,8 @@ pub const T0: i64 = 1_767_225_600_000;
 pub struct Sim {
     pub rng: Rng,
     pub rec: Vec<RecoveryKeys>,
+    /// The seed of each of `rec` (task S4: a backup reader types it).
+    pub seeds: Vec<[u8; 32]>,
     pub salt: [u8; 16],
     pub board: BoardId,
     pub devs: Vec<DeviceKeys>,
@@ -116,13 +128,16 @@ pub struct Sim {
     pub staged: Option<(u32, [u8; 32])>,
     /// The genesis inputs and receipt, for the vectors.
     pub genesis_case: Option<(Value, Value)>,
+    /// A history record for every accepted control entry (task S4).
+    pub history: Vec<HistoryRecord>,
 }
 
 impl Sim {
     /// A board with `n` current devices.
     pub fn new(seed: u64, n: usize) -> Sim {
         let mut rng = Rng::new(seed);
-        let rk = RecoverySeed::generate(&mut *source(rng.bytes(32))).unwrap().keys();
+        let seed0 = rng.arr::<32>();
+        let rk = recovery_from_seed(&seed0);
         let salt = rng.arr::<16>();
         let board = board_id(&rk.public().sign_pk, &salt);
         let d0 = DeviceKeys::generate(&mut *source(rng.bytes(80))).unwrap();
@@ -130,6 +145,7 @@ impl Sim {
         let mut s = Sim {
             rng,
             rec: vec![rk],
+            seeds: vec![seed0],
             salt,
             board,
             devs: vec![d0],
@@ -141,6 +157,7 @@ impl Sim {
             sealed: BTreeMap::new(),
             staged: None,
             genesis_case: None,
+            history: Vec::new(),
         };
         let g = s.genesis_item();
         let f = s.ctl(Who::R, vec![CtlItem::Genesis(g)], &Spec::default());
@@ -342,6 +359,13 @@ impl Sim {
     }
 
     pub fn commit(&mut self, frame: Vec<u8>, r: Receipt) {
+        if matches!(r.class, Class::Accept)
+            && let Some(o) = &r.opened
+            && o.kind == Kind::Ctl
+        {
+            let seq = self.frames.len() as u64 + 1;
+            self.history.push(HistoryRecord::from_accepted(seq, &frame, o).unwrap());
+        }
         let old = self.m.epoch();
         self.chains.push(r.chain);
         self.frames.push(frame);
@@ -400,6 +424,29 @@ impl Sim {
 
     pub fn new_recovery(&mut self) -> RecoveryKeys {
         RecoverySeed::generate(&mut *source(self.rng.bytes(32))).unwrap().keys()
+    }
+
+    /// New recovery keys and their seed, from the simulator's bytes.
+    pub fn new_recovery_seed(&mut self) -> ([u8; 32], RecoveryKeys) {
+        let seed = self.rng.arr::<32>();
+        (seed, recovery_from_seed(&seed))
+    }
+
+    /// A direct recovery-key change by the current recovery identity, with
+    /// its rotation (task S4); the new keys become `Who::R`.
+    pub fn change_recovery(&mut self) {
+        let (seed, nk) = self.new_recovery_seed();
+        let p = nk.public();
+        let k = CtlItem::RecoveryKeyChange(RecoveryKeyChange {
+            mode: RecoveryKeyMode::Direct,
+            sign_pk: Some(p.sign_pk),
+            hpke_pk: Some(p.hpke_pk),
+        });
+        let items = self.rotate_items(vec![k]);
+        let f = self.ctl(Who::R, items, &Spec::default());
+        self.accept(f);
+        self.rec.push(nk);
+        self.seeds.push(seed);
     }
 
     pub fn add_device(&mut self) -> usize {
