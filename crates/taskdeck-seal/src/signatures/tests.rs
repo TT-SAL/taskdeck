@@ -129,6 +129,13 @@ fn wrap_to(dev: &DevId, fill: u8) -> [u8; 96] {
     w
 }
 
+/// `dev_R = H(ctx("recovery-dev") ‖ board_id ‖ rsign_pk)[0..16]` on `BOARD`
+/// (§6.3), computed here.
+fn dev_r_of(sign_pk: &[u8; 32]) -> DevId {
+    let d = sha(&[b"taskdeck/v1/recovery-dev\0".as_slice(), &BOARD.0, sign_pk].concat());
+    DevId(d[..16].try_into().unwrap())
+}
+
 /// Every operation of the registry with its `args` written out by hand.
 fn registry() -> Vec<(AdminOp, &'static str, Vec<u8>)> {
     let dev = DevId([0xD1; 16]);
@@ -144,9 +151,9 @@ fn registry() -> Vec<(AdminOp, &'static str, Vec<u8>)> {
             cat(&[&dev.0, &[0, 0, 0, 5], &[0, 2], &wrap_to(&dev, 1), &wrap_to(&dev, 2)]),
         ),
         (
-            AdminOp::RecoveryRegister { dev, sign_pk: pk, frame_hash: fh },
+            AdminOp::RecoveryRegister { dev: dev_r_of(&pk), sign_pk: pk, frame_hash: fh },
             "recovery_register",
-            cat(&[&dev.0, &pk, &fh.0]),
+            cat(&[&dev_r_of(&pk).0, &pk, &fh.0]),
         ),
         (
             AdminOp::Fence { host: "new.example.net:8443".into(), door: [1, 2, 3, 4, 5], home_gen: 3 },
@@ -240,22 +247,34 @@ fn the_admin_message() {
     let d = DeviceKeys::generate(&mut OsEntropy).unwrap();
     let rk = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
     let dev_r = rk.public().dev(&BOARD);
+    let signers = [(Signer::Device(&d), d.public().dev, d.public().sign_pk), (Signer::Recovery(&rk, BOARD), dev_r, rk.public().sign_pk)];
     for (op, name, args) in registry() {
-        let m = admin_message(&op, &BOARD, &d.public().dev, &NONCE).unwrap();
-        let mut want = b"taskdeck/v1/admin\0".to_vec();
-        want.push(name.len() as u8);
-        want.extend_from_slice(name.as_bytes());
-        want.extend_from_slice(&[0xB0; 16]);
-        want.extend_from_slice(&d.public().dev.0);
-        want.extend_from_slice(&sha(&args));
-        want.extend_from_slice(&NONCE);
-        assert_eq!(m, want, "{name}");
-        assert_eq!(m.len(), 115 + name.len());
-        let sig = sign_admin(&Signer::Device(&d), &op, &BOARD, &NONCE).unwrap();
-        assert!(verify(&d.public().sign_pk, &m, &sig), "{name}");
-        let sig = sign_admin(&Signer::Recovery(&rk, BOARD), &op, &BOARD, &NONCE).unwrap();
-        let m = admin_message(&op, &BOARD, &dev_r, &NONCE).unwrap();
-        assert!(verify(&rk.public().sign_pk, &m, &sig), "{name}");
+        for (signer, sdev, pk) in &signers {
+            // `mint_read_token` names its signer (ruling Q15).
+            let (op, args) = match op {
+                AdminOp::MintReadToken { epoch, .. } => {
+                    (AdminOp::MintReadToken { dev: *sdev, epoch }, [&sdev.0[..], &args[16..]].concat())
+                }
+                ref op => (op.clone(), args.clone()),
+            };
+            let m = admin_message(&op, &BOARD, sdev, &NONCE).unwrap();
+            let mut want = b"taskdeck/v1/admin\0".to_vec();
+            want.push(name.len() as u8);
+            want.extend_from_slice(name.as_bytes());
+            want.extend_from_slice(&[0xB0; 16]);
+            want.extend_from_slice(&sdev.0);
+            want.extend_from_slice(&sha(&args));
+            want.extend_from_slice(&NONCE);
+            assert_eq!(m, want, "{name}");
+            assert_eq!(m.len(), 115 + name.len());
+            // `reinstate` is the recovery identity's (ruling Q15).
+            if matches!((signer, &op), (Signer::Device(_), AdminOp::Reinstate { .. })) {
+                assert_eq!(sign_admin(signer, &op, &BOARD, &NONCE).err(), Some(SealError::BadPayload));
+                continue;
+            }
+            let sig = sign_admin(signer, &op, &BOARD, &NONCE).unwrap();
+            assert!(verify(pk, &m, &sig), "{name}");
+        }
     }
     let r = sign_admin(&Signer::Recovery(&rk, BoardId([1; 16])), &AdminOp::Revoke(dev_r), &BOARD, &NONCE);
     assert_eq!(r.err(), Some(SealError::UnknownAuthor));
@@ -288,6 +307,7 @@ fn invalid_arguments_are_refused() {
         (AdminOp::Reinstate { dev, first_epoch: 5, wraps: vec![] }, SealError::BadPayload),
         (AdminOp::Reinstate { dev, first_epoch: 5, wraps: vec![wrap_to(&dev, 0); 257] }, SealError::BadPayload),
         (AdminOp::Reinstate { dev, first_epoch: 0, wraps: vec![wrap_to(&dev, 0)] }, SealError::BadPayload),
+        (AdminOp::Reinstate { dev, first_epoch: 1, wraps: vec![wrap_to(&dev, 0)] }, SealError::BadPayload),
         (AdminOp::Reinstate { dev, first_epoch: u32::MAX, wraps: vec![wrap_to(&dev, 0); 2] }, SealError::BadPayload),
         (AdminOp::Reinstate { dev, first_epoch: 5, wraps: vec![wrap_to(&DevId([9; 16]), 0)] }, SealError::BadPayload),
         (AdminOp::Seed(SeedArgs { first_seq: 0, last_seq: 0, ..seed() }), SealError::BadPayload),
@@ -353,4 +373,94 @@ fn register_names_the_device_added_frame() {
     assert_eq!(&args[16..48], &a.sign_pk);
     let sig = sign_admin(&Signer::Device(&e), &op, &BOARD, &NONCE).unwrap();
     assert!(verify(&ep.sign_pk, &admin_message(&op, &BOARD, &ep.dev, &NONCE).unwrap(), &sig));
+}
+
+// The registry's words exclude (ruling Q15), with `seal/bad_payload`, in
+// `admin_message` and `sign_admin` alike: `mint_read_token` for a `dev` that
+// is not the signer; `reinstate` with `first_epoch` below 2 (the epoch a
+// rotation set up), and in `sign_admin` by a device signer;
+// `recovery_register` whose `dev` is not the `dev_R` of its `sign_pk`; a
+// `seed` of more than 320 entries (256 device records and 64 recovery
+// records). The values just inside each bound are signed.
+// spec: SEAL-SIG-004
+#[test]
+fn what_the_registry_s_words_exclude() {
+    let d = DeviceKeys::generate(&mut OsEntropy).unwrap();
+    let dd = d.public().dev;
+    let rk = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
+    let rp = rk.public();
+    let dev_r = rp.dev(&BOARD);
+    let dev = DevId([0xD1; 16]);
+    let dev_s = Signer::Device(&d);
+    let rec_s = Signer::Recovery(&rk, BOARD);
+    let refused = |signer: &Signer, sdev: &DevId, op: &AdminOp| {
+        assert_eq!(admin_message(op, &BOARD, sdev, &NONCE).err(), Some(SealError::BadPayload), "{op:?}");
+        assert_eq!(sign_admin(signer, op, &BOARD, &NONCE).err(), Some(SealError::BadPayload), "{op:?}");
+    };
+    let signed = |signer: &Signer, sdev: &DevId, op: &AdminOp| {
+        assert!(admin_message(op, &BOARD, sdev, &NONCE).is_ok(), "{op:?}");
+        assert!(sign_admin(signer, op, &BOARD, &NONCE).is_ok(), "{op:?}");
+    };
+    // mint_read_token: `dev` is the signer.
+    signed(&dev_s, &dd, &AdminOp::MintReadToken { dev: dd, epoch: 3 });
+    signed(&rec_s, &dev_r, &AdminOp::MintReadToken { dev: dev_r, epoch: 1 });
+    refused(&dev_s, &dd, &AdminOp::MintReadToken { dev, epoch: 3 });
+    refused(&dev_s, &dd, &AdminOp::MintReadToken { dev: dev_r, epoch: 3 });
+    refused(&rec_s, &dev_r, &AdminOp::MintReadToken { dev: dd, epoch: 1 });
+    // reinstate: by the recovery identity, from epoch 2.
+    let reinstate = |first_epoch| AdminOp::Reinstate { dev, first_epoch, wraps: vec![wrap_to(&dev, 0)] };
+    signed(&rec_s, &dev_r, &reinstate(2));
+    refused(&rec_s, &dev_r, &reinstate(1));
+    refused(&rec_s, &dev_r, &reinstate(0));
+    assert_eq!(sign_admin(&dev_s, &reinstate(2), &BOARD, &NONCE).err(), Some(SealError::BadPayload));
+    // recovery_register: `dev` is the `dev_R` of `sign_pk` on this board,
+    // whoever signs.
+    let rr = |dev| AdminOp::RecoveryRegister { dev, sign_pk: rp.sign_pk, frame_hash: FrameHash([1; 32]) };
+    signed(&rec_s, &dev_r, &rr(dev_r));
+    signed(&dev_s, &dd, &rr(dev_r));
+    refused(&rec_s, &dev_r, &rr(dd));
+    refused(&dev_s, &dd, &rr(rp.dev(&BoardId([1; 16]))));
+    let mut flipped = dev_r;
+    flipped.0[15] ^= 1;
+    refused(&dev_s, &dd, &rr(flipped));
+    // seed: at most 320 entries.
+    let seed = |n: usize| {
+        AdminOp::Seed(SeedArgs {
+            home_gen: 2,
+            first_seq: 1,
+            chain_before: Chain([0; 32]),
+            last_seq: 0,
+            chain_last: Chain([0; 32]),
+            blob_id: BlobId([0; 16]),
+            entries: vec![SeedEntry { dev, sign_pk: [0; 32], role: 1, status: 1, last_ctr: 0 }; n],
+        })
+    };
+    signed(&dev_s, &dd, &seed(320));
+    assert_eq!(seed(320).args().len(), 102 + 58 * 320);
+    refused(&dev_s, &dd, &seed(321));
+    refused(&dev_s, &dd, &seed(65_535));
+}
+
+// The relay nonce's length is checked before anything else (ruling Q18):
+// `seal/challenge_length` also when the recovery signer's board is not the
+// one signed for, and when the arguments are refused too.
+// spec: SEAL-SIG-002
+#[test]
+fn the_nonce_is_checked_first() {
+    let d = DeviceKeys::generate(&mut OsEntropy).unwrap();
+    let rk = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
+    let other = Signer::Recovery(&rk, BoardId([1; 16]));
+    let revoke = AdminOp::Revoke(DevId([2; 16]));
+    assert_eq!(sign_admin(&other, &revoke, &BOARD, &NONCE).err(), Some(SealError::UnknownAuthor));
+    let bad_args = AdminOp::Purge { before_seq: 0, epoch: 0 };
+    let reinstate = AdminOp::Reinstate { dev: DevId([2; 16]), first_epoch: 3, wraps: vec![wrap_to(&DevId([2; 16]), 0)] };
+    for n in [0usize, 31, 33] {
+        let nonce = vec![7u8; n];
+        let want = Some(SealError::ChallengeLength);
+        assert_eq!(sign_admin(&other, &revoke, &BOARD, &nonce).err(), want, "{n}");
+        assert_eq!(sign_admin(&other, &bad_args, &BOARD, &nonce).err(), want, "{n}");
+        assert_eq!(sign_admin(&Signer::Device(&d), &bad_args, &BOARD, &nonce).err(), want, "{n}");
+        assert_eq!(sign_admin(&Signer::Device(&d), &reinstate, &BOARD, &nonce).err(), want, "{n}");
+        assert_eq!(admin_message(&bad_args, &BOARD, &DevId([2; 16]), &nonce).err(), want, "{n}");
+    }
 }
