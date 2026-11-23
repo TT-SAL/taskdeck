@@ -471,6 +471,35 @@ fn seal_blob_vectors() {
         Some("seal/blob_open"),
     ));
 
+    // Added by task S7b (ruling Q57 as completed, §20.5 step 7): the state
+    // hash recomputed from the body's own board and membership under the
+    // expected version equals the expected one. A body whose board is not
+    // the one hashed, carrying the expected hash; after every earlier case,
+    // so that none of their draws changes.
+    let mut b2 = copy_body(&body);
+    b2.board.extend_from_slice(b" ");
+    assert_ne!(state_hash(1, &sha(&[&b2.board]), &b2.membership), fx.hash);
+    let (f, rf) = sealed_body(&mut s, &body_bytes(&b2));
+    cases.push(fx.snap_expecting(
+        "step 7: a board that does not give the signed state hash",
+        &split_parts(&f),
+        &rf,
+        fx.s,
+        (&fx.hash, 1),
+        &w,
+        snap_key_json.clone(),
+        Some("seal/blob_open"),
+    ));
+    // Added by task S7b (ruling Q56, §20.4): `seal_snapshot` refuses, before
+    // it draws, a history record above `S` and a membership of another board.
+    let mut early = copy_body(&body);
+    early.seq = body.history.last().unwrap().seq() - 1;
+    cases.push(case(seal_in("seal_snapshot: a history record with a seq above S", &early, &entropy), Some("seal/blob_open")));
+    let other = Sim::new(89, 1);
+    let mut foreign = snap_body(&other);
+    foreign.seq = body.seq;
+    cases.push(case(seal_in("seal_snapshot: a membership of another board", &foreign, &entropy), Some("seal/blob_open")));
+
     // Replay every case as another implementation would.
     for c in &cases {
         for (k, v) in run(c) {

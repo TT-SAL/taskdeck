@@ -202,6 +202,31 @@ pub(crate) fn deflate_raw(data: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
     Some(out)
 }
 
+/// An empty final stored block (RFC 1951 §3.2.4): `BFINAL = 1`, `BTYPE =
+/// 00`, padding to the byte, `LEN = 0`, `NLEN = 0xFFFF`. After the head's
+/// sync-flushed output it ends the stream there, for the proof of
+/// `deflate_split`.
+const EMPTY_FINAL_STORED: [u8; 5] = [0x01, 0x00, 0x00, 0xFF, 0xFF];
+
+/// Test builds only: a change to a stream of `deflate_split`, given the
+/// stream, the end of the compressed head and the start of the compressed
+/// tail.
+#[cfg(test)]
+pub(crate) type SplitFault = fn(&mut Vec<u8>, usize, usize);
+
+#[cfg(test)]
+thread_local! {
+    /// Test builds only: a change `deflate_split` makes to its stream
+    /// before the proof, given the stream, the end of the compressed head
+    /// and the start of the compressed tail (a stand-in for a compressor
+    /// that writes a stream that does not read back).
+    pub(crate) static SPLIT_FAULT: core::cell::Cell<Option<SplitFault>> =
+        const { core::cell::Cell::new(None) };
+    /// Test builds only: every byte handed to the proof's decompressor on
+    /// this thread (`inflates_to`).
+    pub(crate) static PROOF_INPUT: core::cell::RefCell<Vec<u8>> = const { core::cell::RefCell::new(Vec::new()) };
+}
+
 /// One raw DEFLATE stream (RFC 1951) of `head ‖ secret ‖ tail` in which
 /// `secret` never passes through a compressor (seal.md §21.3, SEAL-GEN-006):
 /// `head` through a compressor ended with a sync flush (byte-aligned, no
@@ -211,15 +236,25 @@ pub(crate) fn deflate_raw(data: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
 /// compressor, finished, whose last block carries the final bit. A reader
 /// inflates it as any other stream. The output is in a zeroizing buffer.
 ///
+/// The stream is proved before it is returned (task S7b: a defect of the
+/// compressor's flush showed only on some data, and a backup that does not
+/// read back is found only at a restore): the compressed head followed by an
+/// empty final stored block inflates to exactly `head`, and the compressed
+/// tail inflates to exactly `tail`, each compared while inflating
+/// (`inflates_to`). The stored blocks are written here byte by byte and do
+/// not pass through the decompressor, so neither does `secret`.
+///
 /// What stays outside the crate's reach: the two compressors' private
 /// buffers (the window, hash chains and LZ buffer of miniz_oxide's
 /// `CompressorOxide`) keep `head` and `tail` and are freed unwiped; that is
-/// why the secret bytes never enter one. `None` if a compressor fails.
+/// why the secret bytes never enter one. `None` if a compressor fails or the
+/// proof does.
 pub(crate) fn deflate_split(head: &[u8], secret: &[u8], tail: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
     let blocks = secret.len().div_ceil(STORED_MAX).max(1);
     let cap = (head.len() / 2).saturating_add(secret.len()).saturating_add(5 * blocks).saturating_add(tail.len() / 2 + 64);
     let mut out = Zeroizing::new(Vec::with_capacity(cap));
     compress_piece(&mut out, head, false)?;
+    let head_end = out.len();
     for chunk in secret.chunks(STORED_MAX) {
         let len = u16::try_from(chunk.len()).ok()?;
         push_zeroizing(&mut out, &[0x00]);
@@ -227,8 +262,68 @@ pub(crate) fn deflate_split(head: &[u8], secret: &[u8], tail: &[u8]) -> Option<Z
         push_zeroizing(&mut out, &(!len).to_le_bytes());
         push_zeroizing(&mut out, chunk);
     }
+    let tail_start = out.len();
     compress_piece(&mut out, tail, true)?;
+    #[cfg(test)]
+    if let Some(fault) = SPLIT_FAULT.with(core::cell::Cell::take) {
+        fault(&mut out, head_end, tail_start);
+    }
+    inflates_to(&[out.get(..head_end)?, &EMPTY_FINAL_STORED], head)?;
+    inflates_to(&[out.get(tail_start..)?], tail)?;
     Some(out)
+}
+
+/// Whether the raw DEFLATE stream that is the concatenation of `pieces`
+/// inflates to exactly `want`, its end coming exactly at the end of the
+/// last piece: `Some(())`, or `None` at the first difference, for output
+/// beyond `want` or short of it, a wrong or truncated stream, or input left
+/// after its end. The output is compared chunk by chunk as it is inflated,
+/// in one 64 KiB working buffer: no copy of `want` is made, and the pieces
+/// are fed in turn rather than joined. The decompressor is reset before it
+/// is dropped (`Inflater`).
+fn inflates_to(pieces: &[&[u8]], want: &[u8]) -> Option<()> {
+    use flate2::{Decompress, FlushDecompress, Status};
+    #[cfg(test)]
+    PROOF_INPUT.with(|c| pieces.iter().for_each(|p| c.borrow_mut().extend_from_slice(p)));
+    let mut inflater = Inflater(Decompress::new(false));
+    let d = &mut inflater.0;
+    let mut buf = Zeroizing::new(vec![0u8; CHUNK]);
+    let mut piece = 0usize;
+    let mut at = 0usize;
+    let mut done = 0usize;
+    loop {
+        // Skip the pieces fed whole.
+        while pieces.get(piece).is_some_and(|p| at >= p.len()) {
+            piece = piece.checked_add(1)?;
+            at = 0;
+        }
+        let input = match pieces.get(piece) {
+            Some(p) => p.get(at..)?,
+            None => &[],
+        };
+        let in_before = d.total_in();
+        let out_before = d.total_out();
+        let st = d.decompress(input, &mut buf[..], FlushDecompress::None).ok()?;
+        let consumed = usize::try_from(d.total_in().checked_sub(in_before)?).ok()?;
+        let produced = usize::try_from(d.total_out().checked_sub(out_before)?).ok()?;
+        let end = done.checked_add(produced)?;
+        if buf.get(..produced)? != want.get(done..end)? {
+            return None;
+        }
+        done = end;
+        at = at.checked_add(consumed)?;
+        match st {
+            Status::StreamEnd => break,
+            // No progress: the input ended before the stream did.
+            Status::Ok | Status::BufError if produced == 0 && consumed == 0 => return None,
+            Status::Ok | Status::BufError => {}
+        }
+    }
+    while pieces.get(piece).is_some_and(|p| at >= p.len()) {
+        piece = piece.checked_add(1)?;
+        at = 0;
+    }
+    (done == want.len() && piece == pieces.len()).then_some(())
 }
 
 /// A decompressor that is reset when it is dropped, on every path. In the

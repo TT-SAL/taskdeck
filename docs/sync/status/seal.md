@@ -60,11 +60,12 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **done**, merged (TT-SAL/taskdeck#10, with the spec change) |
 | S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done**, merged (TT-SAL/taskdeck#13, 2026-11-23 07:46 UTC; low findings only, four rulings carried into S5's brief) |
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **done** (TT-SAL/taskdeck#14; two high findings of its security passes fixed and checked by the lead) |
-| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **done** (TT-SAL/taskdeck#16; one medium finding of its second security pass fixed) |
+| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **done**, merged (TT-SAL/taskdeck#16, 2026-11-23 16:42 UTC; one medium finding of its second security pass fixed) |
 | S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | **done** with S6 (TT-SAL/taskdeck#16); two of its points are completed by S7 (Q57, Q60) |
-| S7b | The last small code changes: rulings the spec states and the code does not yet do (Q57, Q60, Q56, Q18, Q15), and `write_backup` proving its stream before it seals, with a property test | `blob`, `pair`, `signatures`, `backup`, `prim` | §16, §17.10, §20.4, §20.5, §21.3 | `seal-blob` | implementer running |
-| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written; follows S7b, one verify pass and the two security passes over both |
-| S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
+| S7b | The last small code changes: rulings the spec states and the code does not yet do (Q57, Q60, Q56, Q18, Q15), and `write_backup` proving its stream before it seals, with a property test | `blob`, `pair`, `signatures`, `backup`, `prim` | §16, §17.10, §20.4, §20.5, §21.3 | `seal-blob`, `seal-signatures` | **done** with S7 (its pull request follows the spec change's, L19): S7's verify pass and both its security passes covered it; no finding in the library |
+| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | **done** (its pull request follows the spec change's, L19): one medium finding of its security passes fixed (six fuzz targets could not run); the stage gate passes in the lead's run, 164 of 164 clauses cited |
+| S8 | Hygiene pass, stage exit review, exit pull request | | | | **the exit review is done** (one high, four medium, six low points: "The exit review" below); the hygiene pass (`docs/sync/status/seal/workflows/exit.js` with `only: "hygiene"`) and the exit pull request follow S9 |
+| S9 | The exit review's two findings in code: the five fuzz targets that do not reach the parsers their rows name; SEAL-GEN-007 proven for pairing's comparisons | `fuzz/`, tests | §3, §17 | | planned, with the task shape of every task (brief: `briefs/s9.md`); it starts when the usage window has reset, about 20:40 UTC |
 
 The briefs of S4, S5 and S6 name line ranges of `seal.md` as it stood on 2026-11-23 02:30 UTC; after
 a change to that file, check them against its headings before launching.
@@ -251,6 +252,81 @@ Notes behind the briefs (the lead's reading of the spec):
   and changed the script (`firstAlone`). An agent that is started and stopped costs about 0.1
   million tokens at once (it reads its brief and the code first).
 
+## Task S7b and S7: what happened
+
+- S7b's implementer (0.38 million tokens): the rulings the spec states and the code did not yet do.
+  `open_snapshot` recomputes the state hash from the body's board and membership (Q57); a pairing
+  machine ignores an identical repeat of a slot it accepted (Q60); `seal_snapshot` refuses another
+  board's membership and a history record above `S` (Q56); `sign_admin` checks the nonce's length
+  first and refuses the four operations the registry excludes (Q18, Q80); `write_backup` proves its
+  compressed stream before it seals, with a property test.
+- S7's implementer (0.43 million tokens): the tamper, context and parser matrices as comment tables
+  with the modules that were missing; 26 fuzz targets in a crate of their own; the budget example;
+  the coverage from 146 to 164 of 164 (two test files renamed so that the scanner reads them, a
+  target `crate_rules` for the whole-crate clauses, a compile-fail doc test for the sealed trait, a
+  memory test for the sheet); three citations repaired. Its spec questions are Q80 to Q83.
+- Verify pass over both (0.25 million tokens): both gates green in its own run; it recomputed the
+  signature vectors independently. Nothing above low. Two hollow citations, shown by mutation
+  (SEAL-KIND-006, SEAL-BLOB-003), went to the fix pass (L17).
+- Security passes (0.23 million tokens each). The lens "the gate against the tests, and S7b's
+  changes as an attacker meets them": three low findings and no defect in the library. It found
+  `open_snapshot`'s two comparisons, the repeat rule, `seal_snapshot`'s refusals and `sign_admin`'s
+  order as specified, and recomputed the admin and login vectors. The parsing lens: **one medium
+  finding: six of the 26 fuzz targets panicked in their shared fixture on every input** (a snap
+  announcement with seq 0, which the payload builder refuses; a fixed entropy source of 64 bytes
+  where key generation draws 80). CI only compiled the fuzz crate, so nothing ran a fixture. The
+  same pass ran every public parser at its largest sizes in a release build (each returned within
+  75 ms, with no allocation sized by a claimed length).
+- The fix pass (0.20 million tokens): the two fixtures, and **a test target `fuzz_targets` that runs
+  every fuzz target's body, fixture included, over 158 fixed inputs** (it includes the fuzz crate's
+  files unchanged and failed 6 of 26 before the fix); the lead's three items (a test keeps the fuzz
+  lockfile within the root lockfile; SEAL-KIND-006 proven at the level of `classify`; the inflate
+  test asserts the failure at the cap).
+- The lead's own edits before the commit: the three hollow SEAL-RCPT-002 citations of the tamper
+  target removed (L17); the budget baseline written, and the 25% rule judged on CI's runner (L18).
+- The lead's checks of the fix pass: with the two fixture lines as they were, the six targets fail in `fuzz_targets`; with one version line of the fuzz lockfile changed, the lockfile test fails; with `classify` dropping the snap context, the new SEAL-KIND-006 test fails; the budget example exits 1 over a baseline only with `--judge-baseline`. Each change was restored and compared byte for byte. The task gate and the stage gate pass in the lead's run on the result (17:28 UTC).
+
+## The exit review
+
+One agent that did no work in the stage (0.25 million tokens, 2026-11-23 17:34 UTC) read the plan's
+rules, this file in full, the stage's diff and the clause index; compared the 144 public names of
+`seal.md` §26 with the crate (all present), the 16 vector families and the 26 fuzz targets with §24;
+read the three matrices and the per-byte loops of the tamper target; sampled 29 clauses against the
+tests that cite them; checked the 13 clauses whose text the stage changed against their rows; ran
+the stage gate itself (it passes) and read CI on the head commit (seal green on three systems).
+It found everything §6.3 asks for in the tree, and these points. High and medium are the next
+work (SYNC_PLAN.md §7); what the lead did with each:
+
+- **High: the stage's spec changes went into task pull requests, not into spec-change pull
+  requests of their own** (§3.3), and this file recorded no deviation. True, and recorded now as
+  decision L19. What is merged stays as it is; the part not yet merged (the wording after the
+  fourth check, and two points of this review) merged first and alone, as TT-SAL/taskdeck#19
+  (2026-11-23 17:57 UTC), and the work of S7b and S7 follows in the next pull request.
+- **Medium: SEAL-GEN-007 is proven only for the move code, the sheet and the wraps.** Its citations
+  are source scans of `chain.rs` and `keys.rs`; the clause also names a MAC, a commitment, a SAS and
+  a ticket proof, which are compared in `pair.rs` (constant-time today, with no test that would
+  fail if one became `==`). Task S9.
+- **Medium: five fuzz targets do not reach the parsers their rows of the parser table name**
+  (`open_blob`, `open_snapshot`, `open_snapshot_declared`, `pair_new`, `pair_bundle`: the low
+  findings of S7's security passes). The lead had left them to `release`; the review holds that
+  the targets are this stage's deliverable (§6.3) in this stage's paths, and that S7's brief asked
+  for targets that reach their parsers. The lead agrees: by the plan's scale this is work that
+  does something other than its brief says. Task S9.
+- **Medium: a false sentence here** ("None changes a clause's text" at the head of the rulings):
+  corrected.
+- **Medium: the hand-off left out that the typed digits are compared as typed** (Q77): a screen
+  that lets "123 456" through costs the user one of three attempts. Added to the sections for
+  `device` and for `desktop` and `android`, and to the pairing-runtime row of `CHANGES.md` as its
+  sixth point.
+- Low, put right at once because each is one line: `device.md` §24 did not list SEAL-PAIR-008 and
+  SEAL-PAIR-013 among the duties this file says it names (it does now; a line of the spec change);
+  the memory figure for `read_backup` was never measured (now said so); two ranges for the
+  container's budget timing (one now, with the third CI figure); the cells of Q57 and Q60 still
+  said "on S7's list".
+- Low, noted: the budget runs as a step of the seal job's hook and not as a CI job of its own
+  (under L18); the review read the stage lists of two open rows against the "specs" column of
+  `CHANGES.md`, and they match its "stages affected" column, so nothing changes there.
+
 ## Decisions (with reasons)
 
 - **L1. Tasks along the skeleton's modules**, in dependency order (table above). Membership and
@@ -305,12 +381,59 @@ Notes behind the briefs (the lead's reading of the spec):
   stays in a freed heap block, the test binary installs a global allocator that scans what is freed
   on the test's own thread. That needs `unsafe` in the test binary; the library keeps
   `#![forbid(unsafe_code)]`, and nothing else can observe freed memory.
+- **L16. The fuzz crate's lockfile is covered by the root's.** `crates/taskdeck-seal/fuzz` has its own
+  `[workspace]` table and lockfile (foundation's note: such a lockfile is outside the supply-chain
+  gate). It started as a copy of the root `Cargo.lock`; the lead compared the two: every one of its
+  64 packages stands in the root lockfile with the same version and checksum, except the fuzz
+  package itself (`libfuzzer-sys` 0.4.13 and `arbitrary` 1.4.2 were pinned by foundation). So the
+  root's supply-chain gate and cooldown cover it; a test in `tests/crate_rules` keeps it a subset
+  (handed to S7's fix pass).
+- **L17. S7's two hollow citations go to its fix pass although the verifier called them low.** S7's
+  brief asks that every clause is cited by a test that proves it, and the verifier showed by
+  mutation that two new citations are not (SEAL-KIND-006 on a tamper test whose flips never reach
+  the payload table, with no test anywhere that catches a `classify` that drops the snap context;
+  SEAL-BLOB-003 on a property test that passes when the inflater cuts its output at the cap). The
+  fix pass runs in any case for L16's test, so the two cost no agent of their own. Other low
+  findings stay listed and are not chased (SYNC_PLAN.md §7). The first security pass then found
+  three more hollow citations, of SEAL-RCPT-002 in the tamper target (its helper accepts `Refuse`
+  for any flipped byte). They came with the fix pass already running, so the lead removed those
+  three comment lines himself: nine unit tests of `src/receipt` prove the clause, as the
+  reviewer's mutation showed.
+- **L18. The budget's 25% rule is judged where its baseline was measured.** The baseline is the CI
+  job's number on GitHub's Linux runner (13,542 µs, the slowest of three CI runs: 11,145, 13,488 and
+  13,542 µs; GitHub's runners themselves differ by a fifth). This
+  container reads 14.2 to 16.1 ms when nothing else runs and more while agents build, so the same
+  rule applied here would fail with no change of the code, and a gate that fails by itself teaches
+  agents to distrust it. `ci.sh` passes `--judge-baseline` on GitHub's runners; everywhere else the
+  example prints the comparison and judges the 100 ms limit. Where the plan's rule applies (§3.3:
+  measured in a dedicated CI job) nothing is loosened. The budget runs as a step of the seal job's
+  hook (`ci.sh`), which is what the gate file `foundation` wrote calls the dedicated budget job
+  ("seal's ci.sh hook"); a CI job of its own would be a change to `ci.yml`, a shared file. Since
+  the baseline is the slowest runner seen, a run on a runner a quarter slower than that would fail
+  with no change of the code: then measure again before looking for a regression.
+- **L19. The stage's spec changes travelled in task pull requests; the last one merges alone.**
+  §3.3: a stage that finds a spec wrong "opens a spec-change pull request (spec, vectors, and a
+  line in `CHANGES.md`), merges it, and names the affected stages". The lead put each spec change
+  into the pull request of the task whose code and vectors make it true (TT-SAL/taskdeck#10, #14,
+  #16), named in that pull request's title and body and in the rows of `CHANGES.md`, reading the
+  rule as "a pull request that carries the three". The exit review reads it as a pull request of
+  its own, as stage `core` made them, and that reading serves the other stages better: a spec
+  change is then found in the base branch's history under its own title, and it merges without
+  waiting for a task. This is a deviation from §3.3, found at the exit. What is merged cannot be
+  split; every change and the stages it affects stand in the rows of `CHANGES.md` dated 2026-11-23
+  that name `seal`. The spec text not yet merged went first and alone (TT-SAL/taskdeck#19: the
+  branch was brought to the base branch's tree plus the spec files by one commit, merged, and the
+  task's work restored by reverting that commit; the session may push to one branch only, so two
+  pull requests cannot be open at once).
 - **L12. A hook step that needs `python3` runs on Linux only** (the vectors' format check in `ci.sh`):
   a Windows runner's bash may lack it, and the files are the same on every system.
 
 ## Rulings on spec questions
 
-The implementers' questions and the lead's rulings. None changes a clause's text. The rulings of
+The implementers' questions and the lead's rulings. Most are sentences where the text was silent.
+The clauses whose text or owners changed (thirteen of `seal.md`, among them SEAL-BKP-004,
+SEAL-KEY-013 and the owners of the caller's clauses; ENG-PURGE-003 and ENG-BOOT-002) are named in
+the stage's two rows of `docs/sync/spec/CHANGES.md` that list clauses. The rulings of
 tasks S1 to S3, the ownership of five caller clauses and the defect E1 were written into `seal.md`
 and `engine.md` by the lead on 2026-11-23 02:30 UTC (sentences added or rewritten in place, so no
 line moved; `scripts/spec-lint.sh` passes). They travel in the pull request of task S3. One agent that
@@ -415,7 +538,7 @@ corrections after the second check and part 3: one high, seven medium and six lo
   The lead's first ruling (Q50) had the crate recompute the hash but compare it with nothing signed;
   the second (Q57) compared with the signed value but dropped the recomputation, to leave that to
   the engine, whose spec does not do it in those two places. **Q57 as completed: `open_snapshot`
-  does both.** The recomputation is on S7's list (task S6b built the comparison).
+  does both.** Task S6b built the comparison, task S7b the recomputation.
 - A repeated delivery of a slot would have aborted an honest pairing (a runtime that polls and
   listens can hand one over twice): **Q60 as completed, a machine ignores a slot identical to one it
   has accepted.** On S7's list.
@@ -431,6 +554,26 @@ corrections after the second check and part 3: one high, seven medium and six lo
 
 Because this check found a high point, the corrected parts 2 and 3 are checked once more, before the
 exit (one agent).
+
+**The fourth and last check** (one agent, 2026-11-23 16:52 UTC, 0.17 million tokens) read the
+corrections after the third check against the code as tasks S7b and S7 left it. No high point; three
+medium and nine low, all of them wording, applied in place at 17:00 UTC, and nothing is checked
+again (the plan's task shape: nothing a third time; what this check did not find stays). No
+behaviour of the crate changed.
+
+- Medium: §22's row for `seal/pair_cancelled` still counted an out-of-place `RegisterFailed` (it
+  aborts with its own code, §17.10). The main row of `CHANGES.md` told `engine` it had nothing to
+  build, but with §20.5 step 7 its `FakeSealer` must recompute the state hash too (ENG-FAKE-001;
+  `engine.md` §19.9 relies on the sealer for it): the row and `engine.md`'s `Sealer` table now say
+  so. `device` owns the runtime's half of SEAL-PAIR-013, and neither table of `device.md` §18.3
+  delivers `Tick` to a pairing machine: a fifth open point in the `device`, `engine` row.
+- Low: the reason a repeated slot can arrive (`relay.md` §10.8: every read of a stored slot gives
+  the same bytes) and the exception for it in §17.11 and in §22's row for `seal/slot_mac`; §20.4 and
+  §20.5 say what the snapshot's reader compares, how the recomputed hash is composed (the expected
+  version, SHA-256 of the body's board bytes as they stand, SHA-256 of its membership bytes) and
+  that the crate does not judge whether the rules allow the version (§17.9 step 5 and the engine
+  do); §20.5's list of expected values; the place of step 4's code in §17.9; two wrong references
+  and the fork point in the open rows of `CHANGES.md`; SEAL-PAIR-008 in `device`'s list.
 
 **E2, left open for `engine` and `device` (a row of `CHANGES.md`):** the check found the same kind of
 defect as E1 for an own `Fence`: the relay fences itself in the same transaction that appends the
@@ -501,7 +644,7 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q54 | §20.5 step 3 | `BlobRef.id` against the header's `blob_id` | not compared: the signed `sha256` fixes every sealed byte, and the id is what the caller fetches by. Spec note |
 | Q55 | §20.5 step 1 | sealed bytes under 67 bytes are refused at step 1, which states no minimum | the code stays: step 1 now states that `size` is 67 to 67,108,864 (as §11.5 bounds a signed size). Spec note |
 | Q56 | §20.4 | `seal_snapshot` sealed a body with a history record above `S`, and a membership of another board; its reader rejects both | it refuses both with `seal/blob_open`, as `write_backup` refuses a membership of another board. A few lines: on S7's list. Spec note |
-| Q60 | §17.10, §17.11 | an event the machine's state has no row for | a slot identical to one already accepted is ignored (completed after the third check; on S7's list); otherwise it aborts: a slot with `seal/slot_mac`; `Snapshot`, `Entries`, `Frames` with `seal/bundle_invalid`; any other with `seal/pair_cancelled`; `RegisterFailed{code}` with its code. A `Tick` before the limit changes nothing; `Done` and `Aborted` ignore every event. Spec note |
+| Q60 | §17.10, §17.11 | an event the machine's state has no row for | a slot identical to one already accepted is ignored (completed after the third check; built by S7b); otherwise it aborts: a slot with `seal/slot_mac`; `Snapshot`, `Entries`, `Frames` with `seal/bundle_invalid`; any other with `seal/pair_cancelled`; `RegisterFailed{code}` with its code. A `Tick` before the limit changes nothing; `Done` and `Aborted` ignore every event. Spec note |
 | Q61 | §26, SEAL-GEN-006 | the code and the digits are plain strings in the API | kept: they go to a screen and come from a keyboard; the crate erases its own copies, the caller clears the strings. Told to `device`, `desktop`, `android` |
 | Q62 | §17.2 | which form `new_code` returns | the display form `XXXX-XXXX-XXXX-XXXX-CC`; `parse_code` reads both. Spec note |
 | Q63 | §17.4, §17.6, SEAL-GEN-008 | a slot's framing against its MAC | framing first (`body_len` at most 16,040, the slot exactly `36 + body_len` bytes), failing with `seal/slot_mac` since nothing is authenticated yet; then MAC, label, role; then the body's layout (`seal/slot_format`). Spec note |
@@ -521,6 +664,10 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q77 | §17.7 | are the typed digits normalised | no: compared as typed, in constant time |
 | Q78 | §17.9 step 5 | with Q57, nothing checks a bundle snapshot's `hash_version` against the rules | the pairing machine, which recomputes the state hash, refuses a version the membership's rules do not allow (`seal/bundle_invalid`), as the backup reader does (Q40). Spec note |
 | Q79 | §17.9 | nothing E signs binds the entries between the bundle's head and `added_seq`: a relay that swaps a racing rotation for junk makes N report `Joined` although the board refused its `DeviceAdded` (S6 security, reproduced) | the design's limit, bounded: E reports the failure and revokes the device at the relay, nobody accepts N's entries, N meets the fork at the first honest entry after `h`. §17.9 says so. The remedy (the bundle carries `C_{added_seq}`) needs E to classify its own entry before it seals the bundle: left open for `engine` in `CHANGES.md`. No code change |
+| Q80 | §16.2 (Q15) | which admin operations the registry's words exclude | the four the lows named: `mint_read_token` for a `dev` that is not the signer; `reinstate` by a device signer (`sign_admin` only: `admin_message` sees an id, not a role) or with `first_epoch` below 2; `recovery_register` whose `dev` is not the `dev_R` of its key; a `seed` of more than 320 entries. Nothing else is refused |
+| Q81 | SYNC_PLAN.md §6.3 (the gate's words), §17.2, §18.1 | "flipping any byte is rejected" against typed codes with 10 and 20 check bits | a changed character counts as rejected when the check fails, or, when it happens to match, when the text names another secret that is refused where it is used (another ticket, a recovery key that is not the board's) |
+| Q82 | §26 `Receipt.opened` | an entry whose own author reseals a broken payload | `opened` is set although the entry is refused (step 11 passed); "nothing of the plaintext returned" is about bytes a third party flips |
+| Q83 | §5.3, `core.md` §4.5 | seal's canonical parser works in one pass and has no tree budget | both stay: every failure is `seal/bad_payload` either way, and a payload is at most 262,144 bytes and already authenticated |
 | Q49 | §26 `VerifiedBackup` | the recovery tool is to show a file's written date, which `read_backup` did not return | `VerifiedBackup` gains `written_ms` (the header's, display only). Code in S5's brief |
 | Q48 | SEAL-GEN-006, §21.3 | the DEFLATE compressor and decompressor (a pinned dependency's private state) hold the payload's bytes, the epoch roots among them, and are freed without being erased (S4 security, a note; `unsafe` is forbidden, so the crate cannot wipe them from outside) | as S1's high finding ruled for the hash states: a state that took in roots must not be left behind. The writer keeps the roots and the read token out of the compressor (they travel in stored blocks the crate writes itself, after a full flush); the reader resets the decompressor, which zeroes its window in the pinned version, before dropping it. What stays outside reach is said in the code and in the spec. Code in S5's brief |
 
@@ -551,6 +698,13 @@ Applied with the same change (they were candidates until task S3 confirmed the p
 | A pull-request CI run of the seal area | 6 to 9 minutes; with a lockfile change (every area) 19 minutes | TT-SAL/taskdeck#4, TT-SAL/taskdeck#6 |
 | Task S3, the implementer | 35 minutes; 0.89 million tokens | 2026-11-23 01:42 to 02:17 UTC |
 | The crate's tests after S3 | 152 unit tests, 34 in the four gate targets, 11 vector families (the two largest 412 KB and 213 KB) | the lead's run, 02:19 UTC |
+| The crate's tests after S7 | 262 unit tests, 144 tests in nine integration targets and one doc test with `test-entropy` (407 in all); 16 vector families; 26 fuzz targets, each run over 158 fixed inputs by the target `fuzz_targets` | the lead's run, 2026-11-23 17:28 UTC |
+| The stage gate, `bash scripts/gate.sh seal` | passes: 11 items run, 2 for CI; `spec-coverage` 164 of 164 | the lead's runs of 16:53 and 17:28 UTC; the verifier's run of 17:00 UTC agrees |
+| **Budget: 256 entries verified and opened** (limit 100 ms), median of five, release build | **baseline 13,542 µs**: GitHub's `ubuntu-latest` runner measured 13,488 and 13,542 µs in the two CI runs of commit `bfaf3d2` (the slower is the baseline, in `crates/taskdeck-seal/budget-baseline.txt`), and 11,145 µs on another runner in the run of `54a595a`. In the container 14.2 to 16.1 ms (nine runs by the lead and the agents) | the Linux seal jobs of TT-SAL/taskdeck#19's CI, 2026-11-23 17:01 and 17:03 UTC; `examples/budget.rs` |
+| The same on a membership with 100,000 control entries (0.8 MB of state; the per-entry copy) | 16.6, 19.3 and 21.4 ms on CI, 21 to 29 ms in the container; not judged | the same runs |
+| `read_backup` of a nightly file with 2,000 history records | 84, 102 and 103 ms on CI, 104 to 110 ms in the container (one signature check per record); not judged | the same runs |
+| `write_backup` with a board of 250 MiB that does not compress | 10.2 s, a file of 262 MB, about 1.0 GB of memory at the peak (four times the payload) | S7's second security pass, release build |
+| Every public parser at its largest sizes (a frame of 262,144 bytes, a backup of 268,435,456, 64 MiB of typed text, counts with no bytes behind them) | each returns within 75 ms; no allocation sized by a claimed length | the same pass |
 
 ## Token ledger
 
@@ -588,7 +742,13 @@ output); the higher is booked. Limit: 3.5 million per window.
 | from 2026-11-23 17:40 (the limit reset at 15:40 UTC) | third check of the spec change, run again | 1 | 0.18 M | 0.23 M | 0.23 M |
 | | two agents started by a resume that could not reuse the first security pass, stopped after two minutes | 2 | | 0.21 M | 0.21 M |
 | | S6, the second security pass and the fix pass | 2 | 0.37 M | 0.38 M | 0.38 M |
-| | **window so far** | | | | **0.82 M** |
+| | S7b, the implementer | 1 | 0.31 M | 0.38 M | 0.38 M |
+| | S7, the implementer | 1 | 0.36 M | 0.43 M | 0.43 M |
+| | fourth and last check of the spec change | 1 | 0.14 M | 0.17 M | 0.17 M |
+| | S7, the verifier (S7b and S7) | 1 | 0.22 M | 0.25 M | 0.25 M |
+| | S7, security passes and the fix pass | 3 | 0.64 M | 0.66 M | 0.66 M |
+| | the exit review | 1 | 0.21 M | 0.25 M | 0.25 M |
+| | **window total** (nothing more is started in it: the hygiene pass or S9's implementer would bring it to the level at which the account's limit was hit in the window before) | | | | **2.96 M** |
 
 ## Low findings left as they are
 
@@ -661,6 +821,37 @@ output); the higher is booked. Limit: 3.5 million per window.
   `Entries` (the spec sets no limit for the join, and paging is the caller's) costs one membership
   copy per entry, as everywhere `classify` runs.
 
+- **What became of "on S7's list".** The items the paragraphs above put on S7's list were built by
+  tasks S7b and S7 (the admin operations and the order of `sign_admin`'s checks, `seal_snapshot`'s
+  two refusals, the recomputed state hash, the repeated slot, the proof inside `write_backup`, the
+  budget's figure for the per-entry copy, the hollow citations), except the three the paragraph
+  "Left as they are" names.
+- **S7, verify.** Two hollow citations (SEAL-KIND-006, SEAL-BLOB-003): repaired by the fix pass
+  (L17). A note that is no finding: the signature tests build their messages with the crate's own
+  `login_message` and `admin_message`; the layout is proven by the vectors, which the verifier and
+  a security pass recomputed independently.
+- **S7, security (the gate against the tests).** (1) The proof inside `write_backup` inflates the
+  compressed tail alone, with a decompressor whose window starts as zeros: a tail whose first match
+  points back before its own start passes the proof and does not read back in the real stream.
+  Only a faulty compressor writes such a tail (the test hook stands in for one; a fresh compressor
+  has nothing before its start to point at). A stricter proof, an inflate that refuses such a
+  distance, is a few lines when a later task touches that code. (2) Three hollow citations of
+  SEAL-RCPT-002 in the tamper target: removed by the lead (L17). (3) The fuzz targets
+  `open_snapshot`, `open_snapshot_declared` and `open_blob` mutate sealed bytes and stop at the
+  AEAD; only `snapshot_body` seals around a mutated body, in the normal mode, where the recomputed
+  state hash now refuses a changed board or membership first. No fuzz target reaches the declared
+  mode's parse of a mutated body (the property tests of `tests/parsers` do). For `release`.
+- **S7, security (parsing).** (1) The fuzz target `pair_new` cannot move N's machine past its wait
+  for slot C: its fixture has no valid slot C or D, and its `Entries` frames are at most 255 bytes.
+  (2) The fuzz target `pair_bundle` reports a false crash for a bundle plaintext over 16,000 bytes
+  (N's correct `seal/slot_mac`), and its helper draws from `OsEntropy`, so a run is not a function
+  of its input alone. Both are for `release` to repair before it relies on these two targets.
+- **S7, reviewers' notes, not findings.** `write_backup` at a large payload holds about four times
+  the payload in memory (the payload's copy and the compressed buffer's doubling). The fuzz target
+  `snapshot_body` reaches the body parser only when the mutated length stays within one byte of the
+  original. Whether rustdoc on the pinned toolchain enforces the error code of the compile-fail doc
+  test (E0277) was not checked; the test fails to compile either way.
+
 ## Open questions for the owner
 
 **O1. One compromised device defeats every "second device" rule and every time window of the
@@ -712,51 +903,154 @@ the owner chooses.
 
 ## What the next stages need to know
 
-To be completed at the exit. So far:
+**What exists.** `crates/taskdeck-seal` implements `docs/sync/spec/seal.md` in full; its public API is
+§26 of that file and nothing else. It is pure: no clock, file, network, environment or thread of its
+own, no `unsafe`; every random byte comes from the caller's `Entropy` (`OsEntropy` in production).
+The feature `test-entropy` gives the tests a fixed source and must never be enabled in a release
+build: a build with it contains the marker string of SEAL-GEN-014, which `ci.sh` checks both ways
+and stage `release` can search the artifacts for (SYNC_PLAN.md §3.4). The vectors are
+`docs/sync/vectors/seal-*.json`, 16 families; `cargo test -p taskdeck-seal --features test-entropy
+--test vectors` builds each file again and compares every byte (`SEAL_VECTORS=write` rewrites them
+after a spec change). The stage gate is `bash scripts/gate.sh seal`; the crate's hook for CI is
+`crates/taskdeck-seal/ci.sh`. The crate's README lists the test targets.
 
-- L4: seal and core each have a canonical JSON encoder; `device` should compare them in a test.
-- Q2: the identity bytes are 80 bytes, `dev ‖ Ed25519 seed ‖ X25519 private key`.
-- Q10: `relay` must answer Wycheproof's 29 "acceptable" Ed25519 cases as `verify_strict` does (8 fail,
-  21 verify); `crates/taskdeck-seal/tests/kat/data/ed25519_test.json` is the file.
-- Q4, Q5: `to_sheet` returns the groups separated by spaces; `move_code` and `key_fingerprint` return
-  the grouped text.
+**Open, and not this stage's to close.**
+
+- **O1** above waits for the owner. The crate implements the design as `seal.md` states it; option A
+  would be a small task in this crate (items, transitions, vectors) and a spec change that reaches
+  `engine`, `device`, `desktop` and `recovery`.
+- Six rows of `docs/sync/spec/CHANGES.md` begin "Left open by stage `seal`". Each names what the text
+  does not settle and one way out; the stages that build the thing decide:
+  1. `engine`, `device`, `recovery`: an own `Fence` that loses a rotation race leaves the old relay
+     fenced with no accepted `Fence` (`engine.md` §28.3 and §28.7, `device.md` §15.8 step 5).
+  2. `engine`: re-sealing (§24.3) can meet a revocation that §28.5 composes again; the second record
+     is refused with `seal/ctl_target` although the target is revoked.
+  3. `recovery`, `device`: a device revoked later can still write a backup that claims any seq and
+     date (Q47); what the recovery tool compares with the relay's log is not yet a step of
+     `device.md` §15.8.
+  4. `device`, `recovery`: after a recovery-key change no monthly segment can be written under
+     `device.md` §15.2 as it stands.
+  5. `engine`, `seal`, `device`: nothing E signs binds the log between the bundle's head and
+     `added_seq` (Q79). The remedy (the bundle carries the chain value at `added_seq`) is `engine`'s
+     choice; if taken, it is a field of the bundle and of `Registered`, a few lines in this crate's
+     `pair` module, and its vectors.
+  6. `device`, `engine`: the pairing runtime, five points (a `PairFailed` after E's machine is
+     `Done`; one `Entries` event and `FetchFrames`; who sends `DeleteTicket`; who revokes when E
+     aborts after `Registered`; who feeds the machines `Tick`).
+
+**For `engine`.**
+
+- Spec change E1: a rotation or revocation that lost a race is refused with `seal/stale_epoch` or
+  `seal/old_epoch` (Q21); `engine.md` §28.5 step 4 names all four codes it retries on.
+- `Sealer::open_snapshot` with `exact = true` is `seal.md` §20.5 with every expected value: the crate
+  compares the body's seq, hash version and state hash with the signed ones **and recomputes the
+  hash from the body's board and membership** (Q57). `engine.md` §19.9 and §22.3 rely on that, and
+  `FakeSealer` must do the same (ENG-FAKE-001). The declared mode compares neither: the engine checks
+  both against the `snap` entry once it has classified it. The crate does not judge whether the
+  rules allow a hash version; the join does (§17.9 step 5), and elsewhere the engine.
+- Pairing: the engine composes and seals the `DeviceAdded` (SEAL-PAIR-010, with `seal`). The item of
+  `NeedSnapshotAndRegister` carries a placeholder `bootstrap_seq` (Q67). The machine's `Joined` is not
+  proof that the board accepted the device when the relay is hostile; E's result is (Q79). After
+  `Joined` the engine classifies the log from `h + 1` again and learns later roots from the new
+  device's own wraps.
+- With `device`: SEAL-SIG-005 (what `register` names) and the caller's half of SEAL-WRAP-003 (a wrap
+  delivered outside an entry that does not match its commitment: the adapter returns
+  `seal/commitment`, the engine halts, `engine.md` §24.4).
+- `classify` returns a new membership for every entry, so each call copies the state (measured:
+  256 entries cost 13.5 ms on an ordinary board, 19 to 29 ms on one with 100,000 control
+  entries). `Receipt.opened` is set for an entry whose own author sealed a payload that is then
+  refused (Q82). A beat's ack may name any seq below the beat's own, also one that is no `snap` entry
+  (Q17).
+- The state hash exists twice by design (ENG-HASH-001 is owned by `engine`, `seal` and `recovery`):
+  compare `taskdeck_sync::state_hash` with this crate's on the vectors.
+
+**For `device`.**
+
+- The duties of the crate's caller, which its pure functions cannot violate, are `device`'s
+  (`seal.md` §25, `device.md` §24): SEAL-FRAME-005 (a frame for one counter is sealed once),
+  SEAL-ENV-003 and -004 (which epoch a sealer chooses), SEAL-MEM-016 (a refused rotation's root is
+  discarded), the caller's halves of SEAL-SIG-002 (a login's origin comes from the device's own
+  configuration), SEAL-WRAP-003, SEAL-KEY-012 (`SymKey` carries no kind: the adapter passes each
+  function the key of its own kind) and SEAL-KEY-013 (`derive_epoch_key` and
+  `open_snapshot_declared` get only roots already checked against their commitments), and in pairing
+  SEAL-PAIR-008 (`UserConfirmed` only on the user's confirmation on E) and SEAL-PAIR-013 (monotonic
+  time and ticks for both machines).
+- Pairing runtime: N gets `OsEntropy`; the whole log from `h + 1` arrives as one `Entries` event
+  (Q76) and `Frames` holds exactly the frames asked for; a slot delivered twice is ignored by the
+  machine, any other event out of place aborts it; the code and the digit strings of `ShowCode`,
+  `ShowSas`, `CodeEntered` and `SasEntered` are secrets of the attempt that the caller clears (Q61).
+  The new device compares the six digits exactly as typed (Q77, `seal.md` §17.7): `SasEntered`
+  must carry the six ASCII digits and nothing else, so separators a screen shows or accepts are
+  stripped before `join_sas`, or a correct entry costs one of the three attempts.
+- Backups: `write_backup` takes every root the device holds and writes those whose commitment the
+  file's membership records (Q38); it proves its own compressed stream before it seals, and refuses
+  inconsistent inputs with the codes §21.3 lists. `read_backup` returns the verified history (Q59)
+  and `written_ms` (Q49).
+- Sizes and time: the largest body `seal_blob` and `seal_snapshot` can seal is 66,060,284 bytes
+  (compressed, for a snapshot). On hostile input of the largest size allowed, `read_backup` takes
+  about a minute and `open_snapshot` about 16 s (measured by S5's security pass): run them off the
+  UI thread. The memory of `read_backup` at that size was not measured; by the sizes involved (a
+  file of 256 MiB that may inflate to 512 MiB, held beside the opened payload) expect more than
+  1 GB. `read_backup` of an ordinary nightly file with 2,000 history records takes about 0.1 s.
+  `write_backup` holds about four times its payload in memory (measured: 250 MiB in, 1.0 GB at the
+  peak, 10 s).
+- The identity bytes are 80 bytes, `dev ‖ Ed25519 seed ‖ X25519 private key` (Q2). `to_sheet` returns
+  the groups separated by spaces; `move_code` and `key_fingerprint` return the grouped text (Q4, Q5).
+- Seal and core each have a canonical JSON encoder (L4): compare them in a test. Seal's parser works
+  in one pass and has no tree budget (Q83), which changes no result for payloads of its size.
 - A repository file that code compares byte for byte needs `-text` in a `.gitattributes`: Windows
   runners check text out with CRLF.
-- For `engine`: spec change E1 (a raced rotation is refused with `seal/stale_epoch`).
-- `core` changed `core.md` §4.5 (TT-SAL/taskdeck#7: a tree budget for the canonical parser, a lone
-  surrogate escape is an error). Seal's own parser handles payloads of at most 257,979 bytes and
-  refuses lone surrogates; task S7 checks it against §4.5 as it now stands.
-- For `recovery` (Q47): `read_backup` proves that a file's writer was a current device at the last
-  control entry of the file's history, and nothing later. A device revoked afterwards can still write
-  files that claim any seq and date, with any board content. Show the writer, `written_ms` and the seq
-  of the last control entry, and trust no file over another for its seq or date alone. What the tool
-  compares with a relay copy (a control entry the file's history lacks, a frame whose hash differs
-  from a record's `frame_hash`) is an open point in `CHANGES.md` for `device` and `recovery`.
-- For `device`: `write_backup` takes every root the device holds and writes those whose commitment
-  the file's membership records (Q38). After a recovery-key change no monthly segment can be written
-  under `device.md` §15.2 as it stands (an open point in `CHANGES.md`).
-- For `recovery` (Q45): `read_backup` refuses with `seal/backup_writer` a file whose history ends with
-  a recovery key that is not exactly the typed sheet's pair of public keys.
-- For `recovery` and `device`: `read_backup` on a hostile file of the largest size allowed takes time
-  linear in the history (one signature check per record, about 55 µs each in a release build on the
-  container, so about 60 s at the limit of 1,048,576) and up to about 1.5 GB of memory (a 256 MiB
-  file inflating to 512 MiB); `open_snapshot` at its largest size about 16 s. Run them off the UI
-  thread.
-- For `engine` and `device` (Q57): `open_snapshot` takes the signed entry's state hash and its
-  version and compares the body's with them; the engine recomputes the hash from the board it loads,
-  and that comparison is the engine's alone. In the declared mode the crate compares neither: the
-  engine checks both against the `snap` entry once it has classified it. A beat's ack may name any
-  seq below the beat's own, also one that is no `snap` entry (Q17).
-- For `engine`, `device`, `desktop`, `android` (pairing): the machine's `Joined` is not proof that the
-  board accepted the device when the relay is hostile (Q79); E's result is. The code and the digit
-  strings of `ShowCode`, `ShowSas`, `CodeEntered` and `SasEntered` are secrets of the attempt that the
-  caller clears (Q61). The runtime hands N the whole log from `h + 1` in one `Entries` event (Q76),
-  feeds both machines monotonic milliseconds and ticks, and gives N `OsEntropy`. The item of
-  `NeedSnapshotAndRegister` carries a placeholder `bootstrap_seq` (Q67). After `Joined` the engine
-  classifies the log from `h + 1` again and learns later roots from N's own wraps.
-- For `recovery` and `device` (Q59): `read_backup` returns the verified history; a record gives its
-  seq, author, counter, frame hash and items.
-- For `device` (Q52, Q53): the largest body `seal_blob` and `seal_snapshot` can seal is 66,060,284
-  bytes (compressed, for a snapshot). `SymKey` carries no kind: the adapter passes each function the
-  key of its own kind (SEAL-KEY-012), and hands `open_snapshot_declared` only roots it has checked
-  against their commitments (SEAL-KEY-013).
+
+**For `recovery`.**
+
+- `read_backup` proves that a file's writer was a current device at the last control entry of the
+  file's history, and nothing later (Q47): show the writer, `written_ms` and the seq of the last
+  control entry, and trust no file over another for its seq or date alone.
+- It refuses with `seal/backup_writer` a file whose history ends with a recovery key that is not
+  exactly the typed sheet's pair of public keys (Q45, SEAL-BKP-004).
+- A history record gives its seq, author, counter, frame hash and items (Q59); the cost on hostile
+  input is as stated for `device`.
+
+**For `relay`.**
+
+- Its Ed25519 verifier must answer Wycheproof's 29 "acceptable" cases as `verify_strict` does: 8
+  fail, 21 verify (Q10); the file is `crates/taskdeck-seal/tests/kat/data/ed25519_test.json`.
+- `sign_admin` refuses four operations the registry's words exclude (Q80): `mint_read_token` for a
+  `dev` that is not the signer, `reinstate` by a device signer or with `first_epoch` below 2,
+  `recovery_register` whose `dev` is not the `dev_R` of its key, a `seed` of more than 320 entries.
+  The relay must refuse them itself: another client can sign them.
+- The machines rely on `relay.md` §10.8 as written: every read of a stored slot gives the same
+  bytes, and each label is stored once.
+
+**For `desktop` and `android`.** The pairing code and the six digits are plain strings in the API
+(Q61): show them, then clear them. The six digits are compared exactly as typed (Q77): the field
+on the new device hands over six ASCII digits with no space or hyphen, or a correct entry costs
+one of the three attempts. A typed code or sheet with a changed character is refused by its
+check characters, or names another secret that is refused where it is used (Q81). When the relay is
+hostile, "joined" on the new device is not proof; the existing device's result is (Q79).
+
+**For `release`.**
+
+- `crates/taskdeck-seal/fuzz` holds 26 fuzz targets, one per row of the parser table
+  (`tests/parsers/main.rs`), in a crate with its own `[workspace]` and lockfile. CI compiles them
+  (`cargo check`, Linux), and the test target `fuzz_targets` runs every target's body and fixture
+  over 158 fixed inputs; no fuzzer has run them yet (the fix pass ran three of them for a moment
+  as real libFuzzer binaries). A test in `tests/crate_rules` keeps the fuzz lockfile within the
+  root lockfile, so the root's supply-chain gate covers it (L16).
+- Before relying on them, repair four harnesses (low findings of S7's security passes, listed
+  above): `pair_new` cannot move the new device's machine past its wait for slot C; `pair_bundle`
+  reports a false crash for a plaintext over 16,000 bytes and draws from `OsEntropy`;
+  `open_snapshot`, `open_snapshot_declared` and `open_blob` mutate sealed bytes and stop at the
+  AEAD.
+- The budget (256 entries verified and opened within 100 ms) is `examples/budget.rs`, run by `ci.sh`
+  on Linux. The baseline, 13,542 µs, is in `crates/taskdeck-seal/budget-baseline.txt`: the number
+  GitHub's Linux runner measured. The 100 ms limit is judged everywhere; the 25% rule only on
+  GitHub's runners (`--judge-baseline`, L18), because another machine reads differently (this
+  container 14.2 to 16.1 ms alone, more while something else builds; GitHub's own runners gave
+  11.1 to 13.5 ms).
+
+**Working on this crate later.** One writer at a time. The coverage scanner reads only `tests/**`,
+`fuzz/fuzz_targets/**`, `src/**/tests.rs` and `src/**/*_tests.rs`. `tests/memory` installs a
+test-only allocator that scans freed blocks (L15); `tests/crate_rules` scans the sources for the
+whole-crate clauses and fixes the set of dependencies. The low findings left as they are stand in
+their section above; none is a defect an honest board meets.

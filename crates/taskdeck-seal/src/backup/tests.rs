@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 use super::*;
 use crate::payloads::ctl_inner;
 use crate::prim::deflate_raw;
-use crate::receipt::tests::board::{Board, Spec, Who, copy, rand};
+use crate::receipt::tests::board_tests::{Board, Spec, Who, copy, rand};
 use crate::receipt::tests::scalar;
 use crate::signatures::signer_identity;
 use crate::{Class, CtlItem, OsEntropy, RecoverySeed};
@@ -1455,4 +1455,82 @@ fn write_then_read_boards_where_the_code_buffer_fills() {
         }
     }
     assert!(failed.is_empty(), "files that do not read back: {failed:?}");
+}
+
+/// An `Entropy` that refuses every draw: a call that draws fails with
+/// `seal/entropy`, so a refusal with another code drew nothing first.
+struct NoDraw;
+
+impl crate::entropy::private::Sealed for NoDraw {}
+
+impl Entropy for NoDraw {
+    fn fill(&mut self, _out: &mut [u8]) -> Result<(), SealError> {
+        Err(SealError::Entropy)
+    }
+}
+
+// `write_backup` proves its stream before it seals (task S7b): a stream
+// whose compressed head (with an empty final stored block after it) does not
+// inflate to exactly the bytes before `n_roots`, or whose compressed tail
+// does not inflate to exactly `vb32(meta)`, is `seal/backup_payload`, and
+// nothing is drawn or written. Here a byte of the head's first block, the
+// head's last byte (its sync marker), a byte of the tail and the tail's
+// last byte are changed after the compressor wrote them; without the change
+// the same input reaches the draw.
+// spec: SEAL-BKP-001
+#[test]
+fn write_backup_proves_its_stream() {
+    use crate::prim::{SPLIT_FAULT, SplitFault};
+    let mut x = Hist::new(2);
+    x.rotate(Who::D(1));
+    let recs = x.recs();
+    let faults: [SplitFault; 4] = [
+        |s, _, _| s[0] ^= 0x04,
+        |s, h, _| s[h - 1] ^= 0x01,
+        |s, _, t| s[t] ^= 0x04,
+        |s, _, _| {
+            let n = s.len();
+            s[n - 1] ^= 0x01;
+        },
+    ];
+    for (i, f) in faults.into_iter().enumerate() {
+        SPLIT_FAULT.with(|c| c.set(Some(f)));
+        let r = write_backup(&x.b.devs[0], x.input(&recs, x.nightly()), &mut NoDraw);
+        SPLIT_FAULT.with(|c| c.set(None));
+        assert_eq!(r.err(), Some(SealError::BackupPayload), "fault {i}");
+    }
+    assert_eq!(write_backup(&x.b.devs[0], x.input(&recs, x.nightly()), &mut NoDraw).err(), Some(SealError::Entropy));
+    assert!(write_backup(&x.b.devs[0], x.input(&recs, x.nightly()), &mut OsEntropy).is_ok());
+}
+
+// The proof never hands the roots or the read token to a decompressor: of
+// every byte the proof's decompressor is given, none is a root or the
+// token (which stand verbatim in the stream's stored blocks), while the
+// empty final stored block the head's proof appends is there; the file
+// reads back with the roots and the token.
+// spec: SEAL-GEN-006
+#[test]
+fn the_proof_never_inflates_the_roots() {
+    use crate::prim::PROOF_INPUT;
+    let mut x = Hist::new(2);
+    x.rotate(Who::D(1));
+    let recs = x.recs();
+    let mut i = x.input(&recs, x.nightly());
+    i.read_token = Some("rt1.secret-read-token-0123456789".into());
+    let meta = b"{\"meta\":\"visible\"}".to_vec();
+    i.meta = meta.clone();
+    PROOF_INPUT.with(|c| c.borrow_mut().clear());
+    let file = write_backup(&x.b.devs[0], i, &mut OsEntropy).unwrap();
+    let seen = PROOF_INPUT.with(|c| std::mem::take(&mut *c.borrow_mut()));
+    assert!(!seen.is_empty());
+    for r in x.b.roots.values() {
+        let root = *r.to_bytes();
+        assert!(!seen.windows(32).any(|w| w == root));
+    }
+    assert!(!seen.windows(10).any(|w| w == b"rt1.secret"));
+    assert!(seen.windows(5).any(|w| w == [0x01, 0x00, 0x00, 0xFF, 0xFF]));
+    let v = x.read(&file).unwrap();
+    assert_eq!(v.roots.len(), 2);
+    assert_eq!(v.read_token.as_deref(), Some("rt1.secret-read-token-0123456789"));
+    assert_eq!(v.meta, meta);
 }
