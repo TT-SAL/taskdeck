@@ -26,6 +26,9 @@ You work on `crates/taskdeck-core/`, the pure board of the TaskDeck sync design.
 - Tests read fixtures and vectors with `include_str!` / `include_bytes!` and one plain string literal,
   relative to the test file (`include_str!("../../../fixtures/boards/small/notepad_text.json")`): no `env!`,
   no `concat!`, no backslash. CI's reads check follows these.
+- A test that reads a text file of the crate (`include_str!` of a source file, the manifest, `ci.sh`) must not
+  depend on line endings: a Windows checkout has CRLF. Compare by lines or with whitespace collapsed; never
+  search for a string that holds `\n`. (Twice a test passed here and failed on `windows-latest` for this.)
 - A value a test needs "from outside" (a process zone) is `taskdeck_core::time::ChronoZone(chrono::Local)`
   written as that value expression, with no `use chrono::Local` and no type naming `Local`.
 - No `unsafe`, no new dependency: `serde`, `serde_json`, `chrono` (no `clock`) for the library; `proptest`,

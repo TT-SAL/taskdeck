@@ -35,5 +35,8 @@ fn the_ported_read_side_names_no_clock_zone_file_network_thread_or_environment()
 fn ics_parse_takes_its_zone_as_an_argument() {
     // CORE-READ-004 through CORE-GEN-003: the zone reaches the parser as a
     // parameter, never from the process.
-    assert!(ICS.contains("zone: &(impl Zone + ?Sized),\n) -> Result<Parsed, String>"));
+    // Compared with every run of whitespace as one space, so that a checkout
+    // with CRLF line endings (Windows) reads the same.
+    let flat = ICS.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("zone: &(impl Zone + ?Sized), ) -> Result<Parsed, String>"));
 }
