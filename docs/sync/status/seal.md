@@ -204,10 +204,29 @@ Notes behind the briefs (the lead's reading of the spec), and for the brief of S
 
 The implementers' questions and the lead's rulings. None changes a clause's text. The rulings of
 tasks S1 to S3, the ownership of five caller clauses and the defect E1 were written into `seal.md`
-and `engine.md` by the lead on 2026-11-23 02:30 UTC (34 sentences added in place, so no line moved;
-one row in `CHANGES.md`; `scripts/spec-lint.sh` passes; seal now owns 164 clauses). They travel in
-the pull request of task S3. Still to do: one agent that did not write them checks the spec diff
-against this table (next window). Rulings of later tasks go into a second spec change before the exit.
+and `engine.md` by the lead on 2026-11-23 02:30 UTC (sentences added or rewritten in place, so no
+line moved; `scripts/spec-lint.sh` passes). They travel in the pull request of task S3. One agent that
+did not write them then checked the spec diff against this table (0.27 million tokens) and found one
+high, seven medium and five low points, all applied on 2026-11-23 06:10 UTC:
+
+- E1 was incomplete: after two or more rotations the lost entry is refused with `seal/old_epoch`
+  (step 9), which `engine.md` §28.5 step 4 now also names;
+- `M_0`'s bytes keep `magic` and `version`; an empty `home_host` is valid before any Fence;
+- SEAL-SIG-005 is owned by `engine` and `device` (the engine supplies the `register` arguments);
+  SEAL-WRAP-003 and SEAL-SIG-002 gain `device` as an owner for the caller's half; `seal.md` §25 and
+  `device.md` §24 and §6.4.7 tell `device` what it owns and that the identity bytes are 80 bytes;
+- the catalogue rows of §22 name the new places that raise their codes; `Receipt.opened` is `Some`
+  exactly when step 11 passed; `padded_len`'s overflow and `ctl_payload`'s codes are in §26.
+
+Seal now owns 164 clauses: 163 of `seal.md` and ENG-HASH-001. Because the check found a high point, a
+second check pass runs on the corrected change. Rulings of later tasks go into a second spec change
+before the exit.
+
+**E2, left open for `engine` and `device` (a row of `CHANGES.md`):** the check found the same kind of
+defect as E1 for an own `Fence`: the relay fences itself in the same transaction that appends the
+frame, so a `Fence` that loses a rotation race leaves the old relay fenced with no accepted `Fence`
+(`engine.md` §28.3 and §28.7, `device.md` §15.8 step 5). The three places need one design by the
+stages that build them; seal's lead recorded it and did not change them.
 
 | # | Where | Question | Ruling |
 |---|---|---|---|
