@@ -1,0 +1,15 @@
+{"root": "/home/user/taskdeck", "work": "/home/user/taskdeck/target/work/core", "briefs": "docs/sync/status/core/briefs",
+ "gate": "cargo test --locked -p taskdeck-core && cargo clippy --locked -p taskdeck-core --all-targets -- -D warnings && bash crates/taskdeck-core/ci.sh && bash scripts/gate.sh --only purity-clippy-toml core",
+ "steps": [
+  {"id": "verify:c-ports", "kind": "verify", "briefs": ["c1-planner-scoring-archive.md", "c2-ics-overlay-weather.md"], "commit": "HEAD",
+   "extra": "These are ports: the question is whether the new code computes what today's code computes, except for the changes the briefs list. Compare each ported function with today's source line by line (today's files are under src/ at the root of your copy), and each ported test's inputs and expected values with today's test of the same name. Then probe: the order of the f32 scoring arithmetic, a zone other than UTC, a daylight-saving transition, blocks walked in sid order, the hand-written date strings against chrono's format in a test of your own."},
+  {"id": "impl:e1-import", "kind": "impl", "brief": "e1-import.md", "after": []},
+  {"id": "security:c-ports", "kind": "security", "briefs": ["c2-ics-overlay-weather.md"], "after": ["verify:c-ports"],
+   "focus": "`ics::parse`, which reads the text of a calendar feed fetched from an address that anyone may control: recurrence rules, time zones the file defines, huge counts and ranges, long lines and folding, deep or repeated components, dates at the ends of the calendar; and the overlay types that read `subscribed_cache.json`."},
+  {"id": "impl:d-compile", "kind": "impl", "brief": "d-compile.md", "after": ["impl:e1-import", "verify:c-ports"]},
+  {"id": "verify:d-compile", "kind": "verify", "briefs": ["d-compile.md"], "after": ["impl:d-compile"],
+   "extra": "Work the compile table of core.md §13.4 row by row: each step in its order; each code, status and message against §16 character for character; the command and the reply of each row. Check CORE-COMP-008 hard: a command that `compile` returns must parse and be accepted by `apply` on the same view. Check the Reflow steps against today's code (src/board.rs, src/planner.rs at the root of your copy) and the tie order of §13.5."},
+  {"id": "impl:e2-read", "kind": "impl", "brief": "e2-read-snapshot.md", "after": ["impl:d-compile"]},
+  {"id": "security:d-compile", "kind": "security", "briefs": ["d-compile.md"], "after": ["verify:d-compile"],
+   "focus": "`parse_intent` and `compile`: the JSON that the phone page sends through the bridge (a page in a WebView that the design treats as hostile), compiled against a view and an overlay: sizes, deep or odd JSON, numbers at the edges of their Rust types, days and minutes at the ends of their ranges, names and addresses with unusual characters, a minter near its end, a view at its caps."}
+ ]}

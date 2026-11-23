@@ -318,20 +318,81 @@ pub fn local_minutes(t: Instant, z: &(impl Zone + ?Sized)) -> i32 {
     i32::try_from(local_secs(t, z).rem_euclid(86_400) / 60).unwrap_or(0)
 }
 
+/// The naive date-time of `local_at(d, x)` (core.md §5.4 step 2): `d` at
+/// hour `min(x div 60, 23)`, minute `x mod 60`, second 0.
+fn local_naive(day: chrono::NaiveDate, x: i32) -> Option<chrono::NaiveDateTime> {
+    let hour = u32::try_from((x / 60).min(23)).ok()?;
+    let minute = u32::try_from(x % 60).ok()?;
+    day.and_hms_opt(hour, minute, 0)
+}
+
 /// `local_at(d, x)` of core.md §5.4 step 2: on a fold the earlier instant
 /// (CORE-TIME-003), which `from_local` lists first (§5.2).
 fn local_at(day: chrono::NaiveDate, x: i32, z: &(impl Zone + ?Sized)) -> Option<Instant> {
-    let hour = u32::try_from((x / 60).min(23)).ok()?;
-    let minute = u32::try_from(x % 60).ok()?;
-    match z.from_local(day.and_hms_opt(hour, minute, 0)?) {
+    match z.from_local(local_naive(day, x)?) {
         LocalTime::None => None,
         LocalTime::Single(t) | LocalTime::Ambiguous(t, _) => Some(t),
     }
 }
 
+/// Whether a local wall time lies outside the instant range (core.md §5.4;
+/// lead ruling, spec change 5, §5.4): its seconds since
+/// 1970-01-01T00:00:00 minus `z.offset_at(Instant::MIN)` are below 0, or
+/// minus `z.offset_at(Instant::MAX)` are above 253,402,300,799.
+fn naive_outside_range(local: chrono::NaiveDateTime, z: &(impl Zone + ?Sized)) -> bool {
+    let secs = local.and_utc().timestamp();
+    secs - i64::from(z.offset_at(Instant::MIN)) < 0 || secs - i64::from(z.offset_at(Instant::MAX)) > MAX_SECS
+}
+
+/// Whether the local time `resolve_on_day(day, minutes, z)` reads first,
+/// `local_at(day, clamp(minutes, 0, 1439))`, lies outside the instant range
+/// (lead ruling, spec change 5, §5.4). `resolve_on_day` gives none for such a
+/// time without the 60-minute step, and `compile` answers it
+/// `core/date_range`, not as a gap (§13.3 G3 and G5).
+pub(crate) fn outside_range(day: chrono::NaiveDate, minutes: i32, z: &(impl Zone + ?Sized)) -> bool {
+    local_naive(day, minutes.clamp(0, 1439)).is_some_and(|local| naive_outside_range(local, z))
+}
+
+/// The local date-time of `t` in `z` (core.md §5.3): `t + z.offset_at(t)`
+/// read as a naive date-time, for the read queries that print one.
+pub(crate) fn local_date_time(t: Instant, z: &(impl Zone + ?Sized)) -> chrono::NaiveDateTime {
+    let secs = local_secs(t, z);
+    // Within a day of the instant range, so chrono holds it.
+    chrono::DateTime::from_timestamp(secs, t.nanos).map(|d| d.naive_utc()).unwrap_or_default()
+}
+
+/// `to − from` as a chrono span: a difference of two instants needs no zone.
+pub(crate) fn between(from: Instant, to: Instant) -> chrono::TimeDelta {
+    to.to_chrono() - from.to_chrono()
+}
+
+/// English month names, January first (chrono's `%B`, without locales).
+const MONTH_NAMES: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+    "November", "December",
+];
+
+/// chrono's `%B`: the month's full English name.
+pub(crate) fn month_name(month: u32) -> &'static str {
+    let index = usize::try_from(month.saturating_sub(1)).unwrap_or(0);
+    MONTH_NAMES.get(index).copied().unwrap_or("")
+}
+
+/// chrono's `%b`: the month's first three letters.
+pub(crate) fn month_abbrev(month: u32) -> &'static str {
+    let name = month_name(month);
+    name.get(..3).unwrap_or(name)
+}
+
 /// Resolves a local time on a day (core.md §5.4).
+///
+/// A local time outside the instant range is no gap: the result is none, and
+/// step 3 does not try 60 minutes later (lead ruling, spec change 5, §5.4).
 pub fn resolve_on_day(day: chrono::NaiveDate, minutes: i32, z: &(impl Zone + ?Sized)) -> Option<Instant> {
     let m = minutes.clamp(0, 1439);
+    if outside_range(day, m, z) {
+        return None;
+    }
     local_at(day, m, z).or_else(|| local_at(day, (m + 60).min(1439), z))
 }
 

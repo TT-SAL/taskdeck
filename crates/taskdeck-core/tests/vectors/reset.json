@@ -47,6 +47,25 @@
    "target_text": "{\"rules\":1}",
    "current_text": "{\"rules\":2}",
    "code": "core/unknown_rules"
+  },
+  {
+   "name": "the target at the last notes revision",
+   "target_text": "{\"items\":[{\"created\":\"2026-01-01T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"notes_rev\":9007199254740991,\"rules\":1}",
+   "current_text": "{\"marks\":[{\"block\":3,\"device_no\":1,\"item\":2}],\"notes_rev\":4,\"rules\":1}",
+   "code": "core/cap"
+  },
+  {
+   "name": "the current board at the last notes revision",
+   "target_text": "{\"notes_rev\":4,\"rules\":1}",
+   "current_text": "{\"notes_rev\":9007199254740991,\"rules\":1}",
+   "code": "core/cap"
+  },
+  {
+   "name": "one below the last notes revision",
+   "target_text": "{\"notes_rev\":9007199254740990,\"rules\":1}",
+   "current_text": "{\"rules\":1}",
+   "result_text": "{\"notes_rev\":9007199254740991,\"rules\":1}",
+   "result_sha256": "f27e9efb69d0e11391c8f9b9a1b5e62956852f36bdbaefaa104dbeb294d09866"
   }
  ]
 }
