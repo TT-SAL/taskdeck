@@ -56,16 +56,16 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S1 | Primitives, keys, wraps, chain and fingerprints, the sheet, the known-answer suites, the vectors target, `ci.sh` | `error`, `entropy`, `base32`, `encodings` (hosts, names), `ids`, `ctx`, `keys`, `chain`, `prim` | §3–§7, §15, §18 | `seal-kdf`, `seal-wrap`, `seal-chain`, `seal-sheet` | **done**, merged (TT-SAL/taskdeck#4; its high finding fixed by TT-SAL/taskdeck#6) |
 | S2 | Frames, envelope, padding, payloads and control items (encode and strict parse, canonical JSON), login and admin signatures | `entries`, `signatures`, `encodings` (JSON) | §5.3, §8–§12, §16 | `seal-frame`, `seal-padding`, `seal-signatures` | **done**, merged (TT-SAL/taskdeck#9; low findings only) |
 | S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **done**, merged (TT-SAL/taskdeck#10, with the spec change) |
-| S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done** (TT-SAL/taskdeck#13; low findings only, three of them carried into S5's brief) |
+| S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done**, merged (TT-SAL/taskdeck#13, 2026-11-23 07:46 UTC; low findings only, four rulings carried into S5's brief) |
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection); four rulings carried over from S4's security passes | `blob`, `backup`, `prim` | §20 | `seal-blob` | brief written; next to launch |
 | S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | brief written |
-| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `ci.sh` | §3, §24 | all present | brief to write |
+| S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written (to revise with what S5 and S6 leave) |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
 
 The briefs of S4, S5 and S6 name line ranges of `seal.md` as it stood on 2026-11-23 02:30 UTC; after
 a change to that file, check them against its headings before launching.
 
-Notes behind the briefs (the lead's reading of the spec), and for the brief of S7, still to write:
+Notes behind the briefs (the lead's reading of the spec):
 
 - **S4.** Read §6.6, §6.7, §11.3, §12.1, §13.2, §13.6 (the Author column, for the projection's reduced
   rules), §16.3, §19, §21, §22, §23, §24 and §26's file and backup parts; `engine.md` §18.3 for the
@@ -86,7 +86,7 @@ Notes behind the briefs (the lead's reading of the spec), and for the brief of S
   it gets through only when the digits the user types into N equal N's own, that is by guessing six
   digits. Clauses: SEAL-CODE-001, -002, SEAL-PAIR-001 to -017, SEAL-CTX-003 (`pair-bundle`),
   SEAL-KEY-015 (the bundle's token).
-- **S7.** `scripts/gate.sh seal` green: `spec-coverage` at 169 of 169 with no hollow citation (the
+- **S7.** `scripts/gate.sh seal` green: `spec-coverage` at 164 of 164 with no hollow citation (the
   verifier of each task names them), `no-unimplemented`, `no-skipped-tests`; SEAL-GEN-001, -002, -003,
   -005, -011 for the whole crate; fuzz targets under `crates/taskdeck-seal/fuzz/` that compile on the
   pinned toolchain in `ci.sh` (Linux), with their own `[workspace]` and lockfile, covered by hand
@@ -385,7 +385,7 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S4, the implementer | 1 | 0.44 M | 0.61 M | 0.61 M |
 | | S4, the verifier | 1 | 0.27 M | 0.33 M | 0.33 M |
 | | S4, security passes and the fix pass | 3 | 0.55 M | 0.70 M | 0.70 M |
-| | **window total** (nothing more is started in it: S5's implementer would not fit) | | | | **3.26 M** |
+| | **window total** (nothing more is started in it: S5's implementer would not fit. The session's worker restarted at 05:41 UTC, when the owner wrote that the limit had reset, so this window ends at 10:41 UTC, 12:41 Helsinki, at the latest; S5 starts after that) | | | | **3.26 M** |
 
 ## Low findings left as they are
 
