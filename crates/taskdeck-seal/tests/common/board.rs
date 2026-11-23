@@ -70,7 +70,7 @@ pub fn empty_membership() -> Vec<u8> {
     v.push(0); // home_host
     v.extend([0u8; 5 + 8 + 2]); // door, purge_seq, next_device_no
     v.extend([0u8; 4 + 2 + 2]); // n_commit, n_recovery, n_dev
-    v.extend([0u8; 3]); // three flags
+    v.extend([0u8; 2]); // two flags: pending_override, last_reset
     v.extend([0u8; 4 + 4]); // n_skip, n_ctl
     v
 }
@@ -437,11 +437,7 @@ impl Sim {
     pub fn change_recovery(&mut self) {
         let (seed, nk) = self.new_recovery_seed();
         let p = nk.public();
-        let k = CtlItem::RecoveryKeyChange(RecoveryKeyChange {
-            mode: RecoveryKeyMode::Direct,
-            sign_pk: Some(p.sign_pk),
-            hpke_pk: Some(p.hpke_pk),
-        });
+        let k = CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: p.sign_pk, hpke_pk: p.hpke_pk });
         let items = self.rotate_items(vec![k]);
         let f = self.ctl(Who::R, items, &Spec::default());
         self.accept(f);
@@ -469,8 +465,8 @@ impl Sim {
             }
         }
         let new_rec = prefix.iter().find_map(|i| match i {
-            CtlItem::RecoveryKeyChange(k) if matches!(k.mode, RecoveryKeyMode::Direct | RecoveryKeyMode::Confirm) => {
-                let p = RecoveryPublic { sign_pk: k.sign_pk.unwrap(), hpke_pk: k.hpke_pk.unwrap() };
+            CtlItem::RecoveryKeyChange(k) => {
+                let p = RecoveryPublic { sign_pk: k.sign_pk, hpke_pk: k.hpke_pk };
                 Some((p.dev(&self.board), p.hpke_pk))
             }
             _ => None,

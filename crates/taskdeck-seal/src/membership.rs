@@ -58,7 +58,6 @@ pub struct Membership {
     pub(crate) commitments: Vec<(u32, u64, [u8; 32])>,
     pub(crate) recovery: Vec<RecoveryRecord>,
     pub(crate) devices: Vec<DeviceRecord>,
-    pub(crate) pending_recovery: Option<PendingRecovery>,
     /// `(rules, voter, seq)`.
     pub(crate) pending_override: Option<(u32, DevId, u64)>,
     /// `(at_seq, target, hash_version, state_hash)`.
@@ -125,17 +124,6 @@ impl Membership {
         o.extend_from_slice(&count16(self.devices.len()).to_be_bytes());
         for d in &self.devices {
             d.write(&mut o);
-        }
-        match &self.pending_recovery {
-            None => o.push(0),
-            Some(p) => {
-                o.push(1);
-                o.extend_from_slice(&p.proposer.0);
-                o.extend_from_slice(&p.sign_pk);
-                o.extend_from_slice(&p.hpke_pk);
-                o.extend_from_slice(&p.seq.to_be_bytes());
-                o.extend_from_slice(&p.start_ms.to_be_bytes());
-            }
         }
         match &self.pending_override {
             None => o.push(0),
@@ -235,11 +223,6 @@ impl Membership {
         self.recovery.iter().find(|r| r.until_seq == 0).unwrap_or(&NO_RECOVERY)
     }
 
-    /// The proposed recovery-key change, if any (seal.md §13.1, §13.11).
-    pub fn pending_recovery(&self) -> Option<&PendingRecovery> {
-        self.pending_recovery.as_ref()
-    }
-
     /// A device's `device_no` (seal.md §13.7).
     pub fn device_no(&self, dev: &DevId) -> Option<u16> {
         self.device(dev).map(|d| d.device_no)
@@ -266,7 +249,6 @@ impl Membership {
             commitments: Vec::new(),
             recovery: Vec::new(),
             devices: Vec::new(),
-            pending_recovery: None,
             pending_override: None,
             last_reset: None,
             skips: Vec::new(),
@@ -296,7 +278,6 @@ impl Membership {
             commitments: self.commitments.clone(),
             recovery: self.recovery.iter().map(RecoveryRecord::dup).collect(),
             devices: self.devices.iter().map(DeviceRecord::dup).collect(),
-            pending_recovery: self.pending_recovery.as_ref().map(PendingRecovery::dup),
             pending_override: self.pending_override,
             last_reset: self.last_reset,
             skips: self.skips.clone(),
@@ -582,17 +563,6 @@ fn parse(bytes: &[u8]) -> Option<Membership> {
         return None;
     }
 
-    let pending_recovery = if r.flag()? {
-        Some(PendingRecovery {
-            proposer: DevId(r.arr()?),
-            sign_pk: r.arr()?,
-            hpke_pk: r.arr()?,
-            seq: r.u64()?,
-            start_ms: r.i64()?,
-        })
-    } else {
-        None
-    };
     let pending_override = if r.flag()? { Some((r.u32()?, DevId(r.arr()?), r.u64()?)) } else { None };
     let last_reset = if r.flag()? { Some((r.u64()?, r.u64()?, r.u32()?, r.arr()?)) } else { None };
 
@@ -633,7 +603,6 @@ fn parse(bytes: &[u8]) -> Option<Membership> {
         commitments,
         recovery,
         devices,
-        pending_recovery,
         pending_override,
         last_reset,
         skips,
@@ -817,27 +786,6 @@ impl RecoveryRecord {
             since_seq: self.since_seq,
             until_seq: self.until_seq,
             last_ctr: self.last_ctr,
-        }
-    }
-}
-
-/// A proposed recovery-key change (seal.md §13.2, §26).
-pub struct PendingRecovery {
-    pub proposer: DevId,
-    pub sign_pk: [u8; 32],
-    pub hpke_pk: [u8; 32],
-    pub seq: u64,
-    pub start_ms: i64,
-}
-
-impl PendingRecovery {
-    pub(crate) fn dup(&self) -> PendingRecovery {
-        PendingRecovery {
-            proposer: self.proposer,
-            sign_pk: self.sign_pk,
-            hpke_pk: self.hpke_pk,
-            seq: self.seq,
-            start_ms: self.start_ms,
         }
     }
 }

@@ -122,12 +122,9 @@ pub fn frames() -> &'static Frames {
         let items = s.rotate_items(vec![CtlItem::DeviceRevoked(s.dev(Who::D(2)))]);
         frames.push(s.ctl(Who::D(0), items, &Spec::default()));
         let k = s.new_recovery().public();
-        let p = CtlItem::RecoveryKeyChange(RecoveryKeyChange {
-            mode: RecoveryKeyMode::Propose,
-            sign_pk: Some(k.sign_pk),
-            hpke_pk: Some(k.hpke_pk),
-        });
-        frames.push(s.ctl(Who::D(1), vec![p], &Spec::default()));
+        let p = CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: k.sign_pk, hpke_pk: k.hpke_pk });
+        let items = s.rotate_items(vec![p]);
+        frames.push(s.ctl(Who::R, items, &Spec::default()));
         let membership = s.m.to_canonical_bytes();
         let skip = [CtlItem::Skip(SkipItem { seq: 1, frame_hash: FrameHash([2; 32]) })];
         let ctl = ctl_payload(&skip, &s.signer(Who::D(0)), &s.board, 9, &EntryId([5; 16]), s.now).unwrap();

@@ -709,7 +709,7 @@ fn genesis_state() {
     assert_eq!((x.rules.clone(), x.envelopes.clone(), x.hash_versions.clone(), x.name.as_str()), (vec![1], vec![(1, 1)], vec![1], "Laptop"));
     assert_eq!(m.devices().len(), 1);
     assert_eq!(m.ctl_seqs, vec![1]);
-    assert!(m.pending_recovery().is_none() && m.pending_override.is_none() && m.last_reset.is_none() && m.skips.is_empty());
+    assert!(m.pending_override.is_none() && m.last_reset.is_none() && m.skips.is_empty());
     assert_eq!(m.device_no(&d.dev), Some(1));
 }
 

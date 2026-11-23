@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::receipt::tests::board_tests::{Board, Spec, Who};
-use crate::{CtlItem, Fence, OsEntropy, RecoveryKeyChange, RecoveryKeyMode, RecoverySeed, ResetTo, RulesUpgrade, RulesUpgradeMode, SkipItem, frame_hash};
+use crate::{CtlItem, Fence, OsEntropy, RecoveryKeyChange, RecoverySeed, ResetTo, RulesUpgrade, RulesUpgradeMode, SkipItem, frame_hash};
 
 /// The bytes of §13.2, written field by field from the table, independent
 /// of `to_canonical_bytes`.
@@ -72,17 +72,6 @@ fn table_bytes(m: &Membership) -> Vec<u8> {
         o.push(d.name.len() as u8);
         o.extend(d.name.as_bytes());
     }
-    match &m.pending_recovery {
-        None => o.push(0),
-        Some(p) => {
-            o.push(1);
-            o.extend(p.proposer.0);
-            o.extend(p.sign_pk);
-            o.extend(p.hpke_pk);
-            o.extend(p.seq.to_be_bytes());
-            o.extend(p.start_ms.to_be_bytes());
-        }
-    }
     match &m.pending_override {
         None => o.push(0),
         Some((r, v, s)) => {
@@ -114,8 +103,9 @@ fn table_bytes(m: &Membership) -> Vec<u8> {
     o
 }
 
-/// A board whose state has every optional part: a Fence, two rotations, a
-/// revoked device, a proposal, an override vote, a reset and a skip.
+/// A board whose state has every optional part: a Fence, three rotations, a
+/// revoked device, a second recovery key, an override vote, a reset and a
+/// skip.
 fn rich() -> Board {
     let mut b = Board::new(4);
     let f = b.cmd(Who::D(1), &Spec::default());
@@ -124,13 +114,12 @@ fn rich() -> Board {
     b.accept(f);
     b.revoke(Who::D(0), 3);
     b.rotate(Who::R);
-    let k = RecoverySeed::generate(&mut OsEntropy).unwrap().keys().public();
-    let f = b.ctl(
-        Who::D(1),
-        vec![CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode: RecoveryKeyMode::Propose, sign_pk: Some(k.sign_pk), hpke_pk: Some(k.hpke_pk) })],
-        &Spec::default(),
-    );
+    let k = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
+    let p = k.public();
+    let items = b.rotate_items(vec![CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: p.sign_pk, hpke_pk: p.hpke_pk })]);
+    let f = b.ctl(Who::R, items, &Spec::default());
     b.accept(f);
+    b.rec.push(k);
     let f = b.ctl(Who::D(2), vec![CtlItem::RulesUpgrade(RulesUpgrade { rules: 5, mode: RulesUpgradeMode::Override })], &Spec::default());
     b.accept(f);
     let f = b.ctl(Who::D(0), vec![CtlItem::ResetTo(ResetTo { seq: 6, state_hash: [7; 32], hash_version: 1 })], &Spec::default());
@@ -150,8 +139,8 @@ fn rich() -> Board {
 fn canonical_layout() {
     let b = rich();
     let m = &b.m;
-    assert!(m.pending_recovery.is_some() && m.pending_override.is_some() && m.last_reset.is_some());
-    assert!(!m.skips.is_empty() && !m.home_host.is_empty() && m.recovery.len() == 1 && m.epoch == 3);
+    assert!(m.pending_override.is_some() && m.last_reset.is_some());
+    assert!(!m.skips.is_empty() && !m.home_host.is_empty() && m.recovery.len() == 2 && m.epoch == 4);
     let bytes = m.to_canonical_bytes();
     assert_eq!(bytes, table_bytes(m));
     let again = Membership::from_canonical_bytes(&bytes).unwrap();
@@ -172,10 +161,10 @@ fn canonical_layout() {
 fn accessors() {
     let b = rich();
     let m = Membership::from_canonical_bytes(&b.m.to_canonical_bytes()).unwrap();
-    assert_eq!((m.board(), m.epoch(), m.rules()), (b.board, 3, 1));
+    assert_eq!((m.board(), m.epoch(), m.rules()), (b.board, 4, 1));
     assert_eq!(m.devices().len(), 4);
     assert_eq!(m.current_recovery().dev, b.dev(Who::R));
-    assert_eq!(m.pending_recovery().unwrap().proposer, b.dev(Who::D(1)));
+    assert_eq!(m.current_recovery().since_seq, b.m.recovery[1].since_seq);
     for i in 0..4 {
         assert_eq!(m.device_no(&b.dev(Who::D(i))), Some(i as u16 + 1));
     }
@@ -211,7 +200,7 @@ fn rejects_layout() {
     for n in 0..bytes.len() {
         rejects(&bytes[..n]);
     }
-    // The three flags sit before `n_skip` (one skip) and `n_ctl`.
+    // The two flags sit before `n_skip` (one skip) and `n_ctl`.
     let tail = 4 + 40 * b.m.skips.len() + 4 + 8 * b.m.ctl_seqs.len();
     let reset_flag = bytes.len() - tail - 53;
     assert_eq!(bytes[reset_flag], 1);
@@ -220,7 +209,7 @@ fn rejects_layout() {
     rejects(&m);
     let g = Board::new(1).m.to_canonical_bytes();
     let gtail = 4 + 4 + 8;
-    for i in 1..=3 {
+    for i in 1..=2 {
         let mut m = g.clone();
         m[g.len() - gtail - i] = 2;
         rejects(&m);
@@ -356,7 +345,7 @@ fn rejects_recovery_records() {
     for _ in 0..2 {
         let k = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
         let p = k.public();
-        let items = b.rotate_items(vec![CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode: RecoveryKeyMode::Direct, sign_pk: Some(p.sign_pk), hpke_pk: Some(p.hpke_pk) })]);
+        let items = b.rotate_items(vec![CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: p.sign_pk, hpke_pk: p.hpke_pk })]);
         let f = b.ctl(Who::R, items, &Spec::default());
         b.accept(f);
         b.rec.push(k);
@@ -379,4 +368,39 @@ fn rejects_recovery_records() {
         x.recovery[1].until_seq = 0;
         x.recovery[2].until_seq = 99;
     }));
+}
+
+// The layout has no `pending_recovery` (§13.2): bytes that still carry its
+// flag byte between the device records and `pending_override`, as 0 or as 1
+// with the 96 bytes of a proposal, are not canonical membership bytes, for
+// the empty state, a genesis state and a rich one.
+// spec: SEAL-MEM-002
+// spec: SEAL-MEM-001
+#[test]
+fn rejects_the_old_pending_recovery_flag() {
+    let rich = rich();
+    let genesis = Board::new(1);
+    for m in [&Membership::empty(), &genesis.m, &rich.m] {
+        let bytes = m.to_canonical_bytes();
+        let tail = 1
+            + m.pending_override.map_or(0, |_| 28)
+            + 1
+            + m.last_reset.map_or(0, |_| 52)
+            + 4
+            + SKIP_LEN * m.skips.len()
+            + 4
+            + CTL_LEN * m.ctl_seqs.len();
+        let at = bytes.len() - tail;
+        // What follows the device records is the override flag.
+        assert_eq!(bytes[at], u8::from(m.pending_override.is_some()));
+        assert!(Membership::from_canonical_bytes(&bytes).is_ok());
+        let mut zero = bytes.clone();
+        zero.insert(at, 0);
+        rejects(&zero);
+        let mut one = bytes.clone();
+        let mut old = vec![1u8];
+        old.extend([0x42; 96]);
+        one.splice(at..at, old);
+        rejects(&one);
+    }
 }

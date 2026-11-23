@@ -465,21 +465,12 @@ pub struct EpochRotated {
     pub purge_before: Option<u64>,
 }
 
-/// The `RecoveryKeyChange` item (seal.md §12.6).
+/// The `RecoveryKeyChange` item (seal.md §12.6): the new recovery key,
+/// installed by the current recovery identity (§13.11).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryKeyChange {
-    pub mode: RecoveryKeyMode,
-    pub sign_pk: Option<[u8; 32]>,
-    pub hpke_pk: Option<[u8; 32]>,
-}
-
-/// The `mode` of `RecoveryKeyChange` (seal.md §12.6, §13.11).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RecoveryKeyMode {
-    Direct,
-    Propose,
-    Confirm,
-    Cancel,
+    pub sign_pk: [u8; 32],
+    pub hpke_pk: [u8; 32],
 }
 
 /// The `Fence` item (seal.md §12.7).

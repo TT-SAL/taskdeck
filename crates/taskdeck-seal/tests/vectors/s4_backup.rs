@@ -313,8 +313,8 @@ fn seal_backup() {
     cases.push(read_case("step 11: a trailing byte", &seal_compressed(&base, &s.devs[0], &deflate(&q), [2; 32]), &board, &seed, Some("seal/backup_payload")));
 
     // Step 10 compares the recovery keys, not only `dev_R` (SEAL-BKP-004,
-    // ruling Q45): two devices propose and confirm a recovery key made of a
-    // new sheet's signing key and a third party's HPKE key; device 0 seals a
+    // ruling Q45): the current recovery identity installs a recovery key made
+    // of a new sheet's signing key and a third party's HPKE key; device 0 seals a
     // file to the new sheet's real keys. Read with the new sheet's seed, it
     // passes steps 1 to 9 and fails step 10.
     {
@@ -322,14 +322,9 @@ fn seal_backup() {
         let (sheet_seed, sheet) = t.new_recovery_seed();
         let (_, third) = t.new_recovery_seed();
         let mixed = RecoveryPublic { sign_pk: sheet.public().sign_pk, hpke_pk: third.public().hpke_pk };
-        let change = |mode| {
-            CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode, sign_pk: Some(mixed.sign_pk), hpke_pk: Some(mixed.hpke_pk) })
-        };
-        let f = t.ctl(Who::D(0), vec![change(RecoveryKeyMode::Propose)], &Spec::default());
-        t.accept(f);
-        t.now += 259_200_000;
-        let items = t.rotate_items(vec![change(RecoveryKeyMode::Confirm)]);
-        let f = t.ctl(Who::D(1), items, &Spec::default());
+        let change = CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: mixed.sign_pk, hpke_pk: mixed.hpke_pk });
+        let items = t.rotate_items(vec![change]);
+        let f = t.ctl(Who::R, items, &Spec::default());
         t.accept(f);
         let mut hd = Header::of(&t, &t.devs[0], 1, t.seq());
         hd.recipient = sheet.public();

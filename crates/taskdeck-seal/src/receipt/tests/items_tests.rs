@@ -17,8 +17,8 @@ fn try_ctl(b: &mut Board, who: Who, items: Vec<CtlItem>) -> Receipt {
     b.classify(&f)
 }
 
-fn rkc(mode: RecoveryKeyMode, k: Option<RecoveryPublic>) -> CtlItem {
-    CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode, sign_pk: k.map(|k| k.sign_pk), hpke_pk: k.map(|k| k.hpke_pk) })
+fn rkc(k: RecoveryPublic) -> CtlItem {
+    CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: k.sign_pk, hpke_pk: k.hpke_pk })
 }
 
 fn new_recovery() -> RecoveryKeys {
@@ -183,19 +183,15 @@ fn device_no_never_reused() {
 // -------------------------------------------------------- DeviceRevoked
 
 // `DeviceRevoked` by a device or the recovery identity: status, seq and
-// author recorded; a proposal and an override vote by the target cleared.
+// author recorded; an override vote by the target cleared.
 // spec: SEAL-MEM-011
-// spec: SEAL-MEM-025
 #[test]
 fn revoke_effects() {
     for by in [Who::D(0), Who::R] {
         let mut b = Board::new(3);
-        let k = new_recovery().public();
-        let f = b.ctl(Who::D(2), vec![rkc(RecoveryKeyMode::Propose, Some(k))], &Spec::default());
-        b.accept(f);
         let f = b.ctl(Who::D(2), vec![CtlItem::RulesUpgrade(RulesUpgrade { rules: 2, mode: RulesUpgradeMode::Override })], &Spec::default());
         b.accept(f);
-        assert!(b.m.pending_recovery().is_some() && b.m.pending_override.is_some());
+        assert!(b.m.pending_override.is_some());
         let target = b.dev(Who::D(2));
         let s = b.seq() + 1;
         let items = b.rotate_items(vec![CtlItem::DeviceRevoked(target)]);
@@ -204,23 +200,21 @@ fn revoke_effects() {
         let d = r.membership.device(&target).unwrap();
         assert!(matches!(d.status, DeviceStatus::Revoked));
         assert_eq!((d.status_seq, d.status_by), (s, b.dev(by)));
-        assert!(r.membership.pending_recovery().is_none());
         assert!(r.membership.pending_override.is_none());
     }
 }
 
-// Revoking a proposal's or vote's non-author leaves them.
-// spec: SEAL-MEM-025
+// Revoking a device that did not cast the override vote leaves the vote.
+// spec: SEAL-MEM-011
 #[test]
-fn revoke_other_keeps_proposal() {
+fn revoke_other_keeps_vote() {
     let mut b = Board::new(3);
-    let k = new_recovery().public();
-    let f = b.ctl(Who::D(2), vec![rkc(RecoveryKeyMode::Propose, Some(k))], &Spec::default());
+    let f = b.ctl(Who::D(2), vec![CtlItem::RulesUpgrade(RulesUpgrade { rules: 2, mode: RulesUpgradeMode::Override })], &Spec::default());
     b.accept(f);
     let items = b.rotate_items(vec![CtlItem::DeviceRevoked(b.dev(Who::D(1)))]);
     let r = try_ctl(&mut b, Who::D(0), items);
     expect(&r, "Accept", None);
-    assert!(r.membership.pending_recovery().is_some());
+    assert_eq!(r.membership.pending_override.map(|p| p.1), Some(b.dev(Who::D(2))));
 }
 
 // A device revoking itself: `seal/ctl_author`; a target that is not a
@@ -414,7 +408,7 @@ fn rotate_cap() {
 
 // ---------------------------------------------------- RecoveryKeyChange
 
-// `direct` by the recovery identity (a K-shape entry, whose rotation the
+// `RecoveryKeyChange` by the recovery identity (a K-shape entry, whose rotation the
 // old identity authors: the class is decided from `M_{s−1}`): the old record
 // retires at `s`, the new one starts at `s` with counter 0; the new identity
 // authors from `s + 1` with counter 1, the old one is refused.
@@ -427,7 +421,7 @@ fn recovery_direct() {
     let nk = new_recovery();
     let np = nk.public();
     let s = b.seq() + 1;
-    let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(np))]);
+    let items = b.rotate_items(vec![rkc(np)]);
     let f = b.ctl(Who::R, items, &Spec::default());
     let r = b.accept(f);
     b.rec.push(nk);
@@ -446,7 +440,7 @@ fn recovery_direct() {
     assert_eq!(r.membership.current_recovery().last_ctr, 1);
 }
 
-// `direct` by a device: `seal/ctl_author`; with keys already recorded:
+// `RecoveryKeyChange` by a device: `seal/ctl_author`; with keys already recorded:
 // `seal/ctl_duplicate_key`; 64 recovery records: `seal/ctl_cap`.
 // spec: SEAL-MEM-011
 // spec: SEAL-MEM-026
@@ -454,7 +448,7 @@ fn recovery_direct() {
 fn recovery_direct_refusals() {
     let mut b = Board::new(2);
     let np = new_recovery().public();
-    let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(np))]);
+    let items = b.rotate_items(vec![rkc(np)]);
     expect(&try_ctl(&mut b, Who::D(0), items), "Refuse", Some("seal/ctl_author"));
     let d = b.dev_pub(1);
     for k in [
@@ -462,7 +456,7 @@ fn recovery_direct_refusals() {
         RecoveryPublic { sign_pk: np.sign_pk, hpke_pk: d.hpke_pk },
         b.rec[0].public(),
     ] {
-        let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(k))]);
+        let items = b.rotate_items(vec![rkc(k)]);
         expect(&try_ctl(&mut b, Who::R, items), "Refuse", Some("seal/ctl_duplicate_key"));
     }
     // 64 records from real changes, each by the identity before it (the
@@ -470,81 +464,96 @@ fn recovery_direct_refusals() {
     // takes; a 65th is `seal/ctl_cap`.
     while b.m.recovery.len() < 64 {
         let k = new_recovery();
-        let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(k.public()))]);
+        let items = b.rotate_items(vec![rkc(k.public())]);
         let f = b.ctl(Who::R, items, &Spec::default());
         b.accept(f);
         b.rec.push(k);
         assert!(Membership::from_canonical_bytes(&b.m.to_canonical_bytes()).is_ok());
     }
-    let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(np))]);
+    let items = b.rotate_items(vec![rkc(np)]);
     expect(&try_ctl(&mut b, Who::R, items), "Refuse", Some("seal/ctl_cap"));
 }
 
-// `propose`, then `confirm` by another device 72 hours of `start_ms` later
-// (the log clock after the proposal, not the proposer's `at_ms`), with a
-// rotation to the new key; every refusal of the three rows once.
+// A `RecoveryKeyChange` authored by any current device, with the rotation
+// to the new key, is `seal/ctl_author` (§13.11: only the current recovery
+// identity changes the recovery key); only the author's counter moves, and
+// the recovery record stays. The same entry by the recovery identity is
+// accepted.
 // spec: SEAL-MEM-011
-// spec: SEAL-MEM-023
-// spec: SEAL-MEM-024
-// spec: SEAL-MEM-026
+// spec: SEAL-MEM-008
 #[test]
-fn recovery_propose_confirm() {
+fn recovery_key_change_by_a_device() {
     let mut b = Board::new(3);
-    let nk = new_recovery();
-    let np = nk.public();
-    // Confirm and cancel without a proposal.
-    let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Confirm, Some(np))]);
-    expect(&try_ctl(&mut b, Who::D(1), items), "Refuse", Some("seal/ctl_no_pending"));
-    expect(&try_ctl(&mut b, Who::D(1), vec![rkc(RecoveryKeyMode::Cancel, None)]), "Refuse", Some("seal/ctl_no_pending"));
-    // Propose by the recovery identity, with recorded keys.
-    expect(&try_ctl(&mut b, Who::R, vec![rkc(RecoveryKeyMode::Propose, Some(np))]), "Refuse", Some("seal/ctl_author"));
-    let dup = RecoveryPublic { sign_pk: b.dev_pub(2).sign_pk, hpke_pk: np.hpke_pk };
-    expect(&try_ctl(&mut b, Who::D(0), vec![rkc(RecoveryKeyMode::Propose, Some(dup))]), "Refuse", Some("seal/ctl_duplicate_key"));
-    // A clock ahead of the proposer's at_ms: start_ms is the clock.
-    let f = b.cmd(Who::D(2), &Spec { at_ms: Some(T0 + 5_000_000), ..Spec::default() });
-    b.accept(f);
-    let s = b.seq() + 1;
-    let f = b.ctl(Who::D(0), vec![rkc(RecoveryKeyMode::Propose, Some(np))], &Spec { at_ms: Some(T0), ..Spec::default() });
-    let r = b.accept(f);
-    let p = r.membership.pending_recovery().unwrap();
-    assert_eq!((p.proposer, p.sign_pk, p.hpke_pk, p.seq, p.start_ms), (b.dev(Who::D(0)), np.sign_pk, np.hpke_pk, s, T0 + 5_000_000));
-    let start = T0 + 5_000_000;
-    // A second proposal.
-    let other = new_recovery().public();
-    expect(&try_ctl(&mut b, Who::D(1), vec![rkc(RecoveryKeyMode::Propose, Some(other))]), "Refuse", Some("seal/ctl_pending"));
-    let at = |t| Spec { at_ms: Some(t), ..Spec::default() };
-    let confirm = |b: &mut Board, who, k, t| {
-        let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Confirm, Some(k))]);
-        let f = b.ctl(who, items, &at(t));
-        b.classify(&f)
-    };
-    let open = start + 259_200_000;
-    expect(&confirm(&mut b, Who::D(0), np, open), "Refuse", Some("seal/ctl_author"));
-    expect(&confirm(&mut b, Who::R, np, open), "Refuse", Some("seal/ctl_author"));
-    expect(&confirm(&mut b, Who::D(1), other, open), "Refuse", Some("seal/ctl_target"));
-    expect(&confirm(&mut b, Who::D(1), np, open - 1), "Refuse", Some("seal/ctl_window"));
-    let s = b.seq() + 1;
-    let r = confirm(&mut b, Who::D(1), np, open);
-    expect(&r, "Accept", None);
-    assert!(r.membership.pending_recovery().is_none());
-    let cur = r.membership.current_recovery();
-    assert_eq!((cur.sign_pk, cur.since_seq, cur.last_ctr), (np.sign_pk, s, 0));
-    assert_eq!(r.membership.recovery[0].until_seq, s);
+    let np = new_recovery().public();
+    for who in [Who::D(0), Who::D(1), Who::D(2)] {
+        let items = b.rotate_items(vec![rkc(np)]);
+        let r = try_ctl(&mut b, who, items);
+        expect(&r, "Refuse", Some("seal/ctl_author"));
+        only_counter(&b.m, &r, &b.dev(who), b.next_ctr(who));
+        assert_eq!(r.membership.recovery.len(), 1);
+        assert_eq!(r.membership.current_recovery().sign_pk, b.rec[0].public().sign_pk);
+    }
+    let items = b.rotate_items(vec![rkc(np)]);
+    expect(&try_ctl(&mut b, Who::R, items), "Accept", None);
 }
 
-// `cancel` by a device or by the recovery identity clears the proposal.
-// spec: SEAL-MEM-011
+// A `RecoveryKeyChange` not followed by its rotation forms no shape (§12.1
+// shape K): alone, after the rotation, followed by another item, twice
+// before one rotation, after a revocation, or with a second rotation. Each
+// is `seal/ctl_shape` by the recovery identity and by a device, and
+// `ctl_payload` refuses to build it.
+// spec: SEAL-CTL-001
 #[test]
-fn recovery_cancel() {
-    for by in [Who::D(1), Who::R, Who::D(0)] {
-        let mut b = Board::new(2);
-        let np = new_recovery().public();
-        let f = b.ctl(Who::D(0), vec![rkc(RecoveryKeyMode::Propose, Some(np))], &Spec::default());
-        b.accept(f);
-        let r = try_ctl(&mut b, by, vec![rkc(RecoveryKeyMode::Cancel, None)]);
-        expect(&r, "Accept", None);
-        assert!(r.membership.pending_recovery().is_none());
+fn recovery_key_change_needs_its_rotation() {
+    let mut b = Board::new(2);
+    let np = new_recovery().public();
+    let other = new_recovery().public();
+    let rc = b.recipients_after(&[rkc(np)]);
+    let rot = CtlItem::EpochRotated(b.rotation_to(2, &rc, None));
+    let bad = vec![
+        vec![rkc(np)],
+        vec![rot.clone(), rkc(np)],
+        vec![rkc(np), fence(2)],
+        vec![rkc(np), rkc(other), rot.clone()],
+        vec![rkc(np), rot.clone(), rot.clone()],
+        vec![CtlItem::DeviceRevoked(b.dev(Who::D(1))), rkc(np), rot.clone()],
+    ];
+    for who in [Who::R, Who::D(0)] {
+        for items in &bad {
+            let e = ctl_payload(items, &b.signer(who), &b.board, 9, &EntryId([1; 16]), T0);
+            assert_eq!(e.err(), Some(SealError::CtlShape), "{items:?}");
+            let f = b.ctl_raw(who, who, items.clone(), &Spec::default());
+            let r = b.classify(&f);
+            expect(&r, "Refuse", Some("seal/ctl_shape"));
+            only_counter(&b.m, &r, &b.dev(who), b.next_ctr(who));
+        }
     }
+    let r = try_ctl(&mut b, Who::R, vec![rkc(np), rot]);
+    expect(&r, "Accept", None);
+}
+
+// A `RecoveryKeyChange` that carries `mode` (the field of the removed
+// propose path, here with the value `direct` it had for this same change)
+// is a field its table does not list: the entry is `seal/bad_payload`,
+// although its inner signature is valid. Without the field it is accepted.
+// spec: SEAL-CTL-003
+// spec: SEAL-ENC-004
+#[test]
+fn recovery_key_change_with_a_mode_is_bad_payload() {
+    let mut b = Board::new(2);
+    let np = new_recovery().public();
+    let items = b.rotate_items(vec![rkc(np)]);
+    let (value, _) = crate::payloads::items_bytes(&items).unwrap();
+    for mode in ["direct", "confirm", "propose"] {
+        let mut v = value.clone();
+        v[0].as_object_mut().unwrap().insert("mode".into(), serde_json::json!(mode));
+        let f = b.ctl_json(Who::R, v, &Spec::default());
+        let r = b.classify(&f);
+        expect(&r, "Refuse", Some("seal/bad_payload"));
+        only_counter(&b.m, &r, &b.dev(Who::R), b.next_ctr(Who::R));
+    }
+    let f = b.ctl_json(Who::R, value, &Spec::default());
+    expect(&b.classify(&f), "Accept", None);
 }
 
 // ---------------------------------------------------------------- Fence
@@ -855,11 +864,12 @@ fn all_or_nothing() {
     expect(&try_ctl(&mut b, Who::D(0), items), "Refuse", Some("seal/ctl_author"));
     let items = b.rotate_items(vec![CtlItem::DeviceRevoked(DevId([7; 16])), CtlItem::DeviceRevoked(me)]);
     expect(&try_ctl(&mut b, Who::D(0), items), "Refuse", Some("seal/ctl_target"));
-    // A K-shape whose rotation fails after a good confirm: nothing applies.
+    // A K-shape whose rotation fails after a good RecoveryKeyChange: nothing
+    // applies.
     let np = new_recovery().public();
     let rc = b.recipients_after(&[]);
     let r = b.rotation_to(2, &rc, None);
-    let r = try_ctl(&mut b, Who::R, vec![rkc(RecoveryKeyMode::Direct, Some(np)), CtlItem::EpochRotated(r)]);
+    let r = try_ctl(&mut b, Who::R, vec![rkc(np), CtlItem::EpochRotated(r)]);
     expect(&r, "Refuse", Some("seal/ctl_wraps"));
     assert_eq!(r.membership.recovery.len(), 1);
 }
@@ -876,9 +886,9 @@ fn ctl_seqs_cap() {
 }
 
 // The recovery identity's powers (§13.12): allowed `DeviceRevoked`,
-// `DeviceReinstated`, `EpochRotated`, `RecoveryKeyChange` `direct` and
-// `cancel`, `Fence`, `Skip`; refused with `seal/ctl_author`: `DeviceAdded`,
-// `propose`, `confirm`, `ResetTo`, `RulesUpgrade`, `purge_before`.
+// `EpochRotated`, `RecoveryKeyChange`, `Fence`, `Skip` (`DeviceReinstated`
+// in its own row's tests); refused with `seal/ctl_author`: `DeviceAdded`,
+// `ResetTo`, `RulesUpgrade` (`purge_before` in the rotation's tests).
 // spec: SEAL-MEM-026
 #[test]
 fn recovery_powers() {
@@ -886,11 +896,9 @@ fn recovery_powers() {
     let f = b.cmd(Who::D(0), &Spec::default());
     b.accept(f);
     let k = DeviceKeys::generate(&mut OsEntropy).unwrap();
-    let np = new_recovery().public();
     let added = b.added_item(&k);
     let refused = vec![
         vec![added],
-        vec![rkc(RecoveryKeyMode::Propose, Some(np))],
         vec![CtlItem::ResetTo(ResetTo { seq: 2, state_hash: [0; 32], hash_version: 1 })],
         vec![CtlItem::RulesUpgrade(RulesUpgrade { rules: 2, mode: RulesUpgradeMode::Normal })],
         vec![CtlItem::RulesUpgrade(RulesUpgrade { rules: 2, mode: RulesUpgradeMode::Override })],
@@ -898,12 +906,7 @@ fn recovery_powers() {
     for items in refused {
         expect(&try_ctl(&mut b, Who::R, items), "Refuse", Some("seal/ctl_author"));
     }
-    let f = b.ctl(Who::D(0), vec![rkc(RecoveryKeyMode::Propose, Some(np))], &Spec::default());
-    b.accept(f);
-    let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Confirm, Some(np))]);
-    expect(&try_ctl(&mut b, Who::R, items), "Refuse", Some("seal/ctl_author"));
     // Allowed.
-    expect(&try_ctl(&mut b, Who::R, vec![rkc(RecoveryKeyMode::Cancel, None)]), "Accept", None);
     expect(&try_ctl(&mut b, Who::R, vec![fence(2)]), "Accept", None);
     let items = vec![skip(&b, 4)];
     expect(&try_ctl(&mut b, Who::R, items), "Accept", None);
@@ -911,31 +914,8 @@ fn recovery_powers() {
     expect(&try_ctl(&mut b, Who::R, items), "Accept", None);
     let items = b.rotate_items(vec![CtlItem::DeviceRevoked(b.dev(Who::D(2)))]);
     expect(&try_ctl(&mut b, Who::R, items), "Accept", None);
-    let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(new_recovery().public()))]);
+    let items = b.rotate_items(vec![rkc(new_recovery().public())]);
     expect(&try_ctl(&mut b, Who::R, items), "Accept", None);
-}
-
-// `confirm` checks again that the proposal's keys are fresh: a device
-// whose `sign_pk` is the proposed one was added meanwhile (accepted, since
-// a pending proposal is not a record); 72 hours later the confirm is
-// `seal/ctl_duplicate_key`.
-// spec: SEAL-MEM-011
-#[test]
-fn recovery_confirm_keys_no_longer_fresh() {
-    let mut b = Board::new(3);
-    let np = new_recovery().public();
-    let f = b.ctl(Who::D(0), vec![rkc(RecoveryKeyMode::Propose, Some(np))], &Spec::default());
-    let r = b.accept(f);
-    let start = r.membership.pending_recovery().unwrap().start_ms;
-    let fresh = DeviceKeys::generate(&mut OsEntropy).unwrap().public();
-    let clash = DeviceAdded { dev: fresh.dev, sign_pk: np.sign_pk, hpke_pk: fresh.hpke_pk, name: "N".into(), transcript: [1; 32], bootstrap_seq: 1 };
-    let f = b.ctl(Who::D(1), vec![CtlItem::DeviceAdded(clash)], &Spec::default());
-    b.accept(f);
-    let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Confirm, Some(np))]);
-    let f = b.ctl(Who::D(1), items, &Spec { at_ms: Some(start + 259_200_000), ..Spec::default() });
-    let r = b.classify(&f);
-    expect(&r, "Refuse", Some("seal/ctl_duplicate_key"));
-    only_counter(&b.m, &r, &b.dev(Who::D(1)), b.next_ctr(Who::D(1)));
 }
 
 // The second pass of §14.6 runs in item order: a supplied frame with a

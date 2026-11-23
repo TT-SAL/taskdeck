@@ -10,19 +10,16 @@
 use subtle::ConstantTimeEq;
 
 use super::{
-    COMMIT_MAX, CURRENT_MAX, DEVICE_NO_MAX, DEVICES_MAX, DeviceRecord, DeviceStatus, Membership, PendingRecovery,
-    RECOVERY_MAX, RecoveryRecord, SKIPS_MAX,
+    COMMIT_MAX, CURRENT_MAX, DEVICE_NO_MAX, DEVICES_MAX, DeviceRecord, DeviceStatus, Membership, RECOVERY_MAX,
+    RecoveryRecord, SKIPS_MAX,
 };
 use crate::entries::{
-    CtlItem, DeviceAdded, EpochRotated, RecoveryKeyChange, RecoveryKeyMode, ResetTo, RulesUpgrade, RulesUpgradeMode,
-    SkipItem,
+    CtlItem, DeviceAdded, EpochRotated, RecoveryKeyChange, ResetTo, RulesUpgrade, RulesUpgradeMode, SkipItem,
 };
 use crate::payloads::{Shape, wrap_recipient};
 use crate::prim::take;
 use crate::{BoardId, DevId, FrameHash, RecoveryPublic, SealError, frame_hash, frame_header};
 
-/// The 72 hours of a recovery-key change (seal.md §13.11, §23).
-pub(crate) const RECOVERY_DELAY_MS: i64 = 259_200_000;
 /// The active-member window (seal.md §13.10, §23).
 pub(crate) const ACTIVE_WINDOW_MS: i64 = 2_592_000_000;
 /// The Skip window (seal.md §13.6, §23, ruling S15).
@@ -105,7 +102,7 @@ pub(crate) fn apply(w: &mut Membership, shape: Shape, items: &[CtlItem], cx: &En
             CtlItem::DeviceRevoked(t) => revoke(w, t, rest, cx),
             CtlItem::DeviceReinstated(t) => reinstate(w, t, cx),
             CtlItem::EpochRotated(r) => rotate(w, r, cx),
-            CtlItem::RecoveryKeyChange(k) => recovery_key_change(w, k, cx, true),
+            CtlItem::RecoveryKeyChange(k) => recovery_key_change(w, k, cx),
             CtlItem::Fence(f) => {
                 if Some(f.home_gen) != w.home_gen.checked_add(1) {
                     Err(SealError::CtlHomeGen)
@@ -145,10 +142,8 @@ fn recorded_hpke_pk(w: &Membership, pk: &[u8; 32]) -> bool {
     w.devices.iter().any(|d| d.hpke_pk == *pk) || w.recovery.iter().any(|r| r.hpke_pk == *pk)
 }
 
-// SPEC-QUESTION: §13.6 says "differs from every recorded sign_pk" without
-// listing the records; this takes every device record and every recovery
-// record (current or retired), not the pending proposal (whose keys a
-// `confirm` must repeat, so they cannot count as recorded).
+// "Every recorded" key or id is every device record and every recovery
+// record, current or retired (§13.6, below the table).
 
 /// `DeviceAdded` (§13.6, §13.7; SEAL-MEM-013, SEAL-MEM-014).
 pub(crate) fn device_added(w: &mut Membership, a: &DeviceAdded, cx: &EntryCx<'_>) -> Result<(), SealError> {
@@ -186,7 +181,7 @@ pub(crate) fn device_added(w: &mut Membership, a: &DeviceAdded, cx: &EntryCx<'_>
     Ok(())
 }
 
-/// `DeviceRevoked` (§13.6; SEAL-MEM-025).
+/// `DeviceRevoked` (§13.6).
 // SPEC-QUESTION: "after the whole entry at least one current device
 // remains" is evaluated when the revocation is reached, from `W` and the
 // remaining revocations and reinstatements of the entry, each counted with
@@ -217,9 +212,6 @@ pub(crate) fn revoke(w: &mut Membership, target: &DevId, rest: &[CtlItem], cx: &
         d.status = DeviceStatus::Revoked;
         d.status_seq = cx.s;
         d.status_by = by;
-    }
-    if w.pending_recovery.as_ref().is_some_and(|p| p.proposer == *target) {
-        w.pending_recovery = None;
     }
     if w.pending_override.is_some_and(|(_, voter, _)| voter == *target) {
         w.pending_override = None;
@@ -297,7 +289,7 @@ fn fresh_recovery(w: &Membership, sign_pk: &[u8; 32], hpke_pk: &[u8; 32], board:
     !(recorded_sign_pk(w, sign_pk) || recorded_hpke_pk(w, hpke_pk) || recorded_dev(w, &dev_r))
 }
 
-/// Installs a new recovery key at seq `s` (§13.6 `direct`): the current
+/// Installs a new recovery key at seq `s` (§13.6 `RecoveryKeyChange`): the current
 /// record retires, the new one starts with counter 0 (SEAL-KEY-007).
 fn install_recovery(w: &mut Membership, sign_pk: &[u8; 32], hpke_pk: &[u8; 32], cx: &EntryCx<'_>) -> Result<(), SealError> {
     if w.recovery.len() >= RECOVERY_MAX {
@@ -310,80 +302,20 @@ fn install_recovery(w: &mut Membership, sign_pk: &[u8; 32], hpke_pk: &[u8; 32], 
     let rec = RecoveryRecord { dev, sign_pk: *sign_pk, hpke_pk: *hpke_pk, since_seq: cx.s, until_seq: 0, last_ctr: 0 };
     let at = w.recovery.partition_point(|r| r.since_seq <= cx.s);
     w.recovery.insert(at, rec);
-    w.pending_recovery = None;
     Ok(())
 }
 
-/// `RecoveryKeyChange` in its four modes (§13.6, §13.11; SEAL-MEM-023 to
-/// SEAL-MEM-025).
-///
-/// `window` is false only for the backup reader's projection (§21.6 step 6:
-/// "without the time check"), which cannot repeat the 72-hour window.
-pub(crate) fn recovery_key_change(
-    w: &mut Membership,
-    k: &RecoveryKeyChange,
-    cx: &EntryCx<'_>,
-    window: bool,
-) -> Result<(), SealError> {
-    // The parser of §12.6 makes both keys present for every mode but
-    // `cancel`; a missing one here is refused as a wrong target.
-    let keys = || match (k.sign_pk, k.hpke_pk) {
-        (Some(s), Some(h)) => Ok((s, h)),
-        _ => Err(SealError::CtlTarget),
-    };
-    match k.mode {
-        RecoveryKeyMode::Direct => {
-            if !matches!(cx.author, Auth::Recovery(_)) {
-                return Err(SealError::CtlAuthor);
-            }
-            let (s, h) = keys()?;
-            if !fresh_recovery(w, &s, &h, &cx.board) {
-                return Err(SealError::CtlDuplicateKey);
-            }
-            install_recovery(w, &s, &h, cx)
-        }
-        RecoveryKeyMode::Propose => {
-            let Auth::Device(a) = cx.author else { return Err(SealError::CtlAuthor) };
-            if w.pending_recovery.is_some() {
-                return Err(SealError::CtlPending);
-            }
-            let (s, h) = keys()?;
-            if !fresh_recovery(w, &s, &h, &cx.board) {
-                return Err(SealError::CtlDuplicateKey);
-            }
-            w.pending_recovery = Some(PendingRecovery { proposer: a, sign_pk: s, hpke_pk: h, seq: cx.s, start_ms: cx.tau });
-            Ok(())
-        }
-        RecoveryKeyMode::Confirm => {
-            let Auth::Device(a) = cx.author else { return Err(SealError::CtlAuthor) };
-            if w.pending_recovery.as_ref().is_some_and(|p| p.proposer == a) {
-                return Err(SealError::CtlAuthor);
-            }
-            let (s, h) = keys()?;
-            let Some(p) = w.pending_recovery.as_ref() else { return Err(SealError::CtlNoPending) };
-            if p.sign_pk != s || p.hpke_pk != h {
-                return Err(SealError::CtlTarget);
-            }
-            // `start_ms + 72 h` in i64; a sum past i64 (not reachable: both
-            // are below 2^53 in a valid log) can never be reached by at_ms.
-            match p.start_ms.checked_add(RECOVERY_DELAY_MS) {
-                Some(open) if cx.at_ms >= open => {}
-                _ if !window => {}
-                _ => return Err(SealError::CtlWindow),
-            }
-            if !fresh_recovery(w, &s, &h, &cx.board) {
-                return Err(SealError::CtlDuplicateKey);
-            }
-            install_recovery(w, &s, &h, cx)
-        }
-        RecoveryKeyMode::Cancel => {
-            if w.pending_recovery.is_none() {
-                return Err(SealError::CtlNoPending);
-            }
-            w.pending_recovery = None;
-            Ok(())
-        }
+/// `RecoveryKeyChange` (§13.6, §13.11): author R, fresh keys, then the new
+/// key is installed. The backup reader's projection (§21.6 step 6) runs this
+/// same row.
+pub(crate) fn recovery_key_change(w: &mut Membership, k: &RecoveryKeyChange, cx: &EntryCx<'_>) -> Result<(), SealError> {
+    if !matches!(cx.author, Auth::Recovery(_)) {
+        return Err(SealError::CtlAuthor);
     }
+    if !fresh_recovery(w, &k.sign_pk, &k.hpke_pk, &cx.board) {
+        return Err(SealError::CtlDuplicateKey);
+    }
+    install_recovery(w, &k.sign_pk, &k.hpke_pk, cx)
 }
 
 /// `ResetTo` (§13.6, §13.13; SEAL-MEM-027): only `last_reset` changes.

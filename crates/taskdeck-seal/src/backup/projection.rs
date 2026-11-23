@@ -54,15 +54,14 @@ use crate::{BoardId, CtlItem, DevId, SealError, board_id};
 /// `purge_seq` and the record's seq, the authors, the targets' statuses, the
 /// last current device, the next epoch number, the wraps against the
 /// current devices and recovery identity, `purge_before`) is decided by
-/// control entries alone. `RecoveryKeyChange` runs its row without the
-/// 72-hour check. `Fence` and `Skip` (author D or R: every authority) and
+/// control entries alone. `RecoveryKeyChange` runs its row whole too (author
+/// R, fresh keys). `Fence` and `Skip` (author D or R: every authority) and
 /// `ResetTo` and `RulesUpgrade` (author D) check only their Author column
 /// and change nothing.
 ///
 /// **What the returned `Membership` holds.** Exactly as the log would: the
 /// board id and salt, the devices with their keys, numbers, statuses and
-/// `added`/`status` fields, `next_device_no`, the recovery records, the
-/// pending recovery-key proposal, the epochs and commitments, `purge_seq`,
+/// `added`/`status` fields, `next_device_no`, the recovery records, the epochs and commitments, `purge_seq`,
 /// and `ctl_seqs` (the records' seqs). What a history cannot give is filled
 /// from it alone: each author's `last_ctr` is the `ctr` of its last record
 /// (0 for an author with none), the log clock `clock_ms` is the largest
@@ -191,7 +190,7 @@ fn reduced(w: &mut Membership, item: &CtlItem, later: &[CtlItem], cx: &EntryCx<'
         CtlItem::DeviceRevoked(t) => transitions::revoke(w, t, later, cx),
         CtlItem::DeviceReinstated(t) => transitions::reinstate(w, t, cx),
         CtlItem::EpochRotated(r) => transitions::rotate(w, r, cx),
-        CtlItem::RecoveryKeyChange(k) => transitions::recovery_key_change(w, k, cx, false),
+        CtlItem::RecoveryKeyChange(k) => transitions::recovery_key_change(w, k, cx),
         // Author D or R: every authority of step 2.
         CtlItem::Fence(_) | CtlItem::Skip(_) => Ok(()),
         // Author D.

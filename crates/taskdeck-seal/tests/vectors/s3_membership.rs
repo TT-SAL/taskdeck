@@ -13,8 +13,8 @@ fn fence(g: u32) -> CtlItem {
     CtlItem::Fence(Fence { host: "relay.example".into(), door: [1, 2, 3, 4, 5], home_gen: g })
 }
 
-fn rkc(mode: RecoveryKeyMode, k: Option<RecoveryPublic>) -> CtlItem {
-    CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode, sign_pk: k.map(|k| k.sign_pk), hpke_pk: k.map(|k| k.hpke_pk) })
+fn rkc(k: RecoveryPublic) -> CtlItem {
+    CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: k.sign_pk, hpke_pk: k.hpke_pk })
 }
 
 fn rules(v: u32, mode: RulesUpgradeMode) -> CtlItem {
@@ -75,21 +75,9 @@ fn seal_membership_vectors() {
 
     let nk = s.new_recovery();
     let np = nk.public();
-    ctl(&mut s, &mut cases, "RecoveryKeyChange cancel without a proposal", Who::D(2), vec![rkc(RecoveryKeyMode::Cancel, None)], &d(), rf, Some("seal/ctl_no_pending"), false);
-    ctl(&mut s, &mut cases, "RecoveryKeyChange propose accepted", Who::D(0), vec![rkc(RecoveryKeyMode::Propose, Some(np))], &d(), acc, None, true);
-    let start = s.now - 1000;
-    let other = s.new_recovery().public();
-    ctl(&mut s, &mut cases, "RecoveryKeyChange propose with one pending", Who::D(1), vec![rkc(RecoveryKeyMode::Propose, Some(other))], &d(), rf, Some("seal/ctl_pending"), false);
-    let open = start + 259_200_000;
-    let at = |t| Spec { at_ms: Some(t), ..Spec::default() };
-    let items = s.rotate_items(vec![rkc(RecoveryKeyMode::Confirm, Some(np))]);
-    ctl(&mut s, &mut cases, "RecoveryKeyChange confirm by the proposer", Who::D(0), items.clone(), &at(open), rf, Some("seal/ctl_author"), false);
-    ctl(&mut s, &mut cases, "RecoveryKeyChange confirm 1 ms before 72 hours", Who::D(1), items.clone(), &at(open - 1), rf, Some("seal/ctl_window"), false);
-    let wrong = s.rotate_items(vec![rkc(RecoveryKeyMode::Confirm, Some(other))]);
-    ctl(&mut s, &mut cases, "RecoveryKeyChange confirm with other keys", Who::D(1), wrong, &at(open), rf, Some("seal/ctl_target"), false);
-    ctl(&mut s, &mut cases, "RecoveryKeyChange cancel accepted", Who::R, vec![rkc(RecoveryKeyMode::Cancel, None)], &d(), acc, None, false);
-    let items = s.rotate_items(vec![rkc(RecoveryKeyMode::Confirm, Some(np))]);
-    ctl(&mut s, &mut cases, "RecoveryKeyChange confirm at 72 hours, with the rotation to the new key", Who::D(1), items, &at(open), acc, None, true);
+    let items = s.rotate_items(vec![rkc(np)]);
+    ctl(&mut s, &mut cases, "RecoveryKeyChange by a device, with the rotation to the new key", Who::D(1), items.clone(), &d(), rf, Some("seal/ctl_author"), false);
+    ctl(&mut s, &mut cases, "RecoveryKeyChange accepted, with the rotation to the new key", Who::R, items, &d(), acc, None, true);
     s.rec.push(nk);
 
     let v2 = || rules(2, RulesUpgradeMode::Override);
@@ -147,11 +135,11 @@ fn seal_membership_vectors() {
     ctl(&mut s, &mut cases, "DeviceReinstated by a device", Who::D(0), items.clone(), &d(), rf, Some("seal/ctl_author"), false);
     ctl(&mut s, &mut cases, "DeviceReinstated by the recovery identity accepted", Who::R, items, &d(), acc, None, true);
     let rp = s.rec[0].public();
-    let items = s.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(rp))]);
-    ctl(&mut s, &mut cases, "RecoveryKeyChange direct with a recorded key", Who::R, items, &d(), rf, Some("seal/ctl_duplicate_key"), false);
+    let items = s.rotate_items(vec![rkc(rp)]);
+    ctl(&mut s, &mut cases, "RecoveryKeyChange with a recorded key", Who::R, items, &d(), rf, Some("seal/ctl_duplicate_key"), false);
     let nk = s.new_recovery();
-    let items = s.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(nk.public()))]);
-    ctl(&mut s, &mut cases, "RecoveryKeyChange direct accepted", Who::R, items, &d(), acc, None, false);
+    let items = s.rotate_items(vec![rkc(nk.public())]);
+    ctl(&mut s, &mut cases, "RecoveryKeyChange by the recovery identity the log installed, accepted", Who::R, items, &d(), acc, None, false);
 
     // The limits: 16 current devices; 64 recovery records (63 real
     // recovery-key changes, each by the identity before it); the last device.
@@ -162,14 +150,14 @@ fn seal_membership_vectors() {
     let mut s = Sim::new(67, 1);
     for _ in 0..63 {
         let nk = s.new_recovery();
-        let items = s.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(nk.public()))]);
+        let items = s.rotate_items(vec![rkc(nk.public())]);
         let f = s.ctl(Who::R, items, &d());
         s.accept(f);
         s.rec.push(nk);
     }
     let nk = s.new_recovery();
-    let items = s.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(nk.public()))]);
-    ctl(&mut s, &mut cases, "RecoveryKeyChange direct with 64 recovery records", Who::R, items, &d(), rf, Some("seal/ctl_cap"), false);
+    let items = s.rotate_items(vec![rkc(nk.public())]);
+    ctl(&mut s, &mut cases, "RecoveryKeyChange with 64 recovery records", Who::R, items, &d(), rf, Some("seal/ctl_cap"), false);
     let mut s = Sim::new(65, 1);
     let rc = s.recipients_after(&[]);
     let me = s.dev(Who::D(0));

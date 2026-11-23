@@ -32,9 +32,6 @@ const ALL: &[(SealError, &str)] = &[
     (SealError::CtlEpoch, "seal/ctl_epoch"),
     (SealError::CtlWraps, "seal/ctl_wraps"),
     (SealError::CtlLastDevice, "seal/ctl_last_device"),
-    (SealError::CtlPending, "seal/ctl_pending"),
-    (SealError::CtlNoPending, "seal/ctl_no_pending"),
-    (SealError::CtlWindow, "seal/ctl_window"),
     (SealError::CtlHomeGen, "seal/ctl_home_gen"),
     (SealError::CtlSupport, "seal/ctl_support"),
     (SealError::Commitment, "seal/commitment"),
@@ -92,7 +89,7 @@ const ALL: &[(SealError, &str)] = &[
 // spec: SEAL-GEN-004
 #[test]
 fn every_code_is_spelled_as_section_22_writes_it() {
-    assert_eq!(ALL.len(), 83);
+    assert_eq!(ALL.len(), 80);
     let mut seen = std::collections::HashSet::new();
     for (e, code) in ALL {
         assert_eq!(e.code(), *code);
