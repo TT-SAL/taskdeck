@@ -18,7 +18,9 @@ resumes from it alone.
 
 ## How this stage is run
 
-- One workflow per task, agents on `model: 'opus'` with effort `high`, set on every call. The task shape
+- One workflow per task, agents on `model: 'opus'` with effort `high`, set on every call. (When a
+  usage window has room for one more agent only, `until = "security-1"` runs the first security pass
+  alone; the later resume replays it from the cache.) The task shape
   is SYNC_PLAN.md §7's, adapted (decision L2): implement, verify once, fix once, then the two security
   passes side by side with different lenses, then one fix pass for what both found. A second verify
   pass runs only after a high finding. Nothing runs a third time.
@@ -58,7 +60,7 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **done**, merged (TT-SAL/taskdeck#10, with the spec change) |
 | S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done**, merged (TT-SAL/taskdeck#13, 2026-11-23 07:46 UTC; low findings only, four rulings carried into S5's brief) |
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **done** (TT-SAL/taskdeck#14; two high findings of its security passes fixed and checked by the lead) |
-| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **implemented**, gate green in the lead's run; S6b, then the verify and security passes (workflow run `wf_7055dfcc-29f`) |
+| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **implemented and verified** (no finding; CI green on three systems with S6b); the first security pass ran in the third window, the second and the fix pass follow in the fourth (workflow run `wf_7055dfcc-29f`, resumed with `until = "all"`) |
 | S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | **implemented**, gate green in the lead's run (workflow run `wf_eb8420c9-0ef`); reviewed by S6's passes |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written (to revise with what S5 and S6 leave) |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
@@ -377,6 +379,10 @@ to part 1 and part 2 fresh: one high, three medium and six low points, all appli
 Part 1 has now been checked twice and is closed. Part 2's corrections and the rulings of task S6
 (part 3) get one more check before the exit, by one agent.
 
+**Part 3 (task S6's rulings, Q60 to Q78), written on 2026-11-23 12:56 UTC**, in place: §17.2, §17.4,
+§17.6 to §17.11, six rows of §22, §25; SEAL-PAIR-010 gains `engine` as an owner (the engine seals the
+`DeviceAdded`). The row of `CHANGES.md` is extended.
+
 **E2, left open for `engine` and `device` (a row of `CHANGES.md`):** the check found the same kind of
 defect as E1 for an own `Fence`: the relay fences itself in the same transaction that appends the
 frame, so a `Fence` that loses a rotation race leaves the old relay fenced with no accepted `Fence`
@@ -525,7 +531,8 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | second check of the second spec change | 1 | 0.18 M | 0.22 M | 0.22 M |
 | | S6, the implementer | 1 | 0.47 M | 0.69 M | 0.69 M |
 | | S6b, the implementer | 1 | 0.23 M | 0.27 M | 0.27 M |
-| | **window so far** | | | | **2.61 M** |
+| | S6, the verifier (S6 and S6b) | 1 | 0.27 M | 0.31 M | 0.31 M |
+| | **window so far** (S6's first security pass is running alone: both passes and their fix would not fit) | | | | **2.92 M** |
 
 ## Low findings left as they are
 
