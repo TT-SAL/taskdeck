@@ -153,20 +153,24 @@ fn seal_membership_vectors() {
     let items = s.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(nk.public()))]);
     ctl(&mut s, &mut cases, "RecoveryKeyChange direct accepted", Who::R, items, &d(), acc, None, false);
 
-    // The limits: 16 current devices; 64 recovery records (a state whose
-    // recovery list was filled, given as its canonical bytes); the last device.
+    // The limits: 16 current devices; 64 recovery records (63 real
+    // recovery-key changes, each by the identity before it); the last device.
     let mut s = Sim::new(64, 16);
     let k = s.new_device();
     let item = s.added_item(&k);
     ctl(&mut s, &mut cases, "DeviceAdded with 16 current devices", Who::D(0), vec![item], &d(), rf, Some("seal/ctl_device_cap"), false);
-    let mut s = Sim::new(65, 1);
+    let mut s = Sim::new(67, 1);
+    for _ in 0..63 {
+        let nk = s.new_recovery();
+        let items = s.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(nk.public()))]);
+        let f = s.ctl(Who::R, items, &d());
+        s.accept(f);
+        s.rec.push(nk);
+    }
     let nk = s.new_recovery();
     let items = s.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(nk.public()))]);
-    let f = s.ctl(Who::R, items, &d());
-    let mut inputs = s.inputs("RecoveryKeyChange direct with 64 recovery records", &f, &Opts::default());
-    inputs["membership"] = json!(crate::common::hex(&with_recovery_records(&s.m, 63)));
-    let r = replay(&inputs).unwrap();
-    cases.push(case(inputs, &r, rf, Some("seal/ctl_cap")));
+    ctl(&mut s, &mut cases, "RecoveryKeyChange direct with 64 recovery records", Who::R, items, &d(), rf, Some("seal/ctl_cap"), false);
+    let mut s = Sim::new(65, 1);
     let rc = s.recipients_after(&[]);
     let me = s.dev(Who::D(0));
     let r = s.rotation_to(2, &rc, None);
@@ -198,40 +202,12 @@ fn seal_membership_vectors() {
     let f = s.cmd(Who::D(0), &Spec { at_ms: Some(clock + 2_592_000_001), ..d() });
     s.push(f);
     run(&s, &mut cases, "race: the same cmd after 30 days of log clock", &stale_cmd, &Opts::default(), rf, Some("seal/stale_epoch"));
+    let gone = Opts { hide_roots: vec![1], ..Opts::default() };
+    run(&s, &mut cases, "race: the same cmd after 30 days, the root of E − 1 deleted", &stale_cmd, &gone, rf, Some("seal/stale_epoch"));
 
     let doc = json!({ "spec": "seal.md §13", "cases": cases });
     for c in doc["cases"].as_array().unwrap() {
         check_case(c);
     }
     check_or_write("seal-membership.json", doc);
-}
-
-/// `m`'s canonical bytes with `n` retired recovery records after the
-/// genesis record (`since_seq` 2 to `n + 1`, each retired at once).
-fn with_recovery_records(m: &Membership, n: u16) -> Vec<u8> {
-    let b = m.to_canonical_bytes();
-    let host = b[84] as usize;
-    let n_commit = 84 + 1 + host + 15;
-    let commits = u32::from_be_bytes(b[n_commit..n_commit + 4].try_into().unwrap()) as usize;
-    let n_rec = n_commit + 4 + 44 * commits;
-    let count = u16::from_be_bytes([b[n_rec], b[n_rec + 1]]);
-    let after_first = n_rec + 2 + 104;
-    let mut out = b[..n_rec].to_vec();
-    out.extend((count + n).to_be_bytes());
-    out.extend(&b[n_rec + 2..after_first]);
-    for i in 0..n {
-        let mut rec = vec![0xC0; 16];
-        rec[15] = i as u8;
-        rec.extend([0xC1; 32]);
-        rec[47] = i as u8;
-        rec.extend([0xC2; 32]);
-        rec[79] = i as u8;
-        rec.extend((u64::from(i) + 2).to_be_bytes());
-        rec.extend((u64::from(i) + 3).to_be_bytes());
-        rec.extend(0u64.to_be_bytes());
-        out.extend(rec);
-    }
-    out.extend(&b[after_first..]);
-    assert!(Membership::from_canonical_bytes(&out).is_ok());
-    out
 }

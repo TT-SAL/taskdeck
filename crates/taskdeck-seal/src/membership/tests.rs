@@ -342,3 +342,41 @@ fn no_secrets() {
     let sk = b.rec[0].signing_key().to_bytes();
     assert!(!contains(&sk));
 }
+
+// A recovery record whose `dev` is not the `dev_R` of its `sign_pk` (§6.3),
+// or whose `until_seq` is not the `since_seq` of the record after it (a gap
+// or an overlap), or a last record that is retired: no log produces it, and
+// the parser rejects it. Records that chain, from real recovery-key changes,
+// pass.
+// spec: SEAL-MEM-002
+// spec: SEAL-KEY-006
+#[test]
+fn rejects_recovery_records() {
+    let mut b = Board::new(2);
+    for _ in 0..2 {
+        let k = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
+        let p = k.public();
+        let items = b.rotate_items(vec![CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode: RecoveryKeyMode::Direct, sign_pk: Some(p.sign_pk), hpke_pk: Some(p.hpke_pk) })]);
+        let f = b.ctl(Who::R, items, &Spec::default());
+        b.accept(f);
+        b.rec.push(k);
+    }
+    let m = &b.m;
+    assert_eq!(m.recovery.len(), 3);
+    assert!(Membership::from_canonical_bytes(&m.to_canonical_bytes()).is_ok());
+    // A foreign dev: on a retired record, on the current one.
+    rejects(&reencoded(m, |x| x.recovery[1].dev = DevId([0x66; 16])));
+    rejects(&reencoded(m, |x| x.recovery[2].dev = DevId([0x66; 16])));
+    // Another board's dev_R for the same key.
+    rejects(&reencoded(m, |x| x.recovery[1].dev = crate::RecoveryPublic { sign_pk: x.recovery[1].sign_pk, hpke_pk: [0; 32] }.dev(&crate::BoardId([1; 16]))));
+    // A gap and an overlap between records 0 and 1.
+    let since1 = m.recovery[1].since_seq;
+    rejects(&reencoded(m, |x| x.recovery[0].until_seq = since1 - 1));
+    rejects(&reencoded(m, |x| x.recovery[0].until_seq = since1 + 1));
+    rejects(&reencoded(m, |x| x.recovery[1].since_seq += 1));
+    // The last record retired and an earlier one current.
+    rejects(&reencoded(m, |x| {
+        x.recovery[1].until_seq = 0;
+        x.recovery[2].until_seq = 99;
+    }));
+}

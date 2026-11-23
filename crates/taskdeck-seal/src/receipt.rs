@@ -288,6 +288,14 @@ fn steps(
         if env.epoch == e {
             false
         } else if e >= 2 && Some(env.epoch) == e.checked_sub(1) {
+            // Condition 4 of §13.9 (30 days of log clock since the rotation)
+            // is checked here, before the root of `E − 1` is asked for and
+            // before decryption (spec change E3); conditions 1 to 3 follow
+            // at steps 13 and 14.
+            let window = prev.clock_ms.checked_sub(prev.epoch_clock_ms).is_some_and(|d| d <= STALE_WINDOW_MS);
+            if !window {
+                return Ok(Verdict::Refuse(SealError::StaleEpoch));
+            }
             true
         } else if env.epoch > e {
             return Ok(Verdict::Refuse(SealError::BadEpoch));
@@ -379,13 +387,11 @@ fn steps(
             }
         }
     }
-    // 14. The stale-epoch rule (§13.9, SEAL-MEM-018); the author is a current
-    // device here (step 13 refused the recovery identity's cmd and beat).
-    if stale {
-        let window = prev.clock_ms.checked_sub(prev.epoch_clock_ms).is_some_and(|d| d <= STALE_WINDOW_MS);
-        if author.class != AuthorClass::CurrentDevice || b >= prev.epoch_seq || !window {
-            return Ok(Verdict::Refuse(SealError::StaleEpoch));
-        }
+    // 14. Conditions 1 to 3 of the stale-epoch rule (§13.9, SEAL-MEM-018;
+    // condition 4 was step 9's); the author is a current device here (step
+    // 13 refused the recovery identity's cmd and beat).
+    if stale && (author.class != AuthorClass::CurrentDevice || b >= prev.epoch_seq) {
+        return Ok(Verdict::Refuse(SealError::StaleEpoch));
     }
     let tau = prev.clock_ms.max(at_ms);
     let payload: &[u8] = p.opened.as_ref().map(|o| o.payload.as_slice()).unwrap_or(&[]);

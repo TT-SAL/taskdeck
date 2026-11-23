@@ -566,6 +566,52 @@ fn step14_stale_epoch() {
     only_counter(&b.m, &r, &b.dev(Who::D(1)), b.next_ctr(Who::D(1)));
 }
 
+// Step 9 with condition 4 of §13.9 (spec change E3): a frame under E − 1
+// more than 30 days of log clock after the rotation is `Refuse` with
+// `seal/stale_epoch` before the root of E − 1 is asked for and before
+// decryption: a receiver that has deleted that root gives the same class,
+// code, flags and state as one that holds it, and a ciphertext no key opens
+// gets `seal/stale_epoch`, not `seal/aead`. At exactly 30 days the root is
+// still needed, and a cmd that meets conditions 1 to 3 is accepted.
+// spec: SEAL-RCPT-001
+// spec: SEAL-MEM-018
+// spec: SEAL-ENV-005
+#[test]
+fn step9_stale_window() {
+    let mut b = Board::new(3);
+    let before = b.head();
+    b.rotate(Who::D(0));
+    let rot_clock = b.m.epoch_clock_ms;
+    let window = 2_592_000_000;
+    let stale = |b: &mut Board, root: Option<[u8; 32]>| {
+        b.cmd(Who::D(1), &Spec { epoch: Some(1), based_on: Some(before), root, ..Spec::default() })
+    };
+    let hide = Opts { hide_roots: vec![1], ..Opts::default() };
+    // Exactly 30 days: the root of E − 1 is needed, and the cmd accepted.
+    let f = b.cmd(Who::D(2), &Spec { at_ms: Some(rot_clock + window), ..Spec::default() });
+    b.accept(f);
+    let f = stale(&mut b, None);
+    assert_eq!(b.classify_with(&f, &hide).err(), Some(SealError::MissingRoot));
+    expect(&b.classify(&f), "Accept", None);
+    // One millisecond more: refused at step 9, with or without the root.
+    let f = b.cmd(Who::D(2), &Spec { at_ms: Some(rot_clock + window + 1), ..Spec::default() });
+    b.accept(f);
+    let f = stale(&mut b, None);
+    let held = b.classify(&f);
+    let gone = b.classify_with(&f, &hide).unwrap();
+    for r in [&held, &gone] {
+        expect(r, "Refuse", Some("seal/stale_epoch"));
+        assert!(r.opened.is_none());
+        only_counter(&b.m, r, &b.dev(Who::D(1)), b.next_ctr(Who::D(1)));
+    }
+    assert_eq!((held.own_dev_foreign, held.based_on_unchecked), (gone.own_dev_foreign, gone.based_on_unchecked));
+    assert_eq!(held.membership.to_canonical_bytes(), gone.membership.to_canonical_bytes());
+    // A ciphertext no key opens: still the epoch's code.
+    let junk = stale(&mut b, Some([0x5A; 32]));
+    expect(&b.classify(&junk), "Refuse", Some("seal/stale_epoch"));
+    expect(&b.classify_with(&junk, &hide).unwrap(), "Refuse", Some("seal/stale_epoch"));
+}
+
 // ---------------------------------------------------------------- step 15
 
 // Step 15: a beat whose payload violates §11.4 is `seal/bad_payload`; a
@@ -639,8 +685,6 @@ fn step17_accept_bookkeeping() {
 
 // Seq 1 with its anchor: accepted, and the state is exactly §13.3's list.
 // spec: SEAL-MEM-006
-// spec: SEAL-MEM-004
-// spec: SEAL-MEM-005
 #[test]
 fn genesis_state() {
     let b = Board::new(1);
@@ -866,7 +910,6 @@ fn rules_halt() {
 // V2-8 (a): two rotations for one epoch; the first in log order wins, the
 // second (sealed under the old epoch) is refused on every device, its author's
 // device included, which learns no root and keeps the epoch (§13.8).
-// spec: SEAL-MEM-015
 // spec: SEAL-MEM-016
 // spec: SEAL-RCPT-004
 #[test]
@@ -980,7 +1023,6 @@ fn determinism() {
 }
 
 // `classify` never changes its input state, whatever the class.
-// spec: SEAL-MEM-010
 #[test]
 fn input_untouched() {
     let mut b = Board::new(2);

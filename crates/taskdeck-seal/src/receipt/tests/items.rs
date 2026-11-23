@@ -5,7 +5,7 @@
 
 use super::board::*;
 use super::{only_counter, unchanged};
-use crate::membership::{DeviceRecord, DeviceStatus, RecoveryRecord};
+use crate::membership::{DeviceRecord, DeviceStatus};
 use crate::*;
 
 fn fence(g: u32) -> CtlItem {
@@ -465,16 +465,19 @@ fn recovery_direct_refusals() {
         let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(k))]);
         expect(&try_ctl(&mut b, Who::R, items), "Refuse", Some("seal/ctl_duplicate_key"));
     }
-    let cur = b.m.recovery.remove(0);
-    for i in 0..63u8 {
-        b.m.recovery.push(RecoveryRecord { dev: DevId([i; 16]), sign_pk: [i; 32], hpke_pk: [i; 32], since_seq: 0, until_seq: 1, last_ctr: 0 });
+    // 64 records from real changes, each by the identity before it (the
+    // last of them accepted with 63 recorded), each state one the parser
+    // takes; a 65th is `seal/ctl_cap`.
+    while b.m.recovery.len() < 64 {
+        let k = new_recovery();
+        let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(k.public()))]);
+        let f = b.ctl(Who::R, items, &Spec::default());
+        b.accept(f);
+        b.rec.push(k);
+        assert!(Membership::from_canonical_bytes(&b.m.to_canonical_bytes()).is_ok());
     }
-    b.m.recovery.push(cur);
     let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(np))]);
     expect(&try_ctl(&mut b, Who::R, items), "Refuse", Some("seal/ctl_cap"));
-    b.m.recovery.remove(0);
-    let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(np))]);
-    expect(&try_ctl(&mut b, Who::R, items), "Accept", None);
 }
 
 // `propose`, then `confirm` by another device 72 hours of `start_ms` later
@@ -910,4 +913,71 @@ fn recovery_powers() {
     expect(&try_ctl(&mut b, Who::R, items), "Accept", None);
     let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Direct, Some(new_recovery().public()))]);
     expect(&try_ctl(&mut b, Who::R, items), "Accept", None);
+}
+
+// `confirm` checks again that the proposal's keys are fresh: a device
+// whose `sign_pk` is the proposed one was added meanwhile (accepted, since
+// a pending proposal is not a record); 72 hours later the confirm is
+// `seal/ctl_duplicate_key`.
+// spec: SEAL-MEM-011
+#[test]
+fn recovery_confirm_keys_no_longer_fresh() {
+    let mut b = Board::new(3);
+    let np = new_recovery().public();
+    let f = b.ctl(Who::D(0), vec![rkc(RecoveryKeyMode::Propose, Some(np))], &Spec::default());
+    let r = b.accept(f);
+    let start = r.membership.pending_recovery().unwrap().start_ms;
+    let fresh = DeviceKeys::generate(&mut OsEntropy).unwrap().public();
+    let clash = DeviceAdded { dev: fresh.dev, sign_pk: np.sign_pk, hpke_pk: fresh.hpke_pk, name: "N".into(), transcript: [1; 32], bootstrap_seq: 1 };
+    let f = b.ctl(Who::D(1), vec![CtlItem::DeviceAdded(clash)], &Spec::default());
+    b.accept(f);
+    let items = b.rotate_items(vec![rkc(RecoveryKeyMode::Confirm, Some(np))]);
+    let f = b.ctl(Who::D(1), items, &Spec { at_ms: Some(start + 259_200_000), ..Spec::default() });
+    let r = b.classify(&f);
+    expect(&r, "Refuse", Some("seal/ctl_duplicate_key"));
+    only_counter(&b.m, &r, &b.dev(Who::D(1)), b.next_ctr(Who::D(1)));
+}
+
+// The second pass of §14.6 runs in item order: a supplied frame with a
+// wrong hash before a missing one is `seal/ctl_target`; a missing frame
+// before a supplied one with a wrong hash is `NeedFrames`.
+// spec: SEAL-RCPT-009
+// spec: SEAL-MEM-012
+#[test]
+fn skip_second_pass_order() {
+    let mut b = Board::new(2);
+    for _ in 0..2 {
+        let f = b.cmd(Who::D(0), &Spec::default());
+        b.accept(f);
+    }
+    let wrong = |t| CtlItem::Skip(SkipItem { seq: t, frame_hash: FrameHash([1; 32]) });
+    let f = b.ctl(Who::D(1), vec![wrong(3), skip(&b, 4)], &Spec::default());
+    let r = b.classify_with(&f, &Opts { hide_frames: vec![4], ..Opts::default() }).unwrap();
+    expect(&r, "Refuse", Some("seal/ctl_target"));
+    let f = b.ctl(Who::D(1), vec![skip(&b, 3), wrong(4)], &Spec::default());
+    let r = b.classify_with(&f, &Opts { hide_frames: vec![3], ..Opts::default() }).unwrap();
+    let Class::NeedFrames(ref need) = r.class else { panic!("{}", class_name(&r)) };
+    assert_eq!(need, &vec![(3, frame_hash(&b.frames[2]))]);
+    unchanged(&b.m, &r);
+}
+
+// The last current device (§13.6 `DeviceRevoked`) is judged with the
+// entry's later reinstatements taken as applied; a later item that then
+// fails its own row refuses the entry with its own code. The recovery
+// identity revoked D1, so it cannot reinstate it: revoking D0 (the last
+// current device) and reinstating D1 is `seal/ctl_target`; without the
+// reinstatement, `seal/ctl_last_device`.
+// spec: SEAL-MEM-012
+#[test]
+fn last_device_beside_failing_reinstatement() {
+    let mut b = Board::new(2);
+    b.revoke(Who::R, 1);
+    let (d0, d1) = (b.dev(Who::D(0)), b.dev(Who::D(1)));
+    let items = b.rotate_items(vec![CtlItem::DeviceRevoked(d0), CtlItem::DeviceReinstated(d1)]);
+    expect(&try_ctl(&mut b, Who::R, items), "Refuse", Some("seal/ctl_target"));
+    // (A rotation wrapping to the recovery identity alone cannot be sealed;
+    // the revocation is refused before the rotation is read.)
+    let rc = b.recipients_after(&[]);
+    let r = b.rotation_to(b.m.epoch + 1, &rc, None);
+    expect(&try_ctl(&mut b, Who::R, vec![CtlItem::DeviceRevoked(d0), CtlItem::EpochRotated(r)]), "Refuse", Some("seal/ctl_last_device"));
 }

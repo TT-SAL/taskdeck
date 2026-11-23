@@ -4,7 +4,7 @@
 
 use crate::encodings::{device_name_is_valid, host_is_valid};
 use crate::prim::take;
-use crate::{BoardId, DevId, EpochRoot, FrameHash, SealError, board_id};
+use crate::{BoardId, DevId, EpochRoot, FrameHash, RecoveryPublic, SealError, board_id};
 
 pub(crate) mod transitions;
 
@@ -170,6 +170,8 @@ impl Membership {
     /// Beyond the layout, the state must be one the transitions can produce:
     /// either the empty state `M_0` (below) or a state with exactly one
     /// current recovery record, commitments for the epochs 1 to `epoch`,
+    /// recovery records whose `dev` is the `dev_R` of their `sign_pk` (§6.3)
+    /// and whose `until_seq` is the `since_seq` of the record after them,
     /// distinct ids and `device_no` values, and a `board_id` that the first
     /// recovery key and the salt give (§6.2). Anything else is
     /// `seal/membership_format`.
@@ -401,6 +403,17 @@ impl Membership {
         match self.recovery.first() {
             Some(r) if board_id(&r.sign_pk, &self.salt) == self.board_id => {}
             _ => return false,
+        }
+        // Every record's `dev` is the `dev_R` of its `sign_pk` on this board
+        // (§6.3, SEAL-KEY-006); each record's `until_seq` is the `since_seq`
+        // of the record after it, and only the last is current (§13.2).
+        let devs_ok = self
+            .recovery
+            .iter()
+            .all(|r| RecoveryPublic { sign_pk: r.sign_pk, hpke_pk: r.hpke_pk }.dev(&self.board_id) == r.dev);
+        let chained = self.recovery.windows(2).all(|w| matches!(w, [a, b] if a.until_seq == b.since_seq));
+        if !devs_ok || !chained || self.recovery.last().is_none_or(|r| r.until_seq != 0) {
+            return false;
         }
         // Ids distinct across devices and recovery identities (§13.6
         // `DeviceAdded`, `RecoveryKeyChange`); device numbers distinct and
