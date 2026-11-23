@@ -284,7 +284,7 @@ pull request, whose code makes Q45, Q46 and Q48 true.
 
 One agent that did not write it checked this part at once (0.19 million tokens, the rest of the
 second window), so that S5's implementer builds on a checked text. It found one high, six medium and
-six low points; twelve were applied on 2026-11-23 08:15 UTC:
+six low points; twelve were applied on 2026-11-23 08:02 UTC:
 
 - **High: the new text on which roots a file carries contradicted `device.md` §15.3**, which hands
   `write_backup` every root the device holds. With the writer refusing a root without a commitment
