@@ -38,11 +38,14 @@ cargo check --locked --manifest-path crates/taskdeck-core/fuzz/Cargo.toml --targ
 # and must be within the limit, and within 25% of the recorded baseline once
 # there is one.
 #
-# Baselines in ms per workload, from the first CI run of this job (the lead
-# records them here). Empty: no baseline yet.
-BASELINE_SNAPSHOT_MS=""
-BASELINE_APPLY_MS=""
-BASELINE_CHECKPOINT_MS=""
+# Baselines in ms per workload, from the first CI runs of this job on
+# ubuntu-latest (2026-11-23 16:34 UTC, the push run and the pull-request run of
+# TT-SAL/taskdeck#18; the slower median of the two). They are GitHub's
+# runners' numbers, so they are compared only there (GITHUB_ACTIONS=true); a run
+# elsewhere prints its numbers and checks the limits alone.
+BASELINE_SNAPSHOT_MS="0.941"
+BASELINE_APPLY_MS="133.279"
+BASELINE_CHECKPOINT_MS="51.083"
 
 cargo build --locked --release -p taskdeck-core \
     --example budget_snapshot --example budget_apply --example budget_checkpoint
@@ -67,7 +70,7 @@ budget() {
         echo "budget: FAILED: $name takes $ms ms, over its limit of $limit ms"
         budget_failed=1
     fi
-    if [[ -n "$baseline" ]] && awk -v ms="$ms" -v b="$baseline" 'BEGIN { exit !(ms > b * 1.25) }'; then
+    if [[ -n "$baseline" && "${GITHUB_ACTIONS:-}" == true ]] && awk -v ms="$ms" -v b="$baseline" 'BEGIN { exit !(ms > b * 1.25) }'; then
         echo "budget: FAILED: $name takes $ms ms, more than 25% over its baseline of $baseline ms"
         budget_failed=1
     fi

@@ -1620,6 +1620,7 @@ fn instant_key<Z: Zone + ?Sized>(
 /// `max_occurrences_per_event` holds for the occurrences an override puts in
 /// place of the series' own (brief c3, bound 3): an override is expanded with
 /// only the room the event has left.
+// The parser's state goes in as arguments, as in today's code: this is a port (core.md §14.6).
 #[allow(clippy::too_many_arguments)]
 fn occurrences_of<Z: Zone + ?Sized>(
     event: &RawEvent,
@@ -1761,6 +1762,7 @@ fn span_minutes<Z: Zone + ?Sized>(
 /// the start minute plus a length near `i64::MAX` overflowed here, which
 /// panicked in a debug build and wrapped to an end before the start in a
 /// release one. Every occurrence returned ends at or after its start.
+// The parser's state goes in as arguments, as in today's code: this is a port (core.md §14.6).
 #[allow(clippy::too_many_arguments)]
 fn spread(
     day: NaiveDate,

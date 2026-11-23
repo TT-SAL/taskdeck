@@ -1,6 +1,9 @@
 # Stage `core`: status
 
-**State: in progress** (wave 1), started 2026-11-23 00:00 UTC. Branch `claude/brave-newton-xmg71m`.
+**State: final** (wave 1), since 2026-11-23 17:00 UTC; started 2026-11-23 00:00 UTC. Branch
+`claude/brave-newton-xmg71m`; the exit pull request is TT-SAL/taskdeck#18. Every item of SYNC_PLAN.md §6.2 is
+built, checked and green: `bash scripts/gate.sh core` passes every `run` item in the lead's run, and CI passes
+on Windows, macOS and Linux with the budgets measured.
 This file is the stage's memory (SYNC_PLAN.md §3.5). A fresh session resumes from it alone.
 
 ## Resuming: read this first
@@ -49,18 +52,14 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 | D `d-compile` | D1 intents and the compile step; D2 the lead's rulings applied (`briefs/d2-rulings.md`) | 3 | **done**: built, checked, security-passed (one medium and two high findings fixed with their reproductions as tests), rulings applied; lead's gate 11:59 UTC | 1.37 M |
 | E `e-read` | E1 legacy import; E2 read queries, snapshot builders, reminders, the snapshot-fixtures test | 7, 8 | **done**: built and checked. The check found nothing (the fifteen import steps against the code, two folders worked by hand, the fourteen snapshot differences, mutations of the builders caught by the fixture test, the reminder vectors by hand). 43 of the 48 recorded snapshots match field for field; the other five are those core.md §18.7 excludes. Lead's gate 11:59 UTC with the `snapshot-fixtures` item | 0.93 M |
 | F `f-gate` | F1 the transcript test; F3 three points from it (`briefs/f3-rulings.md`); F2 determinism and rebase property tests, fuzz targets, the budget job, spec coverage, the crate's README | 9 and the gate | **done**: built, checked (nothing high or medium; two lows). The checker broke `apply` and `compile` in four ways and the transcript test caught each (31 to 232 differences); a zone read, a naive time resolved in the process zone and marks kept in insertion order each failed the determinism tests. Lead's run 2026-11-23 16:27 UTC: `bash scripts/gate.sh core` passes every `run` item; the Linux budget run passes | 0.99 M |
-| G exit | hygiene pass, exit review, exit pull request | §7 "once per stage" | running (workflow 9) | |
+| G exit | hygiene pass, exit review, exit pull request | §7 "once per stage" | **done**: the hygiene pass found three lows (two probe tests under scratch names, a real service's host name in a test copied from today's app, three `allow`s without a reason), all fixed by the lead; the exit review found one medium (CORE-CMD-006 was cited but no test failed if `apply` trimmed a name), fixed with its reproduction as a test, and one low, listed | 0.55 M |
 
 ## Next steps
 
-1. Workflow 9 (`workflows/w9-args.json` with `workflows/pipeline.js`): the hygiene pass and the exit review,
-   each with one fix pass for what is high or medium. Read what they find; act on high and medium.
-2. Read the three `budget:` lines of the core job on `ubuntu-latest` in the exit pull request's first CI run:
-   they are the baselines. Write them into `crates/taskdeck-core/ci.sh` (`BASELINE_*_MS`) and into
-   "Measurements". A baseline over its limit is a question for the owner (SYNC_PLAN.md §3.3).
-3. The exit: `bash scripts/gate.sh core` green in the lead's own run, CI green, this file's state `final`, the
-   exit pull request's body (what was built, measured, and what the next stages need to know), merge, and
-   tell the owner which sessions to start.
+None for this stage: it has exited. For the owner: wave 2 (`device`, `recovery`) starts once `seal`, `relay`
+and `engine` have exited too (SYNC_PLAN.md §1.2). A later stage that needs a change under
+`crates/taskdeck-core/` makes it through a small pull request of its own and notes it in both status files
+(§3.2); a spec question goes through a spec-change pull request (§3.3).
 
 ## Decisions (with reasons)
 
@@ -126,11 +125,26 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
   `core/date_range`, for uniformity; the transcript test showed that today answers "not a time", and nothing
   required the change. The rule the transcript test enforces is the better guide: a behaviour today's app has
   changes only for a reason the spec states.
+- **D15. Budget baselines: the slower of two runs, compared on GitHub's runners only.** The two CI runs of the
+  same commit gave 111.7 and 133.3 ms for the apply budget (19% apart), so one run as the baseline would put the
+  next ordinary run near the 25% line of SYNC_PLAN.md §3.3; the slower of the two is the baseline. The
+  container is not a GitHub runner (its checkpoint load is about 80 ms against CI's 51), so `ci.sh` checks the
+  baselines only where `GITHUB_ACTIONS=true` and the limits everywhere.
 - **D10. Fewer turns of the lead.** The first window ended at the account's limit although this stage's agents
   stayed under their 3.5 M: the lead took about a hundred turns, most of them woken by a single GitHub event
   (a check finished, a pull request merged), and every turn reads the whole conversation again. From the
   second session window on the lead does not subscribe to a pull request's events and sets no safety-net
   timers: it reads the `gate` check once, when it integrates, and waits for workflows only.
+
+## Deviations from the plan
+
+- **The budgets run in the core job's own hook, not in a job of their own** (SYNC_PLAN.md §3.3: "Measure in a
+  dedicated CI job"). `scripts/gates/core.gate`, written by `foundation`, names the core stage's `ci.sh` hook
+  as that job; the hook runs on the same `ubuntu-latest` runner after the tests and clippy, so the numbers are
+  a shared runner's. The exit review raised it; the tightly clustered runs (within 3% inside a run) say the
+  numbers are usable.
+- **Low findings were fixed where they were cheap or mattered** (the calendar parser, D11; the hygiene pass's
+  three), although SYNC_PLAN.md §7 lists low findings rather than fixing them.
 
 ## Spec changes raised by this stage
 
@@ -160,11 +174,11 @@ its agents' transcripts (D6). The windows are the owner's (see "How this stage i
 | | 7: C4 (a step budget for a file's rules) | 1 | 125,831 reported; 86,852 by transcripts | 1.63 M |
 | | 8: F1 written; F2 cut by the account's limit at about 13:20 | 2 | 395,808 reported; 337,147 by transcripts | 1.97 M; the other session and the lead's turns used the rest |
 | 15:40 to 20:40 | 10: F3, F2, the check of F | 3 | 593,008 reported; 660,709 by transcripts | 0.66 M |
-| | 9: hygiene pass and exit review | running | | |
+| | 9: hygiene pass and exit review, one fix | 3 | 475,648 reported; 550,167 by transcripts | 1.21 M |
 
-The stage in all, before the exit review: 32 agent runs, about 7.8 M tokens by the rule above (7.7 M by
-transcripts alone): builders 4.9 M (17 implementer runs, one of them cut by the limit, and 4 fixers), checkers
-2.7 M (7 checks and 4 security passes). Foundation spent about 34 M, most of it checking (its D24).
+The stage in all: 35 agent runs, about 8.4 M tokens by the rule above (8.2 M by transcripts alone): builders
+5.0 M (17 implementer runs, one of them cut by the limit, and 5 fixers), checkers 3.2 M (7 checks, 4 security
+passes, the hygiene pass and the exit review). Foundation spent about 34 M, most of it checking (its D24).
 
 ## What the checks found
 
@@ -181,6 +195,8 @@ transcripts alone): builders 4.9 M (17 implementer runs, one of them cut by the 
 | D | verify | medium: `compile` returned a command that `apply` refuses for size on a board at the 59 MiB cap (CORE-COMP-008) | fixed: `compile` runs `apply`'s size check on the view |
 | E | verify | nothing, high, medium or low | no fix pass needed |
 | F | verify | nothing high or medium; two lows (below) | no fix pass needed |
+| exit | hygiene | three lows: `tests/oom_probe.rs` and `tests/probe_verify.rs`, real regression tests under scratch names; `sisu.helsinki.fi`, a real service's host, in a test of `overlay` copied from today's app; three `allow`s without a stated reason | all fixed by the lead: renamed `canon_tree_budget.rs` and `compile_size_check.rs`, the host made up, the reasons written |
+| exit | review | medium: CORE-CMD-006 was cited, but no test failed if `apply` trimmed a `rename` name; one low (below) | fixed: `tests/apply_verbatim.rs` applies six commands with names that carry leading and trailing White_Space and fails under each of six such mutations |
 | D | security (intent parser) | high: `parse_intent` accepted a JSON array as an intent (`["forget",5]`), because a serde derive also reads the sequence form; high: `compile` emitted a `set_notes` with a base of 2^53 or more, which encoded to empty bytes | both fixed; `LogCommand::to_canonical` loses its silent empty result in step D2 |
 
 ## Low findings left as they are
@@ -204,6 +220,10 @@ transcripts alone): builders 4.9 M (17 implementer runs, one of them cut by the 
   core.md §17 says only `apply` is timed. The number is the worse for it (97.6 ms against 1,000 ms), never
   the better, so the budget holds a fortiori.
 
+- **The test of CORE-READ-003 has no tied scores** (exit review), so reversing the tie order of `ranked_ids`
+  passes it; the snapshot fixtures have no ties either (core.md §18.5 assumes so). Scores carry a jitter by
+  id, so a tie needs two malformed items; the order is still pinned by the code's stable sort over ascending ids.
+
 Fixed since they were listed: `reset` at the last notes revision (step B4); the overlay test of today's that
 was not ported (step C3).
 
@@ -222,7 +242,8 @@ was not ported (step C3).
 | A port: C1 (2,300 lines of today's code, 76 tests) and C2 (2,000 lines, 76 tests) | 0.28 M and 0.31 M tokens, 22 and 13 minutes | workflows 2 and 3 |
 | The first usage window | 14 agent runs, 3.39 M tokens: tasks A and B whole, C implemented | 2026-11-23 00:10 to 02:35 UTC |
 | The crate at the exit review | 340 tests (unit and integration), all passing on Windows, macOS and Linux; 100 of the 100 clauses the stage owns cited by a test (`bash scripts/spec-coverage.sh core`) | lead's run, CI |
-| Budgets in the container, `CI_OS=linux bash crates/taskdeck-core/ci.sh`, median of five | 31-day snapshot of the 10,000-row board 0.98 ms (limit 40); 5,000 commands applied 97.6 ms (limit 1,000; includes a board clone per run); checkpoint loaded 83.3 ms (limit 150) | lead's run 2026-11-23 16:27 UTC; the CI baselines come from the exit pull request |
+| **Budget baselines on `ubuntu-latest`** (CORE-PERF-001 to -003), median of five | 31-day snapshot of the 10,000-row board **0.941 ms** (limit 40); 5,000 commands applied **133.279 ms** (limit 1,000; the two runs gave 111.7 and 133.3, and the slower is the baseline; includes a board clone per run); checkpoint loaded **51.083 ms** (limit 150; 48.0 and 51.1) | the push run and the pull-request run of TT-SAL/taskdeck#18, 2026-11-23 16:34 UTC; recorded in `crates/taskdeck-core/ci.sh`, compared on GitHub's runners only |
+| Budgets in the container, `CI_OS=linux bash crates/taskdeck-core/ci.sh`, median of five | snapshot 0.98 to 1.1 ms; apply 97.6 to 117.6 ms; checkpoint 76 to 83 ms | lead's runs 2026-11-23 16:27 and 16:52 UTC |
 | The snapshot fixtures | 43 of the 48 recorded snapshots equal field for field after core.md §18.5's transformation; the other five are those §18.7 excludes | `--test snapshot_fixtures` |
 | The transcripts, steps compared and not compared | Berlin: `every-command` 51/0, `refusals` 73/1, `dst-edges` 13/4, `seeded-01` to `-04` 30/0 each, `-05` and `-06` 20/0 each, `id-limits` 0/6 (refused, §18.7). New York: the same but `refusals` 19/55 and `dst-edges` 14/3 (a deadline in New York's 9999 that is 10000 in UTC ends the comparison, §13.5) | `--test transcripts` |
 | The calendar parser on hostile feeds | 8 MiB of a repeated `BYDAY`: killed at 30 s before, 1.5 s after (debug); 20,000 daily rules from year 1: 37.7 s before, 0.41 s after (release) | steps C3 and C4 |
@@ -248,6 +269,8 @@ was not ported (step C3).
   strings are written out by hand.
 - `libfuzzer-sys` compiles libFuzzer's C++ sources in its build script even under `cargo check`, so the fuzz
   check needs a C++ compiler (the container and `ubuntu-latest` have one).
+- GitHub can cancel a queued job before it starts (no steps; `Stage device · macos-latest` of run 45217123916),
+  and `gate` then fails on `cancelled`. It is not a failure of the pull request: the next push runs it again.
 - The session's worker was restarted twice; the second restart moved the lead from Fable 5.2 to Opus 5.5
   (2026-11-23 15:42 UTC). Agents ran on `model: 'opus'` throughout.
 
@@ -273,6 +296,9 @@ None.
   these four.
 - The fuzz package keeps its own lockfile, outside the supply-chain gate, equal to the root lockfile at the
   exit (D12).
+- A test of today's app names a real service's host (`sisu.helsinki.fi`, in `src/subscriptions.rs` around line
+  840). The core's copy of that test now uses a made-up host; today's copy is stage `desktop`'s to change or
+  delete with the old code.
 
 ## What the next stages need to know
 
@@ -282,8 +308,10 @@ None.
   type of another crate names its byte limit; `BoardData::to_canonical_bytes` and `LogCommand::to_canonical`
   panic for a board that fails `check` or a command holding an integer above 2^53 − 1, so encode only what
   passed `check`, `parse_command` or `compile`. No public signature differs from §20.
-- **Zones.** Pass `ChronoZone(chrono::Local)` or a `TableZone`; every zone parameter takes `&dyn Zone`. A fold
-  resolves to the earlier instant; a local time outside the instant range resolves to none (core.md §5.4).
+- **Zones and instants.** Pass `ChronoZone(chrono::Local)` or a `TableZone`; every zone parameter takes
+  `&dyn Zone`. A fold resolves to the earlier instant; a local time outside the instant range resolves to none
+  (core.md §5.4). `Instant::plus_seconds` saturates at `Instant::MAX` past the end of the range (§5.1) and
+  returns none only below its start.
 - **`compile`.** `CompileCtx.device_no` must equal the minter's `device_no` (`core/bad_id` otherwise). A
   `set_notes` always carries `view.notes_rev` and refuses a stale intent `base` with `core/notes_stale`, so the
   page sends `base` from the snapshot's `notes_base`. A full board is `core/cap_board`. A reflow keeps its

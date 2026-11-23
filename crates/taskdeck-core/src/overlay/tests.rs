@@ -40,15 +40,15 @@ fn at(text: &str) -> chrono::DateTime<chrono::FixedOffset> {
 
 #[test]
 fn a_calendar_is_named_after_its_host_until_something_better_turns_up() {
-    assert_eq!(name_from_url("https://sisu.helsinki.fi:443/ilmo/x.ics").as_deref(), Some("sisu.helsinki.fi"));
+    assert_eq!(name_from_url("https://calendar.example.org:443/feed/x.ics").as_deref(), Some("calendar.example.org"));
     assert_eq!(name_from_url("https://www.example.com/a.ics").as_deref(), Some("example.com"));
     assert_eq!(name_from_url("https://user:pw@cal.example.com/a.ics").as_deref(), Some("cal.example.com"));
     assert_eq!(name_from_url("not a url").as_deref(), None);
 
     let host_named = Subscription {
         id: 150,
-        name: "sisu.helsinki.fi".into(),
-        url: "https://sisu.helsinki.fi:443/ilmo/x.ics".into(),
+        name: "calendar.example.org".into(),
+        url: "https://calendar.example.org:443/feed/x.ics".into(),
         color: [1, 2, 3, 255],
         enabled: true,
     };
