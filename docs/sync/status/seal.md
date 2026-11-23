@@ -54,15 +54,18 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | # | Task | Modules (`crates/taskdeck-seal/src/`) | Spec | Vectors (`docs/sync/vectors/`) | State |
 |---|---|---|---|---|---|
 | S1 | Primitives, keys, wraps, chain and fingerprints, the sheet, the known-answer suites, the vectors target, `ci.sh` | `error`, `entropy`, `base32`, `encodings` (hosts, names), `ids`, `ctx`, `keys`, `chain`, `prim` | §3–§7, §15, §18 | `seal-kdf`, `seal-wrap`, `seal-chain`, `seal-sheet` | **done**, merged (TT-SAL/taskdeck#4; its high finding fixed by TT-SAL/taskdeck#6) |
-| S2 | Frames, envelope, padding, payloads and control items (encode and strict parse, canonical JSON), login and admin signatures | `entries`, `signatures`, `encodings` (JSON) | §5.3, §8–§12, §16 | `seal-frame`, `seal-padding`, `seal-signatures` | **done** (low findings only; its pull request is the next to merge) |
-| S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | brief written; next |
-| S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | brief to write |
-| S5 | Blobs and snapshots (opening a snapshot uses S4's projection) | `blob` | §20 | `seal-blob` | brief to write |
-| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | brief to write |
+| S2 | Frames, envelope, padding, payloads and control items (encode and strict parse, canonical JSON), login and admin signatures | `entries`, `signatures`, `encodings` (JSON) | §5.3, §8–§12, §16 | `seal-frame`, `seal-padding`, `seal-signatures` | **done**, merged (TT-SAL/taskdeck#9; low findings only) |
+| S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **implemented**, gate green, pushed (draft TT-SAL/taskdeck#10); verify and security passes next: resume workflow run `wf_6a6ca5ab-6c6` if this session still lives, else run the verify and security steps afresh on the committed code |
+| S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | brief written |
+| S5 | Blobs and snapshots (opening a snapshot uses S4's projection) | `blob` | §20 | `seal-blob` | brief written |
+| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | brief written |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `ci.sh` | §3, §24 | all present | brief to write |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
 
-Notes for the briefs still to write (the lead's reading of the spec):
+The briefs of S4, S5 and S6 name line ranges of `seal.md` as it stood on 2026-11-23 02:30 UTC; after
+a change to that file, check them against its headings before launching.
+
+Notes behind the briefs (the lead's reading of the spec), and for the brief of S7, still to write:
 
 - **S4.** Read §6.6, §6.7, §11.3, §12.1, §13.2, §13.6 (the Author column, for the projection's reduced
   rules), §16.3, §19, §21, §22, §23, §24 and §26's file and backup parts; `engine.md` §18.3 for the
@@ -125,6 +128,25 @@ Notes for the briefs still to write (the lead's reading of the spec):
   what an item alone decides; the bounds relative to the entry's seq, the Genesis checks that need the
   board and "Genesis only at seq 1" are S3's, at step 16.
 
+## Task S3: what happened so far
+
+- Implementer (35 minutes, 0.89 million tokens, the largest of the stage): `membership.rs` with the
+  canonical bytes and a strict parser that also checks the state's invariants, a private module
+  `membership/transitions.rs` with one function per row of §13.6, `receipt.rs` with `classify` on S2's
+  receive-side functions; 152 unit tests, a board simulator over the public API for the integration
+  targets (`tests/common/board.rs`), four vector families (each case a full record of §14.1's inputs).
+  Gate green in the lead's run. It raised fourteen spec questions (Q20 to Q33 below; the rulings are
+  also at the end of its brief, for the passes that follow).
+- Not yet done: the verify pass and the two security passes. The window's budget was spent
+  (3.32 of 3.5 million), so they wait for the window that starts at 04:50 UTC.
+- **A defect between two specs, found by this task (spec change E1, to raise):** a rotation that lost
+  a race was sealed under the epoch the winner replaced, so `seal.md` §14.2's own step order refuses
+  it at step 13 with `seal/stale_epoch`. `engine.md` §28.5 step 4 retries a raced revocation only when
+  it is refused with `seal/ctl_epoch` or `seal/ctl_wraps` and calls any other refusal a failure: as
+  written, a revocation that loses a rotation race would fail with the target already locked out at
+  the relay. The change: §28.5 step 4 also names `seal/stale_epoch`; `seal.md` §13.8 and §22 say which
+  code a lost race gets. It affects stage `engine` (not started) and nobody else.
+
 ## Decisions (with reasons)
 
 - **L1. Tasks along the skeleton's modules**, in dependency order (table above). Membership and
@@ -168,6 +190,13 @@ Notes for the briefs still to write (the lead's reading of the spec):
   For S1 they were 1.02 and 1.24 million.
 - **L11. The files of the crate and the vectors are `-text`** (`.gitattributes`), as foundation did
   for `fixtures/`: tests and the build compare their bytes.
+- **L13. An implementer of more than about 1,500 lines costs about 0.9 million tokens**, twice the
+  smaller tasks (S1 0.46, S2 0.51, S3 0.89): its context grows with every file it writes. The lead
+  launches such a task with `until = "implement"`, watches the transcripts' count in the background,
+  and books verify and security separately.
+- **L14. An implemented task is pushed even before its verify pass** when the passes must wait for a
+  usage window: the commit says "not yet verified", the pull request is a draft, and nothing merges
+  before the passes.
 - **L12. A hook step that needs `python3` runs on Linux only** (the vectors' format check in `ci.sh`):
   a Windows runner's bash may lack it, and the files are the same on every system.
 
@@ -199,6 +228,21 @@ go into one spec-change pull request (a sentence each, with a line in `CHANGES.m
 | Q18 | §16.1, §16.2 | the order of the nonce and the argument checks | the relay nonce's length first (`seal/challenge_length`), then the origin or the arguments; a refused `sign_login` draws nothing |
 | Q19 | §26 | derives on the public data types | `Debug`, `Clone`, `PartialEq`, `Eq` on the non-secret ones; no name or signature changed |
 
+| Q20 | §13.2, §13.3, §26 | what `M_0` is, and what the caller passes at seq 1 | the layout of §13.2 with every field zero and every list empty, the only state with epoch 0; at seq 1 `classify` works from the anchor and ignores the membership given. Spec note |
+| Q21 | §13.8, §22 | the code of a rotation that lost a race | `seal/stale_epoch` (step 13), by the spec's own step order; `seal/ctl_epoch` only for a rotation sealed under the current epoch that names another epoch. Spec change E1 (`engine.md` §28.5) |
+| Q22 | §12.1 | Genesis at another seq, or another shape at seq 1 | `seal/ctl_shape`; `seal/ctl_genesis` is for the item and anchor checks |
+| Q23 | §14.3 | a rules version above 1 has no row | nothing is allowed under it: later frames are `seal/bad_version`; a `DeviceAdded` under it records no envelope |
+| Q24 | §13.6 | which records "every recorded key" covers | device and recovery records, current or retired; not a pending proposal. Spec note |
+| Q25 | §13.6 `DeviceRevoked` | when "at least one current device remains" is judged | over the whole entry; the refusal is the first revocation's |
+| Q26 | §13.5, §23 | `ctl_seqs` is full | `seal/ctl_cap`, after the items passed |
+| Q27 | §14.8 | `chain_at` gives nothing at or above `retained_from` | the comparison is skipped, `based_on_unchecked` is set |
+| Q28 | §14.2 | a root that does not match the recorded commitment | the local fault `seal/missing_root` |
+| Q29 | §13.5 | the counter of a refused seq 1 | none: the state stays `M_0` |
+| Q30 | §13.6, §14.6 | the author of a Skip target that is no well-formed frame | the 16 bytes at offset 20; none when the frame is shorter |
+| Q31 | §14.6 | a missing target before a supplied frame with a wrong hash | `NeedFrames` first; the refusal follows when the frames are supplied |
+| Q32 | §13.2 | does the parser check invariants beyond the layout | yes; every state the transitions produce must pass (the verifier checks the round trip). Spec note |
+| Q33 | §26 `Receipt` | `code` and `opened` per class | with a halt, the halt's code; with `NeedFrames`, none; `opened` from step 11 on. Spec note |
+
 Candidates for the same spec-change pull request, if the later tasks confirm them:
 
 - Clauses that state a duty of the crate's caller (the device's sealer adapter) and are owned by
@@ -223,6 +267,8 @@ Candidates for the same spec-change pull request, if the later tasks confirm the
 | Task S2, second step (two security passes, no fix) | 6 minutes; 0.17 and 0.18 million tokens | 2026-11-23 01:34 to 01:41 UTC |
 | The crate's tests after S2 | 85 unit tests, 30 in the four gate targets, 7 vector families | the lead's run, 01:34 UTC |
 | A pull-request CI run of the seal area | 6 to 9 minutes; with a lockfile change (every area) 19 minutes | TT-SAL/taskdeck#4, TT-SAL/taskdeck#6 |
+| Task S3, the implementer | 35 minutes; 0.89 million tokens | 2026-11-23 01:42 to 02:17 UTC |
+| The crate's tests after S3 | 152 unit tests, 34 in the four gate targets, 11 vector families (the two largest 412 KB and 213 KB) | the lead's run, 02:19 UTC |
 
 ## Token ledger
 
@@ -235,7 +281,9 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S1, security passes and fix | 3 | 0.47 M | 0.49 M | 0.49 M |
 | | S2, to the verify pass | 2 | 0.60 M | 0.80 M | 0.80 M |
 | | S2, security passes | 2 | 0.39 M | 0.35 M | 0.39 M |
-| | **window so far** | | | | **2.43 M** |
+| | S3, the implementer | 1 | 0.45 M | 0.89 M | 0.89 M |
+| | **window total** | | | | **3.32 M** |
+| from 2026-11-23 06:50 | (S3's verify and security passes, the spec change, S4 …) | | | | |
 
 ## Low findings left as they are
 
@@ -280,3 +328,7 @@ To be completed at the exit. So far:
   the grouped text.
 - A repository file that code compares byte for byte needs `-text` in a `.gitattributes`: Windows
   runners check text out with CRLF.
+- For `engine`: spec change E1 (a raced rotation is refused with `seal/stale_epoch`).
+- `core` changed `core.md` §4.5 (TT-SAL/taskdeck#7: a tree budget for the canonical parser, a lone
+  surrogate escape is an error). Seal's own parser handles payloads of at most 257,979 bytes and
+  refuses lone surrogates; task S7 checks it against §4.5 as it now stands.
