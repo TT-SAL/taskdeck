@@ -58,7 +58,7 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **done**, merged (TT-SAL/taskdeck#10, with the spec change) |
 | S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done**, merged (TT-SAL/taskdeck#13, 2026-11-23 07:46 UTC; low findings only, four rulings carried into S5's brief) |
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **done** (TT-SAL/taskdeck#14; two high findings of its security passes fixed and checked by the lead) |
-| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | implementer running (workflow run `wf_7055dfcc-29f`) |
+| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **implemented**, gate green in the lead's run; S6b, then the verify and security passes (workflow run `wf_7055dfcc-29f`) |
 | S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | brief written |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written (to revise with what S5 and S6 leave) |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
@@ -350,7 +350,7 @@ rulings of S5 and S6 when they are written in (the whole of the second change, o
 gain `device` as an owner for the caller's half. The row of `CHANGES.md` is extended.
 
 **The second check** (one agent, 0.22 million tokens, 2026-11-23 12:06 UTC) covered the corrections
-to part 1 and part 2 fresh: one high, three medium and six low points, all applied at 12:20 UTC.
+to part 1 and part 2 fresh: one high, three medium and six low points, all applied at 12:11 UTC.
 
 - **High, in part 2: nobody was clearly named to compare a snapshot's state hash with the signed
   entry.** Q50 had moved that comparison out of the crate to "the caller", and the change log named
@@ -446,6 +446,24 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q54 | §20.5 step 3 | `BlobRef.id` against the header's `blob_id` | not compared: the signed `sha256` fixes every sealed byte, and the id is what the caller fetches by. Spec note |
 | Q55 | §20.5 step 1 | sealed bytes under 67 bytes are refused at step 1, which states no minimum | the code stays: step 1 now states that `size` is 67 to 67,108,864 (as §11.5 bounds a signed size). Spec note |
 | Q56 | §20.4 | `seal_snapshot` sealed a body with a history record above `S`, and a membership of another board; its reader rejects both | it refuses both with `seal/blob_open`, as `write_backup` refuses a membership of another board. A few lines: on S7's list. Spec note |
+| Q60 | §17.10, §17.11 | an event the machine's state has no row for | it aborts: a slot with `seal/slot_mac`; `Snapshot`, `Entries`, `Frames` with `seal/bundle_invalid`; any other with `seal/pair_cancelled`; `RegisterFailed{code}` with its code. A `Tick` before the limit changes nothing; `Done` and `Aborted` ignore every event. Spec note |
+| Q61 | §26, SEAL-GEN-006 | the code and the digits are plain strings in the API | kept: they go to a screen and come from a keyboard; the crate erases its own copies, the caller clears the strings. Told to `device`, `desktop`, `android` |
+| Q62 | §17.2 | which form `new_code` returns | the display form `XXXX-XXXX-XXXX-XXXX-CC`; `parse_code` reads both. Spec note |
+| Q63 | §17.4, §17.6, SEAL-GEN-008 | a slot's framing against its MAC | framing first (`body_len` at most 16,040, the slot exactly `36 + body_len` bytes), failing with `seal/slot_mac` since nothing is authenticated yet; then MAC, label, role; then the body's layout (`seal/slot_format`). Spec note |
+| Q64 | §17.4 | the range of slot B's rules versions | 1 to 16 values from 1 to 2^31 − 1, strictly ascending. Spec note |
+| Q65 | §17.10 | codes of a bad `Existing::start` | an aborted machine and `[Abort]`, no `DeleteTicket`: `seal/ctl_author` (own device not current), `seal/host_format`, `seal/entropy`; "unhalted" is the caller's. Spec note |
+| Q66 | §17.6 check 5 | does the cap of 256 device records count | yes (`seal/ctl_device_cap`). Spec note |
+| Q67 | §17.10, SEAL-PAIR-010 | `NeedSnapshotAndRegister`'s item is made before the snapshot's seq is known | its `bootstrap_seq` is the head seq of `Start`, a placeholder: the engine composes the `DeviceAdded` with the snapshot's seq (ENG-OPS-001), and N checks it at step 7. Spec note; SEAL-PAIR-010 gains `engine` as an owner |
+| Q68 | §17.10 | `Registered` with values the bundle's table excludes | E aborts with `seal/bundle_invalid` and posts nothing |
+| Q69 | §17.8, §26 | the bundle's `snapshot` object has no seq, `SnapAnnounce` has | the parser sets it to `head.seq`; §11.5's seq rule does not apply. Spec note |
+| Q70 | §17.10 | `CodeEntered` with a bad host or name | after the code's check: `AskAgain` with `seal/host_format` or `seal/slot_format`; nothing derived or fetched |
+| Q71 | §17.9 step 1 | the code for slot D's width | `seal/slot_format`, after the MAC |
+| Q72 | SEAL-KEY-013, §17.9 | the bundle's root is used before a membership exists to check it | §17.9's order: the root opens the snapshot, step 5 checks every root against the snapshot's membership before any other key is derived. Spec note |
+| Q73 | §17.9 step 7 | is `bootstrap_seq = h` checked | yes, `seal/device_added_mismatch` |
+| Q74 | §17.9 step 7 | the log ends before `added_seq` | `seal/device_added_mismatch`; a gap or a seq out of place in `Entries` is `seal/bundle_invalid` |
+| Q75 | §17.9 step 6 | the own-dev flag and a halt while joining | the own-dev flag and the commitment halt abort with `seal/bundle_invalid`, the unknown-rules halt with `seal/pair_rules` |
+| Q76 | §17.10 | is the log one event or pages | one `Entries` holds the whole log from `h + 1` (paging is the caller's); a second aborts; `Frames` holds exactly the seqs asked for. Spec note; told to `device` |
+| Q77 | §17.7 | are the typed digits normalised | no: compared as typed, in constant time |
 | Q49 | §26 `VerifiedBackup` | the recovery tool is to show a file's written date, which `read_backup` did not return | `VerifiedBackup` gains `written_ms` (the header's, display only). Code in S5's brief |
 | Q48 | SEAL-GEN-006, §21.3 | the DEFLATE compressor and decompressor (a pinned dependency's private state) hold the payload's bytes, the epoch roots among them, and are freed without being erased (S4 security, a note; `unsafe` is forbidden, so the crate cannot wipe them from outside) | as S1's high finding ruled for the hash states: a state that took in roots must not be left behind. The writer keeps the roots and the read token out of the compressor (they travel in stored blocks the crate writes itself, after a full flush); the reader resets the decompressor, which zeroes its window in the pinned version, before dropping it. What stays outside reach is said in the code and in the spec. Code in S5's brief |
 
@@ -504,7 +522,8 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S5, the verifier | 1 | 0.23 M | 0.26 M | 0.26 M |
 | | S5, security passes and the fix pass | 3 | 0.59 M | 0.60 M | 0.60 M |
 | | second check of the second spec change | 1 | 0.18 M | 0.22 M | 0.22 M |
-| | **window so far** | | | | **1.65 M** |
+| | S6, the implementer | 1 | 0.47 M | 0.69 M | 0.69 M |
+| | **window so far** | | | | **2.34 M** |
 
 ## Low findings left as they are
 

@@ -25,7 +25,9 @@ spec change (rulings Q57 to Q59); `seal.md` §20.5, §21.6 and §26 already say 
    loads (a body whose board does not give its signed hash is the engine's to find, with its own
    alarm), and the signed entry's version was checked when the entry was classified. The declared
    mode compares neither value, as before. `src/pair.rs` hands `open_snapshot` the bundle's `hash`
-   and `hash_version`; if it compared them itself after the call, that comparison goes.
+   and `hash_version`. Its own recomputation of the state hash from the body (§17.9 step 5: "the
+   state hash recomputed from the body equals `snapshot.hash`") stays: after this task
+   `open_snapshot` no longer recomputes, and in pairing the crate itself is the one that must.
    Tests: a body whose state hash differs from the expected one; one whose version differs; a body
    whose board does not give its own state hash now opens (say so in the test: the engine finds
    it). A test of the removed checks goes with them. Vectors: every `open_snapshot` case of
