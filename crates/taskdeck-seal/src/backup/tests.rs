@@ -256,6 +256,58 @@ fn from_accepted_refuses_other_kinds() {
     assert_eq!(HistoryRecord::from_accepted(3, &f, r.opened.as_ref().unwrap()).err(), Some(SealError::NotControl));
 }
 
+// The accessors of a record made by `from_accepted`: `seq` the given seq,
+// `dev` and `ctr` the frame header's, `frame_hash` the hash of the frame,
+// `items` the payload's items (§21.5, §26); the Genesis record's items are
+// its Genesis item.
+// spec: SEAL-BKP-010
+#[test]
+fn record_accessors() {
+    let mut x = Hist::new(2);
+    let k = DeviceKeys::generate(&mut OsEntropy).unwrap();
+    let item = x.b.added_item(&k);
+    let f = x.b.ctl(Who::D(1), vec![item.clone()], &Spec::default());
+    let r = x.b.push(f.clone());
+    assert!(matches!(r.class, Class::Accept));
+    let o = r.opened.as_ref().unwrap();
+    let rec = HistoryRecord::from_accepted(9, &f, o).unwrap();
+    let hdr = crate::frame_header(&f).unwrap();
+    assert_eq!((rec.seq(), rec.dev(), rec.ctr()), (9, hdr.dev, hdr.ctr));
+    assert_eq!(rec.dev(), x.b.dev(Who::D(1)));
+    assert_eq!(rec.frame_hash(), FrameHash(h(&[&f])));
+    assert_eq!(rec.frame_hash(), crate::frame_hash(&f));
+    let items = rec.items().unwrap();
+    assert_eq!(items.len(), 1);
+    let enc = |i: &[CtlItem]| crate::payloads::items_bytes(i).unwrap().1;
+    assert_eq!(enc(&items), enc(&[item]));
+    // The same through `to_bytes` and `from_bytes`.
+    let back = HistoryRecord::from_bytes(&rec.to_bytes()).unwrap();
+    assert_eq!((back.seq(), back.dev(), back.ctr(), back.frame_hash()), (9, hdr.dev, hdr.ctr, rec.frame_hash()));
+    assert_eq!(enc(&back.items().unwrap()), enc(&items));
+    // The Genesis record.
+    let g = x.recs[0].items().unwrap();
+    assert!(matches!(g.as_slice(), [CtlItem::Genesis(_)]));
+    assert_eq!((x.recs[0].seq(), x.recs[0].ctr()), (1, 1));
+}
+
+// `items()` of a record whose items are no canonical item list (a record
+// only read with `from_bytes`, not verified) is `seal/backup_history`:
+// not JSON, an empty list, whitespace, keys out of order, an unknown item;
+// the canonical list itself parses.
+// spec: SEAL-BKP-010
+#[test]
+fn items_that_do_not_parse() {
+    let x = Hist::new(2);
+    let good = x.recs[1].items.clone();
+    let rec = |items: Vec<u8>| HistoryRecord::from_bytes(&x.signed_bytes(Who::D(0), 3, 3, items).to_bytes()).unwrap();
+    assert!(rec(good.clone()).items().is_ok());
+    let spaced = [b" ".as_slice(), &good].concat();
+    let trailing = [&good[..], b" "].concat();
+    for bad in [b"not json".to_vec(), b"[]".to_vec(), b"{}".to_vec(), Vec::new(), spaced, trailing, b"[{\"t\":\"Nope\"}]".to_vec()] {
+        assert_eq!(rec(bad.clone()).items().err(), Some(SealError::BackupHistory), "{}", String::from_utf8_lossy(&bad));
+    }
+}
+
 // `from_bytes` reads exactly one record: a short one, a trailing byte, an
 // items length over 262,144 or over the bytes left are `seal/backup_history`.
 // spec: SEAL-BKP-002
@@ -354,7 +406,9 @@ fn the_file_layout() {
 }
 
 // A nightly file and a segment read back with every field; the history of
-// the file is exactly the membership's `ctl_seqs`, in seq order.
+// the file is exactly the membership's `ctl_seqs`, in seq order, and
+// `read_backup` returns it: the records the file was written with, byte for
+// byte, in order (§26, ruling Q59).
 // spec: SEAL-BKP-001
 // spec: SEAL-BKP-002
 // spec: SEAL-BKP-003
@@ -383,6 +437,10 @@ fn write_then_read() {
     }
     assert_eq!(v.projection.ctl_seqs, x.b.m.ctl_seqs);
     assert!(agrees(&v.projection, &x.b.m));
+    let bytes = |h: &[HistoryRecord]| h.iter().map(HistoryRecord::to_bytes).collect::<Vec<_>>();
+    assert_eq!(v.history.len(), 3);
+    assert_eq!(bytes(&v.history), bytes(&x.recs));
+    assert_eq!(v.history.iter().map(HistoryRecord::seq).collect::<Vec<_>>(), x.b.m.ctl_seqs);
 
     // A segment: M_{first_seq − 1}, the history to first_seq − 1, the frames
     // first_seq to seq.
@@ -402,12 +460,40 @@ fn write_then_read() {
     assert_eq!(file[6], 2);
     let v = x.read(&file).unwrap();
     assert_eq!((v.seq, v.file_type, v.read_token.is_none()), (x.b.seq(), 2, true));
+    // The segment's history ends at `first_seq − 1`.
+    assert_eq!(bytes(&v.history), bytes(&recs));
+    assert!(v.history.last().unwrap().seq() < first_seq);
     match v.content {
         BackupContent::Segment { first_seq: f, chain_before: c, frames: fr, .. } => {
             assert_eq!((f, c, fr), (first_seq, chain_before, frames));
         }
         BackupContent::Nightly { .. } => panic!("not nightly"),
     }
+}
+
+// The agreement of §21.6 step 11 (and of §20.5 step 7) names the board id:
+// a membership equal to the projection but for its board id does not agree
+// with it, either way round (ruling Q58). Through bytes this cannot be
+// reached (the parser ties the board id to the salt, the first recovery key
+// and every recovery record's id), so the state is built directly.
+// spec: SEAL-BKP-003
+// spec: SEAL-BLOB-007
+#[test]
+fn the_agreement_names_the_board_id() {
+    let mut x = Hist::new(2);
+    x.rotate(Who::D(1));
+    let p = projection::project(&x.recs(), &x.b.board).unwrap();
+    assert!(agrees(&x.b.m, &p));
+    let mut m = x.b.m.dup();
+    m.board_id = BoardId([0x5A; 16]);
+    assert!(!agrees(&m, &p));
+    assert!(!agrees(&p, &m));
+    // Everything else still agrees: only the board id differs.
+    m.board_id = x.b.board;
+    assert!(agrees(&m, &p));
+    // The bytes of such a membership do not parse.
+    m.board_id = BoardId([0x5A; 16]);
+    assert!(Membership::from_canonical_bytes(&m.to_canonical_bytes()).is_err());
 }
 
 // The writer refuses when the membership's current recovery key is not the

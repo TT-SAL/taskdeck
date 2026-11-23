@@ -469,10 +469,6 @@ impl<'a> Reader<'a> {
     pub(crate) fn new(b: &'a [u8]) -> Reader<'a> {
         Reader { b, at: 0 }
     }
-    /// The offset of the next byte.
-    pub(crate) fn pos(&self) -> usize {
-        self.at
-    }
     pub(crate) fn arr<const N: usize>(&mut self) -> Option<[u8; N]> {
         let v = *take::<N>(self.b, self.at)?;
         self.at = self.at.checked_add(N)?;

@@ -1,0 +1,83 @@
+{
+  "cases": [
+    {
+      "code": "000G-40R4-0M30-E209-08",
+      "entropy": "00010203040506070809",
+      "name": "s = 00..09"
+    },
+    {
+      "code": "0000-0000-0000-0000-BX",
+      "entropy": "00000000000000000000",
+      "name": "s of 00"
+    },
+    {
+      "code": "ZZZZ-ZZZZ-ZZZZ-ZZZZ-YG",
+      "entropy": "ffffffffffffffffffff",
+      "name": "s of ff"
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "name": "typed as displayed",
+      "ticket_key": "a0ceb56829a0bf54a33e8901de8c54414ec29ba4a5bb1627bf3399123f2654d1",
+      "tid": "4193352c836672dba5a51790e12583d4",
+      "typed": "000G-40R4-0M30-E209-08"
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "name": "typed without hyphens",
+      "ticket_key": "a0ceb56829a0bf54a33e8901de8c54414ec29ba4a5bb1627bf3399123f2654d1",
+      "tid": "4193352c836672dba5a51790e12583d4",
+      "typed": "000G40R40M30E20908"
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "name": "lowercase, look-alikes, spaces and a tab",
+      "ticket_key": "a0ceb56829a0bf54a33e8901de8c54414ec29ba4a5bb1627bf3399123f2654d1",
+      "tid": "4193352c836672dba5a51790e12583d4",
+      "typed": " ooog 4or4om3o\te2o9o8 "
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "error": "seal/code_format",
+      "name": "17 characters",
+      "typed": "000G40R40M30E2090"
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "error": "seal/code_format",
+      "name": "19 characters",
+      "typed": "000G40R40M30E209080"
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "error": "seal/code_format",
+      "name": "a U",
+      "typed": "U00G40R40M30E20908"
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "error": "seal/code_format",
+      "name": "a newline inside",
+      "typed": "000G40R40\n30E20908"
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "error": "seal/code_format",
+      "name": "a character outside ASCII",
+      "typed": "000G40R40é30E20908"
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "error": "seal/code_check",
+      "name": "check character wrong",
+      "typed": "000G40R40M30E20900"
+    },
+    {
+      "board_id": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0",
+      "error": "seal/code_check",
+      "name": "secret character wrong",
+      "typed": "00ZG40R40M30E20908"
+    }
+  ],
+  "spec": "seal.md §17.2"
+}

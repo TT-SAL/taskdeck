@@ -7,7 +7,7 @@ use super::*;
 use crate::backup::tests::{Hist, dup};
 use crate::receipt::tests::board::{Who, rand};
 use crate::receipt::tests::board::copy;
-use crate::{OsEntropy, chain_zero};
+use crate::{OsEntropy, chain_zero, state_hash};
 
 const BOARD_BYTES: &[u8] = b"{\"cards\":[1,2,3]}";
 
@@ -32,6 +32,7 @@ fn body_of(x: &Hist) -> SnapshotBody {
     }
 }
 
+#[cfg(feature = "test-entropy")]
 fn copy_body(b: &SnapshotBody) -> SnapshotBody {
     SnapshotBody {
         seq: b.seq,
@@ -66,8 +67,14 @@ fn sealed(x: &Hist) -> (SealedBlob, BlobRef) {
     (sb, r)
 }
 
+/// The state hash the signed entry of `x`'s snapshot names (version 1).
+fn want(x: &Hist) -> [u8; 32] {
+    body_of(x).state_hash
+}
+
+/// Opens with the expected values of `x`'s signed entry.
 fn open(x: &Hist, bytes: &[u8], r: &BlobRef) -> Result<SnapshotBody, SealError> {
-    open_snapshot(&split_parts(bytes), r, x.b.seq(), &writer(x), &key(x, KeyKind::Snap), &x.b.board)
+    open_snapshot(&split_parts(bytes), r, x.b.seq(), &want(x), 1, &writer(x), &key(x, KeyKind::Snap), &x.b.board)
 }
 
 /// Sealed bytes built here from a padded body: any header, any `S`, under
@@ -331,7 +338,8 @@ fn a_snapshot_fails_each_step_in_order() {
     let k = key(&x, KeyKind::Snap);
     let w = writer(&x);
     let s = x.b.seq();
-    let go = |parts: &[&[u8]], r: &BlobRef| open_snapshot(parts, r, s, &w, &k, &x.b.board);
+    let hash = want(&x);
+    let go = |parts: &[&[u8]], r: &BlobRef| open_snapshot(parts, r, s, &hash, 1, &w, &k, &x.b.board);
     assert!(go(&[b], &r).is_ok());
     // 1.
     for (n, size) in [(0u32, r.size), (2, r.size), (1, r.size + 1), (1, r.size - 1), (1, 66), (1, 67_108_865)] {
@@ -349,7 +357,7 @@ fn a_snapshot_fails_each_step_in_order() {
     let other = derive_epoch_key(&x.b.roots[&1], &x.b.board, 1, KeyKind::Snap);
     let mut f = b.clone();
     f[60] ^= 1;
-    fails(open_snapshot(&[&f], &r, s, &w, &other, &x.b.board), SealError::BlobHash);
+    fails(open_snapshot(&[&f], &r, s, &hash, 1, &w, &other, &x.b.board), SealError::BlobHash);
     // 3. Each header field, the hash recomputed; the expected epoch.
     let rehash = |f: &[u8]| BlobRef { sha256: h(&[f]), ..blob_ref(&sb, r.inflated, 2) };
     for (i, v) in [(0usize, b'X'), (3, b'2'), (4, 2), (5, 2), (6, 2), (6, 0), (10, 3)] {
@@ -365,10 +373,10 @@ fn a_snapshot_fails_each_step_in_order() {
         f[i] ^= 1;
         fails(go(&[&f], &rehash(&f)), SealError::BlobOpen);
     }
-    fails(open_snapshot(&[b], &r, s + 1, &w, &k, &x.b.board), SealError::BlobOpen);
-    fails(open_snapshot(&[b], &r, s, &x.b.dev(Who::D(0)), &k, &x.b.board), SealError::BlobOpen);
-    fails(open_snapshot(&[b], &r, s, &w, &k, &BoardId([1; 16])), SealError::BlobOpen);
-    fails(open_snapshot(&[b], &r, s, &w, &other, &x.b.board), SealError::BlobOpen);
+    fails(open_snapshot(&[b], &r, s + 1, &hash, 1, &w, &k, &x.b.board), SealError::BlobOpen);
+    fails(open_snapshot(&[b], &r, s, &hash, 1, &x.b.dev(Who::D(0)), &k, &x.b.board), SealError::BlobOpen);
+    fails(open_snapshot(&[b], &r, s, &hash, 1, &w, &k, &BoardId([1; 16])), SealError::BlobOpen);
+    fails(open_snapshot(&[b], &r, s, &hash, 1, &w, &other, &x.b.board), SealError::BlobOpen);
     // 5. The padding: `U` over `L`, `L` not `P(U)`, a padding byte not zero.
     let good = pad(&deflate_raw(&encode_body(&body_of(&x)).unwrap()).unwrap());
     let mut over = good.clone();
@@ -414,34 +422,77 @@ fn a_snapshot_fails_each_step_in_order() {
         let (f, rf) = sealed_body_bytes(&x, &bad);
         fails(go(&[&f], &rf), SealError::BlobOpen);
     }
-    // Membership bytes that do not parse, with the state hash over them.
+    // Membership bytes that do not parse, with the state hash over them
+    // expected.
     let mut b2 = body_of(&x);
     b2.membership.push(0);
     b2.state_hash = state_hash(1, &h(&[&b2.board]), &b2.membership);
     let (f, rf) = sealed_body_bytes(&x, &encode_body(&b2).unwrap());
-    fails(go(&[&f], &rf), SealError::BlobOpen);
+    fails(open_snapshot(&[&f], &rf, s, &b2.state_hash, 1, &w, &k, &x.b.board), SealError::BlobOpen);
 }
 
-// A body whose `hash_version` its membership's rules do not allow is
-// `seal/blob_open` in `open_snapshot`, even with a `state_hash` computed
-// under that version from its own board and membership; the same body with
-// version 1 opens (seal.md §20.5 step 7; ruling Q50, as §21.6 step 11 for a
-// backup). The declared mode makes neither check. No clause of seal.md
-// states this check, so the test cites none.
+// Step 7 compares the body's `hash_version` and `state_hash` with the
+// expected values (the signed entry's or the bundle's), as it does `S`: an
+// expected state hash or version other than the body's, and a body whose
+// state hash or version is not the expected one, are `seal/blob_open`. The
+// crate does not recompute the state hash and does not check the version
+// against the membership's rules (ruling Q57): a body whose board does not
+// give its own state hash opens (the engine finds it, recomputing the hash
+// from the board it loads), and so does a version-2 body when version 2 is
+// expected. The declared mode compares neither value.
+// spec: SEAL-BLOB-007
 #[test]
-fn a_hash_version_the_rules_do_not_allow() {
+fn step_7_compares_the_expected_values() {
     let x = hist();
-    let ok = body_of(&x);
-    let (f, rf) = sealed_body_bytes(&x, &encode_body(&ok).unwrap());
-    assert!(open(&x, &f, &rf).is_ok());
+    let (sb, r) = sealed(&x);
+    let body = body_of(&x);
+    let (w, k, s) = (writer(&x), key(&x, KeyKind::Snap), x.b.seq());
+    let go = |f: &[u8], r: &BlobRef, hash: &[u8; 32], hv: u32| open_snapshot(&[f], r, s, hash, hv, &w, &k, &x.b.board);
+    assert!(go(&sb.bytes, &r, &body.state_hash, 1).is_ok());
+    // The expected values differ from the body's.
+    for i in [0usize, 17, 31] {
+        let mut other = body.state_hash;
+        other[i] ^= 1;
+        fails(go(&sb.bytes, &r, &other, 1), SealError::BlobOpen);
+    }
+    for hv in [0u32, 2, u32::MAX] {
+        fails(go(&sb.bytes, &r, &body.state_hash, hv), SealError::BlobOpen);
+    }
+    // The body's values differ from the expected ones.
+    let mut b = body_of(&x);
+    b.state_hash[5] ^= 1;
+    let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
+    fails(go(&f, &rf, &body.state_hash, 1), SealError::BlobOpen);
+    assert!(go(&f, &rf, &b.state_hash, 1).is_ok());
+    let mut b = body_of(&x);
+    b.hash_version = 2;
+    let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
+    fails(go(&f, &rf, &body.state_hash, 1), SealError::BlobOpen);
+    // A body whose board does not give its signed state hash opens: the
+    // engine finds it.
+    let mut b = body_of(&x);
+    b.board = b"{\"cards\":[]}".to_vec();
+    assert_ne!(state_hash(1, &h(&[&b.board]), &b.membership), body.state_hash);
+    let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
+    let got = go(&f, &rf, &body.state_hash, 1).unwrap();
+    assert_eq!((got.board, got.state_hash), (b.board.clone(), body.state_hash));
+    // A version the membership's rules do not allow, its hash computed
+    // under that version, opens when that version is expected.
     let mut b = body_of(&x);
     b.hash_version = 2;
     b.state_hash = state_hash(2, &h(&[&b.board]), &b.membership);
     let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
-    fails(open(&x, &f, &rf), SealError::BlobOpen);
+    assert_eq!(go(&f, &rf, &b.state_hash, 2).unwrap().hash_version, 2);
+    // The declared mode compares neither: a body with another state hash
+    // and another version opens.
+    let mut b = body_of(&x);
+    b.hash_version = 7;
+    b.state_hash = [0x66; 32];
+    let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
     let root2 = copy(&x.b.roots[&2]);
     let roots = |e: u32| if e == 2 { Some(&root2) } else { None };
-    assert_eq!(declared(&x, &[&f], &rf.sha256, rf.size, &roots).unwrap().0.hash_version, 2);
+    let (got, _, _) = declared(&x, &[&f], &rf.sha256, rf.size, &roots).unwrap();
+    assert_eq!((got.hash_version, got.state_hash), (7, [0x66; 32]));
 }
 
 // The history: one that fails a step of the projection (a signature, the
@@ -464,16 +515,21 @@ fn a_history_that_fails_or_disagrees() {
     let root2 = copy(&x.b.roots[&2]);
     let roots = |e: u32| if e == 2 { Some(&root2) } else { None };
     type Both = (Result<SnapshotBody, SealError>, Result<(SnapshotBody, u32, u64), SealError>);
-    let both = |bytes: &[u8]| -> Both {
-        let (f, rf) = sealed_body_bytes(&x, bytes);
-        (open_snapshot(&[&f], &rf, s, &w, &k, &x.b.board), open_snapshot_declared(&[&f], &rf.sha256, rf.size, s, &w, &roots, &x.b.board))
+    // Each body is opened with its own state hash and version expected, so
+    // that only the history can fail.
+    let both = |b: &SnapshotBody| -> Both {
+        let (f, rf) = sealed_body_bytes(&x, &encode_body(b).unwrap());
+        (
+            open_snapshot(&[&f], &rf, s, &b.state_hash, b.hash_version, &w, &k, &x.b.board),
+            open_snapshot_declared(&[&f], &rf.sha256, rf.size, s, &w, &roots, &x.b.board),
+        )
     };
     let check = |b: &SnapshotBody| {
-        let (a, d) = both(&encode_body(b).unwrap());
+        let (a, d) = both(b);
         fails(a, SealError::BlobOpen);
         fails(d, SealError::BlobOpen);
     };
-    let (a, d) = both(&encode_body(&body_of(&x)).unwrap());
+    let (a, d) = both(&body_of(&x));
     assert!(a.is_ok() && d.is_ok());
     let mut b = body_of(&x);
     b.history[1].sig[0] ^= 1;
@@ -505,7 +561,7 @@ fn a_history_that_fails_or_disagrees() {
     b.seq = b.history.last().unwrap().seq - 1;
     let bytes = raw(1, 2, b.seq, &w, &x.b.board, &k, &pad(&deflate_raw(&encode_body(&b).unwrap()).unwrap()), MAGIC, [1, 1]);
     let rf = BlobRef { id: BlobId([0; 16]), sha256: h(&[&bytes]), size: bytes.len() as u64, parts: 1, inflated: encode_body(&b).unwrap().len() as u64, epoch: 2 };
-    fails(open_snapshot(&[&bytes], &rf, b.seq, &w, &k, &x.b.board), SealError::BlobOpen);
+    fails(open_snapshot(&[&bytes], &rf, b.seq, &b.state_hash, 1, &w, &k, &x.b.board), SealError::BlobOpen);
     // Another board id for the receiver: the Genesis record's board_id check
     // (and the AD) reject it; sealed for that board, only the projection does.
     let other = BoardId([0x42; 16]);
@@ -513,7 +569,7 @@ fn a_history_that_fails_or_disagrees() {
     let e = encode_body(&body_of(&x)).unwrap();
     let bytes = raw(1, 2, s, &w, &other, &kb, &pad(&deflate_raw(&e).unwrap()), MAGIC, [1, 1]);
     let rf = BlobRef { id: BlobId([0; 16]), sha256: h(&[&bytes]), size: bytes.len() as u64, parts: 1, inflated: e.len() as u64, epoch: 2 };
-    fails(open_snapshot(&[&bytes], &rf, s, &w, &kb, &other), SealError::BlobOpen);
+    fails(open_snapshot(&[&bytes], &rf, s, &want(&x), 1, &w, &kb, &other), SealError::BlobOpen);
 }
 
 // A decompression bomb: a small sealed snapshot whose stream would inflate
@@ -579,7 +635,6 @@ fn the_declared_mode() {
     let x = hist();
     let (sb, r) = sealed(&x);
     let b = &sb.bytes;
-    let s = x.b.seq();
     let w = writer(&x);
     let r1 = copy(&x.b.roots[&1]);
     let r2 = copy(&x.b.roots[&2]);
@@ -697,7 +752,7 @@ fn a_blob_fails_each_step_in_order() {
     let (snap, sr) = sealed(&x);
     fails(open_blob(&[&snap.bytes], &sr, &w, &key(&x, KeyKind::Snap), &x.b.board), SealError::BlobHeader);
     let one = seal_blob(b"jpeg", &k, &x.b.board, 2, &w, &mut OsEntropy).unwrap();
-    fails(open_snapshot(&[&one.bytes], &blob_ref(&one, 4, 2), x.b.seq(), &w, &k, &x.b.board), SealError::BlobHeader);
+    fails(open_snapshot(&[&one.bytes], &blob_ref(&one, 4, 2), x.b.seq(), &want(&x), 1, &w, &k, &x.b.board), SealError::BlobHeader);
 }
 
 // `K_snap,e` and `K_blob,e` differ, and a snapshot does not open under the
@@ -713,9 +768,9 @@ fn a_snapshot_key_is_not_a_blob_key() {
     assert_ne!(snap.as_bytes(), blob.as_bytes());
     assert_ne!(snap.as_bytes(), entry.as_bytes());
     let w = writer(&x);
-    assert!(open_snapshot(&[&sb.bytes], &r, x.b.seq(), &w, &snap, &x.b.board).is_ok());
+    assert!(open_snapshot(&[&sb.bytes], &r, x.b.seq(), &want(&x), 1, &w, &snap, &x.b.board).is_ok());
     for k in [&blob, &entry] {
-        fails(open_snapshot(&[&sb.bytes], &r, x.b.seq(), &w, k, &x.b.board), SealError::BlobOpen);
+        fails(open_snapshot(&[&sb.bytes], &r, x.b.seq(), &want(&x), 1, &w, k, &x.b.board), SealError::BlobOpen);
     }
     let pb = seal_blob(b"jpeg", &blob, &x.b.board, 2, &w, &mut OsEntropy).unwrap();
     let pr = blob_ref(&pb, 0, 2);
@@ -738,7 +793,7 @@ fn a_genesis_snapshot() {
     let w = x.b.dev(Who::D(0));
     let sb = seal_snapshot(&body, &k, &x.b.board, 1, &w, &mut OsEntropy).unwrap();
     let r = blob_ref(&sb, encode_body(&body).unwrap().len() as u64, 1);
-    let got = open_snapshot(&[&sb.bytes], &r, 1, &w, &k, &x.b.board).unwrap();
+    let got = open_snapshot(&[&sb.bytes], &r, 1, &body.state_hash, 1, &w, &k, &x.b.board).unwrap();
     assert_eq!(got.seq, 1);
     assert_ne!(got.chain, chain_zero(&x.b.board));
 }

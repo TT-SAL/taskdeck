@@ -12,11 +12,11 @@ use zeroize::Zeroizing;
 
 use crate::keys::hpke_sender;
 use crate::membership::Reader;
-use crate::payloads::parse_ctl_unsigned;
+use crate::payloads::{parse_ctl_unsigned, parse_items_bytes};
 use crate::prim::{HpkeAead, Kdf, Kem, deflate_split, h, inflate_raw, push_zeroizing, take};
 use crate::signatures::{sign_with, verify_strict_parts};
 use crate::{
-    BoardId, Chain, DevId, DeviceKeys, DevicePublic, Entropy, EntryId, EpochRoot, FrameHash, Head, Kind,
+    BoardId, Chain, CtlItem, DevId, DeviceKeys, DevicePublic, Entropy, EntryId, EpochRoot, FrameHash, Head, Kind,
     Membership, Opened, RecoveryKeys, RecoveryPublic, SealError, chain_step, ctx, frame_header, state_hash,
 };
 
@@ -160,6 +160,31 @@ impl HistoryRecord {
     /// The entry's seq (seal.md §21.5).
     pub fn seq(&self) -> u64 {
         self.seq
+    }
+
+    /// The author's `dev`, from the frame header (seal.md §21.5).
+    pub fn dev(&self) -> DevId {
+        self.dev
+    }
+
+    /// The author's counter, from the frame header (seal.md §21.5).
+    pub fn ctr(&self) -> u64 {
+        self.ctr
+    }
+
+    /// `H(frame)` of the accepted entry (seal.md §21.5).
+    pub fn frame_hash(&self) -> FrameHash {
+        self.frame_hash
+    }
+
+    /// The record's items (seal.md §12, §21.5, §26), or
+    /// `seal/backup_history` when they are not a canonical item list. A
+    /// record from `from_accepted` or from a verified history always parses;
+    /// one only read with `from_bytes` may not, and its items are not
+    /// authenticated until its signature has been checked (the projection
+    /// of §21.6).
+    pub fn items(&self) -> Result<Vec<CtlItem>, SealError> {
+        parse_items_bytes(&self.items).map_err(|_| SealError::BackupHistory)
     }
 }
 
@@ -356,7 +381,9 @@ fn encode_parts(
     Ok(PayloadParts { head: p, secret, tail })
 }
 
-/// The payload of §21.5 in one zeroizing buffer (it holds the roots).
+/// The payload of §21.5 in one zeroizing buffer (it holds the roots); the
+/// unit tests' reference for the split encoding the writer uses.
+#[cfg(test)]
 pub(crate) fn encode_payload(
     history: &[HistoryRecord],
     content: &BackupContent,
@@ -499,10 +526,12 @@ pub fn write_backup(writer: &DeviceKeys, input: BackupInput, rng: &mut dyn Entro
 
 /// A backup file that passed every step of §21.6 (seal.md §26).
 ///
-/// `projection` is the membership the history alone gives (§21.6
-/// "Projection"; see `projection::project` for what it holds besides the
-/// devices, keys, statuses, recovery records, epochs, commitments and
-/// `ctl_seqs` that step 11 compares).
+/// `history` is the file's verified history records, in order (§21.6 step
+/// 9); its last record is the last control entry the file proves its
+/// writer saw (§21.6, `device.md` §15.8). `projection` is the membership the
+/// history alone gives (§21.6 "Projection"; see `projection::project` for
+/// what it holds besides the board id, devices, keys, statuses, recovery
+/// records, epochs, commitments and `ctl_seqs` that step 11 compares).
 pub struct VerifiedBackup {
     pub writer: DevicePublic,
     pub seq: u64,
@@ -513,6 +542,7 @@ pub struct VerifiedBackup {
     pub roots: Vec<(u32, EpochRoot)>,
     pub read_token: Option<String>,
     pub meta: Vec<u8>,
+    pub history: Vec<HistoryRecord>,
     pub projection: Membership,
 }
 
@@ -670,17 +700,18 @@ fn parse_rest(r: &mut Reader<'_>, hdr: &BackupHeader) -> Option<Rest> {
 }
 
 /// §21.6 step 11, the agreement of the membership bytes with the projection:
-/// the same devices with the same keys and statuses, the same current
-/// recovery key, the same epochs and commitments, the same `ctl_seqs`; and
-/// nothing else of either state.
+/// the same board id, the same devices with the same keys and statuses, the
+/// same current recovery key, the same epochs and commitments, the same
+/// `ctl_seqs`; and nothing else of either state (ruling Q58).
 pub(crate) fn agrees(m: &Membership, p: &Membership) -> bool {
+    let board = m.board() == p.board();
     let devices = m.devices.len() == p.devices.len()
         && m.devices.iter().zip(&p.devices).all(|(a, b)| {
             a.dev == b.dev && a.sign_pk == b.sign_pk && a.hpke_pk == b.hpke_pk && a.is_current() == b.is_current()
         });
     let (ra, rb) = (m.current_recovery(), p.current_recovery());
     let recovery = ra.dev == rb.dev && ra.sign_pk == rb.sign_pk && ra.hpke_pk == rb.hpke_pk;
-    devices && recovery && m.epoch == p.epoch && m.commitments == p.commitments && m.ctl_seqs == p.ctl_seqs
+    board && devices && recovery && m.epoch == p.epoch && m.commitments == p.commitments && m.ctl_seqs == p.ctl_seqs
 }
 
 /// Reads a backup file with a typed sheet's keys (seal.md §21.6, §26): the
@@ -707,8 +738,10 @@ pub(crate) fn agrees(m: &Membership, p: &Membership) -> bool {
 ///     those of the typed seed (`seal/backup_writer`, SEAL-BKP-004; ruling
 ///     Q45: `dev_R` binds the signing key alone);
 /// 11. the rest, strictly (`seal/backup_payload`): the layout; the
-///     membership parses (§13.2) and agrees with the projection; every root
-///     matches its commitment (SEAL-KEY-013); a nightly file's state hash
+///     membership parses (§13.2) and agrees with the projection (the same
+///     board id, devices, recovery key, epochs, commitments and
+///     `ctl_seqs`); every root matches its commitment (SEAL-KEY-013); a
+///     nightly file's state hash
 ///     recomputed from `board` and `membership` (`engine.md` §18.3); a
 ///     segment's chain recomputed from `chain_before` (§15.1).
 ///
@@ -815,6 +848,7 @@ pub fn read_backup(bytes: &[u8], sheet_board: &BoardId, recovery: &RecoveryKeys)
         roots: rest.roots,
         read_token: rest.read_token,
         meta: rest.meta,
+        history,
         projection,
     })
 }

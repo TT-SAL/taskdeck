@@ -9,9 +9,12 @@ mod board;
 mod backup;
 #[path = "../common/blob.rs"]
 mod blob;
+#[path = "../common/pairing.rs"]
+mod pairing;
 
 mod s1_wraps;
 mod s3_receipt;
 mod s4_backups;
 mod s4_files;
 mod s5_blobs;
+mod s6_slots;

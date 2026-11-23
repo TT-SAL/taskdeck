@@ -1,7 +1,8 @@
 //! `seal-backup.json` (seal.md §21): a nightly backup and a segment written
 //! from a small history (inputs: the seed, the writer's keys, the history
 //! records, the payload fields, the 32 bytes of entropy), with the inflated
-//! payload and the file; the reader's result for each step of §21.6,
+//! payload and the file; the reader's result for each step of §21.6 (a
+//! successful read with the verified history, each record's bytes),
 //! including forged, truncated and re-signed files; `verify_backup_file` on
 //! a good file, a re-signed one, one whose header names another key and a
 //! truncated one; history records built by `from_accepted` from accepted
@@ -54,6 +55,7 @@ fn read_result(file: &[u8], board: &BoardId, seed: &[u8; 32]) -> Map<String, Val
                 json!(v.roots.iter().map(|(e, r)| json!({ "epoch": e, "root": hex(&r.to_bytes()[..]) })).collect::<Vec<_>>()),
             );
             m.insert("projection".into(), json!(hex(&v.projection.to_canonical_bytes())));
+            m.insert("history".into(), json!(v.history.iter().map(|r| hex(&r.to_bytes())).collect::<Vec<_>>()));
         }
     }
     m

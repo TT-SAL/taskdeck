@@ -45,7 +45,7 @@ fn flipping_any_byte_of_a_blob() {
     let sb = seal_snapshot(&body, &k, &s.board, 2, &w, &mut OsEntropy).unwrap();
     let r = blob_ref(&sb.bytes, inflated, 2);
     let seq = s.seq();
-    flip_all(&sb.bytes, &r, &|b, r| open_snapshot(&split_parts(b), r, seq, &w, &k, &s.board).map(|_| ()));
+    flip_all(&sb.bytes, &r, &|b, r| open_snapshot(&split_parts(b), r, seq, &body.state_hash, 1, &w, &k, &s.board).map(|_| ()));
     let root = EpochRoot::from_bytes(s.roots[&2]);
     let roots = |e: u32| if e == 2 { Some(&root) } else { None };
     for i in 0..sb.bytes.len() {

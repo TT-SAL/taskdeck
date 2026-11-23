@@ -8,7 +8,7 @@ export const meta = {
     { title: 'Security', model: 'opus' },
   ],
 }
-// args: { id, brief, lenses: [string, string], until: 'implement' | 'verify' | 'all', base, lead }
+// args: { id, brief, lenses: [string, string], until: 'implement' | 'verify' | 'security-1' | 'all', base, lead, firstAlone }
 // `until` never enters a prompt, so a resume with another value replays the finished agents from the cache.
 // `base` is the commit before the task: the lead commits and pushes the task after its verify pass, so the
 // security passes and their fixer read the task's changes as a diff against `base`.
@@ -140,8 +140,20 @@ if (v1.findings.some(f => f.severity === 'high')) {         // a second verify p
 if (args.until === 'verify') return { ...out, stopped: 'verify' }
 
 phase('Security')
-const passes = await parallel(args.lenses.map((lens, i) => () =>
-  agent(secPrompt(i + 1, lens), { label: `security-${i + 1}:${ID}`, phase: 'Security', schema: FINDINGS, ...OPTS })))
+// `until: 'security-1'` runs the first security pass alone (when a usage window has room for one agent only);
+// the later resume with `until: 'all'` replays it from the cache and runs the second pass and the fix.
+if (args.until === 'security-1') {
+  const first = await agent(secPrompt(1, args.lenses[0]), { label: `security-1:${ID}`, phase: 'Security', schema: FINDINGS, ...OPTS })
+  return { ...out, security1: first, stopped: 'security-1' }
+}
+// A call inside parallel() has another cache key than the same call made directly. So when the first pass ran
+// alone before (`until: 'security-1'`), the resume passes `firstAlone: true`: the first pass is called directly
+// again (served from the cache) and the second one after it.
+const passes = args.firstAlone
+  ? [await agent(secPrompt(1, args.lenses[0]), { label: `security-1:${ID}`, phase: 'Security', schema: FINDINGS, ...OPTS }),
+     await agent(secPrompt(2, args.lenses[1]), { label: `security-2:${ID}`, phase: 'Security', schema: FINDINGS, ...OPTS })]
+  : await parallel(args.lenses.map((lens, i) => () =>
+      agent(secPrompt(i + 1, lens), { label: `security-${i + 1}:${ID}`, phase: 'Security', schema: FINDINGS, ...OPTS })))
 if (passes.some(p => p === null)) return { ...out, failed: 'security' }
 out.security = passes
 passes.forEach(keepLows)
