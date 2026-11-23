@@ -115,6 +115,11 @@ impl RecoveryKeys {
     pub(crate) fn signing_key(&self) -> &ed25519_dalek::SigningKey {
         &self.sign
     }
+
+    /// The HPKE secret, for opening a backup (§21.6 step 6, task S4).
+    pub(crate) fn hpke_secret(&self) -> &x25519_dalek::StaticSecret {
+        &self.hpke
+    }
 }
 
 /// The recovery public key `(rsign_pk, rhpke_pk)` (seal.md §6.1, §26).
@@ -428,6 +433,35 @@ pub fn wrap_root(
     }
     ct_out.copy_from_slice(&ct);
     Ok(out)
+}
+
+/// The HPKE sender context of the suite of §7 and §21.3.
+pub(crate) type HpkeSender = hpke::aead::AeadCtxS<HpkeAead, Kdf, Kem>;
+
+/// An HPKE base-mode sender context to `recipient_pk` with `info` (seal.md
+/// §21.3): draws exactly 32 bytes `ikm` from `rng`, and the ephemeral key
+/// pair is `DeriveKeyPair(ikm)`, as `wrap_root` makes it. Returns the
+/// encapsulated key and the context, which the caller uses for one `seal`
+/// and drops (SEAL-BKP-007). `seal/entropy` when `rng` fails, `seal/dh_zero`
+/// when the X25519 output is all zero (SEAL-GEN-013).
+pub(crate) fn hpke_sender(
+    recipient_pk: &[u8; 32],
+    info: &[u8],
+    rng: &mut dyn Entropy,
+) -> Result<([u8; 32], HpkeSender), SealError> {
+    use hpke::{Deserializable as _, Serializable as _};
+    let mut ikm = Zeroizing::new([0u8; 32]);
+    rng.fill(&mut ikm[..])?;
+    let pk = <Kem as hpke::Kem>::PublicKey::from_bytes(recipient_pk).map_err(|_| SealError::DhZero)?;
+    let mut once = IkmOnce { ikm: &ikm, handed: false, misused: false };
+    let (enc, cx) = hpke::setup_sender_with_rng::<HpkeAead, Kdf, Kem>(&hpke::OpModeS::Base, &pk, info, &mut once)
+        .map_err(|_| SealError::DhZero)?;
+    if once.misused || !once.handed {
+        return Err(SealError::Entropy);
+    }
+    let mut out = [0u8; 32];
+    enc.write_exact(&mut out);
+    Ok((out, cx))
 }
 
 /// Opens a wrap addressed to this identity (seal.md §7, SEAL-WRAP-002,

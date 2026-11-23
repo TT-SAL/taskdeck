@@ -54,5 +54,77 @@ pub(crate) fn take<const N: usize>(bytes: &[u8], at: usize) -> Option<&[u8; N]> 
     bytes.get(at..end)?.try_into().ok()
 }
 
+/// Appends `data` to a zeroizing buffer without leaving a copy behind: when
+/// the capacity does not suffice, the bytes move to a new buffer and the old
+/// one is wiped on drop (a plain `Vec` would reallocate and free unwiped
+/// memory).
+pub(crate) fn push_zeroizing(out: &mut Zeroizing<Vec<u8>>, data: &[u8]) {
+    let need = out.len().saturating_add(data.len());
+    if need > out.capacity() {
+        let cap = need.max(out.capacity().saturating_mul(2)).max(4096);
+        let mut bigger = Zeroizing::new(Vec::with_capacity(cap));
+        bigger.extend_from_slice(out);
+        *out = bigger;
+    }
+    out.extend_from_slice(data);
+}
+
+/// The working buffer of `deflate_raw` and `inflate_raw`.
+const CHUNK: usize = 64 * 1024;
+
+/// Raw DEFLATE (RFC 1951) of `data`, as flate2 writes it (seal.md §20.4,
+/// §21.3), into a zeroizing buffer; `None` if the compressor fails.
+pub(crate) fn deflate_raw(data: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
+    use flate2::{Compress, Compression, FlushCompress, Status};
+    let mut c = Compress::new(Compression::default(), false);
+    let mut out = Zeroizing::new(Vec::with_capacity(data.len() / 2 + 64));
+    let mut buf = Zeroizing::new(vec![0u8; CHUNK]);
+    loop {
+        let in_before = c.total_in();
+        let out_before = c.total_out();
+        let input = data.get(usize::try_from(in_before).ok()?..)?;
+        let st = c.compress(input, &mut buf[..], FlushCompress::Finish).ok()?;
+        let produced = usize::try_from(c.total_out().checked_sub(out_before)?).ok()?;
+        push_zeroizing(&mut out, buf.get(..produced)?);
+        match st {
+            Status::StreamEnd => break,
+            Status::Ok | Status::BufError if produced == 0 && c.total_in() == in_before => return None,
+            Status::Ok | Status::BufError => {}
+        }
+    }
+    Some(out)
+}
+
+/// Inflates raw DEFLATE (RFC 1951) while streaming, under a cap of `cap`
+/// bytes of output (seal.md §20.5, §21.6 step 7): `None` when the stream is
+/// wrong or truncated, when it would produce more than `cap` bytes, or when
+/// any input follows the end of the stream. Nothing is allocated for a
+/// claimed size (DEFLATE claims none): the output grows only with the bytes
+/// actually inflated, in a zeroizing buffer.
+pub(crate) fn inflate_raw(data: &[u8], cap: usize) -> Option<Zeroizing<Vec<u8>>> {
+    use flate2::{Decompress, FlushDecompress, Status};
+    let mut d = Decompress::new(false);
+    let mut out = Zeroizing::new(Vec::new());
+    let mut buf = Zeroizing::new(vec![0u8; CHUNK]);
+    loop {
+        let in_before = d.total_in();
+        let out_before = d.total_out();
+        let input = data.get(usize::try_from(in_before).ok()?..)?;
+        let st = d.decompress(input, &mut buf[..], FlushDecompress::None).ok()?;
+        let produced = usize::try_from(d.total_out().checked_sub(out_before)?).ok()?;
+        if out.len().checked_add(produced)? > cap {
+            return None;
+        }
+        push_zeroizing(&mut out, buf.get(..produced)?);
+        match st {
+            Status::StreamEnd => break,
+            // No progress: the input ended before the stream did.
+            Status::Ok | Status::BufError if produced == 0 && d.total_in() == in_before => return None,
+            Status::Ok | Status::BufError => {}
+        }
+    }
+    (usize::try_from(d.total_in()).ok()? == data.len()).then_some(out)
+}
+
 #[cfg(test)]
 mod tests;

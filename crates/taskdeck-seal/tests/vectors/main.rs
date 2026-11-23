@@ -6,6 +6,10 @@
 
 #[path = "../common/mod.rs"]
 mod common;
+#[path = "../common/board.rs"]
+mod board;
+#[path = "../common/backup.rs"]
+mod backup;
 
 mod s1_chain;
 mod s1_kdf;
@@ -14,6 +18,12 @@ mod s1_wrap;
 mod s2_frame;
 mod s2_padding;
 mod s2_signatures;
+mod s3_commit;
+mod s3_membership;
+mod s3_receipt;
+mod s3_rotation;
+mod s4_backup;
+mod s4_file;
 
 use serde_json::Value;
 
