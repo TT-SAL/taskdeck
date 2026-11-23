@@ -53,9 +53,9 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 
 | # | Task | Modules (`crates/taskdeck-seal/src/`) | Spec | Vectors (`docs/sync/vectors/`) | State |
 |---|---|---|---|---|---|
-| S1 | Primitives, keys, wraps, chain and fingerprints, the sheet, the known-answer suites, the vectors target, `ci.sh` | `error`, `entropy`, `base32`, `encodings` (hosts, names), `ids`, `ctx`, `keys`, `chain`, `prim` | §3–§7, §15, §18 | `seal-kdf`, `seal-wrap`, `seal-chain`, `seal-sheet` | **done** but for the lockfile change of its high finding (below) |
-| S2 | Frames, envelope, padding, payloads and control items (encode and strict parse, canonical JSON), login and admin signatures | `entries`, `signatures`, `encodings` (JSON) | §5.3, §8–§12, §16 | `seal-frame`, `seal-padding`, `seal-signatures` | brief written; next |
-| S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | brief written |
+| S1 | Primitives, keys, wraps, chain and fingerprints, the sheet, the known-answer suites, the vectors target, `ci.sh` | `error`, `entropy`, `base32`, `encodings` (hosts, names), `ids`, `ctx`, `keys`, `chain`, `prim` | §3–§7, §15, §18 | `seal-kdf`, `seal-wrap`, `seal-chain`, `seal-sheet` | **done**, merged (TT-SAL/taskdeck#4; its high finding fixed by TT-SAL/taskdeck#6) |
+| S2 | Frames, envelope, padding, payloads and control items (encode and strict parse, canonical JSON), login and admin signatures | `entries`, `signatures`, `encodings` (JSON) | §5.3, §8–§12, §16 | `seal-frame`, `seal-padding`, `seal-signatures` | **done** (low findings only; its pull request is the next to merge) |
+| S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | brief written; next |
 | S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | brief to write |
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection) | `blob` | §20 | `seal-blob` | brief to write |
 | S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | brief to write |
@@ -89,7 +89,9 @@ Notes for the briefs still to write (the lead's reading of the spec):
   pinned toolchain in `ci.sh` (Linux), with their own `[workspace]` and lockfile, covered by hand
   against the cooldown; the budget job (256 entries verified and opened within 100 ms, release build,
   median of five, baseline recorded here, 25% rule); the low findings listed below that are a few
-  lines each.
+  lines each (S1: the sheet lookup, SEAL-SHEET-003's citation; S2: the admin operations' signer and
+  argument checks, the order of `sign_admin`'s checks, a beat ack of seq 0, `seal_frame` under epoch
+  0, two hollow citations).
 
 ## Task S1: what happened
 
@@ -97,19 +99,31 @@ Notes for the briefs still to write (the lead's reading of the spec):
   value independently in Python, with its own RFC 9180, and re-fetched every known-answer source):
   five low findings, none high or medium. Security passes: one high, one low. Fix pass: the lead's
   rulings applied; the high finding handed back because it needs `Cargo.lock`.
-- **The high finding, open until its own pull request merges:** the SHA-256 and HMAC states that
+- **The high finding, fixed by TT-SAL/taskdeck#6 (merged 2026-11-23 01:35 UTC):** the SHA-256 and HMAC states that
   take in the seed, the epoch roots and the private keys are not wiped on drop, because `sha2` is
   built without its `zeroize` feature (SYNC_PLAN.md §3.4 "secrets zeroized"; SEAL-GEN-006 and
   SEAL-SHEET-003 in spirit). Fix: `sha2 = { workspace = true, features = ["zeroize"] }` in
   `crates/taskdeck-seal/Cargo.toml`; in `Cargo.lock` that adds the edge `zeroize` to `digest` 0.11.3
   and to `block-buffer` 0.12.1 and no package; the reproduction becomes a test in
   `src/prim/tests.rs` (`sha2::Sha256` and `sha2::Sha512` are `ZeroizeOnDrop`). `Cargo.lock` is a shared
-  file (plan §3.2), so this is a small pull request of its own, opened once the pull request of S1 is
-  merged.
+  file (plan §3.2), so it went into a small pull request of its own; its CI ran every area, the
+  desktop matrix and the supply-chain job included, green.
 - CI on Windows failed on the first push: a checkout under `core.autocrlf` gave the embedded word
   list, the sources two tests scan and the published vectors CRLF line endings. Fixed with
   `.gitattributes` in the crate and in `docs/sync/vectors/` (`* -text`), reproduced and verified here
   with a clone under `core.autocrlf=true`.
+
+## Task S2: what happened
+
+- Implementer: everything of the brief built (canonical JSON in `src/canon.rs`, payloads and control
+  items in `src/payloads.rs`, both private; the receive side as private functions, listed in the table
+  at the top of `src/entries.rs`), gate green. Verifier (who recomputed the three vector families
+  independently, with its own HKDF and HChaCha20): two low findings. Security passes: four low
+  findings from the protocol lens, none from the parsing lens (it checked `padded_len` against a
+  reference for every length to 300,000 and the builders' refusals one by one). No fix pass ran.
+- What S3 inherits, by the implementer's design and the lead's ruling Q14: the step-15 parsers check
+  what an item alone decides; the bounds relative to the entry's seq, the Genesis checks that need the
+  board and "Genesis only at seq 1" are S3's, at step 16.
 
 ## Decisions (with reasons)
 
@@ -175,11 +189,24 @@ go into one spec-change pull request (a sentence each, with a line in `CHANGES.m
 | Q9 | §24, §26 | `seal-kdf.json` publishes derived keys the API does not show | decision L9 |
 | Q10 | README §5.5 | Wycheproof's "acceptable" Ed25519 cases | the 8 small-order public keys fail, the 21 mixed-order ones verify: that is `verify_strict`. The relay's verifier must give the same answers |
 
+| Q11 | §10.2 `padded_len` | `U + m` overflows above 2^63 | saturates to `u64::MAX`, which is over the cap: refused, no panic |
+| Q12 | §10.1, §11.2 | does `seal_frame` refuse an `at_ms` out of range and an empty `cmd` payload | yes, `seal/bad_plaintext`: every receiver would refuse the entry. Spec note (§22's "raised when") |
+| Q13 | §26 `Signer::Recovery` | its board differs from the `board` argument | refused, `seal/unknown_author` |
+| Q14 | §12.3, §12.5, §12.8, §12.9 against §13.6 | the tables bound a field by the entry's seq, and §13.6 states the same bounds with `seal/ctl_target`: which step and code | step 15 (`seal/bad_payload`) checks what the item alone decides, the lower bounds included; the bounds relative to the entry's seq are §13.6's, step 16, `seal/ctl_target`. Spec note |
+| Q15 | §16.2, §22 | the code for an invalid admin argument | `admin_message` and `sign_admin` validate what the registry states; a host outside §5.4 is `seal/host_format`, anything else `seal/bad_payload`. Spec note |
+| Q16 | §12.7 | the code of `ctl_payload` for an invalid item | `seal/host_format` for a Fence host, `seal/ctl_shape` for items that form no shape, `seal/bad_payload` otherwise |
+| Q17 | §11.4, §11.5 | are `snap.epoch` 0 and `acks.entry` 0 allowed | `snap.epoch` is at least 1; `acks.entry` as the table says (a security pass notes seq 0 is never a snap entry: low, on S7's list) |
+| Q18 | §16.1, §16.2 | the order of the nonce and the argument checks | the relay nonce's length first (`seal/challenge_length`), then the origin or the arguments; a refused `sign_login` draws nothing |
+| Q19 | §26 | derives on the public data types | `Debug`, `Clone`, `PartialEq`, `Eq` on the non-secret ones; no name or signature changed |
+
 Candidates for the same spec-change pull request, if the later tasks confirm them:
 
 - Clauses that state a duty of the crate's caller (the device's sealer adapter) and are owned by
-  `seal` alone, such as SEAL-FRAME-005 (a frame for one counter is sealed at most once): the crate's
-  functions are pure and cannot violate them. Candidate change: add `device` as an owner.
+  `seal` alone: the crate's functions are pure and cannot violate them, so no test of this crate can
+  cite them honestly. So far: SEAL-FRAME-005 (a frame for one counter is sealed at most once),
+  SEAL-ENV-003 and SEAL-ENV-004 (which epoch the sealer chooses), SEAL-SIG-005 (the `register`
+  arguments name the frame that carries the matching `DeviceAdded`). Candidate change: `device`
+  becomes their owner. It affects stage `device` only, which has not started.
 - `seal.md` §25 says core provides "a function that encodes a JSON value canonically"; seal has its own
   (L4). Candidate change: one sentence there.
 
@@ -192,6 +219,10 @@ Candidates for the same spec-change pull request, if the later tasks confirm the
 | Task S1, first step (implementer, verifier) | 31 minutes; 0.46 and 0.28 million tokens | 2026-11-23 00:14 to 00:45 UTC |
 | Task S1, second step (two security passes, one fix) | 10 minutes; 0.20, 0.14 and 0.15 million tokens | 2026-11-23 00:50 to 01:00 UTC |
 | The crate's tests after S1 | 38 unit tests, 25 in the four gate targets it fills, 4 vector families; with `test-entropy` 44 unit tests | the lead's run, 01:01 UTC |
+| Task S2, first step (implementer, verifier) | 28 minutes; 0.51 and 0.29 million tokens | 2026-11-23 01:03 to 01:32 UTC |
+| Task S2, second step (two security passes, no fix) | 6 minutes; 0.17 and 0.18 million tokens | 2026-11-23 01:34 to 01:41 UTC |
+| The crate's tests after S2 | 85 unit tests, 30 in the four gate targets, 7 vector families | the lead's run, 01:34 UTC |
+| A pull-request CI run of the seal area | 6 to 9 minutes; with a lockfile change (every area) 19 minutes | TT-SAL/taskdeck#4, TT-SAL/taskdeck#6 |
 
 ## Token ledger
 
@@ -202,7 +233,9 @@ output); the higher is booked. Limit: 3.5 million per window.
 |---|---|---|---|---|---|
 | to 2026-11-23 06:50 | S1, to the verify pass | 2 | 0.55 M | 0.74 M | 0.74 M |
 | | S1, security passes and fix | 3 | 0.47 M | 0.49 M | 0.49 M |
-| | **window so far** | | | | **1.24 M** |
+| | S2, to the verify pass | 2 | 0.60 M | 0.80 M | 0.80 M |
+| | S2, security passes | 2 | 0.39 M | 0.35 M | 0.39 M |
+| | **window so far** | | | | **2.43 M** |
 
 ## Low findings left as they are
 
@@ -219,6 +252,17 @@ output); the higher is booked. Limit: 3.5 million per window.
   does not stop a caller from using a snapshot key for entries; §26 fixes that API. `base32::encode`
   and `decode_typed` are public and return plain buffers; the crate's secret paths use zeroizing
   variants.
+
+- **S2, verify and security.** `sign_admin` and `admin_message` sign operations the registry's own
+  words exclude: `mint_read_token` for a `dev` that is not the signer, `reinstate` by a device or with
+  `first_epoch` 1, `recovery_register` with a `dev_R` not derived from its `sign_pk`; `seed` allows
+  65,535 entries where §23 allows 320 records. The relay refuses them all the same. On S7's list.
+- **S2, security.** `sign_admin` reports `seal/unknown_author` before `seal/challenge_length` when both
+  the recovery signer's board and the nonce are wrong (nothing is signed either way). A beat's ack may
+  name seq 0. `seal_frame` seals under epoch 0, which every receiver refuses. On S7's list.
+- **S2, verify.** Two citations claim more than their tests prove: SEAL-SIG-005 on a test of the
+  `register` layout (a caller's clause, see the spec-change candidates), SEAL-PLAIN-001 on the test of
+  the sealing-side `at_ms` refusal. On S7's list.
 
 ## Open questions for the owner
 

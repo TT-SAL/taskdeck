@@ -11,6 +11,9 @@ mod s1_chain;
 mod s1_kdf;
 mod s1_sheet;
 mod s1_wrap;
+mod s2_frame;
+mod s2_padding;
+mod s2_signatures;
 
 use serde_json::Value;
 
