@@ -202,8 +202,12 @@ Notes behind the briefs (the lead's reading of the spec), and for the brief of S
 
 ## Rulings on spec questions
 
-The implementers' questions and the lead's rulings. None changes a clause; those marked "spec note"
-go into one spec-change pull request (a sentence each, with a line in `CHANGES.md`) before the exit.
+The implementers' questions and the lead's rulings. None changes a clause's text. The rulings of
+tasks S1 to S3, the ownership of five caller clauses and the defect E1 were written into `seal.md`
+and `engine.md` by the lead on 2026-11-23 02:30 UTC (34 sentences added in place, so no line moved;
+one row in `CHANGES.md`; `scripts/spec-lint.sh` passes; seal now owns 164 clauses). They travel in
+the pull request of task S3. Still to do: one agent that did not write them checks the spec diff
+against this table (next window). Rulings of later tasks go into a second spec change before the exit.
 
 | # | Where | Question | Ruling |
 |---|---|---|---|
@@ -243,16 +247,17 @@ go into one spec-change pull request (a sentence each, with a line in `CHANGES.m
 | Q32 | §13.2 | does the parser check invariants beyond the layout | yes; every state the transitions produce must pass (the verifier checks the round trip). Spec note |
 | Q33 | §26 `Receipt` | `code` and `opened` per class | with a halt, the halt's code; with `NeedFrames`, none; `opened` from step 11 on. Spec note |
 
-Candidates for the same spec-change pull request, if the later tasks confirm them:
+Applied with the same change (they were candidates until task S3 confirmed the pattern):
 
 - Clauses that state a duty of the crate's caller (the device's sealer adapter) and are owned by
   `seal` alone: the crate's functions are pure and cannot violate them, so no test of this crate can
   cite them honestly. So far: SEAL-FRAME-005 (a frame for one counter is sealed at most once),
   SEAL-ENV-003 and SEAL-ENV-004 (which epoch the sealer chooses), SEAL-SIG-005 (the `register`
-  arguments name the frame that carries the matching `DeviceAdded`). Candidate change: `device`
-  becomes their owner. It affects stage `device` only, which has not started.
-- `seal.md` §25 says core provides "a function that encodes a JSON value canonically"; seal has its own
-  (L4). Candidate change: one sentence there.
+  arguments name the frame that carries the matching `DeviceAdded`), SEAL-MEM-016 (a refused
+  rotation's root is discarded). `device` is now their owner; it affects stage `device` only, which
+  has not started.
+- `seal.md` §25 said core provides "a function that encodes a JSON value canonically"; seal has its own
+  (L4), and §25 now says so.
 
 ## Measurements
 
