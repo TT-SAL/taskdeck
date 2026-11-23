@@ -59,7 +59,7 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done**, merged (TT-SAL/taskdeck#13, 2026-11-23 07:46 UTC; low findings only, four rulings carried into S5's brief) |
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **done** (TT-SAL/taskdeck#14; two high findings of its security passes fixed and checked by the lead) |
 | S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **implemented**, gate green in the lead's run; S6b, then the verify and security passes (workflow run `wf_7055dfcc-29f`) |
-| S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | brief written |
+| S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | **implemented**, gate green in the lead's run (workflow run `wf_eb8420c9-0ef`); reviewed by S6's passes |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written (to revise with what S5 and S6 leave) |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
 
@@ -464,6 +464,7 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q75 | §17.9 step 6 | the own-dev flag and a halt while joining | the own-dev flag and the commitment halt abort with `seal/bundle_invalid`, the unknown-rules halt with `seal/pair_rules` |
 | Q76 | §17.10 | is the log one event or pages | one `Entries` holds the whole log from `h + 1` (paging is the caller's); a second aborts; `Frames` holds exactly the seqs asked for. Spec note; told to `device` |
 | Q77 | §17.7 | are the typed digits normalised | no: compared as typed, in constant time |
+| Q78 | §17.9 step 5 | with Q57, nothing checks a bundle snapshot's `hash_version` against the rules | the pairing machine, which recomputes the state hash, refuses a version the membership's rules do not allow (`seal/bundle_invalid`), as the backup reader does (Q40). Spec note |
 | Q49 | §26 `VerifiedBackup` | the recovery tool is to show a file's written date, which `read_backup` did not return | `VerifiedBackup` gains `written_ms` (the header's, display only). Code in S5's brief |
 | Q48 | SEAL-GEN-006, §21.3 | the DEFLATE compressor and decompressor (a pinned dependency's private state) hold the payload's bytes, the epoch roots among them, and are freed without being erased (S4 security, a note; `unsafe` is forbidden, so the crate cannot wipe them from outside) | as S1's high finding ruled for the hash states: a state that took in roots must not be left behind. The writer keeps the roots and the read token out of the compressor (they travel in stored blocks the crate writes itself, after a full flush); the reader resets the decompressor, which zeroes its window in the pinned version, before dropping it. What stays outside reach is said in the code and in the spec. Code in S5's brief |
 
@@ -523,7 +524,8 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S5, security passes and the fix pass | 3 | 0.59 M | 0.60 M | 0.60 M |
 | | second check of the second spec change | 1 | 0.18 M | 0.22 M | 0.22 M |
 | | S6, the implementer | 1 | 0.47 M | 0.69 M | 0.69 M |
-| | **window so far** | | | | **2.34 M** |
+| | S6b, the implementer | 1 | 0.23 M | 0.27 M | 0.27 M |
+| | **window so far** | | | | **2.61 M** |
 
 ## Low findings left as they are
 
