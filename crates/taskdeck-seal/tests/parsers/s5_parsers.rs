@@ -21,6 +21,8 @@ struct Fixture {
     blob: Vec<u8>,
     body: Vec<u8>,
     compressed: Vec<u8>,
+    /// The body's state hash, which `open_snapshot` expects (version 1).
+    hash: [u8; 32],
 }
 
 fn fixture() -> &'static Fixture {
@@ -34,7 +36,7 @@ fn fixture() -> &'static Fixture {
         let blob = seal_blob(&[7u8; 900], &blob_key(&s), &s.board, 2, &writer, &mut OsEntropy).unwrap().bytes;
         let body = body_bytes(&b);
         let compressed = deflate(&body);
-        Fixture { sim: s, writer, snapshot, blob, body, compressed }
+        Fixture { sim: s, writer, snapshot, blob, body, compressed, hash: b.state_hash }
     })
 }
 
@@ -69,7 +71,7 @@ fn open_all(fx: &Fixture, bytes: &[u8], inflated: u64, split: usize) {
     let r = BlobRef { sha256: sha(&[bytes]), ..blob_ref(bytes, inflated, 2) };
     let at = split.min(bytes.len());
     for parts in [split_parts(bytes), vec![&bytes[..at], &bytes[at..]]] {
-        let _ = open_snapshot(&parts, &r, s.seq(), &fx.writer, &snap_key(s), &s.board);
+        let _ = open_snapshot(&parts, &r, s.seq(), &fx.hash, 1, &fx.writer, &snap_key(s), &s.board);
         let _ = open_snapshot_declared(&parts, &r.sha256, r.size, s.seq(), &fx.writer, &roots, &s.board);
         let _ = open_blob(&parts, &r, &fx.writer, &blob_key(s), &s.board);
     }
@@ -98,7 +100,7 @@ proptest! {
         if m != fx.snapshot {
             let s = &fx.sim;
             let r = BlobRef { sha256: sha(&[&m]), ..blob_ref(&m, fx.body.len() as u64, 2) };
-            prop_assert!(open_snapshot(&split_parts(&m), &r, s.seq(), &fx.writer, &snap_key(s), &s.board).is_err());
+            prop_assert!(open_snapshot(&split_parts(&m), &r, s.seq(), &fx.hash, 1, &fx.writer, &snap_key(s), &s.board).is_err());
         }
     }
 

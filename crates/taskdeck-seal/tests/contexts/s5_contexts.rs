@@ -96,11 +96,11 @@ fn a_snapshot_is_not_a_blob_of_kind_2() {
     assert_eq!(open_blob(&[&f], &blob_ref(&f, 0, 2), &w, &k, &s.board).err(), Some(SealError::BlobOpen));
     let kb = blob_key(&s);
     let pb = seal_blob(b"jpeg", &kb, &s.board, 2, &w, &mut OsEntropy).unwrap();
-    assert_eq!(open_snapshot(&[&pb.bytes], &blob_ref(&pb.bytes, 4, 2), 0, &w, &kb, &s.board).err(), Some(SealError::BlobHeader));
+    assert_eq!(open_snapshot(&[&pb.bytes], &blob_ref(&pb.bytes, 4, 2), 0, &body.state_hash, 1, &w, &kb, &s.board).err(), Some(SealError::BlobHeader));
     let mut g = pb.bytes.clone();
     g[6] = 1;
-    assert_eq!(open_snapshot(&[&g], &blob_ref(&g, 4, 2), 0, &w, &kb, &s.board).err(), Some(SealError::BlobOpen));
-    assert!(open_snapshot(&[&sb.bytes], &blob_ref(&sb.bytes, inflated, 2), s.seq(), &w, &k, &s.board).is_ok());
+    assert_eq!(open_snapshot(&[&g], &blob_ref(&g, 4, 2), 0, &body.state_hash, 1, &w, &kb, &s.board).err(), Some(SealError::BlobOpen));
+    assert!(open_snapshot(&[&sb.bytes], &blob_ref(&sb.bytes, inflated, 2), s.seq(), &body.state_hash, 1, &w, &k, &s.board).is_ok());
 }
 
 // A snapshot sealed for one `S`, writer, board or epoch does not open for
@@ -119,15 +119,15 @@ fn a_snapshot_is_bound_to_s_writer_board_and_epoch() {
     let r = blob_ref(&sb.bytes, body_bytes(&body).len() as u64, 2);
     let seq = s.seq();
     let parts = split_parts(&sb.bytes);
-    assert!(open_snapshot(&parts, &r, seq, &w, &k, &s.board).is_ok());
+    assert!(open_snapshot(&parts, &r, seq, &body.state_hash, 1, &w, &k, &s.board).is_ok());
     let open = SealError::BlobOpen;
-    assert_eq!(open_snapshot(&parts, &r, seq + 64, &w, &k, &s.board).err(), Some(open));
-    assert_eq!(open_snapshot(&parts, &r, seq, &other_w, &k, &s.board).err(), Some(open));
-    assert_eq!(open_snapshot(&parts, &r, seq, &w, &k, &BoardId([0x0B; 16])).err(), Some(open));
+    assert_eq!(open_snapshot(&parts, &r, seq + 64, &body.state_hash, 1, &w, &k, &s.board).err(), Some(open));
+    assert_eq!(open_snapshot(&parts, &r, seq, &body.state_hash, 1, &other_w, &k, &s.board).err(), Some(open));
+    assert_eq!(open_snapshot(&parts, &r, seq, &body.state_hash, 1, &w, &k, &BoardId([0x0B; 16])).err(), Some(open));
     let mut f = sb.bytes.clone();
     f[7..11].copy_from_slice(&1u32.to_be_bytes());
     let r1 = BlobRef { sha256: sha(&[&f]), epoch: 1, ..blob_ref(&f, r.inflated, 1) };
-    assert_eq!(open_snapshot(&[&f], &r1, seq, &w, &k, &s.board).err(), Some(open));
+    assert_eq!(open_snapshot(&[&f], &r1, seq, &body.state_hash, 1, &w, &k, &s.board).err(), Some(open));
     // Declared mode: the root of the header's epoch, the same bindings.
     let root = EpochRoot::from_bytes(s.roots[&2]);
     let roots = |e: u32| if e == 2 { Some(&root) } else { None };

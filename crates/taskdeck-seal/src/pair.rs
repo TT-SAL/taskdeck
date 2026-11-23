@@ -1440,7 +1440,8 @@ impl New {
         let expected =
             BlobRef { id: s.blob, sha256: s.sha256, size: s.size, parts: s.parts, inflated: s.inflated, epoch: s.epoch };
         let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
-        let body = open_snapshot(&refs, &expected, h_seq, &self.dev_e, &key, &self.board).map_err(|_| bad)?;
+        let body = open_snapshot(&refs, &expected, h_seq, &s.hash, s.hash_version, &self.dev_e, &key, &self.board)
+            .map_err(|_| bad)?;
         // 5.
         if body.chain != b.head.chain {
             return Err(bad);
@@ -1455,6 +1456,17 @@ impl New {
             if !bool::from(r.commitment(&self.board, *e).ct_eq(recorded)) {
                 return Err(bad);
             }
+        }
+        // The state hash recomputed from the body: `open_snapshot` compared
+        // the body's `state_hash` and `hash_version` with the bundle's and
+        // no longer recomputes it (ruling Q57), so the crate does it here.
+        // SPEC-QUESTION: step 5 recomputes the state hash "(`engine.md`)",
+        // which defines it for the versions the membership's rules allow
+        // (§14.3); `open_snapshot` used to refuse any other version (ruling
+        // Q50) and no longer does. A version the rules do not allow is
+        // refused here, as before (the refusing reading).
+        if !crate::membership::transitions::hash_version_allowed(m.rules, body.hash_version) {
+            return Err(bad);
         }
         let recomputed = state_hash(body.hash_version, &h(&[&body.board]), &body.membership);
         let hash_ok = recomputed.ct_eq(&s.hash) & body.state_hash.ct_eq(&s.hash);

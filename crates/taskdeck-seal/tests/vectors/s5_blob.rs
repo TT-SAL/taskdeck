@@ -3,8 +3,10 @@
 //! history, the 40 bytes of entropy: the blob id, then the nonce), with the
 //! inflated body, the sealed bytes, `sha256`, the size and the part count;
 //! the sealing refusals; the opening failures in the order of §20.5 for a
-//! snapshot and for a blob of kind 2, including a history that fails the
-//! projection or disagrees with the membership and a decompression bomb;
+//! snapshot and for a blob of kind 2 (an `open_snapshot` case gives the
+//! expected `state_hash` and `hash_version` as inputs), including a history
+//! that fails the projection or disagrees with the membership and a
+//! decompression bomb;
 //! declared-mode openings with the returned epoch and inflated length, and
 //! their failures.
 //!
@@ -107,7 +109,9 @@ fn run(c: &Value) -> Map<String, Value> {
         }
         "open_snapshot" => {
             let s = c["s"].as_u64().unwrap();
-            match open_snapshot(&parts, &expected(c), s, &writer, &key_from(c, &board), &board) {
+            let hash: [u8; 32] = unhex_n(c["state_hash"].as_str().unwrap());
+            let hv = c["hash_version"].as_u64().unwrap() as u32;
+            match open_snapshot(&parts, &expected(c), s, &hash, hv, &writer, &key_from(c, &board), &board) {
                 Ok(b) => {
                     out.insert("body".into(), body_json(&b));
                 }
@@ -162,24 +166,46 @@ fn key_json(root: &[u8; 32], epoch: u32, kind: &str) -> Value {
     json!({ "root": hex(root), "epoch": epoch, "kind": kind })
 }
 
-/// The fixed inputs every opening case shares.
+/// The fixed inputs every opening case shares; `hash` is the state hash
+/// the signed entry names (version 1), which `open_snapshot` expects.
 struct Fx {
     board: BoardId,
     writer: DevId,
     s: u64,
     root: [u8; 32],
+    hash: [u8; 32],
 }
+
+/// The expected `state_hash` and `hash_version` of an `open_snapshot` case
+/// (§20.5 step 7, §26).
+type Expect<'a> = (&'a [u8; 32], u32);
 
 impl Fx {
     #[allow(clippy::too_many_arguments)]
-    fn snap(&self, name: &str, parts: &[&[u8]], r: &BlobRef, s: u64, writer: &DevId, key: Value, want: Option<&str>) -> Value {
+    fn snap_expecting(
+        &self,
+        name: &str,
+        parts: &[&[u8]],
+        r: &BlobRef,
+        s: u64,
+        (hash, hash_version): Expect<'_>,
+        writer: &DevId,
+        key: Value,
+        want: Option<&str>,
+    ) -> Value {
         case(
             json!({
                 "name": name, "op": "open_snapshot", "parts": parts.iter().map(|p| hex(p)).collect::<Vec<_>>(),
-                "expected": expected_json(r), "s": s, "writer": hex(&writer.0), "board_id": hex(&self.board.0), "key": key,
+                "expected": expected_json(r), "s": s, "state_hash": hex(hash), "hash_version": hash_version,
+                "writer": hex(&writer.0), "board_id": hex(&self.board.0), "key": key,
             }),
             want,
         )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn snap(&self, name: &str, parts: &[&[u8]], r: &BlobRef, s: u64, writer: &DevId, key: Value, want: Option<&str>) -> Value {
+        self.snap_expecting(name, parts, r, s, (&self.hash, 1), writer, key, want)
     }
 
     fn snap_ok(&self, name: &str, bytes: &[u8], r: &BlobRef, want: Option<&str>) -> Value {
@@ -225,12 +251,12 @@ fn seal_blob_vectors() {
     let older = s.m.to_canonical_bytes();
     s.add_device();
     let w = s.devs[1].public().dev;
-    let fx = Fx { board: s.board, writer: w, s: s.seq(), root: s.roots[&1] };
+    let body = snap_body(&s);
+    let fx = Fx { board: s.board, writer: w, s: s.seq(), root: s.roots[&1], hash: body.state_hash };
     let snap_key_json = key_json(&fx.root, 1, "snap");
     let mut cases = Vec::new();
 
     // Sealing.
-    let body = snap_body(&s);
     let inflated = body_bytes(&body);
     let entropy = s.rng.bytes(40);
     let seal_in = |name: &str, b: &SnapshotBody, entropy: &[u8]| {
@@ -329,34 +355,37 @@ fn seal_blob_vectors() {
         let r = blob_ref(&f, b.len() as u64, 1);
         (f, r)
     };
-    let mut bodies: Vec<(&str, Vec<u8>)> = Vec::new();
-    bodies.push(("step 7: a byte after the body", [&inflated[..], &[0]].concat()));
+    // Each body is opened expecting the state hash it carries (so that the
+    // step named fails), except the one whose state hash is not the
+    // expected one.
+    let mut bodies: Vec<(&str, Vec<u8>, [u8; 32])> = Vec::new();
+    bodies.push(("step 7: a byte after the body", [&inflated[..], &[0]].concat(), fx.hash));
     let mut x = inflated.clone();
     x[0] = b'X';
-    bodies.push(("step 7: body magic", x));
+    bodies.push(("step 7: body magic", x, fx.hash));
     let mut b2 = copy_body(&body);
     b2.seq += 64;
-    bodies.push(("step 7: S of the body is not s", body_bytes(&b2)));
+    bodies.push(("step 7: S of the body is not s", body_bytes(&b2), fx.hash));
     let mut b2 = copy_body(&body);
     b2.state_hash[0] ^= 1;
-    bodies.push(("step 7: state hash", body_bytes(&b2)));
+    bodies.push(("step 7: state hash", body_bytes(&b2), fx.hash));
     let mut b2 = copy_body(&body);
     b2.membership.push(0);
     b2.state_hash = state_hash(1, &sha(&[&b2.board]), &b2.membership);
-    bodies.push(("step 7: membership bytes that do not parse", body_bytes(&b2)));
+    bodies.push(("step 7: membership bytes that do not parse", body_bytes(&b2), b2.state_hash));
     let mut rec = body.history[1].to_bytes();
     let n = rec.len();
     rec[n - 1] ^= 1;
     let mut b2 = copy_body(&body);
     b2.history[1] = HistoryRecord::from_bytes(&rec).unwrap();
-    bodies.push(("step 7: a history that fails the projection (a signature)", body_bytes(&b2)));
+    bodies.push(("step 7: a history that fails the projection (a signature)", body_bytes(&b2), fx.hash));
     let mut b2 = copy_body(&body);
     b2.membership = older.clone();
     b2.state_hash = state_hash(1, &sha(&[&b2.board]), &b2.membership);
-    bodies.push(("step 7: a history that disagrees with the membership", body_bytes(&b2)));
-    for (name, b) in bodies {
+    bodies.push(("step 7: a history that disagrees with the membership", body_bytes(&b2), b2.state_hash));
+    for (name, b, hash) in bodies {
         let (f, rf) = sealed_body(&mut s, &b);
-        cases.push(fx.snap_ok(name, &f, &rf, Some("seal/blob_open")));
+        cases.push(fx.snap_expecting(name, &split_parts(&f), &rf, fx.s, (&hash, 1), &w, snap_key_json.clone(), Some("seal/blob_open")));
     }
 
     // open_blob, steps 1 to 5.
@@ -410,6 +439,33 @@ fn seal_blob_vectors() {
         &[&f],
         &blob_ref(&f, bb.len() as u64, 1),
         b2.seq,
+        &w,
+        snap_key_json.clone(),
+        Some("seal/blob_open"),
+    ));
+
+    // Added by task S6b (rulings Q57 to Q59): step 7 compares the body's
+    // `state_hash` and `hash_version` with the expected values the case
+    // gives (the signed entry's or the bundle's). The good snapshot, with an
+    // expected value other than its own. No draw.
+    let mut other = fx.hash;
+    other[31] ^= 1;
+    cases.push(fx.snap_expecting(
+        "step 7: an expected state hash other than the body's",
+        &split_parts(&snapshot),
+        &r,
+        fx.s,
+        (&other, 1),
+        &w,
+        snap_key_json.clone(),
+        Some("seal/blob_open"),
+    ));
+    cases.push(fx.snap_expecting(
+        "step 7: an expected hash_version other than the body's",
+        &split_parts(&snapshot),
+        &r,
+        fx.s,
+        (&fx.hash, 2),
         &w,
         snap_key_json.clone(),
         Some("seal/blob_open"),

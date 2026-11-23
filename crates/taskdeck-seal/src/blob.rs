@@ -18,7 +18,7 @@ use crate::membership::Reader;
 use crate::prim::{deflate_raw, h, inflate_raw, take};
 use crate::{
     BlobId, BoardId, Chain, DevId, Entropy, EpochRoot, HistoryRecord, KeyKind, Membership, SealError, SymKey, ctx,
-    derive_epoch_key, padded_len, state_hash,
+    derive_epoch_key, padded_len,
 };
 
 /// `"TDB1"` (seal.md §20.2).
@@ -351,41 +351,40 @@ fn parse_body(b: &[u8]) -> Option<SnapshotBody> {
     Some(SnapshotBody { seq, chain, hash_version, state_hash, board, membership, history })
 }
 
+/// The values step 7 compares with the body's (seal.md §20.5): `S` always;
+/// `hash_version` and `state_hash` only in the normal mode, where they come
+/// from the signed entry or the bundle (`None` in the declared mode).
+struct Expect<'a> {
+    s: u64,
+    hash: Option<(&'a [u8; 32], u32)>,
+}
+
 /// Step 7 of §20.5 (`seal/blob_open`): the body parses with no trailing
-/// bytes; its `S` is `s`; the membership parses (§13.2); with
-/// `check_hash`, its `hash_version` is one the membership's rules allow and
-/// its `state_hash` is the state hash of its own `board` and `membership`
-/// (`engine.md` §18.3); no history record is after `S`; the history
-/// verifies by the projection of §21.6 for the receiver's own `board`; and
-/// it agrees with the membership as §21.6 step 11 states (SEAL-BLOB-007).
-// SPEC-QUESTION: step 7 compares "S and the state hash" with expected
-// values, but `open_snapshot` receives only `s` and a `BlobRef`, which has
-// no state hash (lead's ruling): the body's `state_hash` is checked against
-// the state hash of its own `board` and `membership`; comparing it with the
-// signed entry's `hash` is the caller's, who holds the entry.
+/// bytes; its `S`, and with `expect.hash` its `hash_version` and
+/// `state_hash`, equal the expected values; the membership parses (§13.2);
+/// no history record is after `S`; the history verifies by the projection
+/// of §21.6 for the receiver's own `board`; and it agrees with the
+/// membership as §21.6 step 11 states (SEAL-BLOB-007). The state hash is not
+/// recomputed from the body's `board` and `membership`: that is the
+/// caller's, from the board it loads (`engine.md`; ruling Q57).
 // SPEC-QUESTION: §20.4 says the history holds a record for each seq of
 // `M_S.ctl_seqs`, which the agreement with `membership` checks; nothing
 // states that those seqs are at or below `S`. As a backup's step 9 does for
 // its header's seq, a record after `S` is rejected (the refusing reading).
-fn verify_body(b: &[u8], s: u64, check_hash: bool, board: &BoardId) -> Result<SnapshotBody, SealError> {
+fn verify_body(b: &[u8], expect: &Expect<'_>, board: &BoardId) -> Result<SnapshotBody, SealError> {
     let bad = SealError::BlobOpen;
     let body = parse_body(b).ok_or(bad)?;
-    if body.seq != s {
+    if body.seq != expect.s {
         return Err(bad);
     }
-    let m = Membership::from_canonical_bytes(&body.membership).map_err(|_| bad)?;
-    if check_hash {
-        // A version the membership's rules do not allow (ruling Q50, as
-        // §21.6 step 11 for a backup).
-        if !crate::membership::transitions::hash_version_allowed(m.rules, body.hash_version) {
-            return Err(bad);
-        }
-        let want = state_hash(body.hash_version, &h(&[&body.board]), &body.membership);
-        if !bool::from(want.ct_eq(&body.state_hash)) {
+    if let Some((state_hash, hash_version)) = expect.hash {
+        let same = body.state_hash.ct_eq(state_hash) & body.hash_version.ct_eq(&hash_version);
+        if !bool::from(same) {
             return Err(bad);
         }
     }
-    if body.history.last().is_some_and(|r| r.seq > s) {
+    let m = Membership::from_canonical_bytes(&body.membership).map_err(|_| bad)?;
+    if body.history.last().is_some_and(|r| r.seq > expect.s) {
         return Err(bad);
     }
     let p = projection::project(&body.history, board).map_err(|_| bad)?;
@@ -410,14 +409,20 @@ fn verify_body(b: &[u8], s: u64, check_hash: bool, board: &BoardId) -> Result<Sn
 /// 6. inflate while streaming under a cap of `expected.inflated` (at most
 ///    67,108,864): more output, input after the stream's end, or less output
 ///    than `expected.inflated` is `seal/inflate` (SEAL-BLOB-003);
-/// 7. the body (`verify_body`, `seal/blob_open`).
+/// 7. the body (`verify_body`, `seal/blob_open`): its `S`, `hash_version`
+///    and `state_hash` are `s`, `hash_version` and `state_hash` (the signed
+///    entry's or the bundle's), its history verifies and agrees with its
+///    membership.
 ///
-/// The caller compares the body's `state_hash` and `hash_version` with the
-/// signed `snap` entry's (`engine.md`).
+/// The caller recomputes the state hash from the board it loads and
+/// compares it with the signed one (`engine.md`); this does not.
+#[allow(clippy::too_many_arguments)]
 pub fn open_snapshot(
     parts: &[&[u8]],
     expected: &BlobRef,
     s: u64,
+    state_hash: &[u8; 32],
+    hash_version: u32,
     writer: &DevId,
     key: &SymKey,
     board: &BoardId,
@@ -441,7 +446,7 @@ pub fn open_snapshot(
         return Err(SealError::Inflate);
     }
     // 7.
-    verify_body(&inflated, s, true, board)
+    verify_body(&inflated, &Expect { s, hash: Some((state_hash, hash_version)) }, board)
 }
 
 /// Opens a snapshot in declared mode: `(body, epoch, inflated)` (seal.md
@@ -453,10 +458,10 @@ pub fn open_snapshot(
 /// 4 derives `K_snap` only from the root `roots` gives for that epoch
 /// (`seal/missing_root` when it gives none) and opens the AEAD before any
 /// field of the body is parsed; step 6 inflates under 67,108,864 bytes with
-/// no expected length; step 7 checks `S` against `s` and does not check the
-/// state hash. Nothing declared is trusted: the caller checks every value
-/// against the signed `snap` entry once it has classified it (`engine.md`
-/// §19.7 step 5).
+/// no expected length; step 7 checks `S` against `s` and compares neither
+/// `hash_version` nor `state_hash`. Nothing declared is trusted: the caller
+/// checks every value against the signed `snap` entry once it has
+/// classified it (`engine.md` §19.7 step 5).
 // `<'a>`: the spec's `Option<&EpochRoot>` needs a named lifetime to compile.
 pub fn open_snapshot_declared<'a>(
     parts: &[&[u8]],
@@ -485,7 +490,7 @@ pub fn open_snapshot_declared<'a>(
     let inflated = inflate_raw(&compressed, INFLATED_MAX).ok_or(SealError::Inflate)?;
     let len = u64::try_from(inflated.len()).map_err(|_| SealError::Inflate)?;
     // 7.
-    let body = verify_body(&inflated, s, false, board)?;
+    let body = verify_body(&inflated, &Expect { s, hash: None }, board)?;
     Ok((body, epoch, len))
 }
 

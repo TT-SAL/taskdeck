@@ -326,6 +326,30 @@ fn n_checks_the_snapshot() {
             snap.roots.truncate(1);
             registered_with(r, &|_| {})
         }),
+        ("a hash version the membership's rules do not allow", |r| {
+            // A body of version 2 whose state hash is computed under version
+            // 2, announced with that hash and version: `open_snapshot`
+            // compares them equal (task S6b), so only N's own recomputation
+            // of step 5 (`engine.md`, the rules of §14.3) refuses it.
+            let s = &mut r.sim;
+            let mut body = crate::blob::snap_body(s);
+            body.hash_version = 2;
+            body.state_hash = state_hash(2, &crate::backup::sha(&[&body.board]), &body.membership);
+            let e = s.m.epoch();
+            let key = derive_epoch_key(&EpochRoot::from_bytes(s.roots[&e]), &s.board, e, KeyKind::Snap);
+            let w = s.devs[0].public().dev;
+            let sb = seal_snapshot(&body, &key, &s.board, e, &w, &mut OsEntropy).unwrap();
+            let snap = r.snap.as_mut().unwrap();
+            snap.ann.hash = body.state_hash;
+            snap.ann.hash_version = 2;
+            snap.ann.blob = sb.id;
+            snap.ann.sha256 = sb.sha256;
+            snap.ann.size = sb.bytes.len() as u64;
+            snap.ann.parts = sb.parts;
+            snap.ann.inflated = crate::blob::body_bytes(&body).len() as u64;
+            snap.bytes = sb.bytes;
+            registered_with(r, &|_| {})
+        }),
     ];
     for (what, edit) in cases {
         let mut r = confirmed(epoch2(), 0);
