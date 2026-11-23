@@ -635,3 +635,17 @@ Decisions the lead took that the owner may want to overrule:
 - **In a cloud container you are root.** Never give `/dev/null` as an output file to a compiler or
   linker, and never run `git config --global` with `GIT_CONFIG_GLOBAL=/dev/null`: both replace the
   device with a file, and everything that reads it then misbehaves.
+
+## Changes by later stages
+
+Changes to this stage's paths after its exit, each in a small pull request of its own (SYNC_PLAN.md
+§3.2, §3.3).
+
+- **2026-11-23, by stage `seal`'s lead: `scripts/tests/test-ci-changes.sh`.** The test's helper
+  piped its list of paths into `scripts/ci/changes.sh --paths-from -` under `pipefail`. For a head
+  message that asks for `[ci full]`, `changes.sh` answers without reading its input; when it exits
+  before the writer has written, the writer gets a broken pipe and the test counts a failure that
+  is its own (one case of 152 failed once in CI, `printf: write error: Broken pipe`). The helper
+  now writes the paths to a file and gives that file as standard input, and a new case hands over
+  20,000 paths that are never read: on the old helper it fails every time. `changes.sh` itself and
+  the workflow are unchanged (the workflow calls it without a pipe).
