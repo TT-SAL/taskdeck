@@ -21,9 +21,16 @@ fn b32(bytes: &[u8]) -> String {
 
 const BOARD: BoardId = BoardId([0xB0; 16]);
 
+// The spec's copy of the word list, as committed. A checkout under
+// core.autocrlf (Windows runners) gives that file CRLF line endings, which are
+// not part of the list, so carriage returns are dropped before it is compared.
+// The embedded copy is never converted (the crate's .gitattributes) and is
+// pinned by its SHA-256 below.
 fn spec_wordlist() -> Vec<u8> {
     let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/sync/spec/wordlist.txt");
-    std::fs::read(p).unwrap()
+    let mut bytes = std::fs::read(p).unwrap();
+    bytes.retain(|&b| b != b'\r');
+    bytes
 }
 
 // The embedded list is the committed one: its SHA-256, 2048 lines, each a

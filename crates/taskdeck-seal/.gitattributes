@@ -1,0 +1,5 @@
+# Every file of the crate is kept as committed bytes on every checkout (no
+# line-ending conversion under core.autocrlf, which Windows runners set):
+# the word list is embedded and pinned by its SHA-256 (SEAL-FP-002), the
+# known-answer data is used as fetched, and tests read the crate's sources.
+* -text
