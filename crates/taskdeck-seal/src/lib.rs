@@ -27,6 +27,7 @@ mod ids;
 mod keys;
 mod membership;
 pub mod pair;
+mod prim;
 mod receipt;
 mod signatures;
 

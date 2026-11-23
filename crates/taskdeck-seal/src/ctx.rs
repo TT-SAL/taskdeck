@@ -80,3 +80,6 @@ pub const DOOR: &[u8] = b"taskdeck/v1/door\0";
 pub const TOKEN: &[u8] = b"taskdeck/v1/token\0";
 /// `local-key` (seal.md §4.1; used in §6.6).
 pub const LOCAL_KEY: &[u8] = b"taskdeck/v1/local-key\0";
+
+#[cfg(test)]
+mod tests;
