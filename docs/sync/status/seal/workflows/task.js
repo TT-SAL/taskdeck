@@ -8,12 +8,16 @@ export const meta = {
     { title: 'Security', model: 'opus' },
   ],
 }
-// args: { id, brief, lenses: [string, string], until: 'implement' | 'verify' | 'all' }
+// args: { id, brief, lenses: [string, string], until: 'implement' | 'verify' | 'all', base, lead }
 // `until` never enters a prompt, so a resume with another value replays the finished agents from the cache.
+// `base` is the commit before the task: the lead commits and pushes the task after its verify pass, so the
+// security passes and their fixer read the task's changes as a diff against `base`.
+// `lead` is a list of the lead's own rulings (same shape as a finding) handed to the fix pass after security.
 const W = '/home/user/taskdeck/target/work/seal'
 const COMMON = `${W}/docs/sync/status/seal/briefs/common.md`
 const BRIEF = `${W}/${args.brief}`
 const ID = args.id
+const BASE = args.base
 const OPTS = { model: 'opus', effort: 'high' }
 
 const REPORT = {
@@ -81,7 +85,7 @@ const verifyPrompt = (n) => `You are the verifier of task ${ID} of stage seal (p
 
 const secPrompt = (n, lens) => `You are security reviewer ${n} of task ${ID} of stage seal: you did not write it. Try to break it. ` +
   `Your lens: ${lens}. ${FIRST} The section "Reviewers" of common.md binds you. Then read the task's code in ${W} ` +
-  `(\`git -C ${W} status --short\` and \`git -C ${W} diff\` show what the task changed). ` +
+  `(\`git -C ${W} diff --stat ${BASE}\` lists what the task changed; \`git -C ${W} diff ${BASE} -- <path>\` shows one file's changes). ` +
   `Think as a malicious relay that chooses every byte a device receives and their order, as a revoked device that kept its old keys, ` +
   `as a compromised member, and as someone typing hostile text. Look for: checks in the wrong order; parsing before authentication; ` +
   `missing length or range checks; allocation sized by an attacker; panics (indexing, slicing, unwrap, overflow); comparisons of ` +
@@ -96,6 +100,8 @@ const fixPrompt = (findings) => `You are the fixer for task ${ID} of stage seal.
   `Below are findings by reviewers who did not write the code. For each one: first add its reproduction as a test ` +
   `(in the task's test files, citing its clause) and run it; name and drop any that does not fail. Then fix the rest, ` +
   `the cause and not the symptom, and change nothing a finding does not require. Two findings may describe one defect. ` +
+  `An item whose \`from\` is \`lead\` is a ruling of the lead, not a defect report: apply it as written; it needs no reproduction. ` +
+  `The task's code is committed; \`git -C ${W} diff --stat ${BASE}\` lists what the task changed. ` +
   `Keep the task gate of common.md green, run by you from ${W} with CARGO_TARGET_DIR=target/impl. ` +
   `Report fixed (each with the test that now passes), dropped (each with why), gate_passed, notes.\n` +
   JSON.stringify(findings, null, 2)
@@ -140,6 +146,7 @@ if (passes.some(p => p === null)) return { ...out, failed: 'security' }
 out.security = passes
 passes.forEach(keepLows)
 const broke = passes.flatMap((p, i) => serious(p).map(f => ({ ...f, from: `security-${i + 1}` })))
+  .concat((args.lead || []).map(f => ({ ...f, from: 'lead' })))
 if (broke.length > 0) {
   const f = await agent(fixPrompt(broke), { label: `fix:security:${ID}`, phase: 'Fix', schema: FIXED, ...OPTS })
   if (f === null) return { ...out, failed: 'fix:security' }
