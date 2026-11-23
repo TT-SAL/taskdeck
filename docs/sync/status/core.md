@@ -95,7 +95,7 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 |---|---|---|
 | 1 | core.md §18.3: a golden case may name a generated start board (`start_gen`) for the caps of §17, whose boards are too large to print (200,000 archive rows is about 22 MB of JSON) | merged, TT-SAL/taskdeck#5 |
 | 2 | core.md §18.4, §18.5: what the transcript and snapshot tests do with a fixture folder that `import` refuses. `dst-edges` holds three records before 1970-01-01T00:00:00Z (`instant_range`) and `id-limits` holds ids outside every range (`id_range`); the spec said only "starting from `import` of the starting folder" | merged, TT-SAL/taskdeck#5 |
-| 4 | From task B's check: `reset` at the last notes revision is `core/cap`; a command text over the tree budget is `core/schema` whatever its `op` (§9.1); CORE-ID-003 does not cover a benign `restore`; the 1,001-block `create_task` of §18.3 is a parse error in the golden logs | to come, after TT-SAL/taskdeck#8 merges |
+| 4 | From task B's check: `reset` at the last notes revision is `core/cap`; a command text over the tree budget is `core/schema` whatever its `op` (§9.1); CORE-ID-003 does not cover a benign `restore`; the 1,001-block `create_task` of §18.3 is a parse error in the golden logs | in its own pull request, opened 2026-11-23 02:26 UTC |
 | 3 | The lead's rulings on what tasks A and B found: the size check of `apply` (new clause CORE-APPLY-005), the parser's tree budget, `Record::LIMIT`, the fold (D7), and nine smaller points made exact. `docs/sync/spec/CHANGES.md` lists them; `briefs/b3-rulings.md` is the same list as a task | merged, TT-SAL/taskdeck#7 |
 
 ## Token ledger
