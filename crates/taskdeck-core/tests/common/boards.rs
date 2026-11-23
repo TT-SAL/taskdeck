@@ -1,7 +1,7 @@
-//! The fixture folders as `LegacyFolder` values (core.md §15.2, §18.2), for
-//! every test target that imports one. The bytes come in by `include_bytes!`;
-//! each folder's `LegacyConfig` is what its `userconfig.toml` holds, written
-//! out as values (today's parser, initialization.rs, reads it that way).
+// The fixture folders as `LegacyFolder` values (core.md §15.2, §18.2), for
+// every test target that imports one. The bytes come in by `include_bytes!`;
+// each folder's `LegacyConfig` is what its `userconfig.toml` holds, written
+// out as values (today's parser, initialization.rs, reads it that way).
 
 use taskdeck_core::legacy::{LegacyConfig, LegacyFolder};
 

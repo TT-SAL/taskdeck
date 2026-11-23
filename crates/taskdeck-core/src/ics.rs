@@ -308,10 +308,9 @@ pub fn parse(
     let harvest = harvest(lines, &limits)?;
 
     let mut problems = Problems::default();
-    // One budget for every rule this call follows (brief c4, bound 7): the
-    // zones' observances first, as the parser reads them, then the events in
-    // file order.
-    // SPEC-QUESTION: "spent in file order" with a VTIMEZONE listed after the events: zones are worked out first.
+    // One budget for every rule this call follows (core.md §14.6, bound 7):
+    // the zones' observances first, wherever the file lists its VTIMEZONEs,
+    // as the parser reads them; then the events in file order.
     let mut budget = StepBudget::for_file(&limits);
     let zones = Zones::build(
         harvest.zones,
@@ -953,8 +952,9 @@ impl<'z, Z: Zone + ?Sized> Zones<'z, Z> {
 
             let Some(rule) = &observance.rule else { continue };
             // A rule cut short, by its own limit or by the file's budget, keeps
-            // what it found and is not noted, as today's observances were not.
-            // SPEC-QUESTION: is an observance cut short by the budget noted? Not noted, as one cut by max_rule_steps is today.
+            // what it found and is not noted, as today's observances were not:
+            // core.md §14.6, bound 7, treats a rule the budget cuts short as
+            // one that reached `max_rule_steps`.
             let expansion = expand(rule, observance.start.date(), from, until, limits, budget, zone);
             for day in expansion.days {
                 if !add(day.and_time(observance.start.time()), observance.to) {
@@ -1620,6 +1620,7 @@ fn instant_key<Z: Zone + ?Sized>(
 /// `max_occurrences_per_event` holds for the occurrences an override puts in
 /// place of the series' own (brief c3, bound 3): an override is expanded with
 /// only the room the event has left.
+// The parser's state goes in as arguments, as in today's code: this is a port (core.md §14.6).
 #[allow(clippy::too_many_arguments)]
 fn occurrences_of<Z: Zone + ?Sized>(
     event: &RawEvent,
@@ -1761,6 +1762,7 @@ fn span_minutes<Z: Zone + ?Sized>(
 /// the start minute plus a length near `i64::MAX` overflowed here, which
 /// panicked in a debug build and wrapped to an end before the start in a
 /// release one. Every occurrence returned ends at or after its start.
+// The parser's state goes in as arguments, as in today's code: this is a port (core.md §14.6).
 #[allow(clippy::too_many_arguments)]
 fn spread(
     day: NaiveDate,

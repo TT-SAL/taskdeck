@@ -244,11 +244,9 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
             Some(WireTime::Exact(t)) => self.exact(t).map(Some),
             Some(WireTime::Naive(naive, text)) => {
                 let minutes = i32::try_from(naive.hour() * 60 + naive.minute()).unwrap_or(0);
-                // A local time outside the instant range is `core/date_range`,
-                // not `not a time` (lead ruling, spec change 5, §13.3 G3).
-                if time::outside_range(naive.date(), minutes, self.cx.zone) {
-                    return Err(fail("core/date_range"));
-                }
+                // A naive time outside the instant range (§5.4) has no instant
+                // and is `not a time`, as today (core.md §13.3 G3); only a day
+                // and minutes outside it are `core/date_range` (`resolve`).
                 time::resolve_on_day(naive.date(), minutes, self.cx.zone)
                     .filter(|&t| (FIRST_YEAR..=LAST_YEAR).contains(&time::local_day(t, self.cx.zone).year()))
                     .map(Some)

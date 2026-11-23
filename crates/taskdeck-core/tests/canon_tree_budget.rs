@@ -1,3 +1,7 @@
+//! The canonical parser refuses a text whose parsed tree would exceed its budget, with an error and
+//! without exhausting memory (core.md §4.5, CORE-GEN-007): the reproduction of the high finding of task A's
+//! security pass, kept as a regression test.
+
 // spec: CORE-GEN-007
 use taskdeck_core::board::BoardData;
 
