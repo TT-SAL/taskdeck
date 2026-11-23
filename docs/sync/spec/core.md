@@ -129,6 +129,10 @@ A canonical parser for a record schema takes bytes and returns the record or an 
 
 Step 5 makes the encoding unique: whitespace, key order, escapes, a field written at its default, and the textual forms of instants and integers are all checked by it.
 
+A string that holds a `\u` escape of a lone surrogate (`"\ud800"`) fails step 2 (`core/not_json`): it is RFC 8259 grammar but denotes no Unicode text. A record type names its own byte limit for step 1 (`Record::LIMIT`, §20).
+
+**Tree budget.** A parser bounds what the parsed value costs before any schema is applied, with numbers that are the same on every platform. Against a budget of `max(32 × limit, 1,048,576)` it charges: for every string, member keys included, the number of bytes between its quotes as written, plus 16; for every array element, 32; for every object, 744 for each started group of five members (once for 1 to 5 members, twice for 6 to 10, nothing for an empty object). A text whose charges exceed the budget is `core/schema`, returned once the whole text has passed step 2. No value that a record schema of this spec admits within its limit comes near the budget: the densest record, a `Mark` of 34 bytes, is charged 810, under 24 times its length.
+
 - **CORE-ENC-001** (core) The canonical encoder MUST produce exactly the bytes §4.2 defines for every value, with the members of every object in ascending unsigned-byte order of their keys.
 - **CORE-ENC-002** (core) The canonical encoder MUST omit every field whose value equals the default its schema states and every optional field whose value is none, and MUST write every other field.
 - **CORE-ENC-003** (core) The canonical encoder MUST escape exactly the characters of the table in §4.2 and MUST write every other character as itself.
@@ -168,6 +172,8 @@ The core provides three implementations:
 
 A device passes `ChronoZone(chrono::Local)` or a `TableZone`; `device.md` chooses, at run time, and may pass it as `&dyn Zone`: every zone parameter of this crate is `&(impl Zone + ?Sized)` or a generic `Z: Zone + ?Sized` (§20). Inside the core the type `chrono::Local` never appears (CORE-GEN-004).
 
+`TableZone::new` returns `core/schema` for transitions that are not strictly ascending by `utc_ms` and for an offset outside −86,399 to 86,399. When more than two instants share a local wall time (transitions less than a day apart), `TableZone::from_local` returns the first and the last as `Ambiguous`. `ChronoZone::from_local` returns the instants ascending whatever order `chrono` lists them in, and only those that `offset_at` maps back to `local`: chrono 0.4.45's `Local` lists the later instant of a fold first, and reports a fold at the first minute after one.
+
 ### 5.3 Local day and minutes
 
 For an instant `t` and a zone `z`, the local date-time is `t + z.offset_at(t)` read as a naive date-time. Its date is the **local day** of `t`, and `hour × 60 + minute` (seconds and fractions dropped) its **minutes**. `t` **falls on** day `d` when its local day is `d`. These replace every `date_naive()`, `hour()` and `minute()` that today's code calls on a `DateTime<Local>`.
@@ -179,6 +185,8 @@ For an instant `t` and a zone `z`, the local date-time is `t + z.offset_at(t)` r
 1. `m' = clamp(m, 0, 1439)`;
 2. `local_at(d, x)` is the naive date-time `d` at hour `min(x div 60, 23)`, minute `x mod 60`, second 0; its instant is the earlier one for `Ambiguous`, the one for `Single`, none for `None`;
 3. the result is `local_at(d, m')`, or, when that is none, `local_at(d, min(m' + 60, 1439))`, or none.
+
+On a fold the core takes the earlier instant in every zone. Today's code takes `chrono`'s `.earliest()`, which for `Local` is the later one (§5.2); §13.5 says how the recorded transcripts, which hold the later one, are replayed.
 
 ### 5.5 Planner arithmetic in integers
 
@@ -331,7 +339,7 @@ A row's key is `(id, archived_at)`. Commands name a row by its key (`restore`, `
 
 `BoardData::check` holds exactly when every one of these is true:
 
-1. the record parses under its schema (§6.1 to §6.10) and every array is in its stated order without forbidden duplicates;
+1. the record parses under its schema (§6.1 to §6.10), every array is in its stated order without forbidden duplicates, and no mark has both numbers 0 (§6.10);
 2. every count is within its cap (§17);
 3. every live item id, every subscription id, every non-zero archive-row id and every sid has a non-zero low part (`n = id mod 2^40 ≥ 1`) and a high part `id div 2^40` from 0 to 8191;
 4. for every such id or sid with high part `h` and low part `n`, the mark of `h` has `item ≥ n` (items, rows, subscriptions) or `block ≥ n` (sids);
@@ -453,7 +461,10 @@ The change set lets `device.md`'s local-only `Store` write today's files in toda
 1. `ctx` satisfies §8.1's constraints, else `core/bad_ctx`;
 2. the command's `op` is in the op table of `board.rules` (§11.1), else `core/rules`;
 3. the command's checks, in the order its section in §9 lists them;
-4. the command's effects, which cannot fail.
+4. the size check: the command's effects would leave canonical board bytes (§6.13) that are over 61,865,984 bytes (59 MiB) and longer than before the command, which is `core/cap`;
+5. the command's effects, which cannot fail.
+
+The caps of §9 do not bound the board's bytes on their own (200,000 archive rows of 300 bytes are 60 MB, and unreadable lines can be more), so step 4 does: no sequence of commands grows a board past 59 MiB. That keeps it loadable (§17: 60 MiB) with room for what `reset` adds (§11.3: at most 8,191 marks, under 0.6 MB). A command that does not lengthen the board is never refused by step 4, so a board can always be made smaller. An implementation may use any method that gives exactly this result; a bound that is cheap to compute and never below the true length lets it skip the exact count for all but the largest boards.
 
 A refusal leaves `board` unchanged. An `Applied` with `benign` set has an empty change set and no notices.
 
@@ -464,6 +475,7 @@ A refusal leaves `board` unchanged. An `Applied` with `benign` set has an empty 
 - **CORE-APPLY-002** (core) A refused `apply` MUST leave the canonical board bytes unchanged.
 - **CORE-APPLY-003** (core) A successful `apply` MUST report in its change set every live item, archive key, subscription and setting it changed, and nothing else; and MUST list in `overlay_forget` every subscription it removed or set to disabled.
 - **CORE-APPLY-004** (core) A benign repeat MUST return `Applied` with `benign` set, an empty change set and no notices, and MUST leave the canonical board bytes unchanged.
+- **CORE-APPLY-005** (core) `apply` MUST refuse with `core/cap`, changing nothing, a command whose effects would leave canonical board bytes that are over 61,865,984 bytes and longer than before the command, and MUST NOT refuse for size a command that does not lengthen them.
 
 ## 9. Log commands v1
 
@@ -639,7 +651,7 @@ Fields: `op`, `id` `id`, `start` `instant`, `minutes` `len`. Apply: (1) gone; (2
 | `op` | `"set_notes"` | required | |
 | `text` | string | default `""` | at most 20,000 scalars; contains no U+0009 |
 
-Apply: (1) `base = board.notes_rev`, else `core/notes_stale`, with `NotesConflict{base, current: board.notes_rev}`. Effects: `notes = text`; `notes_rev += 1`. In rules version 1 the cap counts scalars after the origin's detab (SYNC.md §4.6; today counts before, board.rs:1253-1256).
+Apply: (1) `base = board.notes_rev`, else `core/notes_stale`, with `NotesConflict{base, current: board.notes_rev}`; (2) `notes_rev` is below 2^53 − 1, else `core/cap`. Effects: `notes = text`; `notes_rev += 1`. In rules version 1 the cap counts scalars after the origin's detab (SYNC.md §4.6; today counts before, board.rs:1253-1256).
 
 ### 9.21 `restore`
 
@@ -693,7 +705,7 @@ Schema rule for `set_picture`: `parts = ceil(size / 1,048,576)`. None of them ha
 
 The last writer wins per command, in seq order, as today (DOC §4.1), and identically on every device because every device applies the same entries in the same order with the same `apply` (SYNC.md §4.6).
 
-A **stamp** `(seq, device_no)` records which entry last changed something. Each live item carries five (§6.5), each live block one (§6.3). A creating command, `restore` and `add_block` write the entry's stamp `(ctx.seq, ctx.device_no)` on everything they create; every other command writes it on exactly the groups its row of §9.3 names. The legacy import writes `(1, 0)` everywhere (§15.4); `device_no` 0 is never an author. An item's **latest stamp** is the one with the greatest `seq` among its five field stamps and its blocks' stamps.
+A **stamp** `(seq, device_no)` records which entry last changed something. Each live item carries five (§6.5), each live block one (§6.3). A creating command, `restore` and `add_block` write the entry's stamp `(ctx.seq, ctx.device_no)` on everything they create; every other command writes it on exactly the groups its row of §9.3 names. The legacy import writes `(1, 0)` everywhere (§15.4); `device_no` 0 is never an author. An item's **latest stamp** is the one with the greatest `seq` among its five field stamps and its blocks' stamps; among stamps of equal `seq`, the first in the order `estimate`, `levels`, `name`, `repeat`, `time`, then the blocks in ascending sid (equal seqs from different devices occur only in a board that no sequence of commands produces).
 
 A stamp `(s, d)` is **another device's change since the origin's view** for an entry with `ctx` when `s > ctx.based_on`, `d ≠ ctx.device_no` and `d ≠ 0`.
 
@@ -730,7 +742,7 @@ Every other "not there" is a refusal (`core/gone`). The compile step still repor
 
 ### 10.7 Notice and refusal records
 
-Notices and refusals live per device, outside `BoardData`, in the device's sealed notices file (`seal.md` §19.2 kind 8); `engine.md` owns the list (which entries it records, when it shows and clears them), `device.md` the file. Only entries applied to the confirmed state produce records: a notice produced while applying to the pending state is discarded (`engine.md`). A device keeps a notice when its own `device_no` is the notice's `author` or `other`, and a refusal when it is the refused entry's author. Both are canonical-encoding records:
+Notices and refusals live per device, outside `BoardData`, in the device's sealed notices file (`seal.md` §19.2 kind 8); `engine.md` owns the list (which entries it records, when it shows and clears them), `device.md` the file. Only entries applied to the confirmed state produce records: a notice produced while applying to the pending state is discarded (`engine.md`). A device keeps an `overwrite` notice when its own `device_no` is the notice's `author` or `other`, a `skipped` notice when it is the `author` (§10.3: the author alone), and a refusal when it is the refused entry's author. Both are canonical-encoding records of at most 4,096 bytes each (`device.md` §6.4.5). A refusal's `code` and `op` are read as any string, so that a record a newer build wrote still reads; `base` and `current` are present only when `op` is `set_notes`.
 
 **Notice**
 
@@ -961,7 +973,9 @@ Each row's steps run in order; the first failure is the result. "Missing" means 
 
 ### 13.5 Today's commands against the new ones
 
-The transcript test (SYNC_PLAN.md §6.2) replays `fixtures/`' recorded sequences: each recorded command is parsed as an intent (§12.2), compiled with the transcript's pinned clock as `now` (truncated to milliseconds) and its pinned `TZ` as a `TableZone` or `ChronoZone`, and applied with `Ctx{seq: k + 1, device_no: 1, at: now, based_on: k}` at step `k`. The table classifies each recorded command against the state before it. The state after step `k` is compared with the recorded state only while steps 1 to `k` are all "same"; the comparison is the one of §18.4.
+The transcript test (SYNC_PLAN.md §6.2) replays `fixtures/`' recorded sequences: each recorded command is parsed as an intent (§12.2), compiled with the transcript's pinned clock as `now` (truncated to milliseconds) and its pinned `TZ` as a zone that reads local times as the recording did, and applied with `Ctx{seq: k + 1, device_no: 1, at: now, based_on: k}` at step `k`. The table classifies each recorded command against the state before it. The state after step `k` is compared with the recorded state only while steps 1 to `k` are all "same"; the comparison is the one of §18.4.
+
+The replay's zone holds the rules of the transcript's `TZ` and, for a local time in a fold, returns the later instant alone: the recording took chrono's `.earliest()`, which is the later one (§5.4). A recorded command that resolves a time in a fold therefore stays "same". CORE-TIME-003 itself is proven by the `planner.json` vectors (§18.2).
 
 | Today's `op` | New | Classification |
 |---|---|---|
@@ -1159,7 +1173,7 @@ The first board created from a legacy folder takes its palette from the scheme t
 12. **Fields.** Every value is checked against the schema of §6: names at most 4,096 bytes, levels, durations, recurrence fields, block minutes, URLs, at most 20 subscriptions with distinct URLs, notes at most 1,048,576 bytes, and the caps of §17; a violation: fail `field_range`, listing the ids, or `cap`.
 13. **Notes cap.** Notes over 20,000 scalars after detab: warning `notes_over_cap`; they are kept, and the next `set_notes` must fit the cap.
 14. **Assembly.** `rules = 1`; every stamp `(1, 0)`; the marks, ascending by `device_no`: for `device_no` 0, `{item: the largest low part among the item, row and subscription ids now present whose high part is 0, block: the last sid numbered}`; for each high part `h` from 1 to 8191 that some item, row or subscription id now present has, `{device_no: h, item: the largest low part among those ids with high part h, block: 0}`; no other marks, and a mark whose two numbers are 0 is not stored (§6.10); `notes_rev = 0`; no picture; the archive in archive order; the unreadable lines in their order (§6.1).
-15. **Check.** `BoardData::check` must hold; otherwise fail `invariant` (an error in the import itself).
+15. **Check.** `BoardData::check` must hold; otherwise fail `invariant` (an error in the import itself). The board's canonical bytes must be at most 61,865,984 (§8.4 step 4); otherwise fail `cap`.
 
 The genesis of an empty board (no folder) is `BoardData::empty()`: `rules = 1` and every other field at its default; its canonical bytes are `{"rules":1}`.
 
@@ -1213,7 +1227,7 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 | `core/kind` | the item's kind does not take this command | §9 | record the refusal |
 | `core/bad_id` | a minted id or sid is not the author's or not above its mark | CORE-ID-002 | record the refusal; the author's minter is behind its mark: the device advances it (`device.md`) |
 | `core/id_taken` | a restored row's sid is held by a live block | §9.21 step 4 | record the refusal |
-| `core/cap` | a cap of §17 would be exceeded | §9 | record the refusal; the UI says the board is full |
+| `core/cap` | a cap of §17 would be exceeded | §9; §8.4 step 4 | record the refusal; the UI says the board is full |
 | `core/duplicate_url` | that calendar URL is already subscribed | §9.23 | record the refusal |
 | `core/notes_stale` | `set_notes` base is not the current revision | §9.20 | record the refusal with `base` and `current`; the origin offers its draft and the merge view |
 
@@ -1275,6 +1289,9 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 | JSON nesting depth | 32 | levels | CORE-ENC-004 |
 | log command | 1 to 257,979 | bytes | CORE-CMD-001 |
 | canonical board bytes | 62,914,560 | bytes (60 MiB, so that a snapshot body, which holds the board, the membership and the control history, `seal.md` §20.4, stays under 64 MiB inflated) | CORE-DATA-004 |
+| canonical board bytes after a command that lengthens them | 61,865,984 | bytes (59 MiB) | CORE-APPLY-005 |
+| notice or refusal record | 4,096 | bytes | CORE-CONF-006 |
+| parser tree budget | `max(32 × limit, 1,048,576)` | charged units (§4.5) | CORE-ENC-004 |
 | intent JSON | 84,096 | bytes | CORE-INT-001 |
 | legacy input file | 268,435,456 | bytes | CORE-IMP-001 |
 | live items | 10,000 | items | CORE-CMD-004 |
@@ -1361,15 +1378,16 @@ One file per topic (for example `create.json`, `blocks.json`, `archive.json`, `n
 
 `code` is present for `refused` and `parse_error`; `notices`, `moved`, `skipped` and `restored_as` when they apply; `board_sha256` always (unchanged for a refusal). Rules version 1's golden logs, which CORE-RULES-003 requires, cover: every check of every op of §9 with a refused case; every row of §10.6; every notice kind and group; skips for both reasons; and the boundary values 200 and 201 scalars, 14, 15, 1,440 and 1,441 minutes, levels 4 and 5 (severity) and 3 and 4 (horizon), notes of 20,000 and 20,001 scalars, ids at and above the mark, `device_no` 8191, the id 2^53 − 1, instants at both ends of the range, every cap at its value and one above, `based_on` equal to a stamp's seq and one below it, and a `complete` whose `ctx.at` is less than a day before the end of the instant range (the saturating clamp). Golden logs contain no zone, so they hold under any `TZ` (V2-4).
 
-**Generated start boards.** A case that needs a start board too large to print (the caps of §17: 200,000 archive rows are about 22 MB of JSON) gives `start_gen` in place of `start_text`, and `end_sha256`, lowercase hex of SHA-256 of the end board's canonical bytes, in place of `end_text`. `start_gen` is `{"blocks": B, "items": I, "rows": R}`, each an integer from 0, an absent member being 0, and names this board, which the test builds:
+**Generated start boards.** A case that needs a start board too large to print (the caps of §17: 200,000 archive rows are about 22 MB of JSON) gives `start_gen` in place of `start_text`, and `end_sha256`, lowercase hex of SHA-256 of the end board's canonical bytes, in place of `end_text`. `start_gen` is `{"blocks": B, "items": I, "rows": R, "unreadable": U}`, each an integer from 0, an absent member being 0, and names this board, which the test builds:
 
 - `rules` 1;
 - `I` items, item `i` (1 ≤ `i` ≤ `I`) being `{"created":"1970-01-01T00:00:00.000000000Z","id":i,"kind":"task","name":"t","stamps":{"estimate":[1,0],"levels":[1,0],"name":[1,0],"repeat":[1,0],"time":[1,0]}}`;
 - `B` blocks with sids 1 to `B`, block `s` in item `((s − 1) div 1000) + 1` (so `B ≤ 1000 × I`), each `{"minutes":15,"sid":s,"stamp":[1,0],"start":"1970-01-01T00:00:00.000000000Z"}`;
 - `R` archive rows, row `j` (1 ≤ `j` ≤ `R`) being `{"archived_at":t,"created":"1970-01-01T00:00:00.000000000Z","id":I+j,"kind":"task","name":"t"}` with `t` the instant `j − 1` seconds after 1970-01-01T00:00:00Z;
+- `U` unreadable lines, each 65,536 bytes of 0x00 (for the size check of §8.4 step 4);
 - unless `I`, `B` and `R` are all 0, the one mark `{"block":B,"device_no":0,"item":I+R}`.
 
-The board passes `check` (§6.12) whenever `I ≤ 10,000`, `B ≤ 1000 × I`, `B ≤ 50,000` and `R ≤ 200,000`.
+The board passes `check` (§6.12) whenever `I ≤ 10,000`, `B ≤ 1000 × I`, `B ≤ 50,000`, `R ≤ 200,000` and `U ≤ 10,000`.
 
 ### 18.4 Transcripts
 
@@ -1457,7 +1475,8 @@ pub mod canon {
     pub fn encode(value: &serde_json::Value) -> Result<Vec<u8>, super::CoreError>;      // core/schema for null or a float
     pub fn parse(bytes: &[u8], limit: usize) -> Result<serde_json::Value, super::CoreError>; // §4.5 steps 1–3 and 5
     pub fn is_canonical(bytes: &[u8], limit: usize) -> bool;
-    pub trait Record: Sized { fn to_value(&self) -> serde_json::Value;
+    pub trait Record: Sized { const LIMIT: usize;                                        // the record's byte limit (§17), checked before anything is parsed
+                              fn to_value(&self) -> serde_json::Value;
                               fn from_value(v: &serde_json::Value) -> Result<Self, super::CoreError>;
                               fn to_canonical(&self) -> Vec<u8>;
                               fn from_canonical(bytes: &[u8]) -> Result<Self, super::CoreError>; }

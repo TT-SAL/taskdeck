@@ -39,7 +39,11 @@ thread and its statics), `checked_url` (task D), the subscription list itself (i
    U+0020. Inside the ICS parser keep whatever trimming today's parser does: it is per-device presentation.
 5. `Overlay::digest`, `anchors_on`, `events_on`, `sealed`, `covering`, `forget`, `status_for`: today's code,
    byte for byte in what they return (the digest is FNV over the events only).
-6. No function here reads a clock (CORE-GEN-003). If today's code does, in something §20 lists, that is a
+6. A local time in a fold: `Zone::from_local` gives its instants ascending, and the core takes the earlier
+   (core.md §5.4). Today's code took chrono's `.earliest()`, which under chrono 0.4.45's `Local` is the later
+   one. Where a ported test expects the later instant of a fold, that is today's quirk: expect the earlier,
+   and list the test under `for_lead`. This is the one case where an expected value may change.
+7. No function here reads a clock (CORE-GEN-003). If today's code does, in something §20 lists, that is a
    `for_lead` point: say where.
 
 ## Tests
