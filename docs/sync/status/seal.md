@@ -275,6 +275,14 @@ carries the login's origin and the `register` arguments, `engine.md` §36 tells 
 wording. All applied on 2026-11-23 06:13 UTC; nothing is checked a third time. Rulings of later tasks
 go into a second spec change before the exit.
 
+**The second spec change, part 1 (task S4's rulings, Q34 to Q48), written by the lead on 2026-11-23
+08:00 UTC**, again in place (no line of `seal.md` moved; `scripts/spec-lint.sh` passes): §19.1, §19.4,
+§21.3, §21.5, §21.6 and ten rows of §22; SEAL-BKP-004 gains the reader's new refusal (Q45), the one
+clause whose text changes; two rows in `CHANGES.md` (the change, and a point left open for `device`
+and `recovery`: what the recovery tool can compare with a relay copy, Q47). It travels in task S5's
+pull request, whose code makes Q45, Q46 and Q48 true. Not yet checked by an agent that did not write
+it: one check runs when the rulings of S5 and S6 have been added, on the whole of the second change.
+
 **E2, left open for `engine` and `device` (a row of `CHANGES.md`):** the check found the same kind of
 defect as E1 for an own `Fence`: the relay fences itself in the same transaction that appends the
 frame, so a `Fence` that loses a rotation race leaves the old relay fenced with no accepted `Fence`

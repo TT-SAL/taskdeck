@@ -1381,7 +1381,7 @@ Every file a device keeps for a board (SYNC.md §4.1, §5.6) is a header followe
 
 | Field | Width | Type | Value |
 |---|---|---|---|
-| `ct_len` | 4 | u32 | byte length of `ciphertext`, 16 to 67,108,880 |
+| `ct_len` | 4 | u32 | byte length of `ciphertext`, 16 to 67,108,880; `FileSealer::seal_record` (§26) refuses a plaintext over 67,108,864 bytes with `seal/payload_too_large`, before it draws |
 | `nonce` | 24 | bytes | fresh from `Entropy` |
 | `ciphertext` | `ct_len` | bytes | XChaCha20-Poly1305 of the record plaintext, with its 16-byte tag |
 
@@ -1427,7 +1427,7 @@ In order:
 2. for each record from `i = 0`: if fewer than 28 bytes remain, or `ct_len` is outside 16 to 67,108,880, or fewer than `28 + ct_len` bytes remain, the rest of the file is a **torn tail** (`seal/file_torn_tail`); otherwise open it with `AD(i)`;
 3. a record that fails to open is `seal/file_corrupt` if any byte follows it, and `seal/file_bad_tail` if it is the last bytes of the file.
 
-The reader returns the records that opened, in order, with the outcome for the rest. `device.md` decides what a torn or bad tail means (a write interrupted by a crash, or damage) and whether to truncate.
+The reader returns the records that opened, in order, with the outcome for the rest: a clean end, or a torn or bad tail with the count of valid bytes (`FileTail`, §26). A corrupt record is an error and `open_file` then returns no record (`seal/file_corrupt` alone). `device.md` decides what a torn or bad tail means (a write interrupted by a crash, or damage) and whether to truncate.
 
 - **SEAL-FILE-001** (seal, device) A sealed local file MUST consist of the 55-byte header of §19.1 followed by records laid out as §19.1, each sealed under `K_file(kind)` with the AD of §19.3.
 - **SEAL-FILE-002** (seal) A sealer MUST draw a new `file_id` whenever a file is created or rewritten as a whole, and MUST number appended records consecutively from 0.
@@ -1552,7 +1552,7 @@ aad  = ctx("backup-aad") ‖ file[0..143]
 (enc, ct) = HPKE base mode to rhpke_pk with info and aad; plaintext = raw DEFLATE (RFC 1951) of the payload (§21.5)
 ```
 
-HPKE base mode gives no sender authentication, which is why the file is also signed (§16.3). The writer uses the recovery public key whose fingerprint (§6.8) the user confirmed on this device's own screen, and refuses to write when the membership's current recovery key differs from that pinned one, until the user confirms the new fingerprint there (V1-2).
+HPKE base mode gives no sender authentication, which is why the file is also signed (§16.3). The writer uses the recovery public key whose fingerprint (§6.8) the user confirmed on this device's own screen, and refuses to write when the membership's current recovery key differs from that pinned one, until the user confirms the new fingerprint there (V1-2). `write_backup` (§26) also refuses inputs whose file its reader would reject, with the code of the step of §21.6 that would reject it (`seal/backup_writer` when the writer is not a current device of the given membership, `seal/backup_history` when the history's seqs are not the membership's `ctl_seqs`, `seal/backup_payload` for any other inconsistency) and with `seal/membership_format` for membership bytes that do not parse. It writes the DEFLATE stream so that the epoch roots and the read token never pass through the compressor, whose buffers no caller can erase: the payload's bytes from `n_roots` to the end of `read_token` travel in stored blocks (RFC 1951 §3.2.4) that the crate writes itself. A reader inflates the stream as any other and resets its decompressor before dropping it (SEAL-GEN-006).
 
 ### 21.4 What is signed and what is sealed
 
@@ -1581,7 +1581,7 @@ Inflated, the payload is (all integers big-endian):
 | `chain_before` | 32 | bytes | segment | `C_{first_seq − 1}` |
 | `n_frames` | 4 | u32 | segment | `seq − first_seq + 1`, at most 1,048,576 |
 | frames | | | segment | `n_frames` × `vb32(frame)`, for the consecutive seqs `first_seq` to `seq` |
-| `n_roots` | 2 | u16 | both | then `n_roots` × `(u32 e ‖ R_e[32])`, ascending by `e`: every root the writer holds |
+| `n_roots` | 2 | u16 | both | then `n_roots` × `(u32 e ‖ R_e[32])`, ascending by `e`: every root the writer holds whose commitment the file's `membership` records. A segment's membership is `M_{first_seq − 1}`, so the roots of epochs rotated inside the segment are not here; they are in those rotations' wraps to the recovery key. A writer refuses, and a reader rejects, a root without a commitment in that membership |
 | `read_token` | 2 + n | vb16 | both | the writer's backup-read token (§6.7), per writer and generation (V1-2); `n = 0` means none, written only by the test backup of a board being created, which holds no token yet (`device.md` §18.1 step 6); a reader treats it as absent |
 | `meta` | 4 + n | vb32 | both | sync metadata, canonical JSON owned by `device.md`, at most 1,048,576 bytes |
 
@@ -1600,9 +1600,9 @@ The payload has no trailing bytes.
 | `items` | 4 + n | vb32 | the canonical encoding of the entry's `items` array (§11.3), at most 262,144 bytes |
 | `sig` | 64 | bytes | the entry's inner signature (§11.3) |
 
-A writer builds each record from an accepted `ctl` entry with `HistoryRecord::from_accepted` (§26), keeps its bytes as `to_bytes` gives them, and reads them back with `from_bytes`, which rejects bytes that are not exactly one record of this table with `seal/backup_history`.
+A writer builds each record from an accepted `ctl` entry with `HistoryRecord::from_accepted` (§26), keeps its bytes as `to_bytes` gives them, and reads them back with `from_bytes`, which rejects bytes that are not exactly one record of this table with `seal/backup_history`. `from_accepted` refuses a frame whose header does not parse with `seal/frame_format`, an opened entry that is not of kind `ctl` with `seal/not_control` (SEAL-BKP-010), and a control payload that is not §11.3's with `seal/bad_payload`.
 
-The history holds one record for every accepted control entry from seq 1 to the file's `seq` (or `first_seq − 1` for a segment), in seq order: exactly the seqs in the membership's `ctl_seqs`. It needs no epoch root to verify, so a purge that deletes old roots leaves it verifiable.
+The history holds one record for every accepted control entry from seq 1 to the file's `seq` (or `first_seq − 1` for a segment), in seq order: exactly the seqs in the membership's `ctl_seqs`. It needs no epoch root to verify, so a purge that deletes old roots leaves it verifiable. A record after the file's `seq` fails step 9 of §21.6, and one at or after a segment's `first_seq` fails step 11; so a segment has `first_seq ≥ 2`.
 
 ### 21.6 Reading, in order
 
@@ -1617,26 +1617,26 @@ The reader has, from the sheet and never from the file, the seed (hence the reco
 7. Inflate under a cap of 536,870,912 bytes (512 MiB); more output or input after the end of the stream fails (`seal/inflate`).
 8. Parse `magic`, `version`, `file_type` and the history records alone, checking each length before reading (`seal/backup_payload`).
 9. Verify the history and build the projection (below; `seal/backup_history`).
-10. `writer_dev` is a current device of the projection with `writer_sign_pk`, and `recipient` is the projection's current recovery identity (`seal/backup_writer`). For a segment the projection ends at `first_seq − 1`, so its writer must be a current device at that seq; a writer chooses the start of its segments so that it is (`device.md` §15.2, DEV-BKP-005).
-11. Parse the rest strictly. The `membership` bytes parse (§13.2) and agree with the projection: the same devices with the same keys and statuses, the same current recovery key, the same epochs and commitments, the same `ctl_seqs`. Every root matches its commitment. For a nightly file, the state hash recomputed from `board` and `membership` (`engine.md`) equals `state_hash`. For a segment, the frames' chain from `chain_before` is recomputed (§15.1) (`seal/backup_payload`).
+10. `writer_dev` is a current device of the projection with `writer_sign_pk`, and the projection's current recovery identity is the sheet's: its `dev_R` is `recipient`, and its two public keys are those of the typed seed (`seal/backup_writer`). `dev_R` binds the signing key alone, so the HPKE key is compared as well: a history whose last recovery-key change pairs the sheet's signing key with another HPKE key is rejected, and a restore never adopts a recovery key the sheet does not hold (SEAL-BKP-004). For a segment the projection ends at `first_seq − 1`, so its writer must be a current device at that seq; a writer chooses the start of its segments so that it is (`device.md` §15.2, DEV-BKP-005).
+11. Parse the rest strictly. The `membership` bytes parse (§13.2) and agree with the projection: the same devices with the same keys and statuses, the same current recovery key, the same epochs and commitments, the same `ctl_seqs`. Every root matches its commitment. For a nightly file, `hash_version` is one the membership's rules allow (§14.3), and the state hash recomputed from `board` and `membership` (`engine.md`) equals `state_hash`. For a segment, the frames' chain from `chain_before` is recomputed (§15.1) and each frame is at most 262,144 bytes; the file carries no value to compare the chain with, so that comparison is the caller's, who chains segments and nightly files (`seal/backup_payload`).
 
 **Projection.** Starting empty, for each history record in order:
 
 1. its `seq` is above the previous record's, and the first record has seq 1;
-2. its `dev` is an authority in the projection so far (a current device, or the current recovery identity), and for the first record `dev` is `dev_R` of the Genesis item's recovery key;
-3. its `ctr` is above the previous record's `ctr` for the same `dev` (gaps are normal: other entries are not in the history);
+2. its `dev` is an authority in the projection so far (a current device, or the current recovery identity), and for the first record `dev` is `dev_R` of the Genesis item's recovery key (the first record's items are parsed at this step to find that key; step 6 binds it to the board id);
+3. its `ctr` is above the previous record's `ctr` for the same `dev` (gaps are normal: other entries are not in the history), and the first record's `ctr` is 1 (SEAL-MEM-004);
 4. its `sig` verifies (strict) under that author's `sign_pk` over the inner message of §11.3, with the record's `dev`, `ctr`, `entry_id`, `at_ms` and `H(items)`;
 5. its items parse (§12) and form a shape (§12.1);
-6. the items change the projection by the reduced rules: Genesis (first record only) sets the board, checks `board_id` against the sheet as §6.2, and adds the first device and the recovery key; `DeviceAdded` adds a current device with fresh keys; `DeviceRevoked` and `DeviceReinstated` change a status with the authors of §13.6; `EpochRotated` requires the next epoch number and records `commit`; `RecoveryKeyChange` installs or proposes, confirms or cancels as §13.6, without the time check; `Fence`, `ResetTo`, `Skip` and `RulesUpgrade` only check their Author column.
+6. the items change the projection by the reduced rules: Genesis (first record only) sets the board, checks `board_id` against the sheet as §6.2 and that its wraps name exactly the first device and `dev_R`, and adds the first device and the recovery key; `DeviceAdded`, `DeviceRevoked`, `DeviceReinstated` and `EpochRotated` run their rows of §13.6 whole, because control entries alone decide every precondition of those rows (fresh keys and ids, the caps, the authors, the targets' statuses, the last current device, the next epoch number, the wraps' recipients, `purge_before`); `RecoveryKeyChange` runs its row of §13.6 without the time check; `Fence`, `ResetTo`, `Skip` and `RulesUpgrade` only check their Author column.
 
-The checks that need non-control entries (counters of other kinds, beats, the log clock, the 72-hour window) cannot be repeated from the history; a backup is trusted for them because its writer was a member, which steps 9 and 10 prove.
+The checks that need non-control entries (counters of other kinds, beats, the log clock, the 72-hour window) cannot be repeated from the history; a backup is trusted for them because its writer was a member, which steps 9 and 10 prove. They prove that the writer was a current device at the last control entry of the file's history, and nothing later: no field says at which seq a membership was taken, so a device revoked after that entry can still write files that read as backups from before its revocation, with any board content, and no check inside a file can tell such a file from an authentic older backup. The restore flow therefore shows the writer, the written date and the seq of the last control entry, and prefers the newest file; with a relay copy in reach it compares the history's `frame_hash` values and the head chain (`device.md` §15.8).
 
-**Checking a file one wrote.** `verify_backup_file` (§26) runs steps 1, 2 and 5 only, under the writer's own signing key, so that a writer checks the file it wrote without the recovery key (`device.md` §15.3.2). It also requires the header's `writer_sign_pk` to equal that key (`seal/backup_signature`), returns the header fields, and opens nothing.
+**Checking a file one wrote.** `verify_backup_file` (§26) runs steps 1, 2 and 5 only, under the writer's own signing key, so that a writer checks the file it wrote without the recovery key (`device.md` §15.3.2). It also requires the header's `writer_sign_pk` to equal that key (`seal/backup_signature`; compared after steps 1 and 2 and before step 5), returns the header fields, and opens nothing.
 
 - **SEAL-BKP-001** (seal, recovery) A backup or segment file MUST be laid out as §21.2, sealed as §21.3, and signed as §16.3.
 - **SEAL-BKP-002** (seal, recovery) The payload MUST be laid out as §21.5, and its history MUST hold exactly one record for each seq in the membership's `ctl_seqs`, in seq order.
 - **SEAL-BKP-003** (seal, recovery) A reader MUST perform the steps of §21.6 in order and MUST reject the file at the first failing step.
-- **SEAL-BKP-004** (seal, recovery) A reader MUST take `board_id` and the recovery key from the sheet and MUST NOT use any relay host, board id or recovery key from the file in their place (V1-13).
+- **SEAL-BKP-004** (seal, recovery) A reader MUST take `board_id` and the recovery key from the sheet and MUST NOT use any relay host, board id or recovery key from the file in their place (V1-13), and MUST reject with `seal/backup_writer` a file whose history ends with a current recovery key other than the pair of public keys of the typed seed.
 - **SEAL-BKP-005** (seal, recovery) A reader MUST NOT parse the payload's membership, board, frames, roots, token or metadata before the history has been verified and the writer has passed step 10.
 - **SEAL-BKP-006** (seal, recovery) A writer MUST seal a backup only to the recovery public key pinned on the writing device, and MUST refuse with `seal/backup_unpinned` when the membership's current recovery key differs from it.
 - **SEAL-BKP-007** (seal, recovery) The writer's interface MUST NOT retain or return the HPKE context, the plaintext payload after sealing, or any key that opens the file, and the `seal` crate MUST NOT offer any function that opens a backup with a device key.
@@ -1650,7 +1650,7 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 
 | Code | Meaning | Raised when | What the caller does |
 |---|---|---|---|
-| `seal/frame_format` | not a well-formed frame, or a frame asked for with `ctr = 0` | §14.2 step 1; `seal_frame` with `ctr = 0` (SEAL-FRAME-004) | class `Skip`; tampering alarm (`engine.md`); from `seal_frame`: a fault of the caller, nothing is sealed |
+| `seal/frame_format` | not a well-formed frame, or a frame asked for with `ctr = 0` | §14.2 step 1; `seal_frame` with `ctr = 0` (SEAL-FRAME-004); `HistoryRecord::from_accepted` (§21.5) | class `Skip`; tampering alarm (`engine.md`); from `seal_frame`: a fault of the caller, nothing is sealed |
 | `seal/wrong_board` | frame of another board | step 2 | `Skip`; tampering alarm |
 | `seal/unknown_author` | no key of this board signed it; when signing, a recovery signer of another board than the call's | step 3; `seal_frame`, `ctl_payload`, `sign_admin` (§26) | `Skip`; tampering alarm; when signing, nothing is signed (a bug of the caller) |
 | `seal/bad_signature` | signature fails under the author's key | step 4 | `Skip`; tampering alarm |
@@ -1667,7 +1667,7 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 | `seal/based_on_fork` | `based_on_chain` differs from the local chain | step 12, §14.8 | `Tamper`; stop and show evidence |
 | `seal/not_authorized` | author not allowed for the kind | step 13, §11.1 | `Refuse`; alarm naming the author |
 | `seal/stale_epoch` | previous-epoch entry outside §13.9, among them a control entry that lost a race to one other rotation (§13.8) | steps 9, 13 and 14 | `Refuse`; the author re-seals a `cmd` (`engine.md` §24.3); an own control entry fails or repeats its operation (`engine.md` §28) |
-| `seal/bad_payload` | `ctl`, `beat` or `snap` payload invalid; when building, an item or payload its table excludes, or an admin argument the registry excludes | step 15; `ctl_payload`, `beat_payload`, `snap_payload`, `admin_message`, `sign_admin` (§26) | `Refuse`; alarm naming the author; when building, nothing is produced (a bug of the caller) |
+| `seal/bad_payload` | `ctl`, `beat` or `snap` payload invalid; when building, an item or payload its table excludes, or an admin argument the registry excludes | step 15; `ctl_payload`, `beat_payload`, `snap_payload`, `admin_message`, `sign_admin` (§26); `HistoryRecord::from_accepted` (§21.5) | `Refuse`; alarm naming the author; when building, nothing is produced (a bug of the caller) |
 | `seal/bad_ctl_sig` | inner control signature fails | step 15, §11.3 | `Refuse`; alarm naming the author |
 | `seal/ctl_shape` | items form no shape of §12.1 | step 16; `ctl_payload` (§26) | `Refuse`; alarm naming the author; from `ctl_payload`, nothing is produced (a bug of the caller) |
 | `seal/ctl_genesis` | a Genesis item or anchor is wrong | step 16, §13.3 | `Refuse`, or at seq 1 the board is unusable: the caller stops bootstrapping |
@@ -1687,9 +1687,9 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 | `seal/ctl_support` | an active member does not support the version | §13.6, §13.10 | `Refuse`; the UI names the blocker (`engine.md`) |
 | `seal/commitment` | own wrap fails or mismatches its commitment | §14.5; every failure of `unwrap_root` (§7) | `Accept` with the commitment halt; from `unwrap_root`, the caller treats it as that halt (SEAL-WRAP-003) |
 | `seal/unknown_rules` | an activated rules version this build lacks | §14.5 | `Accept` with the rules halt |
-| `seal/payload_too_large` | payload over the padding cap | sealing, §10.2 | the composer splits or refuses the edit |
+| `seal/payload_too_large` | payload over the padding cap; a file record's plaintext over 67,108,864 bytes | sealing, §10.2; `FileSealer::seal_record`, §19.1 | the composer splits or refuses the edit; a file record over the limit is a bug of the caller |
 | `seal/entropy` | the entropy source failed | any sealing or generation | retry later; never fall back to another source |
-| `seal/membership_format` | canonical membership bytes invalid | §13.2 | reject the input that carried them |
+| `seal/membership_format` | canonical membership bytes invalid | §13.2; `write_backup` (§21.3) | reject the input that carried them |
 | `seal/challenge_length` | relay nonce not 32 bytes | §16.1, §16.2 | do not sign; treat the relay answer as invalid |
 | `seal/host_format` | a host is not a host of §5.4 (a port of 443 included) | `relay_origin`, `login_message`, `admin_message`, `sign_admin`, `ctl_payload`, §5.4 | refuse the host; ask the user again |
 | `seal/move_code` | typed move code does not match | §15.4 | ask again (`engine.md` limits tries) |
@@ -1728,9 +1728,9 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 | `seal/backup_recipient` | sealed to another recovery key | §21.6 | try another typed sheet, else reject |
 | `seal/backup_signature` | writer signature fails | §21.6 | reject the file |
 | `seal/backup_open` | HPKE does not open | §21.6 | reject the file |
-| `seal/backup_payload` | payload layout or consistency wrong | §21.6 | reject the file |
-| `seal/backup_history` | membership history fails | §21.6 | reject the file as forged |
-| `seal/backup_writer` | the writer was not a member, or the recipient not the recovery key | §21.6 | reject the file as forged |
+| `seal/backup_payload` | payload layout or consistency wrong | §21.6; `write_backup` (§21.3) | reject the file; from `write_backup`, nothing is written (a bug of the caller) |
+| `seal/backup_history` | membership history fails; bytes that are not one history record | §21.6; `HistoryRecord::from_bytes` (§21.5); `write_backup` (§21.3) | reject the file as forged; from `write_backup`, nothing is written |
+| `seal/backup_writer` | the writer was not a current device at the end of the file's history, or that history's current recovery key is not the sheet's pair of public keys | §21.6 step 10; `write_backup` (§21.3) | reject the file as forged; from `write_backup`, nothing is written |
 | `seal/backup_unpinned` | membership's recovery key differs from the pinned one | §21.3 | do not write; ask the user to confirm the new fingerprint (`device.md`) |
 | `seal/not_control` | `HistoryRecord::from_accepted` was given an entry that is not of kind `ctl` | §21.5, SEAL-BKP-010 | a bug of the caller |
 
