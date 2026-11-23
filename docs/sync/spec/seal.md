@@ -241,8 +241,8 @@ K_blob,e   = HKDF(salt = board_id, ikm = R_e, info = ctx("key-blob")  ‖ u32 e,
 
 - **SEAL-KEY-010** (seal) An epoch root MUST be 32 bytes drawn from `OsEntropy` by the device that composes the entry carrying it (Genesis or EpochRotated).
 - **SEAL-KEY-011** (seal, recovery) The commitment of epoch `e` MUST be `H(ctx("epoch") ‖ board_id ‖ u32 e ‖ R_e)`.
-- **SEAL-KEY-012** (seal, recovery) `K_entry,e`, `K_snap,e` and `K_blob,e` MUST be derived exactly as §6.5 states, and a key derived for one kind MUST NOT be used for another.
-- **SEAL-KEY-013** (seal) A device that learns an epoch root (from a wrap, a bundle or a backup) MUST check it against the commitment `c_e` recorded in its membership state before it derives a key from it.
+- **SEAL-KEY-012** (seal, device, recovery) `K_entry,e`, `K_snap,e` and `K_blob,e` MUST be derived exactly as §6.5 states, and a key derived for one kind MUST NOT be used for another.
+- **SEAL-KEY-013** (seal, device) A device that learns an epoch root (from a wrap, a bundle or a backup) MUST check it against the commitment `c_e` recorded in its membership state before it derives a key from it.
 
 ### 6.6 Storage key and file keys
 
@@ -1466,7 +1466,7 @@ AD  = ctx("blob") ‖ board_id[16] ‖ sealed[0..27] ‖ u64 S ‖ writer_dev[16
 padded = u32 body_len ‖ body ‖ 0x00 × (P(4 + body_len) − 4 − body_len)
 ```
 
-`P` is the function of §10.2. For a snapshot, `body` is the compressed snapshot body of §20.4; for a picture it is the JPEG bytes (`device.md`).
+`P` is the function of §10.2. For a snapshot, `body` is the compressed snapshot body of §20.4; for a picture it is the JPEG bytes (`device.md`). `seal_blob` refuses a body whose sealed bytes would exceed 67,108,864 bytes with `seal/payload_too_large`, before it draws.
 
 ### 20.4 Snapshot body
 
@@ -1485,25 +1485,25 @@ Before compression:
 
 The history lets a device that bootstraps from this snapshot (a pairing's, or a periodic one after compaction or purge) write backups whose history starts at seq 1 (SEAL-BKP-002), although it never received the control entries below `S`. It counts toward the inflated limit of 67,108,864 bytes.
 
-The body is compressed with raw DEFLATE (RFC 1951, `flate2`), and the result is `body` in §20.3. Its uncompressed length is at most 67,108,864 bytes: `seal_snapshot` refuses a longer body, or one whose sealed bytes would exceed the sealed-blob maximum of 67,108,864 bytes (§23), with `seal/snapshot_large`, and produces no sealed bytes (SEAL-BLOB-009).
+The body is compressed with raw DEFLATE (RFC 1951, `flate2`), and the result is `body` in §20.3. Its uncompressed length is at most 67,108,864 bytes: `seal_snapshot` refuses a longer body, or one whose sealed bytes would exceed the sealed-blob maximum of 67,108,864 bytes (§23), with `seal/snapshot_large`, and produces no sealed bytes (SEAL-BLOB-009). Near that maximum `P` rounds up to a multiple of 1,048,576, so the largest compressed body (and the largest body of a kind-2 blob) that fits is 66,060,284 bytes; its sealed blob is 66,060,355 bytes. `seal_snapshot` also refuses what its reader would reject and it can see without replaying the history: membership bytes that do not parse (`seal/membership_format`) and, with `seal/blob_open`, a membership of another board, a history whose seqs are not exactly the membership's `ctl_seqs` (SEAL-BLOB-006), and a history record with a seq above `S`.
 
 ### 20.5 Opening, in order
 
 Given the parts and the expected values from the signed entry (`sha256`, `size`, `parts`, `inflated`, `epoch`, `S`, writer):
 
-1. there are exactly `parts` parts, each 1,048,576 bytes except the last, which is 1 to 1,048,576 bytes; together `size` bytes (`seal/blob_size`);
+1. there are exactly `parts` parts, each 1,048,576 bytes except the last, which is 1 to 1,048,576 bytes; together `size` bytes, and `size` is 67 to 67,108,864 (`seal/blob_size`);
 2. `H(concatenation) = sha256`, in constant time (`seal/blob_hash`): nothing is decrypted before this;
-3. the header has `magic = "TDB1"`, `ver = 1`, `suite = 1`, the expected `blob_kind` and `epoch` (`seal/blob_header`);
+3. the header has `magic = "TDB1"`, `ver = 1`, `suite = 1`, the expected `blob_kind` and `epoch` (`seal/blob_header`); the header's `blob_id` is not compared with the reference's, because the signed `sha256` fixes every sealed byte and the id is what the caller fetches by;
 4. the AEAD opens with the AD of §20.2 under the kind's key for that epoch (`seal/blob_open`);
 5. the padding is valid as §10.3 checks it, with `U = 4 + body_len` (`seal/blob_open`);
 6. for a snapshot: inflate with an output cap of `inflated` bytes; more output, or input left after the end of the DEFLATE stream, or output shorter than `inflated`, fails (`seal/inflate`);
-7. for a snapshot: the body parses as §20.4 with no trailing bytes, `S` and the state hash equal the expected values, the membership bytes parse, the history verifies by the projection steps of §21.6 (with the receiver's own `board_id` in place of the sheet's), and the history agrees with `membership` as §21.6 step 11 states (the same devices with the same keys and statuses, the same current recovery key, the same epochs and commitments, the same `ctl_seqs`) (`seal/blob_open`); the caller then recomputes the state hash (`engine.md`).
+7. for a snapshot: the body parses as §20.4 with no trailing bytes; `S` equals the expected seq; the membership bytes parse; `hash_version` is one the membership's rules allow (§14.3), and `state_hash` is the state hash of the body's own `board` and `membership` under it (`engine.md` §18.3); no history record has a seq above `S`; the history verifies by the projection steps of §21.6 (with the receiver's own `board_id` in place of the sheet's), and the history agrees with `membership` as §21.6 step 11 states (the same devices with the same keys and statuses, the same current recovery key, the same epochs and commitments, the same `ctl_seqs`) (`seal/blob_open`). `open_snapshot` is given no expected state hash (§26): the caller compares the body's `hash_version` and `state_hash` with the signed entry's, and recomputes the state hash from the board it loads (`engine.md`).
 
 For a blob of kind 2, steps 6 and 7 do not apply and `expected.inflated` is not read.
 
 Splitting: part `i` (0-based) is bytes `i × 1,048,576` to `min((i + 1) × 1,048,576, size)` of the sealed bytes; `parts = ceil(size / 1,048,576)`. The relay stores parts by `(blob_id, i)` (`relay.md`).
 
-**Opening a declared snapshot** (a rejoin, `engine.md` §19.7). A device that has not yet classified the announcing `snap` entry opens a snapshot from what the relay declares about the blob (`relay.md` §10.7): its `sha256`, its `size`, the seq `S`, and its `author`, used as `writer_dev`. The steps are those above, with these differences: step 1 uses the declared `size` and `parts = ceil(size / 1,048,576)`; step 2 the declared `sha256`; step 3 checks `magic`, `ver`, `suite` and `blob_kind = 1`, and reads `epoch` from bytes 7 to 11; step 4 takes the root of that epoch from the caller's roots (none: `seal/missing_root`) and derives `K_snap` from it; step 6 inflates under a cap of 67,108,864 bytes, with no expected length; step 7 checks `S` against the declared seq and does not compare the state hash. The reader returns the body together with the header's epoch and the inflated length. No declared value is trusted: the caller checks the seq, the state hash, `sha256`, `size`, `parts`, `inflated`, `epoch` and the writer against the signed `snap` entry once it has classified it (`engine.md` §19.7 step 5).
+**Opening a declared snapshot** (a rejoin, `engine.md` §19.7). A device that has not yet classified the announcing `snap` entry opens a snapshot from what the relay declares about the blob (`relay.md` §10.7): its `sha256`, its `size`, the seq `S`, and its `author`, used as `writer_dev`. The steps are those above, with these differences: step 1 uses the declared `size` and `parts = ceil(size / 1,048,576)`; step 2 the declared `sha256`; step 3 checks `magic`, `ver`, `suite` and `blob_kind = 1`, and reads `epoch` from bytes 7 to 11; step 4 takes the root of that epoch from the caller's roots (none: `seal/missing_root`) and derives `K_snap` from it; step 6 inflates under a cap of 67,108,864 bytes, with no expected length; step 7 checks `S` against the declared seq and makes neither the `hash_version` check nor the state-hash check. The reader returns the body together with the header's epoch and the inflated length. No declared value is trusted: the caller checks the seq, the state hash, `sha256`, `size`, `parts`, `inflated`, `epoch` and the writer against the signed `snap` entry once it has classified it (`engine.md` §19.7 step 5).
 
 - **SEAL-BLOB-001** (seal) A blob MUST be sealed as one AEAD message laid out as §20.2, with the AD of §20.2, before it is split into parts of at most 1,048,576 bytes as §20.5 states.
 - **SEAL-BLOB-002** (seal) A reader MUST check the SHA-256 of the concatenated parts against the value from the signed entry before any decryption, and MUST reject a mismatch.
@@ -1687,9 +1687,9 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 | `seal/ctl_support` | an active member does not support the version | §13.6, §13.10 | `Refuse`; the UI names the blocker (`engine.md`) |
 | `seal/commitment` | own wrap fails or mismatches its commitment | §14.5; every failure of `unwrap_root` (§7) | `Accept` with the commitment halt; from `unwrap_root`, the caller treats it as that halt (SEAL-WRAP-003) |
 | `seal/unknown_rules` | an activated rules version this build lacks | §14.5 | `Accept` with the rules halt |
-| `seal/payload_too_large` | payload over the padding cap; a file record's plaintext over 67,108,864 bytes | sealing, §10.2; `FileSealer::seal_record`, §19.1 | the composer splits or refuses the edit; a file record over the limit is a bug of the caller |
+| `seal/payload_too_large` | payload over the padding cap; a file record's plaintext over 67,108,864 bytes; a kind-2 blob whose sealed bytes would exceed 67,108,864 | sealing, §10.2; `FileSealer::seal_record`, §19.1; `seal_blob`, §20.3 | the composer splits or refuses the edit; a file record over the limit is a bug of the caller |
 | `seal/entropy` | the entropy source failed | any sealing or generation | retry later; never fall back to another source |
-| `seal/membership_format` | canonical membership bytes invalid | §13.2; `write_backup` (§21.3) | reject the input that carried them |
+| `seal/membership_format` | canonical membership bytes invalid | §13.2; `write_backup` (§21.3); `seal_snapshot` (§20.4) | reject the input that carried them |
 | `seal/challenge_length` | relay nonce not 32 bytes | §16.1, §16.2 | do not sign; treat the relay answer as invalid |
 | `seal/host_format` | a host is not a host of §5.4 (a port of 443 included) | `relay_origin`, `login_message`, `admin_message`, `sign_admin`, `ctl_payload`, §5.4 | refuse the host; ask the user again |
 | `seal/move_code` | typed move code does not match | §15.4 | ask again (`engine.md` limits tries) |
@@ -1716,10 +1716,10 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 | `seal/file_torn_tail` | incomplete last record | §19.4 | `device.md` truncates after the good records |
 | `seal/file_bad_tail` | last record does not open | §19.4 | `device.md` decides: truncate or alarm |
 | `seal/file_corrupt` | a record followed by others does not open; identity bytes of another length than 80, or with an X25519 key that is not clamped | §19.4; `DeviceKeys::from_identity_bytes` (§26) | tampering or damage alarm (`device.md`) |
-| `seal/blob_size` | parts or size wrong | §20.5 | refetch once, then alarm naming the writer |
+| `seal/blob_size` | parts or size wrong, a size under 67 bytes among them | §20.5 | refetch once, then alarm naming the writer |
 | `seal/blob_hash` | sealed bytes do not match the signed hash | §20.5 | alarm naming the writer; never decrypt |
 | `seal/blob_header` | blob header wrong | §20.5 | alarm naming the writer |
-| `seal/blob_open` | blob or snapshot body fails to open or parse | §20.5 | alarm naming the writer |
+| `seal/blob_open` | blob or snapshot body fails to open or parse; a body `seal_snapshot` is asked to seal that its reader would reject | §20.5; `seal_snapshot` (§20.4) | alarm naming the writer; from `seal_snapshot`, nothing is sealed (a bug of the caller) |
 | `seal/snapshot_large` | a snapshot body over 67,108,864 bytes before compression, or a sealed snapshot over 67,108,864 bytes | §20.4 | nothing is sealed; `engine.md` decides (§19.4, §28.4) |
 | `seal/inflate` | inflate exceeded the cap or the stream was wrong | §20.5, §21.6 | alarm naming the writer, or reject the backup |
 | `seal/backup_size` | backup file too small or too large | §21.6 | reject the file |
@@ -1845,7 +1845,7 @@ Stage `seal` publishes these families under `docs/sync/vectors/`, one JSON file 
 **`device.md`.**
 - Requires: the files of §19.2, their contents, write and fsync order, and the handling of torn and bad tails; the key stores that wrap `L_d` with `ctx("local-key") ‖ board_id ‖ dev` as associated data or entropy where the store accepts it (§6.6).
 - Requires: every accepted control entry's history record (§21.5) is kept for the life of the board, through purges, so backups can carry the full history (SEAL-BKP-002) and every snapshot it seals carries it (SEAL-BLOB-006).
-- Requires: the sealer adapter opens, with `unwrap_root`, the wraps a `login` answer carries for a reinstated device (`device.md` §10.3), as §7 states (SEAL-WRAP-002, SEAL-WRAP-003, SEAL-KEY-013): epoch by epoch, oldest first, each once its membership records that epoch's commitment. `Receipt.learned_root` reports only a root that an entry's own wraps teach. The sealer adapter also carries the caller's duties SEAL-FRAME-005, SEAL-ENV-003, SEAL-ENV-004 and SEAL-MEM-016, which the crate's pure functions cannot violate, and the caller's half of SEAL-WRAP-003 (a wrap delivered outside an entry: the adapter returns `seal/commitment`, the engine halts, `engine.md` §24.4); the transport (`device.md` §10) carries SEAL-SIG-005 and the caller's half of SEAL-SIG-002 (the origin comes from the device's own configuration). Stage `device` owns them, SEAL-SIG-005 and SEAL-WRAP-003 together with `engine`, which supplies the `register` arguments and halts on such a wrap.
+- Requires: the sealer adapter opens, with `unwrap_root`, the wraps a `login` answer carries for a reinstated device (`device.md` §10.3), as §7 states (SEAL-WRAP-002, SEAL-WRAP-003, SEAL-KEY-013): epoch by epoch, oldest first, each once its membership records that epoch's commitment. `Receipt.learned_root` reports only a root that an entry's own wraps teach. The sealer adapter also carries the caller's duties SEAL-FRAME-005, SEAL-ENV-003, SEAL-ENV-004 and SEAL-MEM-016, which the crate's pure functions cannot violate, and the caller's half of SEAL-WRAP-003 (a wrap delivered outside an entry: the adapter returns `seal/commitment`, the engine halts, `engine.md` §24.4); the transport (`device.md` §10) carries SEAL-SIG-005 and the caller's half of SEAL-SIG-002 (the origin comes from the device's own configuration). The adapter also carries the caller's halves of SEAL-KEY-012 (`SymKey` carries no kind, so the caller passes each function the key of its own kind) and of SEAL-KEY-013 (`open_snapshot_declared` has no membership to check a root against, so its `roots` argument gives only roots the device has already checked against their commitments). Stage `device` owns them, SEAL-SIG-005 and SEAL-WRAP-003 together with `engine`, which supplies the `register` arguments and halts on such a wrap.
 - Requires: backup scheduling, destinations and file names; the pinned recovery fingerprint (SEAL-BKP-006); the `meta` JSON of §21.5.
 - Requires: release builds never enable the `test-entropy` feature (SEAL-GEN-005), which stage `release` checks by the feature resolution and by searching every artifact for `TEST_ENTROPY_MARKER` (SEAL-GEN-014; `device.md` §11.2, DEV-TRUST-003).
 

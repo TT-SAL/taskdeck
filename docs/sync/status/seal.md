@@ -57,7 +57,7 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S2 | Frames, envelope, padding, payloads and control items (encode and strict parse, canonical JSON), login and admin signatures | `entries`, `signatures`, `encodings` (JSON) | §5.3, §8–§12, §16 | `seal-frame`, `seal-padding`, `seal-signatures` | **done**, merged (TT-SAL/taskdeck#9; low findings only) |
 | S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **done**, merged (TT-SAL/taskdeck#10, with the spec change) |
 | S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done**, merged (TT-SAL/taskdeck#13, 2026-11-23 07:46 UTC; low findings only, four rulings carried into S5's brief) |
-| S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **implemented**, gate green, pushed as a draft pull request; verify and security passes next (workflow run `wf_3d17ace2-9c6`) |
+| S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **done** (TT-SAL/taskdeck#14; two high findings of its security passes fixed and checked by the lead) |
 | S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | brief written |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written (to revise with what S5 and S6 leave) |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
@@ -195,6 +195,37 @@ Notes behind the briefs (the lead's reading of the spec):
 - Nothing of the crate's code changed after the implementer; the lead's gate passed on the final tree
   (205 unit tests with `test-entropy`, 13 vector families).
 
+## Task S5: what happened
+
+- Implementer (0.57 million tokens): `blob.rs` whole (sealing, the three openers with the seven steps
+  of §20.5 in order, `split_parts`) and the six carried-over rulings in `backup.rs`,
+  `backup/projection.rs` and `prim.rs`. Five spec questions (Q50 to Q54).
+- Verify pass: no code defect. The verifier recomputed the sealing vectors independently and
+  removed changes one at a time in a scratch copy: two tests and two vector cases were missing or
+  could not tell their check from a weaker one (lead items for the fix pass).
+- Security passes. The parsing lens found one low point (Q55) and measured the projection: linear
+  now, about 55 µs per history record (the signature check); a hostile snapshot at the largest size
+  (284,000 records in 64 MiB) opens in 16 s, a backup at the record limit in about 60 s, where it
+  took 516 s. **The protocol lens found two high defects, both in the backup writer's new code:**
+  1. *`write_backup` could write a backup that does not read back.* A sync flush of the pinned
+     compressor can return with all input taken and room left in the output while bytes are still
+     in its lookahead (when its code buffer fills in mid-stream). The loop took that for a finished
+     flush, and the stored blocks that followed corrupted the stream: 2 of 474 board sizes on mixed
+     data. `verify_backup_file` cannot see it (it opens nothing), so the file would have failed only
+     at a restore. The other security pass had tested 574 streams of other data and found none.
+  2. *`write_backup` left the epoch roots in freed heap memory*: it moved them out of the vector it
+     was handed (the buffer is then freed with the bytes in it), and a stable sort copied them into
+     a heap scratch buffer.
+- Fix pass, one: both reproductions became tests that failed first. The flush loop now calls again
+  with no input until a call writes exactly what an empty flush writes, which proves nothing was
+  held back (bounded; a compressor that never says so is an error, not a file). The roots stay in
+  place until their vector drops. The lead's items and the verify pass's gaps closed.
+- The lead's own check of the fixes: the gate, the loop read against the argument, and a sweep of
+  3,263 backups (six data patterns, sizes from 0 to 3 MB, every size near the two that failed)
+  written and read back with their content compared: none failed. No second agent pass ran on the
+  fixes (the task shape has none after the security passes); task S7 adds a property test of the
+  split stream and a check inside `write_backup` (below).
+
 ## Decisions (with reasons)
 
 - **L1. Tasks along the skeleton's modules**, in dependency order (table above). Membership and
@@ -245,6 +276,10 @@ Notes behind the briefs (the lead's reading of the spec):
 - **L14. An implemented task is pushed even before its verify pass** when the passes must wait for a
   usage window: the commit says "not yet verified", the pull request is a draft, and nothing merges
   before the passes.
+- **L15. A test target with a test-only allocator** (`tests/memory`): to show that no epoch root
+  stays in a freed heap block, the test binary installs a global allocator that scans what is freed
+  on the test's own thread. That needs `unsafe` in the test binary; the library keeps
+  `#![forbid(unsafe_code)]`, and nothing else can observe freed memory.
 - **L12. A hook step that needs `python3` runs on Linux only** (the vectors' format check in `ci.sh`):
   a Windows runner's bash may lack it, and the files are the same on every system.
 
@@ -308,6 +343,10 @@ six low points; twelve were applied on 2026-11-23 08:02 UTC:
 
 Because the check found a high point, the corrected text is checked once more, together with the
 rulings of S5 and S6 when they are written in (the whole of the second change, one agent).
+
+**Part 2 (task S5's rulings, Q50 to Q56), written on 2026-11-23 12:00 UTC**, in place: §20.3, §20.4,
+§20.5 steps 1, 3 and 7 and the declared mode, four rows of §22, §25; SEAL-KEY-012 and SEAL-KEY-013
+gain `device` as an owner for the caller's half. The row of `CHANGES.md` is extended.
 
 **E2, left open for `engine` and `device` (a row of `CHANGES.md`):** the check found the same kind of
 defect as E1 for an own `Fence`: the relay fences itself in the same transaction that appends the
@@ -373,6 +412,8 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q52 | §20.2, §22 | a blob of kind 2 too large to seal has no code | `seal_blob` refuses with `seal/payload_too_large`, before it draws. Spec note |
 | Q53 | §20.4, §23 | the padding function rounds to 1,048,576 bytes near the limit, so a body of 64 MiB cannot be sealed | as the spec says (`seal/snapshot_large` when the sealed blob would exceed 67,108,864 bytes); the largest compressed body that fits is 66,060,284 bytes. Spec note |
 | Q54 | §20.5 step 3 | `BlobRef.id` against the header's `blob_id` | not compared: the signed `sha256` fixes every sealed byte, and the id is what the caller fetches by. Spec note |
+| Q55 | §20.5 step 1 | sealed bytes under 67 bytes are refused at step 1, which states no minimum | the code stays: step 1 now states that `size` is 67 to 67,108,864 (as §11.5 bounds a signed size). Spec note |
+| Q56 | §20.4 | `seal_snapshot` sealed a body with a history record above `S`, and a membership of another board; its reader rejects both | it refuses both with `seal/blob_open`, as `write_backup` refuses a membership of another board. A few lines: on S7's list. Spec note |
 | Q49 | §26 `VerifiedBackup` | the recovery tool is to show a file's written date, which `read_backup` did not return | `VerifiedBackup` gains `written_ms` (the header's, display only). Code in S5's brief |
 | Q48 | SEAL-GEN-006, §21.3 | the DEFLATE compressor and decompressor (a pinned dependency's private state) hold the payload's bytes, the epoch roots among them, and are freed without being erased (S4 security, a note; `unsafe` is forbidden, so the crate cannot wipe them from outside) | as S1's high finding ruled for the hash states: a state that took in roots must not be left behind. The writer keeps the roots and the read token out of the compressor (they travel in stored blocks the crate writes itself, after a full flush); the reader resets the decompressor, which zeroes its window in the pinned version, before dropping it. What stays outside reach is said in the code and in the spec. Code in S5's brief |
 
@@ -428,6 +469,9 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | check of the second spec change, part 1 | 1 | 0.15 M | 0.19 M | 0.19 M |
 | | **window total** (nothing more was started in it: S5's implementer would not fit. The session's worker restarted at 05:41 UTC, when the owner wrote that the limit had reset, so this window ends at 10:41 UTC, 12:41 Helsinki, at the latest; S5 starts after that) | | | | **3.45 M** |
 | from 2026-11-23 12:46 (the lead's first agent after the second window had ended) | S5, the implementer | 1 | 0.43 M | 0.57 M | 0.57 M |
+| | S5, the verifier | 1 | 0.23 M | 0.26 M | 0.26 M |
+| | S5, security passes and the fix pass | 3 | 0.59 M | 0.60 M | 0.60 M |
+| | **window so far** | | | | **1.43 M** |
 
 ## Low findings left as they are
 
@@ -468,6 +512,17 @@ output); the higher is booked. Limit: 3.5 million per window.
 - **S4, reviewers' notes, not findings.** `EpochRoot::from_bytes` takes its 32 bytes by value (§26), so
   a caller's copy stays on the stack, as with every move of a secret. A segment's chain is recomputed
   and compared with nothing (Q39).
+
+- **S5, for S7.** A property test of the split DEFLATE stream (random mixes of compressible and
+  incompressible data, sizes to a few hundred kilobytes, read back by `inflate_raw`): the defect the
+  security pass found shows only on some data. And a check inside `write_backup` before it seals:
+  the compressed head followed by an empty final stored block inflates to exactly the head, and the
+  compressed tail to exactly the tail (the roots do not pass through the decompressor); otherwise
+  nothing is written. A backup that does not read back is found only at a restore.
+- **S5, security.** `seal_snapshot` seals two bodies its reader rejects (Q56). On S7's list.
+- **S5, reviewers' notes, not findings.** What the HPKE and AEAD crates keep of a plaintext in their
+  own buffers was not examined by any pass. `black_box` after the decompressor's reset was not
+  checked in the compiled code.
 
 ## Open questions for the owner
 
@@ -546,5 +601,14 @@ To be completed at the exit. So far:
 - For `recovery` (Q45): `read_backup` refuses with `seal/backup_writer` a file whose history ends with
   a recovery key that is not exactly the typed sheet's pair of public keys.
 - For `recovery` and `device`: `read_backup` on a hostile file of the largest size allowed takes time
-  linear in the history (one signature check per record, up to 1,048,576) and up to about 1.5 GB of
-  memory (a 256 MiB file inflating to 512 MiB); run it off the UI thread.
+  linear in the history (one signature check per record, about 55 µs each in a release build on the
+  container, so about 60 s at the limit of 1,048,576) and up to about 1.5 GB of memory (a 256 MiB
+  file inflating to 512 MiB); `open_snapshot` at its largest size about 16 s. Run them off the UI
+  thread.
+- For `engine` (Q50): `open_snapshot` checks a snapshot body in itself; comparing its `hash_version`
+  and `state_hash` with the signed `snap` entry is the engine's, in both modes. A beat's ack may name
+  any seq below the beat's own, also one that is no `snap` entry (Q17).
+- For `device` (Q52, Q53): the largest body `seal_blob` and `seal_snapshot` can seal is 66,060,284
+  bytes (compressed, for a snapshot). `SymKey` carries no kind: the adapter passes each function the
+  key of its own kind (SEAL-KEY-012), and hands `open_snapshot_declared` only roots it has checked
+  against their commitments (SEAL-KEY-013).
