@@ -3,8 +3,8 @@
 The security pass on the ported ICS parser found seven things, all rated low on the stage's scale (robustness
 on hostile input). The lead has ruled that they are fixed all the same: the parser now runs on the phone
 against text from an address anyone may control, and `docs/sync/spec/device.md` DEV-ICS-004 gives a fetch 20
-seconds, which a device cannot keep if a 120 KB feed parses for 109 s or a 1 MB feed takes 1.16 GB. The spec
-now says what the bounds are: core.md §14.6, the list under "bounded" (find it by heading).
+seconds, which a device cannot keep if a 120 KB feed parses for 109 s or a 1 MB feed takes 1.16 GB. The bounds
+below go into core.md §14.6 with spec change 5, right after this work; until then this brief is the text.
 
 The findings, with the reproduction of each as text, are in
 `/home/user/taskdeck/docs/sync/status/core/findings/security-c-ports.json`; the one low finding of the check
@@ -13,8 +13,7 @@ The findings, with the reproduction of each as text, are in
 ## Do
 
 First add each reproduction as a test and see it fail (a slow one: see it be slow, then give it a size that
-shows the bound without taking minutes). Then make `src/ics.rs` and `src/overlay.rs` keep the bounds of
-core.md §14.6:
+shows the bound without taking minutes). Then make `src/ics.rs` and `src/overlay.rs` keep these bounds:
 
 1. A `BY…` list of a recurrence rule is read without duplicates and holds at most 64 values; a rule with a
    longer list is a rule the parser cannot follow, treated as today's parser treats one.
