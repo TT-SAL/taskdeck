@@ -66,3 +66,20 @@ fn the_schema_rules_are_checked_apart_from_step_5() {
     assert_eq!(pic(1_048_577, 1).check_schema_rules(), Err(schema()));
     assert!(LogCommand::SetPicture { picture: None }.check_schema_rules().is_ok());
 }
+
+// Lead ruling, spec change 5: `to_canonical` never returns empty bytes; a
+// command holding an integer the encoding cannot carry (above 2^53 - 1,
+// core.md §4.2 rule 5) panics, and the message holds no text of the command.
+#[test]
+#[should_panic(expected = "a command holding an integer above 2^53 - 1 cannot be encoded")]
+fn to_canonical_panics_on_an_integer_beyond_u53() {
+    let _ = LogCommand::Rename { id: 1 << 53, name: "secret name".to_owned() }.to_canonical();
+}
+
+#[test]
+fn to_canonical_is_never_empty_at_the_largest_integers() {
+    let max = (1u64 << 53) - 1;
+    let bytes = LogCommand::SetNotes { text: String::new(), base: max }.to_canonical();
+    assert_eq!(String::from_utf8(bytes).as_deref(), Ok(r#"{"base":9007199254740991,"op":"set_notes"}"#));
+    assert!(!LogCommand::Forget { id: max }.to_canonical().is_empty());
+}

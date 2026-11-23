@@ -140,6 +140,7 @@ fn a_refusal_names_op_and_target_and_carries_no_text() {
 
 // spec: CORE-APPLY-003
 // spec: CORE-APPLY-004
+// spec: CORE-ID-003
 #[test]
 fn the_change_set_names_what_changed_and_nothing_else() {
     let mut b = board();
@@ -165,6 +166,13 @@ fn the_change_set_names_what_changed_and_nothing_else() {
     assert_eq!(a.restored_as, Some(D1 + 1));
     assert_eq!(a.changes, ChangeSet { items: [D1 + 1].into(), archive_removed: vec![key], marks: true, ..ChangeSet::default() });
     assert_eq!(b.mark(1).item, 20, "the mark rises to the unused fallback (CORE-ID-003)");
+    // The same restore again, with a fresh fallback above the mark: a benign
+    // repeat (§10.6), which accepts no id and raises no mark.
+    let before = b.to_canonical_bytes();
+    let a = applied(&mut b, &LogCommand::Restore { id: D1 + 1, archived_at: key.archived_at, fallback: D1 + 30 });
+    assert_eq!(a, Applied { benign: true, ..Applied::default() });
+    assert_eq!(b.mark(1), Mark { device_no: 1, item: 20, block: 12 }, "a benign repeat raises no mark (CORE-ID-003)");
+    assert_eq!(b.to_canonical_bytes(), before);
 
     let a = applied(&mut b, &LogCommand::SetSubscriptionEnabled { id: D1 + 7, enabled: false });
     assert_eq!(a.changes, ChangeSet { subscriptions: [D1 + 7].into(), overlay_forget: [D1 + 7].into(), ..ChangeSet::default() });
@@ -359,6 +367,23 @@ fn reset_keeps_the_target_but_marks_and_notes() {
     let mut current2 = current.clone();
     current2.rules = 2;
     assert_eq!(reset(&target, &current2), Err(CoreError::code("core/unknown_rules")));
+    // At the last notes revision, in either board: `core/cap`, and the
+    // inputs are left as they were.
+    for (t_rev, c_rev) in [(MAX_ID, 9), (9, MAX_ID), (MAX_ID, MAX_ID)] {
+        let mut t2 = target.clone();
+        t2.notes_rev = t_rev;
+        let mut c2 = current.clone();
+        c2.notes_rev = c_rev;
+        let (t0, c0) = (t2.clone(), c2.clone());
+        assert_eq!(reset(&t2, &c2), Err(CoreError::code("core/cap")));
+        assert_eq!((t2, c2), (t0, c0));
+    }
+    // One below: raised to the last revision, and the board passes check.
+    let mut t3 = target.clone();
+    t3.notes_rev = MAX_ID - 1;
+    let r = reset(&t3, &current).expect("reset");
+    assert_eq!(r.notes_rev, MAX_ID);
+    r.check().expect("check");
 }
 
 // spec: CORE-GEN-006

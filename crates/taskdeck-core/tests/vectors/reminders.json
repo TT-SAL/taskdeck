@@ -1,0 +1,100 @@
+{
+ "spec": "core.md §14.5",
+ "cases": [
+  {
+   "name": "default leads over the day: blocks on time, events 10 minutes early, due on time; routines and an event without a time give none; the archive gives none",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-03-10T09:30:00.000000000Z\",\"blocks\":[{\"minutes\":30,\"sid\":1,\"start\":\"2026-03-10T09:15:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T11:00:00.000000000Z\",\"id\":0,\"kind\":\"task\",\"name\":\"Archived\"}],\"items\":[{\"blocks\":[{\"minutes\":60,\"sid\":1,\"stamp\":[1,0],\"start\":\"2026-03-10T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":2,\"stamp\":[1,0],\"start\":\"2026-03-10T08:00:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T17:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"Report\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T10:00:00.000000000Z\",\"duration_minutes\":30,\"id\":2,\"kind\":\"event\",\"name\":\"Standup\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":3,\"kind\":\"routine\",\"name\":\"Sleep\",\"recurrence\":{\"anchor\":\"2026-03-10\",\"days\":127,\"minutes\":60,\"start_minutes\":540},\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":4,\"kind\":\"event\",\"name\":\"Party\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T12:00:00.000000000Z\",\"id\":5,\"kind\":\"event\",\"name\":\"Call\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"duration_minutes\":30,\"id\":6,\"kind\":\"task\",\"name\":\"Plain\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":6}],\"rules\":1}",
+   "from": "2026-03-10T00:00:00.000000000Z",
+   "until": "2026-03-11T00:00:00.000000000Z",
+   "reminders_text": [
+    "{\"at\":\"2026-03-10T08:00:00.000000000Z\",\"fire_at\":\"2026-03-10T08:00:00.000000000Z\",\"item\":1,\"key\":\"block:1:2:2026-03-10T08:00:00.000000000Z\",\"kind\":\"block\",\"minutes\":30,\"name\":\"Report\",\"sid\":2}",
+    "{\"at\":\"2026-03-10T09:00:00.000000000Z\",\"fire_at\":\"2026-03-10T09:00:00.000000000Z\",\"item\":1,\"key\":\"block:1:1:2026-03-10T09:00:00.000000000Z\",\"kind\":\"block\",\"minutes\":60,\"name\":\"Report\",\"sid\":1}",
+    "{\"at\":\"2026-03-10T10:00:00.000000000Z\",\"fire_at\":\"2026-03-10T09:50:00.000000000Z\",\"item\":2,\"key\":\"event:2:0:2026-03-10T10:00:00.000000000Z\",\"kind\":\"event\",\"minutes\":30,\"name\":\"Standup\"}",
+    "{\"at\":\"2026-03-10T12:00:00.000000000Z\",\"fire_at\":\"2026-03-10T11:50:00.000000000Z\",\"item\":5,\"key\":\"event:5:0:2026-03-10T12:00:00.000000000Z\",\"kind\":\"event\",\"name\":\"Call\"}",
+    "{\"at\":\"2026-03-10T17:00:00.000000000Z\",\"fire_at\":\"2026-03-10T17:00:00.000000000Z\",\"item\":1,\"key\":\"due:1:0:2026-03-10T17:00:00.000000000Z\",\"kind\":\"due\",\"name\":\"Report\"}"
+   ]
+  },
+  {
+   "name": "from is included, until is not",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-03-10T09:30:00.000000000Z\",\"blocks\":[{\"minutes\":30,\"sid\":1,\"start\":\"2026-03-10T09:15:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T11:00:00.000000000Z\",\"id\":0,\"kind\":\"task\",\"name\":\"Archived\"}],\"items\":[{\"blocks\":[{\"minutes\":60,\"sid\":1,\"stamp\":[1,0],\"start\":\"2026-03-10T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":2,\"stamp\":[1,0],\"start\":\"2026-03-10T08:00:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T17:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"Report\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T10:00:00.000000000Z\",\"duration_minutes\":30,\"id\":2,\"kind\":\"event\",\"name\":\"Standup\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":3,\"kind\":\"routine\",\"name\":\"Sleep\",\"recurrence\":{\"anchor\":\"2026-03-10\",\"days\":127,\"minutes\":60,\"start_minutes\":540},\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":4,\"kind\":\"event\",\"name\":\"Party\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T12:00:00.000000000Z\",\"id\":5,\"kind\":\"event\",\"name\":\"Call\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"duration_minutes\":30,\"id\":6,\"kind\":\"task\",\"name\":\"Plain\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":6}],\"rules\":1}",
+   "from": "2026-03-10T09:50:00.000000000Z",
+   "until": "2026-03-10T11:50:00.000000000Z",
+   "reminders_text": [
+    "{\"at\":\"2026-03-10T10:00:00.000000000Z\",\"fire_at\":\"2026-03-10T09:50:00.000000000Z\",\"item\":2,\"key\":\"event:2:0:2026-03-10T10:00:00.000000000Z\",\"kind\":\"event\",\"minutes\":30,\"name\":\"Standup\"}"
+   ]
+  },
+  {
+   "name": "one nanosecond before from and at until: excluded",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-03-10T09:30:00.000000000Z\",\"blocks\":[{\"minutes\":30,\"sid\":1,\"start\":\"2026-03-10T09:15:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T11:00:00.000000000Z\",\"id\":0,\"kind\":\"task\",\"name\":\"Archived\"}],\"items\":[{\"blocks\":[{\"minutes\":60,\"sid\":1,\"stamp\":[1,0],\"start\":\"2026-03-10T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":2,\"stamp\":[1,0],\"start\":\"2026-03-10T08:00:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T17:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"Report\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T10:00:00.000000000Z\",\"duration_minutes\":30,\"id\":2,\"kind\":\"event\",\"name\":\"Standup\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":3,\"kind\":\"routine\",\"name\":\"Sleep\",\"recurrence\":{\"anchor\":\"2026-03-10\",\"days\":127,\"minutes\":60,\"start_minutes\":540},\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":4,\"kind\":\"event\",\"name\":\"Party\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T12:00:00.000000000Z\",\"id\":5,\"kind\":\"event\",\"name\":\"Call\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"duration_minutes\":30,\"id\":6,\"kind\":\"task\",\"name\":\"Plain\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":6}],\"rules\":1}",
+   "from": "2026-03-10T08:00:00.000000001Z",
+   "until": "2026-03-10T09:00:00.000000000Z",
+   "reminders_text": []
+  },
+  {
+   "name": "an empty window",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-03-10T09:30:00.000000000Z\",\"blocks\":[{\"minutes\":30,\"sid\":1,\"start\":\"2026-03-10T09:15:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T11:00:00.000000000Z\",\"id\":0,\"kind\":\"task\",\"name\":\"Archived\"}],\"items\":[{\"blocks\":[{\"minutes\":60,\"sid\":1,\"stamp\":[1,0],\"start\":\"2026-03-10T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":2,\"stamp\":[1,0],\"start\":\"2026-03-10T08:00:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T17:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"Report\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T10:00:00.000000000Z\",\"duration_minutes\":30,\"id\":2,\"kind\":\"event\",\"name\":\"Standup\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":3,\"kind\":\"routine\",\"name\":\"Sleep\",\"recurrence\":{\"anchor\":\"2026-03-10\",\"days\":127,\"minutes\":60,\"start_minutes\":540},\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":4,\"kind\":\"event\",\"name\":\"Party\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T12:00:00.000000000Z\",\"id\":5,\"kind\":\"event\",\"name\":\"Call\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"duration_minutes\":30,\"id\":6,\"kind\":\"task\",\"name\":\"Plain\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":6}],\"rules\":1}",
+   "from": "2026-03-10T09:50:00.000000000Z",
+   "until": "2026-03-10T09:50:00.000000000Z",
+   "reminders_text": []
+  },
+  {
+   "name": "leads of each kind",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-03-10T09:30:00.000000000Z\",\"blocks\":[{\"minutes\":30,\"sid\":1,\"start\":\"2026-03-10T09:15:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T11:00:00.000000000Z\",\"id\":0,\"kind\":\"task\",\"name\":\"Archived\"}],\"items\":[{\"blocks\":[{\"minutes\":60,\"sid\":1,\"stamp\":[1,0],\"start\":\"2026-03-10T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":2,\"stamp\":[1,0],\"start\":\"2026-03-10T08:00:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T17:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"Report\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T10:00:00.000000000Z\",\"duration_minutes\":30,\"id\":2,\"kind\":\"event\",\"name\":\"Standup\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":3,\"kind\":\"routine\",\"name\":\"Sleep\",\"recurrence\":{\"anchor\":\"2026-03-10\",\"days\":127,\"minutes\":60,\"start_minutes\":540},\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":4,\"kind\":\"event\",\"name\":\"Party\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T12:00:00.000000000Z\",\"id\":5,\"kind\":\"event\",\"name\":\"Call\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"duration_minutes\":30,\"id\":6,\"kind\":\"task\",\"name\":\"Plain\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":6}],\"rules\":1}",
+   "from": "2026-03-10T00:00:00.000000000Z",
+   "until": "2026-03-11T00:00:00.000000000Z",
+   "defaults": {
+    "block_lead_minutes": 15,
+    "due_lead_minutes": 60,
+    "event_lead_minutes": 0
+   },
+   "reminders_text": [
+    "{\"at\":\"2026-03-10T08:00:00.000000000Z\",\"fire_at\":\"2026-03-10T07:45:00.000000000Z\",\"item\":1,\"key\":\"block:1:2:2026-03-10T08:00:00.000000000Z\",\"kind\":\"block\",\"minutes\":30,\"name\":\"Report\",\"sid\":2}",
+    "{\"at\":\"2026-03-10T09:00:00.000000000Z\",\"fire_at\":\"2026-03-10T08:45:00.000000000Z\",\"item\":1,\"key\":\"block:1:1:2026-03-10T09:00:00.000000000Z\",\"kind\":\"block\",\"minutes\":60,\"name\":\"Report\",\"sid\":1}",
+    "{\"at\":\"2026-03-10T10:00:00.000000000Z\",\"fire_at\":\"2026-03-10T10:00:00.000000000Z\",\"item\":2,\"key\":\"event:2:0:2026-03-10T10:00:00.000000000Z\",\"kind\":\"event\",\"minutes\":30,\"name\":\"Standup\"}",
+    "{\"at\":\"2026-03-10T12:00:00.000000000Z\",\"fire_at\":\"2026-03-10T12:00:00.000000000Z\",\"item\":5,\"key\":\"event:5:0:2026-03-10T12:00:00.000000000Z\",\"kind\":\"event\",\"name\":\"Call\"}",
+    "{\"at\":\"2026-03-10T17:00:00.000000000Z\",\"fire_at\":\"2026-03-10T16:00:00.000000000Z\",\"item\":1,\"key\":\"due:1:0:2026-03-10T17:00:00.000000000Z\",\"kind\":\"due\",\"name\":\"Report\"}"
+   ]
+  },
+  {
+   "name": "leads of 1,440 minutes fire the day before",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-03-10T09:30:00.000000000Z\",\"blocks\":[{\"minutes\":30,\"sid\":1,\"start\":\"2026-03-10T09:15:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T11:00:00.000000000Z\",\"id\":0,\"kind\":\"task\",\"name\":\"Archived\"}],\"items\":[{\"blocks\":[{\"minutes\":60,\"sid\":1,\"stamp\":[1,0],\"start\":\"2026-03-10T09:00:00.000000000Z\"},{\"minutes\":30,\"sid\":2,\"stamp\":[1,0],\"start\":\"2026-03-10T08:00:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T17:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"Report\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T10:00:00.000000000Z\",\"duration_minutes\":30,\"id\":2,\"kind\":\"event\",\"name\":\"Standup\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":3,\"kind\":\"routine\",\"name\":\"Sleep\",\"recurrence\":{\"anchor\":\"2026-03-10\",\"days\":127,\"minutes\":60,\"start_minutes\":540},\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":4,\"kind\":\"event\",\"name\":\"Party\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T12:00:00.000000000Z\",\"id\":5,\"kind\":\"event\",\"name\":\"Call\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"duration_minutes\":30,\"id\":6,\"kind\":\"task\",\"name\":\"Plain\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":6}],\"rules\":1}",
+   "from": "2026-03-09T00:00:00.000000000Z",
+   "until": "2026-03-10T00:00:00.000000000Z",
+   "defaults": {
+    "block_lead_minutes": 0,
+    "due_lead_minutes": 1440,
+    "event_lead_minutes": 1440
+   },
+   "reminders_text": [
+    "{\"at\":\"2026-03-10T10:00:00.000000000Z\",\"fire_at\":\"2026-03-09T10:00:00.000000000Z\",\"item\":2,\"key\":\"event:2:0:2026-03-10T10:00:00.000000000Z\",\"kind\":\"event\",\"minutes\":30,\"name\":\"Standup\"}",
+    "{\"at\":\"2026-03-10T12:00:00.000000000Z\",\"fire_at\":\"2026-03-09T12:00:00.000000000Z\",\"item\":5,\"key\":\"event:5:0:2026-03-10T12:00:00.000000000Z\",\"kind\":\"event\",\"name\":\"Call\"}",
+    "{\"at\":\"2026-03-10T17:00:00.000000000Z\",\"fire_at\":\"2026-03-09T17:00:00.000000000Z\",\"item\":1,\"key\":\"due:1:0:2026-03-10T17:00:00.000000000Z\",\"kind\":\"due\",\"name\":\"Report\"}"
+   ]
+  },
+  {
+   "name": "equal fire_at in ascending key bytes",
+   "board_text": "{\"items\":[{\"blocks\":[{\"minutes\":45,\"sid\":3,\"stamp\":[1,0],\"start\":\"2026-03-10T10:00:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T10:00:00.000000000Z\",\"id\":7,\"kind\":\"task\",\"name\":\"Tie\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"2026-03-10T10:00:00.000000000Z\",\"duration_minutes\":1440,\"id\":8,\"kind\":\"event\",\"name\":\"Tie event\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":3,\"device_no\":0,\"item\":8}],\"rules\":1}",
+   "from": "2026-03-10T00:00:00.000000000Z",
+   "until": "2026-03-11T00:00:00.000000000Z",
+   "defaults": {
+    "block_lead_minutes": 0,
+    "due_lead_minutes": 0,
+    "event_lead_minutes": 0
+   },
+   "reminders_text": [
+    "{\"at\":\"2026-03-10T10:00:00.000000000Z\",\"fire_at\":\"2026-03-10T10:00:00.000000000Z\",\"item\":7,\"key\":\"block:7:3:2026-03-10T10:00:00.000000000Z\",\"kind\":\"block\",\"minutes\":45,\"name\":\"Tie\",\"sid\":3}",
+    "{\"at\":\"2026-03-10T10:00:00.000000000Z\",\"fire_at\":\"2026-03-10T10:00:00.000000000Z\",\"item\":7,\"key\":\"due:7:0:2026-03-10T10:00:00.000000000Z\",\"kind\":\"due\",\"name\":\"Tie\"}",
+    "{\"at\":\"2026-03-10T10:00:00.000000000Z\",\"fire_at\":\"2026-03-10T10:00:00.000000000Z\",\"item\":8,\"key\":\"event:8:0:2026-03-10T10:00:00.000000000Z\",\"kind\":\"event\",\"minutes\":1440,\"name\":\"Tie event\"}"
+   ]
+  },
+  {
+   "name": "a fire_at before the instant range is never in the window",
+   "board_text": "{\"items\":[{\"created\":\"2026-03-01T00:00:00.000000000Z\",\"deadline\":\"1970-01-01T00:05:00.000000000Z\",\"id\":9,\"kind\":\"event\",\"name\":\"Early\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}},{\"blocks\":[{\"minutes\":15,\"sid\":1,\"stamp\":[1,0],\"start\":\"1970-01-01T00:00:00.000000000Z\"}],\"created\":\"2026-03-01T00:00:00.000000000Z\",\"id\":10,\"kind\":\"task\",\"name\":\"First\",\"stamps\":{\"estimate\":[1,0],\"levels\":[1,0],\"name\":[1,0],\"repeat\":[1,0],\"time\":[1,0]}}],\"marks\":[{\"block\":1,\"device_no\":0,\"item\":10}],\"rules\":1}",
+   "from": "1970-01-01T00:00:00.000000000Z",
+   "until": "1970-01-02T00:00:00.000000000Z",
+   "reminders_text": [
+    "{\"at\":\"1970-01-01T00:00:00.000000000Z\",\"fire_at\":\"1970-01-01T00:00:00.000000000Z\",\"item\":10,\"key\":\"block:10:1:1970-01-01T00:00:00.000000000Z\",\"kind\":\"block\",\"minutes\":15,\"name\":\"First\",\"sid\":1}"
+   ]
+  }
+ ]
+}

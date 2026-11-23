@@ -11,9 +11,6 @@
 //! No clock, zone, file, network, thread, environment or randomness here
 //! (CORE-GEN-003): `clippy.toml` in this directory disallows them.
 #![forbid(unsafe_code)]
-// Skeleton (task 4): the bodies are `unimplemented!()`, so the parameters the
-// spec names are not read yet. Stage `core` removes this line.
-#![allow(unused_variables)]
 
 /// An error of the catalogue (core.md §16, §20).
 #[derive(Debug, Clone, PartialEq, Eq)]

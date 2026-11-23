@@ -201,6 +201,40 @@ fn every_record_names_the_board_limit() {
     assert_eq!(Home::from_canonical(&big[..62_914_560]), Err(CoreError::code("core/not_json")));
 }
 
+// spec: CORE-DATA-002
+// A board that passes check always encodes, and never to empty bytes; one
+// at the largest integer still does.
+#[test]
+fn a_board_that_passes_check_encodes() {
+    let mut b = BoardData::empty();
+    b.notes_rev = (1 << 53) - 1;
+    assert_eq!(b.check(), Ok(()));
+    let bytes = b.to_canonical_bytes();
+    assert_eq!(bytes, b"{\"notes_rev\":9007199254740991,\"rules\":1}".to_vec());
+    assert_eq!(BoardData::from_canonical_bytes(&bytes), Ok(b));
+}
+
+// spec: CORE-DATA-002
+// A board built by hand with an integer above 2^53 − 1 fails check and
+// cannot be encoded: `to_canonical_bytes` panics, it returns no empty bytes.
+#[test]
+#[should_panic(expected = "a board that fails check cannot be encoded")]
+fn a_board_with_an_integer_above_the_range_does_not_encode() {
+    let mut b = BoardData::empty();
+    b.notes_rev = 1 << 53;
+    assert!(b.check().is_err());
+    let _ = b.to_canonical_bytes();
+}
+
+// spec: CORE-DATA-002
+#[test]
+#[should_panic(expected = "a board that fails check cannot be encoded")]
+fn the_record_encoder_of_a_board_panics_alike() {
+    let mut b = BoardData::empty();
+    b.notes_rev = u64::MAX;
+    let _ = b.to_canonical();
+}
+
 #[test]
 fn the_empty_board() {
     assert_eq!(BoardData::empty().to_canonical_bytes(), b"{\"rules\":1}".to_vec());

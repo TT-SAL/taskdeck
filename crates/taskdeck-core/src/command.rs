@@ -161,10 +161,26 @@ impl LogCommand {
         }
     }
 
-    /// The command's canonical bytes (core.md §9.1, §4.2).
+    /// The command's canonical bytes (core.md §9.1, §4.2), never empty.
+    ///
+    /// A command that `parse_command` returns, or that `compile` builds
+    /// (CORE-COMP-008), always encodes.
+    ///
+    /// # Panics
+    ///
+    /// On a command holding an integer the canonical form cannot write
+    /// (above 2^53 − 1, core.md §4.2 rule 5), such as one built by hand: the
+    /// bytes would not be a command, and empty bytes would pass for one
+    /// (lead ruling, spec change 5, as `BoardData::to_canonical_bytes`).
     pub fn to_canonical(&self) -> Vec<u8> {
-        // The value holds no null and no float, so `encode` cannot fail.
-        canon::encode(&self.to_value()).unwrap_or_default()
+        // The value holds no null and no float, so only such an integer fails.
+        match canon::encode(&self.to_value()) {
+            Ok(bytes) => bytes,
+            Err(e) => panic!(
+                "a command holding an integer above 2^53 - 1 cannot be encoded ({}): build commands with compile or parse_command",
+                e.code
+            ),
+        }
     }
 
     /// A `create_*` with another name, else `Err(self)` (core.md §20, V2-17).

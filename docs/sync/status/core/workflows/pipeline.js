@@ -9,7 +9,7 @@ export const meta = {
   ],
 }
 // args: { root, work, briefs, gate, steps: [ { id, kind: 'impl' | 'verify' | 'security', after: [ids],
-//         brief (impl) | briefs (checkers), focus (security), extra, effort } ] }
+//         brief (impl) | briefs (checkers), commit (a checker with no `after`), focus (security), extra, effort } ] }
 // A step runs once every step it names in `after` has finished. Writers (implementers and fixers) run one
 // at a time in args.work. A checker works on a frozen copy of the commit its last `after` step ended on.
 const A = args
@@ -164,7 +164,7 @@ const run = async s => {
     log(`${s.id} done at ${r.commit}`)
     return { ok: true, commit: r.commit }
   }
-  const out = await check(s, deps[deps.length - 1].commit)
+  const out = await check(s, deps.length ? deps[deps.length - 1].commit : s.commit)   // a checker that follows no step names its commit
   log(`${s.id} ${out.ok ? 'done' : 'did not finish'}`)
   return out
 }
