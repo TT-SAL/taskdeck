@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "entropy": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "name": "seed 00..1f",
+      "sheet": "000G 40R4 0M30 E209 185G R38E 1W81 24GK 2GAH C5RR 34D1 P70X 3RFG 5T9E"
+    },
+    {
+      "entropy": "0000000000000000000000000000000000000000000000000000000000000000",
+      "name": "seed of 00",
+      "sheet": "0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 1F61"
+    },
+    {
+      "entropy": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "name": "seed of ff",
+      "sheet": "ZZZZ ZZZZ ZZZZ ZZZZ ZZZZ ZZZZ ZZZZ ZZZZ ZZZZ ZZZZ ZZZZ ZZZZ ZZZG 73A8"
+    },
+    {
+      "name": "typed as printed",
+      "rsign_pk": "e0391c549f0b9ccdc0a9dff6e7389a44fd403c285d3f57e9e00e9c883cfd54e0",
+      "sheet": "000G 40R4 0M30 E209 185G R38E 1W81 24GK 2GAH C5RR 34D1 P70X 3RFG 5T9E",
+      "typed": "000G 40R4 0M30 E209 185G R38E 1W81 24GK 2GAH C5RR 34D1 P70X 3RFG 5T9E"
+    },
+    {
+      "name": "typed without spaces",
+      "rsign_pk": "e0391c549f0b9ccdc0a9dff6e7389a44fd403c285d3f57e9e00e9c883cfd54e0",
+      "sheet": "000G 40R4 0M30 E209 185G R38E 1W81 24GK 2GAH C5RR 34D1 P70X 3RFG 5T9E",
+      "typed": "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG5T9E"
+    },
+    {
+      "name": "typed in lowercase with look-alikes and a tab",
+      "rsign_pk": "e0391c549f0b9ccdc0a9dff6e7389a44fd403c285d3f57e9e00e9c883cfd54e0",
+      "sheet": "000G 40R4 0M30 E209 185G R38E 1W81 24GK 2GAH C5RR 34D1 P70X 3RFG 5T9E",
+      "typed": "ooog4or4om3oe2o9L85gr38eLw8L\t24gk2gahc5rr34dLp7ox3rfg5t9e"
+    },
+    {
+      "name": "typed with hyphens",
+      "rsign_pk": "e0391c549f0b9ccdc0a9dff6e7389a44fd403c285d3f57e9e00e9c883cfd54e0",
+      "sheet": "000G 40R4 0M30 E209 185G R38E 1W81 24GK 2GAH C5RR 34D1 P70X 3RFG 5T9E",
+      "typed": "000G-40R4-0M30-E209-185G-R38E-1W81-24GK-2GAH-C5RR-34D1-P70X-3RFG-5T9E"
+    },
+    {
+      "error": "seal/sheet_length",
+      "name": "55 characters",
+      "typed": "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG5T9"
+    },
+    {
+      "error": "seal/sheet_length",
+      "name": "57 characters",
+      "typed": "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG5T9E0"
+    },
+    {
+      "error": "seal/sheet_char",
+      "name": "a character u",
+      "typed": "u00G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG5T9E"
+    },
+    {
+      "error": "seal/sheet_char",
+      "name": "a newline inside",
+      "typed": "000G40R40M30E209185GR38E1W81\n4GK2GAHC5RR34D1P70X3RFG5T9E"
+    },
+    {
+      "error": "seal/sheet_padding",
+      "name": "padding bits not zero",
+      "typed": "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFH5T9E"
+    },
+    {
+      "error": "seal/sheet_padding",
+      "name": "padding bits not zero and check character wrong",
+      "typed": "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFH5T90"
+    },
+    {
+      "error": "seal/sheet_check",
+      "name": "check character wrong",
+      "typed": "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG5T90"
+    },
+    {
+      "error": "seal/sheet_check",
+      "name": "seed character wrong",
+      "typed": "100G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG5T9E"
+    }
+  ],
+  "spec": "seal.md §18"
+}

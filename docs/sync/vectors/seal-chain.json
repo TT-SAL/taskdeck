@@ -1,0 +1,124 @@
+{
+  "cases": [
+    {
+      "board_id": "42424242424242424242424242424242",
+      "c_0": "c039e6a6956b1def8655a323b60ff283325ce04d96f89989da060019f1ef3f2f",
+      "fingerprint_0": "0 neglect symptom office link",
+      "name": "board 42.., four frames",
+      "steps": [
+        {
+          "chain": "f2ee3c8bd3e154127023b386a7518e61944477dd4fe441cf0f29dbc52c8e45cb",
+          "fingerprint": "1 syrup minor ivory way",
+          "frame": "",
+          "frame_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "move_code": "JCA6-M02B",
+          "seq": 1
+        },
+        {
+          "chain": "7c7e0841c8c1aa0c03d5e835d3601beb36224ecd88c9973a6920a71907acf9ac",
+          "fingerprint": "2 hint quit oak copy",
+          "frame": "616e79206279746573206172652061206672616d6520746f2074686520636861696e",
+          "frame_hash": "18aec271b1b2bdb63569dc102c2cb6fb818e561fce0fda4d112b0c752250fbc9",
+          "move_code": "K443-AZER",
+          "seq": 2
+        },
+        {
+          "chain": "70f838ad3238328b5e2489222c00651d471ed20b32adf0744c175600b164bb69",
+          "fingerprint": "3 crystal tragic cycle wet",
+          "frame": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "frame_hash": "f3889de7a54e61e3f698515a0bec6325b4007fe60ce9c5cd549f3f5d2eaea2ae",
+          "move_code": "E68W-VX8H",
+          "seq": 3
+        },
+        {
+          "chain": "7a1c10379e8b3dc61caa9e9126e783e5b65322e086342026bccd31ff141bd14b",
+          "fingerprint": "4 worry bargain around bind",
+          "frame": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+          "frame_hash": "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
+          "move_code": "SP9P-SXCM",
+          "seq": 4
+        }
+      ]
+    },
+    {
+      "board_id": "00000000000000000000000000000000",
+      "c_0": "2dc86bfaad7470dd7ad39a59f29ad2288d37af5ca639e96817165db119b9aeca",
+      "fingerprint_0": "0 soap erode scrub proud",
+      "name": "board 00.., one frame at seq 2^53-1",
+      "steps": [
+        {
+          "chain": "092ff52b09567bc54e04b516193b1e528336ec26c942093446e4f373ae0ab310",
+          "fingerprint": "9007199254740991 uncover bag gold cancel",
+          "frame": "01",
+          "frame_hash": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a",
+          "move_code": "H8BC-AVS4",
+          "seq": 9007199254740991
+        }
+      ]
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "fence_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+      "fence_seq": 9,
+      "name": "move code as shown",
+      "result": "accepted",
+      "typed": "9GGD-KFBB"
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "fence_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+      "fence_seq": 9,
+      "name": "move code lowercase, look-alikes, spaces",
+      "result": "accepted",
+      "typed": " 9ggd kfbb "
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "error": "seal/move_code",
+      "fence_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+      "fence_seq": 10,
+      "name": "move code of another seq",
+      "typed": "9GGD-KFBB"
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "error": "seal/move_code",
+      "fence_hash": "7878787878787878787878787878787878787878787878787878787878787878",
+      "fence_seq": 9,
+      "name": "move code of another frame hash",
+      "typed": "9GGD-KFBB"
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "error": "seal/move_code",
+      "fence_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+      "fence_seq": 9,
+      "name": "move code with the last character changed",
+      "typed": "9GGDKFB0"
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "error": "seal/move_code",
+      "fence_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+      "fence_seq": 9,
+      "name": "move code of 7 characters",
+      "typed": "9GGDKFB"
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "error": "seal/move_code",
+      "fence_hash": "7777777777777777777777777777777777777777777777777777777777777777",
+      "fence_seq": 9,
+      "name": "move code with u",
+      "typed": "uGGDKFBB"
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "chain": "1111111111111111111111111111111111111111111111111111111111111111",
+      "fingerprint": "4096 stem suspect wise helmet",
+      "name": "sync fingerprint of an arbitrary head",
+      "seq": 4096
+    }
+  ],
+  "spec": "seal.md §15"
+}

@@ -1,0 +1,23 @@
+use super::*;
+
+#[test]
+fn take_never_reads_past_the_end() {
+    let b = [1u8, 2, 3, 4];
+    assert_eq!(take::<2>(&b, 2), Some(&[3, 4]));
+    assert_eq!(take::<2>(&b, 3), None);
+    assert_eq!(take::<1>(&b, usize::MAX), None);
+    assert_eq!(take::<0>(&b, 4), Some(&[]));
+}
+
+// HKDF with an empty salt and with the info given in parts is RFC 5869's
+// HKDF over the concatenated info (seal.md §2).
+// spec: SEAL-KEY-012
+#[test]
+fn hkdf_parts_are_concatenated() {
+    let a = hkdf32(b"salt", b"ikm", &[b"ab", b"cd"]);
+    let b = hkdf32(b"salt", b"ikm", &[b"abcd"]);
+    assert_eq!(*a, *b);
+    let mut c = [0u8; 32];
+    hkdf::Hkdf::<sha2::Sha256>::new(None, b"ikm").expand(b"x", &mut c).unwrap();
+    assert_eq!(*hkdf32(&[], b"ikm", &[b"x"]), c);
+}

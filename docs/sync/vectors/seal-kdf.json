@@ -1,0 +1,118 @@
+{
+  "cases": [
+    {
+      "board_id": "0ed7adc67a9771a385ea81fa21a448db",
+      "dev_r": "cae0c0b84cb05f23c495d726685cf950",
+      "entropy": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "fingerprint": "4Q7A-PEHH-JVX2-W0ZE",
+      "name": "recovery keys, seed 00..1f",
+      "rhpke_pk": "e99f836f5485ae3167ba26dca5aa45c8347eae85ed819cb587bf40712e30ad21",
+      "rsign_pk": "e0391c549f0b9ccdc0a9dff6e7389a44fd403c285d3f57e9e00e9c883cfd54e0",
+      "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    },
+    {
+      "board_id": "296c49a298a1ce4206d84e6dd43f5561",
+      "dev_r": "0d1f636f123c381ca0a465d64b665c43",
+      "entropy": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "fingerprint": "B697-4H95-EKEM-4QYQ",
+      "name": "recovery keys, seed of ff",
+      "rhpke_pk": "fe9c6b3572405369ecf436d0a5abd4ac19784554b56929b61556292df7f8a46d",
+      "rsign_pk": "54acb789609d8b1adf37f02e726557e1ce7cdd1e7c3fb89ce8d7fc2e15728db6",
+      "salt": "00000000000000000000000000000000"
+    },
+    {
+      "board_id": "54705112ee06cfcca4eff58f04ec7d3e",
+      "dev_r": "6791f72be314ec6b7eededf04e0d27a4",
+      "entropy": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "fingerprint": "VDQJ-BHWF-0SGQ-HS1X",
+      "name": "recovery keys, seed a0..bf",
+      "rhpke_pk": "275d1dbac0b3a1fcca9d10c57b5cf177afec979ebe665b24ec9e04967bf9120f",
+      "rsign_pk": "cffbfc3a8bdb491a5fe238870eb7a39a31d398a5dbfafc997f6a49108aa3f9ed",
+      "salt": "7461736b6465636b2073616c74203136"
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "commitment": "105c622317275b34125417fc1b0bf62e43a0f88b2dddbe96b70ffe5630523edb",
+      "epoch": 1,
+      "k_blob": "f3754013ca521d3f8fdbcb45c994526918685dae8d53bd8f8706796d8ca37fdc",
+      "k_entry": "d2e306fa489a437f7dbf1aa149a9ec3ec99f0dee79388c19beefc2139c1424f5",
+      "k_snap": "fae7f0e3836244f5475c2a4e8ff20af6d3f4cdbfeba559504e61a752c89cc4e8",
+      "name": "epoch 1",
+      "root": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "commitment": "45ee2104d5e8b79d4e877727ac9d9af51d2968193d3d435b8259569bcb7642ba",
+      "epoch": 2,
+      "k_blob": "7adef633cd2d3a9811701efe7ca729ec3759b8cbd79406b7b3d74dbe55c9c481",
+      "k_entry": "9d81e78634584b5fda032368e9c87fa0f2a378931bd188d86a90b9f82aefcf45",
+      "k_snap": "87522772f9f082fe856cd10245c297df17243c92fd7ebcfa257ab1a2b0f4ed43",
+      "name": "epoch 2",
+      "root": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "board_id": "101112131415161718191a1b1c1d1e1f",
+      "commitment": "60b8b13a887e152463808c1d329b91e7f81e5fa352412b511947ff5fc2965602",
+      "epoch": 65535,
+      "k_blob": "cfdf5d0722b92182744ec5db12d86627f823201647eb84642da801afc45adeb3",
+      "k_entry": "145dff075b7cea60257a390ae5048b42355363e87dfc93b763684874489991ea",
+      "k_snap": "25a31aeae999fd5fd3755cbe1c357edb5f6da1c67682af9e54c4ca425a0db006",
+      "name": "epoch 65535, another board",
+      "root": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f"
+    },
+    {
+      "board_id": "42424242424242424242424242424242",
+      "commitment": "ac6e89f3c27f7bab88ef59615773a9e4ce3575dd54fba04adc3f719cdc56bdd8",
+      "epoch": 4294967295,
+      "k_blob": "e75bc717ab823bc2c9528b5058b5d576b314ae9f61cddf129cbe78c79c20c0e0",
+      "k_entry": "0c540843e9d1108de207b1044c17ef30fbdb2a8555a0b8f6da1dd476275920f7",
+      "k_snap": "61f201c6160c748a225c211f3713918d3a3e7a32c8c10a27f458272c3ea3a671",
+      "name": "epoch 4294967295",
+      "root": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    {
+      "dev": "000102030405060708090a0b0c0d0e0f",
+      "entropy": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f",
+      "fingerprint": "TR1V-1ZMX-0FXM-A2J4",
+      "hpke_pk": "7808d98283260794bb05f2ae69674ca2fe2e55c16c863031f90235576f0f3b0e",
+      "identity_bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f38895b3e8fb896b00b002f7d8a071764e60ea5c6e1c820065be35a626875ab4a",
+      "name": "device keys, entropy 00..4f",
+      "sign_pk": "7776e870b93354f2a0b24c23f2a36cc4e80e223218c1b97926fdd018396a2b9b"
+    },
+    {
+      "dev": "808182838485868788898a8b8c8d8e8f",
+      "entropy": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecf",
+      "fingerprint": "PEN0-ENPF-12NQ-N623",
+      "hpke_pk": "975a6e70027b1a64117cfbea8962f80dcdfd5d896e72782b089b97c9a847d219",
+      "identity_bytes": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafd0098520ee263d197057a37c9a2cda7afd9587a141759b4af729336cf24cab7f",
+      "name": "device keys, entropy 80..cf",
+      "sign_pk": "d2eb993b63143528e70dcdc7eb9ca21010dd769be95250c2c5babfad15d458e2"
+    },
+    {
+      "entropy": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e",
+      "error": "seal/entropy",
+      "name": "recovery seed, entropy one byte short"
+    },
+    {
+      "entropy": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e",
+      "error": "seal/entropy",
+      "name": "device keys, entropy one byte short"
+    },
+    {
+      "error": "seal/file_corrupt",
+      "identity_bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f38895b3e8fb896b00b002f7d8a071764e60ea5c6e1c820065be35a626875ab",
+      "name": "identity bytes, 79 bytes"
+    },
+    {
+      "error": "seal/file_corrupt",
+      "identity_bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f38895b3e8fb896b00b002f7d8a071764e60ea5c6e1c820065be35a626875ab4a00",
+      "name": "identity bytes, 81 bytes"
+    },
+    {
+      "error": "seal/file_corrupt",
+      "identity_bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f39895b3e8fb896b00b002f7d8a071764e60ea5c6e1c820065be35a626875ab4a",
+      "name": "identity bytes, X25519 key not clamped"
+    }
+  ],
+  "spec": "seal.md §6"
+}

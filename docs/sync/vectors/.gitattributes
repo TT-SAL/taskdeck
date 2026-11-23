@@ -1,0 +1,4 @@
+# The published vectors are kept as committed bytes on every checkout (no
+# line-ending conversion under core.autocrlf): the test target `vectors`
+# compares each file byte for byte with what the code writes.
+* -text
