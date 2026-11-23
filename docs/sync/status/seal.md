@@ -471,6 +471,7 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q76 | §17.10 | is the log one event or pages | one `Entries` holds the whole log from `h + 1` (paging is the caller's); a second aborts; `Frames` holds exactly the seqs asked for. Spec note; told to `device` |
 | Q77 | §17.7 | are the typed digits normalised | no: compared as typed, in constant time |
 | Q78 | §17.9 step 5 | with Q57, nothing checks a bundle snapshot's `hash_version` against the rules | the pairing machine, which recomputes the state hash, refuses a version the membership's rules do not allow (`seal/bundle_invalid`), as the backup reader does (Q40). Spec note |
+| Q79 | §17.9 | nothing E signs binds the entries between the bundle's head and `added_seq`: a relay that swaps a racing rotation for junk makes N report `Joined` although the board refused its `DeviceAdded` (S6 security, reproduced) | the design's limit, bounded: E reports the failure and revokes the device at the relay, nobody accepts N's entries, N meets the fork at the first honest entry after `h`. §17.9 says so. The remedy (the bundle carries `C_{added_seq}`) needs E to classify its own entry before it seals the bundle: left open for `engine` in `CHANGES.md`. No code change |
 | Q49 | §26 `VerifiedBackup` | the recovery tool is to show a file's written date, which `read_backup` did not return | `VerifiedBackup` gains `written_ms` (the header's, display only). Code in S5's brief |
 | Q48 | SEAL-GEN-006, §21.3 | the DEFLATE compressor and decompressor (a pinned dependency's private state) hold the payload's bytes, the epoch roots among them, and are freed without being erased (S4 security, a note; `unsafe` is forbidden, so the crate cannot wipe them from outside) | as S1's high finding ruled for the hash states: a state that took in roots must not be left behind. The writer keeps the roots and the read token out of the compressor (they travel in stored blocks the crate writes itself, after a full flush); the reader resets the decompressor, which zeroes its window in the pinned version, before dropping it. What stays outside reach is said in the code and in the spec. Code in S5's brief |
 
@@ -532,7 +533,8 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S6, the implementer | 1 | 0.47 M | 0.69 M | 0.69 M |
 | | S6b, the implementer | 1 | 0.23 M | 0.27 M | 0.27 M |
 | | S6, the verifier (S6 and S6b) | 1 | 0.27 M | 0.31 M | 0.31 M |
-| | **window so far** (S6's first security pass is running alone: both passes and their fix would not fit) | | | | **2.92 M** |
+| | S6, the first security pass, alone (both passes and their fix would not fit) | 1 | 0.20 M | 0.19 M | 0.20 M |
+| | **window so far** | | | | **3.12 M** |
 
 ## Low findings left as they are
 
@@ -584,6 +586,16 @@ output); the higher is booked. Limit: 3.5 million per window.
 - **S5, reviewers' notes, not findings.** What the HPKE and AEAD crates keep of a plaintext in their
   own buffers was not examined by any pass. `black_box` after the decompressor's reset was not
   checked in the compiled code.
+
+- **S6, security (the protocol lens; one low finding, no code defect).** A relay that lies about the
+  log between the bundle's head and `added_seq` can make the new device report `Joined` although the
+  board refused its `DeviceAdded` (Q79). Left as the design has it, written into §17.9, the remedy
+  left open for `engine`. The reviewer recomputed the pairing vector and found the commit-then-reveal
+  order, the slot MACs, the transcript, the key separation, the comparisons and the erasure on every
+  abort as specified.
+- **S6, reviewers' notes, not findings.** A stack copy of the ticket key, the SAS integer and the
+  check-bit string are temporaries the crate cannot wipe. §17.6 check 3 compares like with like
+  (an id with ids, a signing key with signing keys), as §13.6 does.
 
 ## Open questions for the owner
 
@@ -671,6 +683,13 @@ To be completed at the exit. So far:
   and that comparison is the engine's alone. In the declared mode the crate compares neither: the
   engine checks both against the `snap` entry once it has classified it. A beat's ack may name any
   seq below the beat's own, also one that is no `snap` entry (Q17).
+- For `engine`, `device`, `desktop`, `android` (pairing): the machine's `Joined` is not proof that the
+  board accepted the device when the relay is hostile (Q79); E's result is. The code and the digit
+  strings of `ShowCode`, `ShowSas`, `CodeEntered` and `SasEntered` are secrets of the attempt that the
+  caller clears (Q61). The runtime hands N the whole log from `h + 1` in one `Entries` event (Q76),
+  feeds both machines monotonic milliseconds and ticks, and gives N `OsEntropy`. The item of
+  `NeedSnapshotAndRegister` carries a placeholder `bootstrap_seq` (Q67). After `Joined` the engine
+  classifies the log from `h + 1` again and learns later roots from N's own wraps.
 - For `recovery` and `device` (Q59): `read_backup` returns the verified history; a record gives its
   seq, author, counter, frame hash and items.
 - For `device` (Q52, Q53): the largest body `seal_blob` and `seal_snapshot` can seal is 66,060,284
