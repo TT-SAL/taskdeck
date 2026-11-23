@@ -27,11 +27,16 @@ value_of() { sed -n "s/^$1=//p" <<<"$2"; }
 
 # paths <case> <expected areas> <path>...: test mode, paths on standard input.
 # EV and MSG set the event and the head commit message (default: a push).
+# The list reaches standard input from a file, not through a pipe: for a head
+# message that asks for [ci full] changes.sh answers without reading its
+# input, and a writer left on a pipe the reader has closed fails the pipeline
+# (seen once in CI as "printf: write error: Broken pipe").
 paths() {
     local name="$1" want="$2" out
     shift 2
-    if ! out="$(printf '%s\n' "$@" | CI_EVENT="${EV-push}" CI_HEAD_MESSAGE="${MSG-}" \
-        bash "$CHANGES" --paths-from - 2>/dev/null)"; then
+    printf '%s\n' "$@" >"$TMP/paths.in"
+    if ! out="$(CI_EVENT="${EV-push}" CI_HEAD_MESSAGE="${MSG-}" \
+        bash "$CHANGES" --paths-from - <"$TMP/paths.in" 2>/dev/null)"; then
         FAILS=$((FAILS + 1)); echo "FAIL  $name: changes.sh exited non-zero"; return
     fi
     LAST="$out"
@@ -151,6 +156,11 @@ EV=push MSG='[CI FULL]' paths "[CI FULL] is [ci full] (any case, as GitHub's con
 EV=push MSG='Fix the planner [CI full]' paths "[CI full] is [ci full]" "$ALL" src/ui.rs
 verdict "[CI full]: wide" "$(value_of wide "$LAST")" "true"
 EV=push MSG='ci full' paths "ci full without brackets is not [ci full]" "none" README.md
+# A list longer than a pipe's buffer, with a message that makes changes.sh
+# answer before it reads its input: the helper must not fail on its own writer.
+many=()
+for i in $(seq 1 20000); do many+=("src/file_number_$i.rs"); done
+EV=push MSG='[ci full]' paths "[ci full] with 20,000 paths it never reads" "$ALL" "${many[@]}"
 EV=push MSG='$(touch '"$TMP"'/pwned) `touch '"$TMP"'/pwned2`' paths "a hostile message is data" "none" README.md
 verdict "the hostile message ran nothing" "$(ls "$TMP" | grep -c pwned)" "0"
 

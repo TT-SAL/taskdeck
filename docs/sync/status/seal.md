@@ -20,6 +20,10 @@ resumed.
    `docs/sync/status/seal/briefs/common.md`, the workflow script `docs/sync/status/seal/workflows/task.js`.
 4. `docs/sync/spec/seal.md` is the contract; R4 and V1 (`docs/sync/research/`) are the reasons
    behind it.
+5. After the exit, this stage's lead changed one file outside the stage's paths, in a pull request
+   of its own, as SYNC_PLAN.md §3.3 asks for a script that is wrong: `scripts/tests/test-ci-changes.sh`
+   (a race in that test's own pipe, which failed one CI run of the exit pull request). It is noted
+   in `docs/sync/status/foundation.md` too.
 
 ## How this stage was run
 
@@ -1153,8 +1157,10 @@ hostile, "joined" on the new device is not proof; the existing device's result i
 - `scripts/tests/test-ci-changes.sh` has a race in its own harness: it pipes a list of paths into
   `changes.sh`, which for a head message that asks for the full run exits without reading, and the
   writer then sometimes gets a broken pipe (one case of 152 failed once, in the CI of
-  TT-SAL/taskdeck#21; the workflow itself is not affected). The fix, feeding the paths from a file,
-  follows this stage's exit in a pull request of its own.
+  TT-SAL/taskdeck#21; the workflow itself is not affected). Fixed after this stage's exit in a
+  pull request of its own ("scripts: the changes test feeds its paths from a file"): the helper
+  writes the paths to a file, and a new case with 20,000 unread paths fails on the old helper every
+  time.
 - The root manifest gives `serde`, `serde_json`, `flate2`, `subtle`, `zeroize` and `proptest` as
   caret requirements; the lockfile holds them. Pin them with `=` when the root manifest is next
   changed, in a pull request of its own (the hygiene pass).
