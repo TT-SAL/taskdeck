@@ -1,5 +1,17 @@
 use super::*;
 
+// The hash states that take in the seed, the roots and the private keys are
+// wiped on drop: sha2's `zeroize` feature is on (the crate's Cargo.toml), and
+// the HMAC and HKDF states are built from these cores.
+// spec: SEAL-GEN-006
+// spec: SEAL-SHEET-003
+#[test]
+fn hash_states_zeroize_on_drop() {
+    fn zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    zeroize_on_drop::<sha2::Sha256>();
+    zeroize_on_drop::<sha2::Sha512>();
+}
+
 #[test]
 fn take_never_reads_past_the_end() {
     let b = [1u8, 2, 3, 4];
