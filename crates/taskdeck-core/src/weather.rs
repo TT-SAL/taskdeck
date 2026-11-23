@@ -249,7 +249,9 @@ pub fn build_report(json: &WeatherResponse, coordinates: [f32; 2]) -> Report {
         longitude: coordinates[1],
         timezone: json.timezone.clone(),
         utc_offset_seconds: json.utc_offset_seconds,
-        // SPEC-QUESTION: today's `build_report` reads the system clock here; the core reads no clock (CORE-GEN-003), so it writes today's fallback 0 and the caller sets `fetched_at` from its own clock.
+        // Lead ruling, spec change 5, §14.6: today's `build_report` reads the
+        // system clock here; the core reads no clock (CORE-GEN-003), so it
+        // leaves `fetched_at` at 0 for the caller to set from its own clock.
         fetched_at: 0,
         now,
         hours,

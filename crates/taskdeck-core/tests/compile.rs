@@ -314,11 +314,9 @@ fn compile_vectors() {
             (Some(c), Some(t)) => {
                 assert_eq!(String::from_utf8(c.to_canonical()).expect("utf-8"), t, "{name}");
                 ops.insert(c.op());
-                let verdict = accepted(&view, c, device_no, now);
-                match case.get("apply_code") {
-                    Some(code) => assert_eq!(verdict, Err(code.as_str().expect("code")), "{name}"),
-                    None => assert_eq!(verdict, Ok(()), "{name}"),
-                }
+                // Every command is accepted on its view: no case is exempt
+                // (lead ruling, spec change 5, §13.4 `set_notes`).
+                assert_eq!(accepted(&view, c, device_no, now), Ok(()), "{name}");
             }
             (c, t) => panic!("{name}: {c:?} against {t:?}"),
         }
@@ -735,7 +733,8 @@ fn an_intent() -> impl Strategy<Value = Intent> {
         (an_id(), any::<u8>(), a_day()).prop_map(|(id, days, day)| Intent::SetRepeat { id, days, day }),
         (a_day(), proptest::option::of(prop_oneof![-100i32..1600, any::<i32>()]))
             .prop_map(|(day, from)| Intent::Reflow { day, from }),
-        "[a\t\n é]{0,12}".prop_map(|text| Intent::SetNotes { text, base: None }),
+        ("[a\t\n é]{0,12}", proptest::option::of(prop_oneof![0u64..4, any::<u64>()]))
+            .prop_map(|(text, base)| Intent::SetNotes { text, base }),
         (an_id(), an_archived_at()).prop_map(|(id, archived_at)| Intent::Restore { id, archived_at }),
         (an_id(), an_archived_at()).prop_map(|(id, archived_at)| Intent::ForgetArchived { id, archived_at }),
         (
@@ -1021,6 +1020,7 @@ fn an_array_is_not_an_intent() {
     }
 }
 
+// spec: CORE-COMP-001
 // spec: CORE-COMP-008
 #[test]
 fn set_notes_base_beyond_u53_is_not_emitted() {
@@ -1031,9 +1031,129 @@ fn set_notes_base_beyond_u53_is_not_emitted() {
         let overlay = Overlay::default();
         let cx = CompileCtx { view: &view, zone: &FixedZone(0), now: at(720), device_no: 1, overlay: &overlay };
         let mut minter = IdMinter::new(1);
-        if let Ok(Compiled { command: Some(c), .. }) = compile(&intent, &cx, &mut minter) {
-            let bytes = c.to_canonical();
-            assert_eq!(parse_command(&bytes).as_ref(), Ok(&c), "{:?}", String::from_utf8_lossy(&bytes));
+        // Not the view's revision: stale (lead ruling, spec change 5, §13.4).
+        let e = compile(&intent, &cx, &mut minter).expect_err(base);
+        assert_eq!((e.code, e.status, e.message.as_str()), ("core/notes_stale", 400, "The notes changed on another device."));
+    }
+}
+
+// spec: CORE-COMP-001
+// spec: CORE-COMP-008
+#[test]
+fn set_notes_always_carries_the_view_revision() {
+    // Lead ruling, spec change 5, §13.4: a given base other than
+    // `view.notes_rev` is stale; the command's base is `view.notes_rev`; a
+    // revision of 2^53 - 1 is the board cap, after the stale check.
+    let mut view = BoardData::empty();
+    for rev in [0u64, 1, 41, (1 << 53) - 2] {
+        view.notes_rev = rev;
+        for base in [None, Some(rev)] {
+            let got = run(&view, &Intent::SetNotes { text: "n".into(), base }).0.expect("compiles");
+            let c = got.command.expect("a command");
+            assert_eq!(c, LogCommand::SetNotes { text: "n".into(), base: rev });
+            assert_eq!(accepted(&view, &c, 1, at(720)), Ok(()), "{rev}");
+        }
+        for base in [rev + 1, rev.wrapping_sub(1), u64::MAX] {
+            let got = run(&view, &Intent::SetNotes { text: "n".into(), base: Some(base) }).0;
+            assert_eq!(code(&got), Some("core/notes_stale"), "{rev} {base}");
         }
     }
+    view.notes_rev = (1 << 53) - 1;
+    let full = run(&view, &Intent::SetNotes { text: "n".into(), base: None });
+    assert_eq!(
+        full.0.err().map(|e| (e.code, e.status, e.message)),
+        Some(("core/cap_board", 400, "The board is full.".to_owned()))
+    );
+    assert_eq!(full.1, IdMinter::new(1));
+    let stale = run(&view, &Intent::SetNotes { text: "n".into(), base: Some(3) }).0;
+    assert_eq!(code(&stale), Some("core/notes_stale"));
+    // The length check comes first.
+    let long = run(&view, &Intent::SetNotes { text: "\t".repeat(5001), base: Some(3) }).0;
+    assert_eq!(code(&long), Some("core/notes_long"));
+}
+
+// spec: CORE-COMP-001
+// spec: CORE-ID-004
+#[test]
+fn the_minter_must_be_the_devices() {
+    // Lead ruling, spec change 5, §13.3 G7: checked first, for every intent;
+    // the minter is unchanged.
+    let mut view = BoardData::empty();
+    view.items = vec![task(1, [7])];
+    let overlay = Overlay::default();
+    let cx = CompileCtx { view: &view, zone: &FixedZone(0), now: at(720), device_no: 1, overlay: &overlay };
+    let intents = creates().into_iter().chain([
+        Intent::Rename { id: 1, name: "x".into() },
+        Intent::Rename { id: 99, name: String::new() },
+        Intent::Unplan { id: 1 },
+        Intent::Forget { id: 99 },
+        Intent::SetNotes { text: "\t".repeat(5001), base: Some(9) },
+        Intent::SetPalette { colors: [[0; 4]; 6] },
+        Intent::Create { kind: Kind::Task, name: String::new(), day: day(), start: 600, minutes: 30 },
+    ]);
+    for intent in intents {
+        for device_no in [0u16, 2, 8191, u16::MAX] {
+            let before = IdMinter { device_no, next_item: 3, next_block: 4 };
+            let mut minter = before;
+            let e = compile(&intent, &cx, &mut minter).expect_err("another device's minter");
+            assert_eq!(
+                (e.code, e.status, e.message.as_str()),
+                ("core/bad_id", 400, "The id counter belongs to another device."),
+                "{intent:?}"
+            );
+            assert_eq!(minter, before, "{intent:?}");
+        }
+        // The device's own minter is not refused for being the device's.
+        let mut own = IdMinter::new(1);
+        assert_ne!(compile(&intent, &cx, &mut own).err().map(|e| e.code), Some("core/bad_id"), "{intent:?}");
+    }
+}
+
+// spec: CORE-COMP-001
+// spec: CORE-TIME-003
+#[test]
+fn a_local_time_outside_the_range_is_out_of_range_not_a_gap() {
+    // Lead ruling, spec change 5, §5.4 and §13.3 G3 and G5.
+    let first = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).expect("a date");
+    let last = chrono::NaiveDate::from_ymd_opt(9999, 12, 31).expect("a date");
+    let mut view = BoardData::empty();
+    view.items = vec![task(1, [7])];
+    let overlay = Overlay::default();
+    let range = ("core/date_range", 400, "That date is out of range (1970–9999).".to_owned());
+    let compile_in = |zone: &dyn Zone, intent: &Intent| {
+        let cx = CompileCtx { view: &view, zone, now: at(720), device_no: 1, overlay: &overlay };
+        let mut minter = IdMinter::new(1);
+        compile(intent, &cx, &mut minter).map_err(|e| (e.code, e.status, e.message))
+    };
+    let east = FixedZone(3600);
+    let west = FixedZone(-3600);
+    for (zone, d, start) in [(&east, first, 0), (&east, first, 45), (&west, last, 1380), (&west, last, 1439)] {
+        for kind in [Kind::Task, Kind::Event] {
+            let create = Intent::Create { kind, name: String::new(), day: d, start, minutes: 15 };
+            assert_eq!(compile_in(zone, &create).err(), Some(range.clone()), "{create:?}");
+        }
+        let add = Intent::AddBlock { id: 1, day: d, start, minutes: Some(15) };
+        assert_eq!(compile_in(zone, &add).err(), Some(range.clone()), "{add:?}");
+        let mv = Intent::MoveBlock { id: 1, session: Some(7), day: d, start, minutes: 15 };
+        assert_eq!(compile_in(zone, &mv).err(), Some(range.clone()), "{mv:?}");
+        let naive = d.and_hms_opt(u32::try_from(start / 60).expect("h"), u32::try_from(start % 60).expect("m"), 0).expect("t");
+        let wire = WireTime::Naive(naive, "t".into());
+        let quick = Intent::QuickAdd { name: "q".into(), deadline: Some(wire) };
+        assert_eq!(compile_in(zone, &quick).err(), Some(range.clone()), "{quick:?}");
+    }
+    // Just inside: 01:00 at UTC+1 is the first instant, 22:45 at UTC-1 the
+    // last quarter hour.
+    for (zone, d, start) in [(&east, first, 60), (&west, last, 1365)] {
+        let create = Intent::Create { kind: Kind::Task, name: String::new(), day: d, start, minutes: 15 };
+        assert!(compile_in(zone, &create).is_ok(), "{create:?}");
+    }
+    // A real gap keeps its codes: `core/bad_time`, and `not a time` for a
+    // naive wire time.
+    let gap = TableZone::new(0, vec![(1_774_746_000_000, 10_800)]).expect("a table zone");
+    let gap_day = chrono::NaiveDate::from_ymd_opt(2026, 3, 29).expect("a date");
+    let create = Intent::Create { kind: Kind::Task, name: String::new(), day: gap_day, start: 120, minutes: 15 };
+    assert_eq!(compile_in(&gap, &create).err().map(|e| e.0), Some("core/bad_time"));
+    let naive = gap_day.and_hms_opt(2, 0, 0).expect("t");
+    let quick = Intent::QuickAdd { name: "q".into(), deadline: Some(WireTime::Naive(naive, "2026-03-29T02:00".into())) };
+    assert_eq!(compile_in(&gap, &quick).err().map(|e| (e.0, e.2)), Some(("core/intent_json", "not a time: `2026-03-29T02:00`".to_owned())));
 }

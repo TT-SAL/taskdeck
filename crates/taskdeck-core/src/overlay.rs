@@ -2,7 +2,9 @@
 //! `FetchStatus.at` at a fixed offset (core.md §14.6, §20).
 //!
 //! Ported from today's `src/subscriptions.rs` (lines 184-484): what every
-//! function here returns is today's, byte for byte. Not ported: the fetches,
+//! function here returns is today's, byte for byte, except two changes of
+//! brief c3: `OverlayEvent::minutes` saturates, and `Overlay::sealed` orders
+//! events that tie on today's sort key by their remaining fields. Not ported: the fetches,
 //! the feeds thread, the cache file and `checked_url` (task D). None of these
 //! functions reads a clock (CORE-GEN-003): `FetchStatus.at` is filled by the
 //! caller.
@@ -60,8 +62,13 @@ pub const LONG_EVENT_MINUTES: i32 = 12 * 60;
 
 impl OverlayEvent {
     /// The event's length in minutes (today's overlay; core.md §14.6).
+    ///
+    /// Saturating (brief c3, bound 4): an event read straight from a cache
+    /// file and never sealed can hold any `i32`s, and today's subtraction
+    /// overflowed on them (a panic in a debug build, a wrapped length in a
+    /// release one).
     pub fn minutes(&self) -> i32 {
-        (self.end - self.start).max(0)
+        self.end.saturating_sub(self.start).max(0)
     }
 
     /// Whether the event is drawn as background (today's overlay; core.md §14.6).
@@ -197,10 +204,21 @@ impl Overlay {
             .take(EVENTS_MAX)
             .collect();
         // Sorted so a feed free to list its events in a different order each
-        // time does not read as a change.
+        // time does not read as a change. Events that tie on today's key are
+        // ordered by their remaining fields (brief c3, bound 6), so the order
+        // they were handed over in shows nowhere.
         events.sort_by(|a, b| {
-            (a.day, a.start, a.end, a.subscription, &a.summary)
-                .cmp(&(b.day, b.start, b.end, b.subscription, &b.summary))
+            (a.day, a.start, a.end, a.subscription, &a.summary, &a.location, &a.description, a.all_day, a.free).cmp(&(
+                b.day,
+                b.start,
+                b.end,
+                b.subscription,
+                &b.summary,
+                &b.location,
+                &b.description,
+                b.all_day,
+                b.free,
+            ))
         });
         let status = status
             .into_iter()

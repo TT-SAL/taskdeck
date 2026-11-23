@@ -101,8 +101,8 @@ fn fail(code: &'static str) -> CompileError {
         "core/horizon_kind" => (400, "Only a task has a horizon."),
         "core/repeat_kind" => (400, "Only a routine repeats."),
         "core/notes_long" => (400, "Those notes are too long for the notepad."),
-        // SPEC-QUESTION: §16 has `core/notes_stale` only for apply (§9.20); compile refuses an intent `base` above 2^53 − 1 with it, status 400 and a new message.
-        "core/notes_stale" => (400, "Those notes have changed since you started editing."),
+        // Lead ruling, spec change 5, §13.4 `set_notes`: an intent `base` other than `view.notes_rev`.
+        "core/notes_stale" => (400, "The notes changed on another device."),
         "core/archive_gone" => (410, "That is no longer in the archive."),
         "core/calendars_full" => (400, "That is already 20 calendars, which is as many as this keeps."),
         "core/url_empty" => (400, "An address is needed."),
@@ -117,12 +117,15 @@ fn fail(code: &'static str) -> CompileError {
         "core/cap_archive" => (400, "The archive is full."),
         "core/place" => (400, "That place is off the map."),
         "core/picture" => (400, "That picture could not be shared."),
-        // SPEC-QUESTION: §16 has no compile code for a restore whose row's sid a live block holds (apply's `core/id_taken`, §9.21 step 4); this keeps apply's code with status 400 and a new message.
+        // Lead ruling, spec change 5, §13.4 `restore`: a row whose sid a live block holds (§9.21 step 4).
         "core/id_taken" => (400, "That item's blocks are already on the board."),
-        // SPEC-QUESTION: §16 has no compile code for an op outside `view.rules`' op table (CORE-RULES-004); this uses apply's `core/rules` with status 400 and a new message.
+        // Lead ruling, spec change 5, §13.3 G8: an op outside `view.rules`' op table (CORE-RULES-004).
         "core/rules" => (400, "This board's rules do not allow that yet."),
-        // SPEC-QUESTION: §16 has no compile code for a command apply would refuse for size (§8.4 step 4, CORE-APPLY-005) though G6 and CORE-COMP-008 require compile to refuse it on `view`; this uses apply's `core/cap` with status 400 and a new message.
-        "core/cap" => (400, "The board is full."),
+        // Lead ruling, spec change 5, §13.3 G6 and §8.4 step 4: apply's size check on `view`;
+        // also `set_notes` on a `view.notes_rev` of 2^53 − 1 (§13.4).
+        "core/cap_board" => (400, "The board is full."),
+        // Lead ruling, spec change 5, §13.3 G7: a minter of another device.
+        "core/bad_id" => (400, "The id counter belongs to another device."),
         _ => (400, ""),
     };
     CompileError { code, status, message: message.to_owned() }
@@ -143,9 +146,16 @@ pub fn compile<Z: Zone + ?Sized>(
     cx: &CompileCtx<Z>,
     minter: &mut IdMinter,
 ) -> Result<Compiled, CompileError> {
+    // G7: the minter is the device's, checked first for every intent (lead
+    // ruling, spec change 5, §13.3 G7); the minter is unchanged.
+    if minter.device_no != cx.device_no {
+        return Err(fail("core/bad_id"));
+    }
     // Minted on a copy, stored back only on `Ok` (CORE-COMP-004).
     let mut m = *minter;
-    let out = Rows { cx, minter: &mut m }.row(intent)?;
+    let mut rows = Rows { cx, minter: &mut m, mint_failed: None };
+    let out = rows.row(intent)?;
+    let mint_failed = rows.mint_failed;
     // G8: never an op outside the op table of `view.rules` (CORE-RULES-004).
     if let Some(c) = &out.command
         && !crate::apply::op_table(cx.view.rules).contains(&c.op())
@@ -153,16 +163,22 @@ pub fn compile<Z: Zone + ?Sized>(
         return Err(fail("core/rules"));
     }
     // G6: apply's size check (§8.4 step 4) on `view`, so `apply` on `view`
-    // does not refuse the command `core/cap` (CORE-COMP-008). The entry's
-    // `seq` is not known here; the largest one writes the longest stamps, so
-    // a command that fits under it fits under every `seq`, and `based_on` just
-    // below it means the origin saw every change of `view`.
+    // does not refuse the command for size (CORE-COMP-008): `core/cap_board`,
+    // after the row's own checks and before ids are minted (lead ruling,
+    // spec change 5, §13.3 G6). The entry's `seq` is not known here; the
+    // largest one writes the longest stamps, so a command that fits under it
+    // fits under every `seq`, and `based_on` just below it means the origin
+    // saw every change of `view`.
     if let Some(c) = &out.command {
         let seq = crate::apply::LAST_SEQ;
         let ctx = crate::apply::Ctx { seq, device_no: cx.device_no, at: cx.now, based_on: seq - 1 };
         if crate::apply::refused_for_size(cx.view, c, &ctx) {
-            return Err(fail("core/cap"));
+            return Err(fail("core/cap_board"));
         }
+    }
+    // The ids are minted last (G7): a minter with no number left answers now.
+    if let Some(code) = mint_failed {
+        return Err(fail(code));
     }
     *minter = m;
     Ok(out)
@@ -184,6 +200,10 @@ fn with_id(command: LogCommand, id: u64) -> R<Compiled> {
 struct Rows<'c, 'a, Z: Zone + ?Sized> {
     cx: &'c CompileCtx<'a, Z>,
     minter: &'c mut IdMinter,
+    /// The cap code of the first mint that found no number left (§7.1). The
+    /// row goes on with a stand-in id, the largest of the device, so the size
+    /// check of G6 runs before the failure is answered.
+    mint_failed: Option<&'static str>,
 }
 
 impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
@@ -224,6 +244,11 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
             Some(WireTime::Exact(t)) => self.exact(t).map(Some),
             Some(WireTime::Naive(naive, text)) => {
                 let minutes = i32::try_from(naive.hour() * 60 + naive.minute()).unwrap_or(0);
+                // A local time outside the instant range is `core/date_range`,
+                // not `not a time` (lead ruling, spec change 5, §13.3 G3).
+                if time::outside_range(naive.date(), minutes, self.cx.zone) {
+                    return Err(fail("core/date_range"));
+                }
                 time::resolve_on_day(naive.date(), minutes, self.cx.zone)
                     .filter(|&t| (FIRST_YEAR..=LAST_YEAR).contains(&time::local_day(t, self.cx.zone).year()))
                     .map(Some)
@@ -232,9 +257,14 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
         }
     }
 
-    /// `resolve_on_day` in the origin's zone; none is `core/bad_time`. Its
-    /// instant is within §5.1's range by construction (G5).
+    /// `resolve_on_day` in the origin's zone; a local time outside the
+    /// instant range is `core/date_range` (lead ruling, spec change 5, §13.3
+    /// G5), any other none is `core/bad_time`. Its instant is within §5.1's
+    /// range by construction (G5).
     fn resolve(&self, day: chrono::NaiveDate, minutes: i32) -> R<Instant> {
+        if time::outside_range(day, minutes, self.cx.zone) {
+            return Err(fail("core/date_range"));
+        }
         time::resolve_on_day(day, minutes, self.cx.zone).ok_or_else(|| fail("core/bad_time"))
     }
 
@@ -252,13 +282,25 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
         self.view().items.iter().map(|i| i.blocks.len()).sum()
     }
 
-    // SPEC-QUESTION: §13.4 says nothing of a minter with no number left (§7.1); this answers the cap of the kind minted, `core/cap_items` or `core/cap_blocks`.
-    fn mint_item(&mut self) -> R<u64> {
-        self.minter.mint_item(self.cx.view).ok_or_else(|| fail("core/cap_items"))
+    // Lead ruling, spec change 5, §13.4: a minter with no number left (§7.1)
+    // is the cap of the kind minted, `core/cap_items` or `core/cap_blocks`.
+    fn mint_item(&mut self) -> u64 {
+        let id = self.minter.mint_item(self.cx.view);
+        self.minted(id, "core/cap_items")
     }
 
-    fn mint_block(&mut self) -> R<u64> {
-        self.minter.mint_block(self.cx.view).ok_or_else(|| fail("core/cap_blocks"))
+    fn mint_block(&mut self) -> u64 {
+        let id = self.minter.mint_block(self.cx.view);
+        self.minted(id, "core/cap_blocks")
+    }
+
+    /// The minted number, or, when there is none, the stand-in of
+    /// `mint_failed` with `code` recorded (the first failure wins).
+    fn minted(&mut self, id: Option<u64>, code: &'static str) -> u64 {
+        id.unwrap_or_else(|| {
+            self.mint_failed.get_or_insert(code);
+            crate::ids::compose(self.minter.device_no, (1 << crate::ids::LOW_BITS) - 1).unwrap_or(MAX_U53)
+        })
     }
 
     /// `at'` of `complete` and `delete`: `min(at, now + 1 day)`, or `now`
@@ -298,7 +340,7 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
                     return Err(fail("core/horizon"));
                 }
                 self.cap_items()?;
-                let id = self.mint_item()?;
+                let id = self.mint_item();
                 let command = match deadline {
                     // An event has a time (`core/event_time` above).
                     Some(start) if *is_event => LogCommand::CreateEvent(CreateEvent {
@@ -329,7 +371,7 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
                 }
                 let deadline = self.wire(deadline.as_ref())?;
                 self.cap_items()?;
-                let id = self.mint_item()?;
+                let id = self.mint_item();
                 let (importance, time_importance) =
                     if deadline.is_some() { (Some(NEW_TASK_IMPORTANCE), None) } else { (None, Some(NEW_TASK_HORIZON)) };
                 let command = LogCommand::CreateTask(CreateTask {
@@ -366,10 +408,10 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
                 if *kind == Kind::Task && self.live_blocks() >= MAX_LIVE_BLOCKS {
                     return Err(fail("core/cap_blocks"));
                 }
-                let id = self.mint_item()?;
+                let id = self.mint_item();
                 let command = match (kind, when) {
                     (Kind::Task, Some(when)) => {
-                        let sid = self.mint_block()?;
+                        let sid = self.mint_block();
                         LogCommand::CreateTask(CreateTask {
                             id,
                             name,
@@ -468,7 +510,7 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
                 if item.blocks.len() >= MAX_BLOCKS_PER_ITEM || self.live_blocks() >= MAX_LIVE_BLOCKS {
                     return Err(fail("core/cap_blocks"));
                 }
-                let sid = self.mint_block()?;
+                let sid = self.mint_block();
                 let command = LogCommand::AddBlock { id: *id, sid, start: when, minutes: length.max(15) };
                 Ok(Compiled { command: Some(command), reply: Reply { session: Some(sid), ..Reply::default() } })
             }
@@ -579,17 +621,19 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
                 if t.chars().count() > NOTES_SCALARS {
                     return Err(fail("core/notes_long"));
                 }
-                // SPEC-QUESTION: an intent `base` other than `view.notes_rev` is emitted as given (§13.4), so `apply` on `view` refuses it `core/notes_stale` (§9.20), against CORE-COMP-008; and `view.notes_rev` at 2^53 − 1 has no compile code (apply: `core/cap`).
-                let base = base.unwrap_or(self.view().notes_rev);
-                // A base above 2^53 − 1 has no canonical encoding (§4.2 rule 5),
-                // and it can never be `view.notes_rev` (a `u53`), so apply on
-                // `view` would refuse it `core/notes_stale` (§9.20): refuse it here
-                // with that code, so the command returned always encodes (CORE-COMP-008).
-                // SPEC-QUESTION: §13.4 and §16 give no compile refusal for an intent `base` above 2^53 − 1; this uses apply's `core/notes_stale`.
-                if base > MAX_U53 {
+                // Lead ruling, spec change 5, §13.4 `set_notes`: a given base
+                // that is not `view.notes_rev` is `core/notes_stale` (a base
+                // above 2^53 − 1 among them); a `view.notes_rev` at 2^53 − 1 is
+                // `core/cap_board`. The command's base is `view.notes_rev`, so
+                // `apply` on `view` accepts it (CORE-COMP-008).
+                let rev = self.view().notes_rev;
+                if base.is_some_and(|b| b != rev) {
                     return Err(fail("core/notes_stale"));
                 }
-                done(LogCommand::SetNotes { text: t, base })
+                if rev >= MAX_U53 {
+                    return Err(fail("core/cap_board"));
+                }
+                done(LogCommand::SetNotes { text: t, base: rev })
             }
 
             Intent::Restore { id, archived_at } => {
@@ -612,7 +656,7 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
                     return Err(fail("core/id_taken"));
                 }
                 let own = (row.id != 0 && view.item(row.id).is_none()).then_some(row.id);
-                let fallback = self.mint_item()?;
+                let fallback = self.mint_item();
                 let command = LogCommand::Restore { id: *id, archived_at, fallback };
                 with_id(command, own.unwrap_or(fallback))
             }
@@ -635,7 +679,7 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
                     return Err(fail("core/url_duplicate"));
                 }
                 let name = self.name(name)?;
-                let id = self.mint_item()?;
+                let id = self.mint_item();
                 let name = if name.is_empty() {
                     overlay::name_from_url(&u)
                         .filter(|n| n.chars().count() <= NAME_SCALARS)
@@ -722,7 +766,9 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
                 moves.push(BlockMove { id, sid, start: w, minutes: block.minutes });
             }
         }
-        // SPEC-QUESTION: `move_blocks` holds at most 1,000 moves (§9.11) and §13.4 does not say what a day with more does; this keeps the first 1,000 in input order.
+        // Lead ruling, spec change 5, §13.4 Reflow: `move_blocks` holds at
+        // most 1,000 moves (§9.11), so a day with more keeps the first 1,000
+        // in input order.
         moves.truncate(MAX_MOVES);
         moves
     }

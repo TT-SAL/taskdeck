@@ -108,19 +108,25 @@ pub fn archive_newest_first(board: &BoardData) -> impl Iterator<Item = &ArchiveR
     board.archive.iter().rev()
 }
 
+/// The most days `archive_by_day` buckets (lead ruling, spec change 5, §14.4).
+const MAX_DAYS: u32 = 366;
+
 /// The ghost sources of each day from `from` (core.md §14.4).
 ///
 /// One pass over the archive newest first (CORE-SNAP-003): for each row
 /// whose `kind` is not `event`, each of its blocks in ascending sid goes to
 /// the bucket of its local day when that day is one of the `days` days from
-/// `from`. The result has one bucket per day, the first for `from`.
+/// `from`. The result has one bucket per day, the first for `from`; a `days`
+/// above 366 is read as 366 (lead ruling, spec change 5, §14.4).
 pub fn archive_by_day<'a>(
     board: &'a BoardData,
     from: chrono::NaiveDate,
     days: u32,
     zone: &(impl Zone + ?Sized),
 ) -> Vec<Vec<(&'a ArchiveRow, &'a RowBlock)>> {
-    let count = usize::try_from(days).unwrap_or(usize::MAX);
+    // A `days` above 366 is read as 366 (lead ruling, spec change 5, §14.4),
+    // so no caller can ask for billions of buckets.
+    let count = usize::try_from(days.min(MAX_DAYS)).unwrap_or(0);
     let mut buckets: Vec<Vec<(&'a ArchiveRow, &'a RowBlock)>> = vec![Vec::new(); count];
     for row in archive_newest_first(board) {
         // An archived event places nothing: today's ghost placeable has no

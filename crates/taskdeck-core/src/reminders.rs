@@ -97,7 +97,7 @@ fn key(kind: ReminderKind, item: u64, sid: Option<u64>, at: Instant) -> String {
 /// deadline). Routines give none. `fire_at = at − lead`; a source is kept
 /// when `from ≤ fire_at < until` (CORE-REM-001).
 pub fn reminders(board: &BoardData, from: Instant, until: Instant, defaults: &ReminderDefaults) -> Vec<Reminder> {
-    // SPEC-QUESTION: §14.5 gives each lead the range 0 to 1,440 but not what a larger value does; a lead above 1,440 is taken as 1,440.
+    // Lead ruling, spec change 5, §14.5: a lead above 1,440 is read as 1,440.
     let lead = |minutes: u32| -i64::from(minutes.min(MAX_LEAD_MINUTES)) * 60;
     let mut out = Vec::new();
     let mut add = |kind: ReminderKind, item: &crate::board::Item, sid: Option<u64>, at: Instant, minutes: Option<u32>| {

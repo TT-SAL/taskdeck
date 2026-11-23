@@ -262,18 +262,20 @@ fn a_tzid_the_file_defines_is_read_from_that_definition_and_not_from_this_machin
     assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
 }
 
+// Today's test was `..._and_says_which_one_it_was`, and asserted the line
+// quoted the TZID. Brief c3 (bound 5, CORE-GEN-010) forbids quoting a TZID:
+// the expected start is today's; the line now says that a zone was guessed at
+// without naming it.
+// spec: CORE-GEN-010
 #[test]
-fn a_tzid_the_file_never_defined_falls_back_to_local_and_says_which_one_it_was() {
+fn a_tzid_the_file_never_defined_falls_back_to_local_and_says_so_without_quoting_it() {
     let parsed = read(&event(
         "SUMMARY:Somewhere\r\nDTSTART;TZID=W. Europe Standard Time:20260910T090000\r\nDURATION:PT1H",
     ));
     let only = parsed.occurrences.first().expect("one");
     assert_eq!(only.start, 9 * 60, "read as this computer's wall time");
-    assert!(
-        parsed.problems.iter().any(|p| p.contains("W. Europe Standard Time")),
-        "the calendar has to admit which meeting it guessed at: {:?}",
-        parsed.problems
-    );
+    assert_eq!(parsed.problems, vec![UNDEFINED_ZONE.to_string()], "the calendar admits it guessed at a zone");
+    assert!(parsed.problems.iter().all(|p| !p.contains("Europe")), "{:?}", parsed.problems);
 }
 
 #[test]
@@ -469,22 +471,142 @@ fn a_utc_until_is_read_in_the_zone_given() {
 }
 
 // spec: CORE-READ-004
+// spec: CORE-GEN-010
 #[test]
 fn an_undefined_tzid_is_read_as_wall_time_in_every_zone() {
     let text = wrap(&event("SUMMARY:Somewhere\r\nDTSTART;TZID=Nowhere/Undefined:20260910T090000\r\nDURATION:PT1H"));
     for zone in [&FixedZone(0) as &dyn Zone, &FixedZone(-5 * 3600), &europe_2026()] {
         let parsed = parse_in(&text, zone);
         assert_eq!(when(&parsed, "Somewhere"), (day(2026, 9, 10), 9 * 60));
-        assert!(parsed.problems.iter().any(|p| p.contains("Nowhere/Undefined")), "{:?}", parsed.problems);
+        // One line that says so without quoting the TZID (brief c3, CORE-GEN-010).
+        assert_eq!(parsed.problems, vec![UNDEFINED_ZONE.to_string()]);
     }
 }
 
 // spec: CORE-READ-004
 #[test]
 fn a_utc_time_before_1970_is_read_with_the_offset_at_the_start_of_the_range() {
-    // Outside core.md §5.1's instants (the SPEC-QUESTION at `wall_time`): the
+    // Outside core.md §5.1's instants (lead ruling, spec change 5, §14.6): the
     // zone's offset at 1970-01-01T00:00Z is taken.
     let text = wrap(&event("SUMMARY:Old\r\nDTSTART:19600101T120000Z\r\nDURATION:PT1H"));
     let parsed = parse(&text, day(1959, 1, 1), day(1961, 1, 1), Limits::default(), &europe_2026()).expect("a calendar");
     assert_eq!(when(&parsed, "Old"), (day(1960, 1, 1), 13 * 60));
+}
+
+/* ─────────────── New: the bounds of brief c3 (core.md §14.6) ─────────────── */
+
+#[test]
+fn a_by_list_is_read_without_duplicates_and_holds_at_most_sixty_four_values() {
+    let rule = read_recurrence("FREQ=MONTHLY;BYDAY=MO,MO,+1MO,1MO,-1FR;BYMONTH=1,1,2;BYSETPOS=1,1;BYMONTHDAY=3,3")
+        .expect("a rule");
+    assert_eq!(rule.by_day, vec![(None, Weekday::Mon), (Some(1), Weekday::Mon), (Some(-1), Weekday::Fri)]);
+    assert_eq!(rule.by_month, vec![1, 2]);
+    assert_eq!(rule.by_set_pos, vec![1]);
+    assert_eq!(rule.by_month_day, vec![3]);
+
+    let list = |n: i32| (1..=n).map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+    assert_eq!(read_recurrence(&format!("FREQ=YEARLY;BYSETPOS={}", list(MAX_BY_VALUES as i32))).map(|r| r.by_set_pos.len()), Some(64));
+    assert_eq!(read_recurrence(&format!("FREQ=YEARLY;BYSETPOS={}", list(MAX_BY_VALUES as i32 + 1))), None);
+    // Every month day counted both ways is 62 values, the longest real list.
+    let both: Vec<String> = (1..=31).map(|d| d.to_string()).chain((1..=31).map(|d| format!("-{d}"))).collect();
+    assert_eq!(read_recurrence(&format!("FREQ=MONTHLY;BYMONTHDAY={}", both.join(","))).map(|r| r.by_month_day.len()), Some(62));
+}
+
+#[test]
+fn the_nth_weekday_is_todays_filter_of_every_day_of_the_month() {
+    let weekdays = [Weekday::Mon, Weekday::Tue, Weekday::Wed, Weekday::Thu, Weekday::Fri, Weekday::Sat, Weekday::Sun];
+    for year in [1, 1900, 2024, 2026, 2100, 9999] {
+        for month in 1..=12 {
+            for weekday in weekdays {
+                let today: Vec<NaiveDate> = (1..=days_in(year, month))
+                    .filter_map(|d| NaiveDate::from_ymd_opt(year, month, d))
+                    .filter(|date| date.weekday() == weekday)
+                    .collect();
+                assert_eq!(nth_weekday(year, month, weekday, None), today, "{year}-{month} {weekday:?}");
+                for n in [-6i32, -5, -1, 1, 4, 5, 6] {
+                    let picked = if n > 0 {
+                        today.get(n as usize - 1).copied()
+                    } else {
+                        today.len().checked_sub(n.unsigned_abs() as usize).and_then(|i| today.get(i)).copied()
+                    };
+                    assert_eq!(nth_weekday(year, month, weekday, Some(n)), picked.into_iter().collect::<Vec<_>>());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn problems_hold_one_line_per_kind_and_at_most_sixty_four() {
+    let mut problems = Problems::default();
+    for _ in 0..3 {
+        problems.note(NO_START);
+    }
+    problems.note(NO_END);
+    assert_eq!(problems.lines(), vec![format!("{NO_START} (3 times)"), NO_END.to_string()]);
+
+    // Should there ever be more kinds than the bound, the lines stop at it.
+    let kinds: Vec<&'static str> =
+        (0..MAX_PROBLEM_LINES + 10).map(|i| -> &'static str { format!("kind {i}").leak() }).collect();
+    let mut problems = Problems::default();
+    for &kind in &kinds {
+        problems.note(kind);
+        problems.note(kind);
+    }
+    assert_eq!(problems.lines().len(), MAX_PROBLEM_LINES);
+}
+
+/// A zone `Z` whose points are the observances given, as `(DTSTART, offset
+/// in hours)`, and the parse window of `read`.
+fn zones_of(observances: &[(&str, i64)]) -> Vec<(NaiveDateTime, TimeDelta)> {
+    let body: String = observances
+        .iter()
+        .map(|(at, hours)| {
+            format!(
+                "BEGIN:STANDARD\r\nDTSTART:{at}\r\nTZOFFSETFROM:+0000\r\nTZOFFSETTO:+{hours:02}00\r\nEND:STANDARD\r\n"
+            )
+        })
+        .collect();
+    let text = wrap(&format!("BEGIN:VTIMEZONE\r\nTZID:Z\r\n{body}END:VTIMEZONE"));
+    let lines: Vec<Line> = unfold(&text, 1000).expect("unfolds").iter().filter_map(|l| split_line(l)).collect();
+    let harvest = harvest(lines, &Limits::default()).expect("a calendar");
+    let zones = Zones::build(harvest.zones, 2025, 2027, &Limits::default(), &ZONE);
+    zones.transitions.get("Z").cloned().unwrap_or_default()
+}
+
+#[test]
+fn transitions_are_found_by_search_as_todays_scan_found_them() {
+    // Out of order, and two at the same wall time: the first one listed wins,
+    // as today's stable sort and dedup kept it.
+    let points = zones_of(&[("20260601T000000", 3), ("20260101T000000", 1), ("20260601T000000", 5), ("20261001T000000", 2)]);
+    let offsets: Vec<i64> = points.iter().map(|(_, o)| o.num_hours()).collect();
+    assert_eq!(offsets, vec![1, 3, 2]);
+
+    let text = wrap("BEGIN:VTIMEZONE\r\nTZID:Z\r\nBEGIN:STANDARD\r\nDTSTART:20260101T000000\r\nTZOFFSETFROM:+0000\r\n\
+                     TZOFFSETTO:+0100\r\nEND:STANDARD\r\nBEGIN:STANDARD\r\nDTSTART:20260601T000000\r\n\
+                     TZOFFSETFROM:+0100\r\nTZOFFSETTO:+0300\r\nEND:STANDARD\r\nEND:VTIMEZONE");
+    let lines: Vec<Line> = unfold(&text, 1000).expect("unfolds").iter().filter_map(|l| split_line(l)).collect();
+    let harvest = harvest(lines, &Limits::default()).expect("a calendar");
+    let zones = Zones::build(harvest.zones, 2025, 2027, &Limits::default(), &FixedZone(0));
+    let at = |text: &str| NaiveDateTime::parse_from_str(text, "%Y%m%dT%H%M%S").expect("a time");
+    // Before every point: the offset before the earliest observance (+00:00).
+    assert_eq!(zones.resolve("Z", at("20251231T120000")), Some(at("20251231T120000")));
+    // On a point and between points: the last one at or before it.
+    assert_eq!(zones.resolve("Z", at("20260101T000000")), Some(at("20251231T230000")));
+    assert_eq!(zones.resolve("Z", at("20260531T235959")), Some(at("20260531T225959")));
+    assert_eq!(zones.resolve("Z", at("20260601T000000")), Some(at("20260531T210000")));
+    assert_eq!(zones.resolve("Z", at("20270101T000000")), Some(at("20261231T210000")));
+    assert_eq!(zones.resolve("Nowhere", at("20270101T000000")), None);
+}
+
+#[test]
+fn a_span_whose_end_overflows_is_none_and_every_other_ends_at_or_after_its_start() {
+    let event = RawEvent::default();
+    let (from, until) = (day(2026, 1, 1), day(2027, 1, 1));
+    assert_eq!(spread(day(2026, 10, 1), 540, i64::MAX, false, &event, from, until), None);
+    let span = spread(day(2026, 10, 1), 540, i64::MAX - 540, false, &event, from, until).expect("computes");
+    assert_eq!(span.len(), 93, "to the window's edge: 1 October to 1 January");
+    assert!(span.iter().all(|o| o.start <= o.end));
+    let span = spread(day(2026, 10, 1), 0, i64::MAX, true, &event, from, until).expect("computes");
+    assert!(span.iter().all(|o| o.start == 0 && o.end == planner::DAY_MINUTES));
 }

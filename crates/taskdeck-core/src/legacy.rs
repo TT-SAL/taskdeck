@@ -268,7 +268,8 @@ fn device_minted(id: u64) -> bool {
 
 /// The instant a legacy time denotes, every fraction digit kept; none
 /// outside §5.1's range.
-// SPEC-QUESTION: a leap second (`:60`, which chrono reads) is no instant of §5.1; taken as `instant_range`.
+// Lead ruling, spec change 5, §15.3: a leap second (`:60`, which chrono reads) is
+// no instant of §5.1, so it is `instant_range`.
 fn instant(t: &LocalTime) -> Option<Instant> {
     Instant::from_parts(t.timestamp(), t.timestamp_subsec_nanos())
 }
@@ -450,7 +451,9 @@ fn run(folder: &LegacyFolder) -> Result<(BoardData, ImportReport), ImportFailure
             sub_ids.push(id);
         }
     }
-    // SPEC-QUESTION: step 9.4 lists "the ids" for both causes; the ids out of range are listed, else (only `next` reached 2^40) the old ids left without a new one.
+    // Lead ruling, spec change 5, §15.3 step 9.4: `id_range` lists the
+    // out-of-range ids, ascending and distinct, else (only when a renumbering
+    // would assign 2^40 or more) the ids left without a number.
     if !ids.out_of_range.is_empty() {
         return Err(fail(FailureKind::IdRange, ids.out_of_range));
     }
@@ -561,7 +564,8 @@ fn run(folder: &LegacyFolder) -> Result<(BoardData, ImportReport), ImportFailure
         }
     }
     bad_fields.extend(by_url.values().filter(|ids| ids.len() > 1).flatten());
-    // SPEC-QUESTION: step 12 names "at most 20 subscriptions" among the fields (field_range) and §17 among the caps; taken as field_range, listing the ids past the twentieth.
+    // Lead ruling, spec change 5, §15.3 step 12: more than 20 subscriptions is
+    // `field_range`, listing the ids past the twentieth.
     bad_fields.extend(subs.iter().skip(MAX_SUBSCRIPTIONS).map(|s| s.id));
     let notes_long = notes.len() > NOTES_BYTES;
     if !bad_fields.is_empty() || notes_long {

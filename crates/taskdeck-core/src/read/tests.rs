@@ -226,6 +226,26 @@ fn archive_by_day_buckets_blocks_by_their_local_day() {
     assert_eq!(archive_by_day(&b, day(2026, 9, 4), 0, &ZONE).len(), 0);
 }
 
+// Lead ruling, spec change 5, §14.4: a `days` above 366 is read as 366, so
+// no caller can ask for billions of buckets; the board is only read.
+// spec: CORE-READ-002
+#[test]
+fn archive_by_day_reads_at_most_366_days() {
+    let rb = |sid, start, minutes| RowBlock { sid, start, minutes };
+    let late = row(10, Kind::Task, at(2027, 9, 6, 9, 0), vec![rb(1, at(2027, 9, 4, 9, 0), 60)]);
+    let b = board(Vec::new(), vec![late]);
+    let before = b.clone();
+    let from = day(2026, 9, 4);
+    for (days, want) in [(365u32, 365usize), (366, 366), (367, 366), (100_000, 366), (u32::MAX, 366)] {
+        let buckets = archive_by_day(&b, from, days, &ZONE);
+        assert_eq!(buckets.len(), want, "{days}");
+        // 2027-09-04 is day 365 from 2026-09-04: in the 366th bucket only.
+        let held: usize = buckets.iter().map(Vec::len).sum();
+        assert_eq!(held, usize::from(want == 366), "{days}");
+    }
+    assert_eq!(b, before);
+}
+
 /// Today's per-day ghost scan (phone.rs:2409-2421): every row newest first,
 /// placed by `placements_of` with no deadline, no estimate and no rule.
 fn per_day_scan(b: &BoardData, d: chrono::NaiveDate, zone: &TableZone) -> Vec<(u64, u64, Placement)> {

@@ -43,9 +43,9 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 |---|---|---|---|---|
 | A `a-base` | canonical encoding, time and zones, board data and `check`, id minting | 2, 4, 6 | **done**: built, checked (one high finding, fixed, second check clean), security pass (one high finding, fixed); lead's gate 2026-11-23 01:39 UTC: 77 tests, clippy, `ci.sh`, the purity item, CI's reads check | 1.16 M |
 | B `b-apply` | B1 log commands and `parse_command`; B2 `apply`, conflict rules, rules versions, `reset`, `rebind`, golden logs; B3 the lead's rulings applied (the size check of CORE-APPLY-005, the tree budget in fixed numbers, `Record::LIMIT`) | 2, 3, 4, 5, 6 | **done**: built, checked (all 29 commands against §9 line by line, the conflict boundaries, over 170 golden cases worked by hand: nothing high or medium, one low), security pass (nothing high or medium, two lows); lead's gate 2026-11-23 02:14 UTC. Step B4 then applied spec change 4 (`reset` at the last revision, the 1,001-block golden case, a board that fails `check` no longer encodes to empty bytes) | 1.65 M |
-| C `c-ports` | C1 planner, scoring, archive; C2 ICS parser, overlay types, weather report types, `compile::{trim, detab}`; C3 the calendar parser's cost bounded (lead's ruling on the security pass) | 1 | C1 and C2 **built and checked**: nothing high or medium (one low); the security pass on the ICS parser: seven lows. C3 running (workflow 6) | 1.15 M so far |
-| D `d-compile` | D1 intents and the compile step; D2 the lead's rulings applied | 3 | D1 **built, checked, security-passed**: one medium and two high findings, all fixed with their reproductions as tests; lead's gate 2026-11-23 11:09 UTC (293 tests). D2 running (workflow 6) | 1.11 M so far |
-| E `e-read` | E1 legacy import; E2 read queries, snapshot builders, reminders, the snapshot-fixtures test | 7, 8 | E1 and E2 built and in the tree: 43 of the 48 recorded snapshots match field for field, the other five are the ones core.md §18.7 says not to compare; lead's gate 11:09 UTC with the `snapshot-fixtures` item. Their check is running (workflow 6) | 0.63 M so far |
+| C `c-ports` | C1 planner, scoring, archive; C2 ICS parser, overlay types, weather report types, `compile::{trim, detab}`; C3 the calendar parser's cost bounded in six ways; C4 one step budget for all the rules of a file | 1 | **done** but for C4, which is running: built, checked (nothing high or medium), security pass (seven lows, fixed by ruling D11 in C3 with their reproductions as tests: the 8 MiB hostile feeds that timed out at 60 s now parse in 1.5 to 4.2 s in a debug build); lead's gate 2026-11-23 11:59 UTC (328 tests) | 1.46 M so far |
+| D `d-compile` | D1 intents and the compile step; D2 the lead's rulings applied (`briefs/d2-rulings.md`) | 3 | **done**: built, checked, security-passed (one medium and two high findings fixed with their reproductions as tests), rulings applied; lead's gate 11:59 UTC | 1.37 M |
+| E `e-read` | E1 legacy import; E2 read queries, snapshot builders, reminders, the snapshot-fixtures test | 7, 8 | **done**: built and checked. The check found nothing (the fifteen import steps against the code, two folders worked by hand, the fourteen snapshot differences, mutations of the builders caught by the fixture test, the reminder vectors by hand). 43 of the 48 recorded snapshots match field for field; the other five are those core.md §18.7 excludes. Lead's gate 11:59 UTC with the `snapshot-fixtures` item | 0.93 M |
 | F `f-gate` | F1 transcripts test; F2 determinism and rebase property tests, fuzz targets, the budget job, spec coverage | 9 and the gate | not started | |
 | G exit | hygiene pass, exit review, exit pull request | §7 "once per stage" | not started | |
 
@@ -138,7 +138,8 @@ Agent tokens as the workflows report them (input, cache writes and output).
 | | 4: B4 (four points of spec change 4) | 1 | 129,140 reported; 84,825 by transcripts | **3.39 M: the window is spent**; agents rest until about 04:57 UTC |
 | 2026-11-23 05:00 to 10:00 | none: the account's limit was hit at about 02:53 UTC, in the first window, and this session stood still until 09:45 UTC | 0 | 0 | 0 |
 | 2026-11-23 10:00 to 15:00 | 5: check and security pass of C; E1; D with its check and security pass; E2 (`workflows/w5-args.json`) | 9 | 1,879,829 reported; 2,298,333 by transcripts | 2.30 M |
-| | 6: the check of E; D2 (rulings); C3 (the calendar parser's bounds) | running | | |
+| | 6: the check of E; D2 (rulings); C3 (the calendar parser's bounds) | 3 | 742,325 reported; 877,782 by transcripts | 3.18 M |
+| | 7: C4 (a step budget for a file's rules) | running | | |
 
 ## What the checks found
 
@@ -153,6 +154,7 @@ Agent tokens as the workflows report them (input, cache writes and output).
 | C | security (ICS parser) | seven lows, all inherited from today's parser: a 120 KB feed parses for 109 s (unbounded `BY…` lists), a 1.1 MB feed for 178 s (a scan over an unbounded zone table), a 1 MB feed peaks at 1.16 GB (overrides bypass the per-event cap), a duration near `i64::MAX` overflows, unbounded problem lines that quote the file, an unstable order of ties, an overflow in `OverlayEvent::minutes` | **fixed by ruling (D11)**, step C3, although low on the scale |
 | C | CI (windows-latest) | a test searched the ICS source for a signature across a line break (CRLF again) | fixed by the lead; the rule is now in `briefs/common.md` |
 | D | verify | medium: `compile` returned a command that `apply` refuses for size on a board at the 59 MiB cap (CORE-COMP-008) | fixed: `compile` runs `apply`'s size check on the view |
+| E | verify | nothing, high, medium or low | no fix pass needed |
 | D | security (intent parser) | high: `parse_intent` accepted a JSON array as an intent (`["forget",5]`), because a serde derive also reads the sequence form; high: `compile` emitted a `set_notes` with a base of 2^53 or more, which encoded to empty bytes | both fixed; `LogCommand::to_canonical` loses its silent empty result in step D2 |
 
 ## Low findings left as they are

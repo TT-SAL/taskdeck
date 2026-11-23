@@ -626,7 +626,7 @@
    "result": "2026-09-04T09:00:00.000000000Z"
   },
   {
-   "name": "resolve_on_day: before the range steps into it",
+   "name": "resolve_on_day: 00:00 on 1970-01-01 at UTC+1 is before the range: none, no 60-minute step",
    "resolve_on_day": {
     "day": [
      1970,
@@ -638,7 +638,7 @@
      "fixed": 3600
     }
    },
-   "result": "1970-01-01T00:00:00.000000000Z"
+   "result": null
   },
   {
    "name": "resolve_on_day: after the range gives none",
@@ -654,6 +654,188 @@
     }
    },
    "result": null
+  },
+  {
+   "name": "resolve_on_day: 00:59 on 1970-01-01 at UTC+1 is before the range",
+   "resolve_on_day": {
+    "day": [
+     1970,
+     1,
+     1
+    ],
+    "minutes": 59,
+    "zone": {
+     "fixed": 3600
+    }
+   },
+   "result": null
+  },
+  {
+   "name": "resolve_on_day: 01:00 on 1970-01-01 at UTC+1 is the first instant",
+   "resolve_on_day": {
+    "day": [
+     1970,
+     1,
+     1
+    ],
+    "minutes": 60,
+    "zone": {
+     "fixed": 3600
+    }
+   },
+   "result": "1970-01-01T00:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: 00:00 on 1970-01-01 at UTC-1 is in the range",
+   "resolve_on_day": {
+    "day": [
+     1970,
+     1,
+     1
+    ],
+    "minutes": 0,
+    "zone": {
+     "fixed": -3600
+    }
+   },
+   "result": "1970-01-01T01:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: 23:59 on 9999-12-31 at UTC+1 is in the range",
+   "resolve_on_day": {
+    "day": [
+     9999,
+     12,
+     31
+    ],
+    "minutes": 1439,
+    "zone": {
+     "fixed": 3600
+    }
+   },
+   "result": "9999-12-31T22:59:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: 23:00 on 9999-12-31 at UTC-1 is after the range",
+   "resolve_on_day": {
+    "day": [
+     9999,
+     12,
+     31
+    ],
+    "minutes": 1380,
+    "zone": {
+     "fixed": -3600
+    }
+   },
+   "result": null
+  },
+  {
+   "name": "resolve_on_day: 22:59 on 9999-12-31 at UTC-1 is the last minute",
+   "resolve_on_day": {
+    "day": [
+     9999,
+     12,
+     31
+    ],
+    "minutes": 1379,
+    "zone": {
+     "fixed": -3600
+    }
+   },
+   "result": "9999-12-31T23:59:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: the range's start takes the offset at Instant::MIN (UTC+1)",
+   "resolve_on_day": {
+    "day": [
+     1970,
+     1,
+     1
+    ],
+    "minutes": 0,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        -3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": null
+  },
+  {
+   "name": "resolve_on_day: 01:00 on 1970-01-01, offset at Instant::MIN UTC+1",
+   "resolve_on_day": {
+    "day": [
+     1970,
+     1,
+     1
+    ],
+    "minutes": 60,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        -3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "1970-01-01T00:00:00.000000000Z"
+  },
+  {
+   "name": "resolve_on_day: the range's end takes the offset at Instant::MAX (UTC-1)",
+   "resolve_on_day": {
+    "day": [
+     9999,
+     12,
+     31
+    ],
+    "minutes": 1380,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        -3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": null
+  },
+  {
+   "name": "resolve_on_day: 22:59 on 9999-12-31, offset at Instant::MAX UTC-1",
+   "resolve_on_day": {
+    "day": [
+     9999,
+     12,
+     31
+    ],
+    "minutes": 1379,
+    "zone": {
+     "table": {
+      "initial": 3600,
+      "transitions": [
+       [
+        1774746000000,
+        -3600
+       ]
+      ]
+     }
+    }
+   },
+   "result": "9999-12-31T23:59:00.000000000Z"
   },
   {
    "name": "offset_at: before every transition",

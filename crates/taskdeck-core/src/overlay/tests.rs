@@ -315,3 +315,70 @@ fn todays_subscribed_cache_reads_and_writes_back_unchanged() {
     let again: Overlay = serde_json::from_str(&written).expect("reads");
     assert_eq!(again, overlay);
 }
+
+/* ────────────── Ported later: the test the check named (verify c) ────────────── */
+
+#[test]
+fn two_meetings_at_the_same_hour_are_given_a_column_each() {
+    // Today's test (subscriptions.rs:1064) ran on Local::now().date_naive();
+    // no test here reads a clock (CORE-GEN-003), and any day will do.
+    let today = day(2026, 9, 7);
+    let overlay = Overlay::sealed(
+        vec![event(1, today, 600, 660, "Standup"), event(2, today, 615, 675, "Interview"), event(1, today, 800, 860, "Alone")],
+        Vec::new(),
+    );
+    let placements: Vec<crate::planner::Placement> = overlay
+        .events
+        .iter()
+        .map(|e| crate::planner::Placement::Block { start: e.start, minutes: u32::try_from(e.end - e.start).unwrap_or(0) })
+        .collect();
+    let lanes = crate::planner::lay_out(&placements);
+    let overlapping: Vec<&crate::planner::Lane> = lanes.iter().take(2).collect();
+    assert_eq!(overlapping.iter().map(|l| l.columns).collect::<Vec<_>>(), vec![2, 2]);
+    assert_ne!(overlapping.first().map(|l| l.column), overlapping.get(1).map(|l| l.column));
+    assert_eq!(lanes.get(2).map(|l| l.columns), Some(1));
+}
+
+/* ───────────────────── New: the bounds of brief c3 ───────────────────── */
+
+#[test]
+fn an_overlay_read_from_a_cache_and_never_sealed_answers_without_overflowing() {
+    // Security finding 7: `minutes` overflowed on an event deserialized
+    // straight from a cache file (a panic in debug, a wrap in release).
+    let text = r#"{"events":[{"subscription":1,"day":"2026-10-01","start":-1,"end":2147483647,"summary":"x"}],"status":[]}"#;
+    let overlay: Overlay = serde_json::from_str(text).expect("reads");
+    let first = overlay.events.first().expect("one event");
+    assert_eq!(first.minutes(), i32::MAX);
+    assert!(first.is_background(), "a span that long is background");
+    assert!(overlay.anchors_on(day(2026, 10, 1)).is_empty());
+
+    let mut backwards = event(1, day(2026, 10, 1), i32::MAX, i32::MIN, "x");
+    assert_eq!(backwards.minutes(), 0);
+    backwards.start = i32::MIN;
+    backwards.end = i32::MAX;
+    assert_eq!(backwards.minutes(), i32::MAX);
+}
+
+#[test]
+fn events_that_tie_on_todays_key_are_sealed_in_one_order_however_they_were_handed_over() {
+    let d = day(2026, 10, 1);
+    let mut events = Vec::new();
+    for (location, description, all_day, free) in
+        [("b", "", false, false), ("a", "", false, false), ("a", "d", false, false), ("", "", true, false), ("", "", false, true), ("", "", false, false)]
+    {
+        let mut e = event(1, d, 0, 0, "x");
+        e.location = location.to_string();
+        e.description = description.to_string();
+        e.all_day = all_day;
+        e.free = free;
+        events.push(e);
+    }
+    let forward = Overlay::sealed(events.clone(), Vec::new());
+    let mut reversed = events.clone();
+    reversed.reverse();
+    let mut rotated = events;
+    rotated.rotate_left(2);
+    assert_eq!(forward, Overlay::sealed(reversed, Vec::new()));
+    assert_eq!(forward, Overlay::sealed(rotated.clone(), Vec::new()));
+    assert_eq!(forward.digest(), Overlay::sealed(rotated, Vec::new()).digest());
+}

@@ -351,7 +351,8 @@ fn wire_time<'de, D: Deserializer<'de>>(d: D) -> Result<Option<WireTime>, D::Err
 }
 
 /// `archived_at` (core.md §12.2 step 5): RFC 3339 as in step 4, exact only.
-// SPEC-QUESTION: §12.2 step 5 names no message for a bad `archived_at`; today's is chrono's own. This uses step 4's `not a time: `<text>``.
+// Lead ruling, spec change 5, §12.2 step 5: a bad `archived_at` has step 4's
+// message, `not a time: `<text>``.
 fn exact_time<'de, D: Deserializer<'de>>(d: D) -> Result<chrono::DateTime<chrono::FixedOffset>, D::Error> {
     let text = String::deserialize(d)?;
     let t = trim(&text);

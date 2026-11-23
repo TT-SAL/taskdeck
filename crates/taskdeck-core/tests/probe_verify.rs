@@ -81,7 +81,7 @@ fn compiled_add_at_the_size_cap_is_not_refused_by_apply() {
         }
         Err(e) => {
             // Compile refuses it on `view` (G6), minting nothing (CORE-COMP-004).
-            assert_eq!(e.code, "core/cap");
+            assert_eq!(e.code, "core/cap_board");
             assert_eq!(m, before);
         }
     }
@@ -100,4 +100,37 @@ fn compile_still_accepts_a_shrinking_command_at_the_size_cap() {
         .map(|_| ())
         .map_err(|e| e.code);
     assert_eq!(r, Ok(()));
+}
+
+// spec: CORE-COMP-001
+// spec: CORE-COMP-008
+#[test]
+fn compile_refuses_a_command_over_the_size_cap_with_cap_board() {
+    // Lead ruling, spec change 5, §13.3 G6 and §8.4 step 4: `core/cap_board`,
+    // 400, after the row's own checks and before ids are minted.
+    let b = board_at_cap();
+    let overlay = Overlay::default();
+    let cx = CompileCtx { view: &b, zone: &FixedZone(0), now: at(720), device_no: 1, overlay: &overlay };
+    // 200 bytes more on a board with 100 bytes of room.
+    let add = parse_intent(&format!(r#"{{"op":"add","name":"{}"}}"#, "n".repeat(200))).expect("parses");
+    let quick = parse_intent(&format!(r#"{{"op":"quick_add","name":"{}"}}"#, "n".repeat(200))).expect("parses");
+    // A minter with numbers left, and one with none: the size check comes
+    // before the mint, so both are the board cap.
+    for before in [IdMinter::new(1), IdMinter { device_no: 1, next_item: 1 << 40, next_block: 1 }] {
+        for intent in [&add, &quick] {
+            let mut m = before;
+            let e = compile(intent, &cx, &mut m).expect_err("over the cap");
+            assert_eq!((e.code, e.status, e.message.as_str()), ("core/cap_board", 400, "The board is full."), "{intent:?}");
+            assert_eq!(m, before);
+        }
+    }
+    // The row's own checks come first.
+    let mut m = IdMinter::new(1);
+    let empty = parse_intent(r#"{"op":"add","name":" "}"#).expect("parses");
+    assert_eq!(compile(&empty, &cx, &mut m).map_err(|e| e.code).err(), Some("core/name_empty"));
+    // On a board with room, the spent minter is the item cap.
+    let room = BoardData::empty();
+    let cx = CompileCtx { view: &room, zone: &FixedZone(0), now: at(720), device_no: 1, overlay: &overlay };
+    let mut m = IdMinter { device_no: 1, next_item: 1 << 40, next_block: 1 };
+    assert_eq!(compile(&add, &cx, &mut m).map_err(|e| e.code).err(), Some("core/cap_items"));
 }

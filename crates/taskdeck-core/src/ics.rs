@@ -8,6 +8,15 @@
 //! `HashMap` seeds itself from the OS's random source (CORE-GEN-003). They
 //! are only looked up, never walked, so nothing they return changes.
 //!
+//! Brief c3 (to be core.md §14.6 with spec change 5) bounds the cost of a
+//! hostile file without changing what a real one parses to: a `BY…` list is
+//! read without duplicates and holds at most `MAX_BY_VALUES`; a `VTIMEZONE`
+//! holds at most `MAX_OBSERVANCES` observances and `MAX_TRANSITIONS` points,
+//! found by binary search; an event keeps at most `max_occurrences_per_event`
+//! `EXDATE`s, `RDATE`s and overrides, and its overrides count towards that
+//! limit; span arithmetic is checked; a problem line never quotes the file;
+//! ties in the sort are broken by every field.
+//!
 //! Reading somebody else's calendar.
 //!
 //! The inverse of `phone::calendar_feed`, and deliberately not its equal. That
@@ -34,7 +43,7 @@
 //!
 //! What is deliberately left out is listed on `Recurrence`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, TimeDelta, TimeZone, Timelike, Utc, Weekday};
 use serde::{Deserialize, Serialize};
@@ -150,28 +159,82 @@ impl Default for Limits {
     }
 }
 
+/// Most distinct values one `BY…` list of a rule holds (brief c3, bound 1).
+///
+/// A rule walks every value of its lists once per period, so the length of a
+/// list is work on every one of up to `max_rule_steps` steps; it has to be a
+/// number this parser chose. The longest list a calendar program writes is a
+/// `BYMONTHDAY` of every day of a month counted both ways (62); a `BYDAY`
+/// names seven weekdays with a few positions. A longer list is a rule the
+/// parser cannot follow, read as today's parser reads one.
+const MAX_BY_VALUES: usize = 64;
+
+/// Most observances one `VTIMEZONE` holds (brief c3, bound 2).
+///
+/// Each observance's rule is walked over the zone's window, so the number of
+/// them is work and memory per zone. A zone's whole recorded history (the
+/// IANA tables at their longest) is a few hundred changes; Outlook writes two
+/// observances with rules. A zone over this is read as an undefined zone.
+const MAX_OBSERVANCES: usize = 512;
+
+/// Most transition points one `VTIMEZONE` yields inside the window it is
+/// worked out for (brief c3, bound 2).
+///
+/// The window is the parse window widened to whole years, a year either
+/// side: a real zone changes twice a year, so a handful of points; 4,096
+/// is that many times over and still a small table to search. A zone over
+/// this is read as an undefined zone.
+const MAX_TRANSITIONS: usize = 4_096;
+
+/// Most lines `Parsed::problems` holds (brief c3, bound 5).
+///
+/// One line per kind of problem, and the kinds are this module's own fixed
+/// texts, fewer than this; the bound holds should a kind ever be added.
+const MAX_PROBLEM_LINES: usize = 64;
+
 /// Reasons things were skipped, each counted once however often it happened.
+///
+/// A reason is one of this module's fixed texts and never quotes the file:
+/// not a `TZID`, not a name, not a value (CORE-GEN-010). That also keeps
+/// noting cheap: comparing two fixed texts costs nothing the file decides.
 #[derive(Debug, Default)]
 struct Problems {
-    counts: Vec<(String, usize)>,
+    counts: Vec<(&'static str, usize)>,
 }
 
 impl Problems {
-    fn note(&mut self, reason: impl Into<String>) {
-        let reason = reason.into();
+    fn note(&mut self, reason: &'static str) {
         match self.counts.iter_mut().find(|(seen, _)| *seen == reason) {
-            Some((_, count)) => *count += 1,
-            None => self.counts.push((reason, 1)),
+            Some((_, count)) => *count = count.saturating_add(1),
+            None => {
+                if self.counts.len() < MAX_PROBLEM_LINES {
+                    self.counts.push((reason, 1));
+                }
+            }
         }
     }
 
     fn lines(self) -> Vec<String> {
         self.counts
             .into_iter()
-            .map(|(reason, count)| if count == 1 { reason } else { format!("{reason} ({count} times)") })
+            .map(|(reason, count)| if count == 1 { reason.to_string() } else { format!("{reason} ({count} times)") })
             .collect()
     }
 }
+
+/* The kinds of problem, each one line of `Parsed::problems`. */
+
+const NO_START: &str = "an event with no start; left out";
+const UNREADABLE_START: &str = "an event whose start could not be read; left out";
+const UNREADABLE_RULE: &str = "a repeat rule this cannot read; that event was left out";
+const RULE_BUDGET: &str = "a repeat that goes back further than can be worked out; shown only in part";
+const TOO_MANY_OCCURRENCES: &str = "more events than can be shown at once; the rest of the file was not read";
+const UNDEFINED_ZONE: &str =
+    "a time zone the file never defined, or defined past what can be read; read as this computer's";
+const TOO_MANY_EXDATES: &str = "more excluded dates on one event than can be read; the rest were not applied";
+const TOO_MANY_RDATES: &str = "more extra dates on one event than can be read; the rest were left out";
+const TOO_MANY_OVERRIDES: &str = "more moved occurrences of one event than can be read; the rest were left out";
+const NO_END: &str = "an occurrence whose end could not be worked out; left out";
 
 /* ───────────────────────────── The one entry point ───────────────────────── */
 
@@ -212,27 +275,44 @@ pub fn parse(
     let zones =
         Zones::build(harvest.zones, from.year().saturating_sub(1), until.year().saturating_add(1), &limits, zone);
 
-    let raw: Vec<RawEvent> = harvest.events.iter().map(|lines| read_event(lines)).collect();
-    let (series, overrides) = apply_overrides(raw);
+    let cap = limits.max_occurrences_per_event;
+    let raw: Vec<RawEvent> = harvest.events.iter().map(|lines| read_event(lines, cap)).collect();
+    let (series, overrides) = apply_overrides(raw, cap, &mut problems);
+    let overrides: BTreeMap<String, Moved> = overrides
+        .into_iter()
+        .map(|(uid, list)| (uid, Moved::index(list, &zones, &mut problems)))
+        .collect();
 
     let mut occurrences: Vec<Occurrence> = Vec::new();
     for event in &series {
         if occurrences.len() >= limits.max_occurrences {
-            problems.note("more events than can be shown at once; the rest of the file was not read");
+            problems.note(TOO_MANY_OCCURRENCES);
             break;
         }
         let room = limits.max_occurrences.saturating_sub(occurrences.len());
+        let moved = event.uid.as_deref().filter(|uid| !uid.is_empty()).and_then(|uid| overrides.get(uid));
         occurrences.extend(
-            occurrences_of(event, &overrides, &zones, from, until, &limits, &mut problems).into_iter().take(room),
+            occurrences_of(event, moved, &zones, from, until, &limits, &mut problems).into_iter().take(room),
         );
     }
 
     // Sorted so a calendar that did not change parses equal however it was
     // listed. This is what makes `Parsed == Parsed` the answer to "did this
     // change", which is what keeps an unchanged refresh from waking every
-    // phone and every client.
+    // phone and every client. Occurrences that tie on (day, start, end, name)
+    // are ordered by their remaining fields (brief c3, bound 6), so the order
+    // the file listed them in shows nowhere.
     occurrences.sort_by(|a, b| {
-        (a.day, a.start, a.end, &a.name).cmp(&(b.day, b.start, b.end, &b.name))
+        (a.day, a.start, a.end, &a.name, &a.location, &a.description, a.all_day, a.free).cmp(&(
+            b.day,
+            b.start,
+            b.end,
+            &b.name,
+            &b.location,
+            &b.description,
+            b.all_day,
+            b.free,
+        ))
     });
 
     Ok(Parsed { occurrences, name: harvest.calendar_name, problems: problems.lines() })
@@ -429,6 +509,9 @@ struct Observance {
 struct ZoneDefinition {
     tzid: String,
     observances: Vec<Observance>,
+    /// It held more than `MAX_OBSERVANCES`: read as an undefined zone, and
+    /// the observances past the bound were never kept.
+    oversized: bool,
 }
 
 /// The `BEGIN:`/`END:` tree, flattened to the three things TaskDeck reads.
@@ -477,7 +560,9 @@ fn harvest(lines: Vec<Line>, limits: &Limits) -> Result<Harvest, String> {
                         }
                         event = Some(Vec::new());
                     }
-                    "VTIMEZONE" => zone = Some(ZoneDefinition { tzid: String::new(), observances: Vec::new() }),
+                    "VTIMEZONE" => {
+                        zone = Some(ZoneDefinition { tzid: String::new(), observances: Vec::new(), oversized: false })
+                    }
                     "STANDARD" | "DAYLIGHT" => observance = Some(Vec::new()),
                     _ => {}
                 }
@@ -503,7 +588,11 @@ fn harvest(lines: Vec<Line>, limits: &Limits) -> Result<Harvest, String> {
                             && let Some(zone) = zone.as_mut()
                             && let Some(read) = read_observance(&lines)
                         {
-                            zone.observances.push(read);
+                            if zone.observances.len() < MAX_OBSERVANCES {
+                                zone.observances.push(read);
+                            } else {
+                                zone.oversized = true;
+                            }
                         }
                     }
                     _ => {}
@@ -511,8 +600,11 @@ fn harvest(lines: Vec<Line>, limits: &Limits) -> Result<Harvest, String> {
             }
             "CALSCALE" => {
                 let scale = line.value.trim().to_ascii_uppercase();
+                // The scale is the file's text and is not quoted back
+                // (CORE-GEN-010; brief c3, bound 5).
                 if !scale.is_empty() && scale != "GREGORIAN" {
-                    return Err(format!("that calendar is written in the {scale} calendar, which this cannot read"));
+                    return Err("that calendar is written in a calendar other than the Gregorian, which this cannot read"
+                        .to_string());
                 }
             }
             _ => {
@@ -608,9 +700,18 @@ fn read_time(value: &str, params: &[(String, String)]) -> Option<IcsTime> {
     })
 }
 
-/// A comma-separated list of them, as `EXDATE` and `RDATE` are allowed to be.
-fn read_times(line: &Line) -> Vec<IcsTime> {
-    line.value.split(',').filter_map(|part| read_time(part, &line.params)).collect()
+/// A comma-separated list of them, as `EXDATE` and `RDATE` are allowed to be,
+/// added to `out` while it holds fewer than `cap`. Whether the line held a
+/// value past that, which is then not kept.
+fn read_times_into(line: &Line, out: &mut Vec<IcsTime>, cap: usize) -> bool {
+    for part in line.value.split(',') {
+        let Some(time) = read_time(part, &line.params) else { continue };
+        if out.len() >= cap {
+            return true;
+        }
+        out.push(time);
+    }
+    false
 }
 
 /// Read an RFC 5545 §3.3.6 `DURATION` into minutes.
@@ -702,6 +803,9 @@ fn read_utc_offset(value: &str) -> Option<TimeDelta> {
 
 /* ─────────────────────────────── Time zones ──────────────────────────────── */
 
+/// One zone's transitions: the wall time each offset takes effect at.
+type Points = Vec<(NaiveDateTime, TimeDelta)>;
+
 /// Every zone the file defined, and the transitions they work out to over the
 /// years the window touches.
 ///
@@ -716,7 +820,7 @@ fn read_utc_offset(value: &str) -> Option<TimeDelta> {
 /// It also carries the caller's zone, the one every time is read in.
 struct Zones<'z, Z: Zone + ?Sized> {
     /// Per zone, the wall time each offset takes effect at, ascending.
-    transitions: BTreeMap<String, Vec<(NaiveDateTime, TimeDelta)>>,
+    transitions: BTreeMap<String, Points>,
     /// The offset in force before any of them.
     earliest: BTreeMap<String, TimeDelta>,
     /// The caller's zone (CORE-READ-004): today's process zone.
@@ -731,31 +835,74 @@ impl<'z, Z: Zone + ?Sized> Zones<'z, Z> {
         let (Some(from), Some(until)) = (from, until) else { return zones };
 
         for definition in definitions {
-            let mut points: Vec<(NaiveDateTime, TimeDelta)> = Vec::new();
-            let mut earliest: Option<(NaiveDateTime, TimeDelta)> = None;
-
-            for observance in &definition.observances {
-                match &earliest {
-                    Some((at, _)) if *at <= observance.start => {}
-                    _ => earliest = Some((observance.start, observance.from)),
+            // A zone over either bound is read as an undefined zone (brief c3,
+            // bound 2). A later definition of a TZID replaces an earlier one,
+            // as today, so an oversized one leaves the TZID undefined.
+            let read = if definition.oversized { None } else { Self::points_of(&definition, from, until, limits, zone) };
+            match read {
+                Some((points, earliest)) => {
+                    if let Some(offset) = earliest {
+                        zones.earliest.insert(definition.tzid.clone(), offset);
+                    }
+                    zones.transitions.insert(definition.tzid, points);
                 }
-                points.push((observance.start, observance.to));
-
-                let Some(rule) = &observance.rule else { continue };
-                let expansion = expand(rule, observance.start.date(), from, until, limits, zone);
-                for day in expansion.days {
-                    points.push((day.and_time(observance.start.time()), observance.to));
+                None => {
+                    zones.earliest.remove(&definition.tzid);
+                    zones.transitions.remove(&definition.tzid);
                 }
             }
-
-            points.sort_by_key(|(at, _)| *at);
-            points.dedup_by_key(|(at, _)| *at);
-            if let Some((_, offset)) = earliest {
-                zones.earliest.insert(definition.tzid.clone(), offset);
-            }
-            zones.transitions.insert(definition.tzid, points);
         }
         zones
+    }
+
+    /// One zone's transition points, ascending with no two at the same wall
+    /// time, and the offset before the earliest observance; `None` when the
+    /// zone yields more than `MAX_TRANSITIONS` points inside `[from, until]`.
+    ///
+    /// Today's list, made the same way: every observance's start and the
+    /// days its rule falls on, in observance order, and of two points at the
+    /// same wall time the first one made. Kept in a map rather than sorted
+    /// afterwards, so the count is known as it grows and the walk stops as
+    /// soon as the bound is passed: what is held is bounded by the limits,
+    /// never by what the file states.
+    fn points_of(
+        definition: &ZoneDefinition,
+        from: NaiveDate,
+        until: NaiveDate,
+        limits: &Limits,
+        zone: &Z,
+    ) -> Option<(Points, Option<TimeDelta>)> {
+        let mut points: BTreeMap<NaiveDateTime, TimeDelta> = BTreeMap::new();
+        let mut inside: usize = 0;
+        let mut earliest: Option<(NaiveDateTime, TimeDelta)> = None;
+        let mut add = |at: NaiveDateTime, offset: TimeDelta| -> bool {
+            if let std::collections::btree_map::Entry::Vacant(slot) = points.entry(at) {
+                slot.insert(offset);
+                if from <= at.date() && at.date() <= until {
+                    inside += 1;
+                }
+            }
+            inside <= MAX_TRANSITIONS
+        };
+
+        for observance in &definition.observances {
+            match &earliest {
+                Some((at, _)) if *at <= observance.start => {}
+                _ => earliest = Some((observance.start, observance.from)),
+            }
+            if !add(observance.start, observance.to) {
+                return None;
+            }
+
+            let Some(rule) = &observance.rule else { continue };
+            let expansion = expand(rule, observance.start.date(), from, until, limits, zone);
+            for day in expansion.days {
+                if !add(day.and_time(observance.start.time()), observance.to) {
+                    return None;
+                }
+            }
+        }
+        Some((points.into_iter().collect(), earliest.map(|(_, offset)| offset)))
     }
 
     /// The instant a wall time in `tzid` names, as the caller's zone reads it:
@@ -767,10 +914,13 @@ impl<'z, Z: Zone + ?Sized> Zones<'z, Z> {
     /// when the calendar admits which meeting it is.
     fn resolve(&self, tzid: &str, at: NaiveDateTime) -> Option<NaiveDateTime> {
         let points = self.transitions.get(tzid)?;
-        let offset = points
-            .iter()
-            .rev()
-            .find(|(when, _)| *when <= at)
+        // The last point at or before `at`, found by binary search over the
+        // ascending points (brief c3, bound 2): today's backward scan, at a
+        // cost of log(points) rather than points per lookup.
+        let after = points.partition_point(|(when, _)| *when <= at);
+        let offset = after
+            .checked_sub(1)
+            .and_then(|last| points.get(last))
             .map(|(_, offset)| *offset)
             .or_else(|| self.earliest.get(tzid).copied())?;
         let utc = at.checked_sub_signed(offset)?;
@@ -782,7 +932,9 @@ impl<'z, Z: Zone + ?Sized> Zones<'z, Z> {
 /// at that instant (core.md §5.3). Today's conversion to the process zone, with the
 /// caller's zone in place of the process zone (CORE-READ-004).
 fn wall_time<Z: Zone + ?Sized>(utc: NaiveDateTime, zone: &Z) -> NaiveDateTime {
-    // SPEC-QUESTION: a UTC time outside the instant range of core.md §5.1 (before 1970, say a birthday series from 1950) has no `Instant` to ask the zone about; the offset at the nearer end of the range is taken.
+    // Lead ruling, spec change 5, §14.6: a UTC time outside the instant range
+    // of core.md §5.1 (before 1970, say a birthday series from 1950) takes
+    // the zone's offset at the nearer end of the range.
     let probe = Instant::from_chrono(utc.and_utc()).unwrap_or(if utc.and_utc().timestamp() < 0 {
         Instant::MIN
     } else {
@@ -876,7 +1028,7 @@ fn read_recurrence(value: &str) -> Option<Recurrence> {
                         _ => return None,
                     };
                     let nth = if nth.is_empty() { None } else { Some(nth.parse::<i32>().ok()?) };
-                    rule.by_day.push((nth, weekday));
+                    push_distinct(&mut rule.by_day, (nth, weekday))?;
                 }
             }
             "BYMONTHDAY" => {
@@ -885,18 +1037,18 @@ fn read_recurrence(value: &str) -> Option<Recurrence> {
                     if day == 0 || !(-31..=31).contains(&day) {
                         return None;
                     }
-                    rule.by_month_day.push(day);
+                    push_distinct(&mut rule.by_month_day, day)?;
                 }
             }
             "BYMONTH" => {
                 for entry in body.split(',') {
                     let month = entry.trim().parse::<u32>().ok().filter(|m| (1..=12).contains(m))?;
-                    rule.by_month.push(month);
+                    push_distinct(&mut rule.by_month, month)?;
                 }
             }
             "BYSETPOS" => {
                 for entry in body.split(',') {
-                    rule.by_set_pos.push(entry.trim().parse::<i32>().ok()?);
+                    push_distinct(&mut rule.by_set_pos, entry.trim().parse::<i32>().ok()?)?;
                 }
             }
             "WKST" => {}
@@ -909,6 +1061,23 @@ fn read_recurrence(value: &str) -> Option<Recurrence> {
 
     rule.freq = freq?;
     Some(rule)
+}
+
+/// Add `value` to a `BY…` list unless it is there already; `None` when that
+/// would make more than `MAX_BY_VALUES` distinct values (brief c3, bound 1).
+///
+/// A duplicate changes nothing a rule falls on (every period is sorted and
+/// deduplicated), so reading without them only drops work. The list is at
+/// most `MAX_BY_VALUES` long, so the check costs at most that per entry.
+fn push_distinct<T: PartialEq>(list: &mut Vec<T>, value: T) -> Option<()> {
+    if list.contains(&value) {
+        return Some(());
+    }
+    if list.len() >= MAX_BY_VALUES {
+        return None;
+    }
+    list.push(value);
+    Some(())
 }
 
 struct Expansion {
@@ -1126,11 +1295,14 @@ fn month_days(year: i32, month: u32, rule: &Recurrence, start: NaiveDate) -> Vec
 
 /// The days of `month` that are `weekday`, or just the `nth` of them.
 fn nth_weekday(year: i32, month: u32, weekday: Weekday, nth: Option<i32>) -> Vec<NaiveDate> {
+    // Today's filter of every day of the month, stepped a week at a time from
+    // the first `weekday` instead: the same days, at a fifth of the work per
+    // `BYDAY` value per period.
+    let Some(first) = NaiveDate::from_ymd_opt(year, month, 1) else { return Vec::new() };
     let length = days_in(year, month);
-    let all: Vec<NaiveDate> = (1..=length)
-        .filter_map(|day| NaiveDate::from_ymd_opt(year, month, day))
-        .filter(|date| date.weekday() == weekday)
-        .collect();
+    let skip = (weekday.num_days_from_monday() + 7 - first.weekday().num_days_from_monday()) % 7;
+    let all: Vec<NaiveDate> =
+        (skip + 1..=length).step_by(7).filter_map(|day| NaiveDate::from_ymd_opt(year, month, day)).collect();
     match nth {
         None => all,
         Some(n) if n > 0 => all.get(n as usize - 1).copied().into_iter().collect(),
@@ -1197,8 +1369,14 @@ struct RawEvent {
     duration_minutes: Option<i64>,
     rule: Option<Recurrence>,
     rule_unreadable: bool,
+    /// At most `max_occurrences_per_event`, the first ones in the file.
     exdates: Vec<IcsTime>,
+    /// At most `max_occurrences_per_event`, the first ones in the file.
     rdates: Vec<IcsTime>,
+    /// The file listed more `EXDATE` values than were kept.
+    dropped_exdates: bool,
+    /// The file listed more `RDATE` values than were kept.
+    dropped_rdates: bool,
     /// Present on a single occurrence that was moved or cancelled.
     recurrence_id: Option<IcsTime>,
     cancelled: bool,
@@ -1206,7 +1384,9 @@ struct RawEvent {
     transparent: bool,
 }
 
-fn read_event(lines: &[Line]) -> RawEvent {
+/// Read one `VEVENT`, keeping at most `cap` `EXDATE` and `cap` `RDATE`
+/// values (brief c3, bound 3): what the file lists past them is not read.
+fn read_event(lines: &[Line], cap: usize) -> RawEvent {
     let mut event = RawEvent::default();
     for line in lines {
         match line.name.as_str() {
@@ -1223,8 +1403,8 @@ fn read_event(lines: &[Line]) -> RawEvent {
                 Some(rule) => event.rule = Some(rule),
                 None => event.rule_unreadable = true,
             },
-            "EXDATE" => event.exdates.extend(read_times(line)),
-            "RDATE" => event.rdates.extend(read_times(line)),
+            "EXDATE" => event.dropped_exdates |= read_times_into(line, &mut event.exdates, cap),
+            "RDATE" => event.dropped_rdates |= read_times_into(line, &mut event.rdates, cap),
             "RECURRENCE-ID" => event.recurrence_id = read_time(&line.value, &line.params),
             "STATUS" => event.cancelled = line.value.trim().eq_ignore_ascii_case("CANCELLED"),
             "TRANSP" => event.transparent = line.value.trim().eq_ignore_ascii_case("TRANSPARENT"),
@@ -1234,13 +1414,8 @@ fn read_event(lines: &[Line]) -> RawEvent {
     event
 }
 
-/// One occurrence that replaces another, named by the instant it replaces.
-#[derive(Debug, Clone)]
-struct Override {
-    uid: String,
-    replaces: IcsTime,
-    event: RawEvent,
-}
+/// The overrides of a file by `UID`: each with the instant it replaces.
+type Overrides = BTreeMap<String, Vec<(IcsTime, RawEvent)>>;
 
 /// Take the overrides out of the list of events.
 ///
@@ -1250,18 +1425,63 @@ struct Override {
 /// where it was and once where it went, which is the most visible way this
 /// feature could be wrong and happens on the first real calendar anyone
 /// subscribes to.
-fn apply_overrides(events: Vec<RawEvent>) -> (Vec<RawEvent>, Vec<Override>) {
+///
+/// The overrides come back grouped by `UID`, at most `cap` to one `UID`, the
+/// first ones in the file (brief c3, bound 3); the rest are dropped and noted
+/// once per `UID`. So an event's overrides are held before anything is
+/// expanded, and no more of them than one event may have occurrences.
+fn apply_overrides(events: Vec<RawEvent>, cap: usize, problems: &mut Problems) -> (Vec<RawEvent>, Overrides) {
     let mut series = Vec::new();
-    let mut overrides = Vec::new();
+    let mut overrides = Overrides::new();
+    let mut full: BTreeSet<String> = BTreeSet::new();
     for event in events {
-        match (&event.recurrence_id, &event.uid) {
+        match (event.recurrence_id.clone(), event.uid.clone()) {
             (Some(replaces), Some(uid)) => {
-                overrides.push(Override { uid: uid.clone(), replaces: replaces.clone(), event: event.clone() })
+                let list = overrides.entry(uid.clone()).or_default();
+                if list.len() < cap {
+                    list.push((replaces, event));
+                } else if full.insert(uid) {
+                    problems.note(TOO_MANY_OVERRIDES);
+                }
             }
             _ => series.push(event),
         }
     }
     (series, overrides)
+}
+
+/// One `UID`'s overrides, and which of them replaces which occurrence.
+#[derive(Debug, Default)]
+struct Moved {
+    events: Vec<RawEvent>,
+    /// The first override, in file order, naming each (day, minute).
+    at: BTreeMap<(NaiveDate, i32), usize>,
+    /// The first override, in file order, naming each day: what an all-day
+    /// series matches on.
+    on_day: BTreeMap<NaiveDate, usize>,
+}
+
+impl Moved {
+    /// Work out once which instant each override replaces, so matching an
+    /// occurrence is a lookup (brief c3, bound 3). Today's `find` took the
+    /// first override in file order that matched; so does this.
+    fn index<Z: Zone + ?Sized>(list: Vec<(IcsTime, RawEvent)>, zones: &Zones<'_, Z>, problems: &mut Problems) -> Moved {
+        let mut moved = Moved::default();
+        for (index, (replaces, event)) in list.into_iter().enumerate() {
+            if let Some((day, minutes)) = instant_key(&replaces, zones, problems) {
+                moved.at.entry((day, minutes)).or_insert(index);
+                moved.on_day.entry(day).or_insert(index);
+            }
+            moved.events.push(event);
+        }
+        moved
+    }
+
+    /// The override replacing the occurrence on `day` at `minutes`.
+    fn replacing(&self, day: NaiveDate, minutes: i32, all_day: bool) -> Option<&RawEvent> {
+        let index = if all_day { self.on_day.get(&day) } else { self.at.get(&(day, minutes)) };
+        index.and_then(|index| self.events.get(*index))
+    }
 }
 
 /// The day and minute a time falls on, read in the caller's zone.
@@ -1280,7 +1500,9 @@ fn local_of<Z: Zone + ?Sized>(
         IcsTime::Zoned { at, tzid } => match zones.resolve(tzid, *at) {
             Some(local) => Some((local.date(), Some(minutes_of(local)))),
             None => {
-                problems.note(format!("a time zone the file never defined ({tzid}); read as this computer's"));
+                // The TZID is the file's text and is not quoted (CORE-GEN-010;
+                // brief c3, bound 5): one line however many zones it was.
+                problems.note(UNDEFINED_ZONE);
                 Some((at.date(), Some(at.hour() as i32 * 60 + at.minute() as i32)))
             }
         },
@@ -1314,9 +1536,13 @@ fn instant_key<Z: Zone + ?Sized>(
 /// for a `DATE` value means the last day is **not** included: a one-day event
 /// is `DTSTART:20260907`, `DTEND:20260908`, and drawing two days there is the
 /// other classic off-by-one in this format.
+///
+/// `max_occurrences_per_event` holds for the occurrences an override puts in
+/// place of the series' own (brief c3, bound 3): an override is expanded with
+/// only the room the event has left.
 fn occurrences_of<Z: Zone + ?Sized>(
     event: &RawEvent,
-    overrides: &[Override],
+    moved: Option<&Moved>,
     zones: &Zones<'_, Z>,
     from: NaiveDate,
     until: NaiveDate,
@@ -1327,21 +1553,30 @@ fn occurrences_of<Z: Zone + ?Sized>(
         return Vec::new();
     }
     if event.rule_unreadable {
-        problems.note("a repeat rule this cannot read; that event was left out");
+        problems.note(UNREADABLE_RULE);
+    }
+    if event.dropped_exdates {
+        problems.note(TOO_MANY_EXDATES);
+    }
+    if event.dropped_rdates {
+        problems.note(TOO_MANY_RDATES);
     }
     let Some(start) = &event.start else {
-        problems.note("an event with no start; left out");
+        problems.note(NO_START);
         return Vec::new();
     };
     let Some((first_day, start_minutes)) = local_of(start, zones, problems) else {
-        problems.note("an event whose start could not be read; left out");
+        problems.note(UNREADABLE_START);
         return Vec::new();
     };
     let all_day = start_minutes.is_none();
 
     // How long it runs, in minutes for a timed event and in days for an
     // all-day one.
-    let length_minutes = span_minutes(event, zones, problems, all_day);
+    let Some(length_minutes) = span_minutes(event, zones, problems, all_day) else {
+        problems.note(NO_END);
+        return Vec::new();
+    };
 
     // Which days the series begins on.
     let mut starts: Vec<NaiveDate> = Vec::new();
@@ -1349,7 +1584,7 @@ fn occurrences_of<Z: Zone + ?Sized>(
         Some(rule) => {
             let expansion = expand(rule, first_day, from, until, limits, zones.zone);
             if expansion.exhausted_budget {
-                problems.note("a repeat that goes back further than can be worked out; shown only in part");
+                problems.note(RULE_BUDGET);
             }
             starts.extend(expansion.days);
         }
@@ -1370,32 +1605,39 @@ fn occurrences_of<Z: Zone + ?Sized>(
     starts.sort_unstable();
     starts.dedup();
 
-    // Which of them were taken out again.
-    let excluded: Vec<(NaiveDate, i32)> =
-        event.exdates.iter().filter_map(|time| instant_key(time, zones, problems)).collect();
-    let uid = event.uid.clone().unwrap_or_default();
-    let moved: Vec<&Override> = overrides.iter().filter(|over| over.uid == uid && !uid.is_empty()).collect();
+    // Which of them were taken out again: a set, so each start is a lookup
+    // (brief c3, bound 3). An all-day series matches on the day alone.
+    let key = |day: NaiveDate, minutes: i32| if all_day { (day, 0) } else { (day, minutes) };
+    let excluded: BTreeSet<(NaiveDate, i32)> = event
+        .exdates
+        .iter()
+        .filter_map(|time| instant_key(time, zones, problems))
+        .map(|(day, minutes)| key(day, minutes))
+        .collect();
 
     let mut out: Vec<Occurrence> = Vec::new();
     for day in starts {
         let minutes = start_minutes.unwrap_or(0);
-        if excluded.iter().any(|(exday, exmin)| *exday == day && (all_day || *exmin == minutes)) {
+        if excluded.contains(&key(day, minutes)) {
             continue;
         }
         // An occurrence that was moved or cancelled is drawn where the
         // override put it, not where the rule did.
-        if let Some(over) = moved.iter().find(|over| {
-            instant_key(&over.replaces, zones, problems).is_some_and(|(rday, rmin)| {
-                rday == day && (all_day || rmin == minutes)
-            })
-        }) {
-            if over.event.cancelled {
+        if let Some(over) = moved.and_then(|moved| moved.replacing(day, minutes, all_day)) {
+            if over.cancelled {
                 continue;
             }
-            out.extend(occurrences_of(&over.event, &[], zones, from, until, limits, problems));
-            continue;
+            let room = Limits {
+                max_occurrences_per_event: limits.max_occurrences_per_event.saturating_sub(out.len()),
+                ..*limits
+            };
+            out.extend(occurrences_of(over, None, zones, from, until, &room, problems));
+        } else {
+            match spread(day, minutes, length_minutes, all_day, event, from, until) {
+                Some(span) => out.extend(span),
+                None => problems.note(NO_END),
+            }
         }
-        out.extend(spread(day, minutes, length_minutes, all_day, event, from, until));
         if out.len() >= limits.max_occurrences_per_event {
             break;
         }
@@ -1404,27 +1646,39 @@ fn occurrences_of<Z: Zone + ?Sized>(
 }
 
 /// How long one occurrence runs: minutes for a timed event, whole days for an
-/// all-day one.
-fn span_minutes<Z: Zone + ?Sized>(event: &RawEvent, zones: &Zones<'_, Z>, problems: &mut Problems, all_day: bool) -> i64 {
+/// all-day one. `None` when the span cannot be computed in an `i64` (brief
+/// c3, bound 4): every step is checked.
+fn span_minutes<Z: Zone + ?Sized>(
+    event: &RawEvent,
+    zones: &Zones<'_, Z>,
+    problems: &mut Problems,
+    all_day: bool,
+) -> Option<i64> {
     if let Some(minutes) = event.duration_minutes {
-        return minutes.max(0);
+        return Some(minutes.max(0));
     }
     let (Some(start), Some(end)) = (&event.start, &event.end) else {
         // What the outbound feed gives a length-less event.
-        return if all_day { planner::DAY_MINUTES as i64 } else { planner::SNAP_MINUTES as i64 };
+        return Some(if all_day { planner::DAY_MINUTES as i64 } else { planner::SNAP_MINUTES as i64 });
     };
     let (Some((start_day, start_min)), Some((end_day, end_min))) =
         (local_of(start, zones, problems), local_of(end, zones, problems))
     else {
-        return planner::SNAP_MINUTES as i64;
+        return Some(planner::SNAP_MINUTES as i64);
     };
     let days = (end_day - start_day).num_days();
-    let minutes = days.saturating_mul(planner::DAY_MINUTES as i64)
-        + (end_min.unwrap_or(0) - start_min.unwrap_or(0)) as i64;
-    minutes.max(0)
+    let minutes = days
+        .checked_mul(planner::DAY_MINUTES as i64)?
+        .checked_add(i64::from(end_min.unwrap_or(0)) - i64::from(start_min.unwrap_or(0)))?;
+    Some(minutes.max(0))
 }
 
 /// Cut one span into one occurrence per day it touches.
+///
+/// `None` when the end of the span cannot be computed (brief c3, bound 4):
+/// the start minute plus a length near `i64::MAX` overflowed here, which
+/// panicked in a debug build and wrapped to an end before the start in a
+/// release one. Every occurrence returned ends at or after its start.
 #[allow(clippy::too_many_arguments)]
 fn spread(
     day: NaiveDate,
@@ -1434,7 +1688,7 @@ fn spread(
     event: &RawEvent,
     from: NaiveDate,
     until: NaiveDate,
-) -> Vec<Occurrence> {
+) -> Option<Vec<Occurrence>> {
     let mut out = Vec::new();
     let day_minutes = planner::DAY_MINUTES as i64;
     // An all-day DTEND is exclusive, so a length of exactly one day covers one
@@ -1453,7 +1707,7 @@ fn spread(
     let mut guard = 0;
     while remaining > 0 && guard < 400 {
         guard += 1;
-        let end = (offset + remaining).min(day_minutes);
+        let end = offset.checked_add(remaining)?.min(day_minutes);
         if cursor > until {
             break;
         }
@@ -1469,12 +1723,12 @@ fn spread(
                 description: event.description.clone(),
             });
         }
-        remaining -= end - offset;
+        remaining = remaining.checked_sub(end.checked_sub(offset)?)?;
         offset = 0;
         let Some(next) = cursor.checked_add_signed(TimeDelta::try_days(1).unwrap_or_default()) else { break };
         cursor = next;
     }
-    out
+    Some(out)
 }
 
 #[cfg(test)]
