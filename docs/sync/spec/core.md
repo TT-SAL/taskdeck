@@ -1229,7 +1229,7 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 | `core/kind` | the item's kind does not take this command | §9 | record the refusal |
 | `core/bad_id` | a minted id or sid is not the author's or not above its mark | CORE-ID-002 | record the refusal; the author's minter is behind its mark: the device advances it (`device.md`) |
 | `core/id_taken` | a restored row's sid is held by a live block | §9.21 step 4 | record the refusal |
-| `core/cap` | a cap of §17 would be exceeded | §9; §8.4 step 4 | record the refusal; the UI says the board is full |
+| `core/cap` | a cap of §17 would be exceeded; from `reset`, the notes revision cannot be raised past 2^53 − 1 | §9; §8.4 step 4; §11.3 | record the refusal; the UI says the board is full. From `reset`: the local fault `engine/local_fault`, as for its `core/unknown_rules` (`engine.md` §28.1) |
 | `core/duplicate_url` | that calendar URL is already subscribed | §9.23 | record the refusal |
 | `core/notes_stale` | `set_notes` base is not the current revision | §9.20 | record the refusal with `base` and `current`; the origin offers its draft and the merge view |
 
@@ -1238,7 +1238,6 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 | Code | Meaning | Raised when | What the caller does |
 |---|---|---|---|
 | `core/unknown_rules` | `upgrade_rules` to a version that is not newer or not supported; `reset` with a target newer than the current board | §11.2, §11.3 | engine: halt with the rules halt (`seal.md` §14.5, `engine.md`); from `reset`, the local fault `engine/local_fault` (`engine.md` §28.1) |
-| `core/cap` (from `reset`) | the notes revision cannot be raised past 2^53 − 1 | §11.3 | engine: the local fault `engine/local_fault`, as for `core/unknown_rules` from `reset` |
 
 **Intent and compile errors.** Returned by `parse_intent` (§12) and `compile` (§13) as `CompileError{code, status, message}`; nothing is queued. The UI shows `message`; the bridge returns it as today's `{"error": message}` with `status` (`bridge.md`). Messages are today's (board.rs, subscriptions.rs) except where the status parentheses say new.
 
