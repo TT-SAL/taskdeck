@@ -1,0 +1,1127 @@
+{
+ "spec": "relay.md §10.2",
+ "cases": [
+  {
+   "name": "a board is created",
+   "clauses": [
+    "RELAY-CREATE-001",
+    "RELAY-CREATE-002",
+    "RELAY-STORE-001",
+    "RELAY-STORE-003",
+    "SEAL-KEY-005",
+    "SEAL-KEY-006",
+    "SEAL-CHAIN-001",
+    "RELAY-OBJ-006",
+    "RELAY-OBJ-007"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "e265cd3e6c724b958b31e96dd1c78990",
+      "recovery": "rec",
+      "first": "alice",
+      "create": false
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "door": true
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "gate",
+      "json": {
+       "error": "relay/unauthorized"
+      },
+      "object_called": false
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 404,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_board"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "seq": 1,
+       "chain": {
+        "$chain": 1
+       },
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 1
+        }
+       },
+       "door": {
+        "$door": true
+       }
+      },
+      "rows_written": 5,
+      "rows_read_max": 3,
+      "storage": {
+       "board": {
+        "one": 1,
+        "schema": 1,
+        "board_id": {
+         "$board": "main"
+        },
+        "state": 1,
+        "created_at": {
+         "$time": 0
+        },
+        "base_seq": 0,
+        "base_chain": {
+         "$chain": 0
+        },
+        "compact_floor": 1,
+        "purge_floor": 1,
+        "purge_done": 1,
+        "compact_snap": null,
+        "del_day": 0,
+        "del_count": 0,
+        "read_epoch": 1,
+        "home_gen": 1,
+        "fence_host": null,
+        "fence_door": null,
+        "seed_signer": null,
+        "seed_last_seq": null,
+        "seed_chain": null
+       },
+       "devices": {
+        "rec": {
+         "sign_pk": {
+          "$key": "rec"
+         },
+         "role": 2,
+         "state": 1,
+         "gen": 0,
+         "last_ctr": 1,
+         "last_seq": 1,
+         "app_day": 0,
+         "app_count": 0,
+         "added_at": {
+          "$time": 0
+         },
+         "wraps": null
+        },
+        "alice": {
+         "sign_pk": {
+          "$key": "alice"
+         },
+         "role": 1,
+         "state": 1,
+         "gen": 1,
+         "last_ctr": 0,
+         "last_seq": 0,
+         "app_day": 0,
+         "app_count": 0,
+         "wraps": null
+        }
+       },
+       "log": [
+        1
+       ],
+       "count": {
+        "devices": 2,
+        "nonces": 0,
+        "blobs": 0,
+        "parts": 0,
+        "tickets": 0,
+        "read_tokens": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "head_seq": 1,
+       "floor": 1,
+       "purge_floor": 1,
+       "more": false,
+       "truncated": false,
+       "fenced": false,
+       "seqs": [
+        1
+       ],
+       "frames": [
+        {
+         "$frame": {
+          "author": "rec",
+          "ctr": 1,
+          "fill": "genesis"
+         }
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "a repeated create gives a new token and writes one row",
+   "clauses": [
+    "RELAY-CREATE-003",
+    "RELAY-TOKEN-004"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "027e6969473ee83860e68f6baddd88a8",
+      "recovery": "rec",
+      "first": "alice",
+      "create": false
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "seq": 1,
+       "chain": {
+        "$chain": 1
+       },
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 1
+        }
+       },
+       "door": {
+        "$door": true
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "seq": 1,
+       "chain": {
+        "$chain": 1
+       },
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 2
+        }
+       },
+       "door": {
+        "$door": true
+       }
+      },
+      "rows_written": 1,
+      "rows_read_max": 3
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/token_stale"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    }
+   ]
+  },
+  {
+   "name": "any other create on a board that exists",
+   "clauses": [
+    "RELAY-CREATE-003",
+    "RELAY-OBJ-001"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "3d862c52b53340bd80e144cb4034d77e",
+      "recovery": "rec",
+      "first": "alice",
+      "create": false
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "seq": 1,
+       "chain": {
+        "$chain": 1
+       },
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 1
+        }
+       },
+       "door": {
+        "$door": true
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "rec",
+          "ctr": 1,
+          "fill": "another genesis"
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/exists"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "dev": "bob"
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/exists"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "sign_pk": "bob"
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/exists"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/exists"
+      },
+      "rows_written": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "a create request that is inconsistent",
+   "clauses": [
+    "RELAY-CREATE-001",
+    "SEAL-KEY-005",
+    "SEAL-KEY-006",
+    "SEAL-FRAME-003",
+    "SEAL-GEN-010"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "c3774c11e85a30edeeab144396dc78ff",
+      "recovery": "rec",
+      "first": "alice",
+      "create": false
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "salt": "00000000000000000000000000000000"
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "rsign": "rec2"
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "alice",
+          "ctr": 1
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "rec",
+          "ctr": 2
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "rec",
+          "ctr": 1,
+          "sig": "flip"
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "rec",
+          "ctr": 1,
+          "sig": "high-s"
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "rec",
+          "ctr": 1,
+          "signer": "alice"
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "rec",
+          "ctr": 1,
+          "body_len": 557
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "rec",
+          "ctr": 1,
+          "magic": "TDF2"
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "rec",
+          "ctr": 1,
+          "len_delta": 1
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "frame": {
+         "$frame": {
+          "author": "rec",
+          "ctr": 1,
+          "board_id": "00000000000000000000000000000000"
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "dev": "rec"
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "sign_pk": "rec"
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_genesis"
+      },
+      "rows_written": 0,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main",
+        "flen": 671
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_body"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$fill": {
+        "len": 99,
+        "seed": "x"
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_body"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "seq": 1,
+       "chain": {
+        "$chain": 1
+       },
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 1
+        }
+       },
+       "door": {
+        "$door": true
+       }
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

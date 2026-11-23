@@ -1,0 +1,2707 @@
+{
+ "spec": "relay.md §10.3",
+ "cases": [
+  {
+   "name": "a device logs in with the door",
+   "clauses": [
+    "RELAY-LOGIN-001",
+    "RELAY-LOGIN-003",
+    "RELAY-LOGIN-004",
+    "RELAY-LOGIN-006",
+    "SEAL-SIG-001",
+    "SEAL-ENC-005",
+    "RELAY-GEN-001"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "6a33903be607a6d9e0ce762f6980d255",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "nonce": "$any",
+       "gen": 2,
+       "expires": {
+        "$time": 120000
+       }
+      },
+      "rows_written": 1,
+      "rows_read_max": 66,
+      "storage": {
+       "nonces": [
+        {
+         "purpose": 1,
+         "dev": {
+          "$dev": "alice"
+         },
+         "at": {
+          "$time": 0
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 2
+        }
+       },
+       "gen": 2,
+       "push": "$push"
+      },
+      "rows_written": 2,
+      "storage": {
+       "count": {
+        "nonces": 0
+       },
+       "devices": {
+        "alice": {
+         "gen": 2
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    }
+   ]
+  },
+  {
+   "name": "a token names its own device only",
+   "clauses": [
+    "RELAY-LOGIN-001",
+    "RELAY-OBJ-004"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "e45b9be92aee781a1e7a8ef47f90ca9f",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "register"
+      },
+      "body": {
+       "$admin": {
+        "op": "register",
+        "signer": "alice",
+        "args": {
+         "dev": "bob",
+         "sign_pk": "bob",
+         "frame_hash": {
+          "$hash": {
+           "$frame": {
+            "author": "alice",
+            "ctr": 1
+           }
+          }
+         }
+        },
+        "extra": {
+         "$frame": {
+          "author": "alice",
+          "ctr": 1
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "seq": 2,
+       "chain": {
+        "$chain": 2
+       },
+       "token": {
+        "$token": {
+         "key": "bob"
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/forbidden"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "nb": "nonce"
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$login": {
+        "dev": "bob",
+        "gen": 2,
+        "nonce": "$saved.nb"
+       }
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/forbidden"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "bob",
+        "gen": 2,
+        "nonce": "$saved.nb"
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    }
+   ]
+  },
+  {
+   "name": "a device the board does not know, and the recovery identity",
+   "clauses": [
+    "RELAY-LOGIN-001"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "1b2f6297f61daad967ff203cf72db089",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "mallory"
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unauthorized"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "rec"
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unauthorized"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "mallory",
+        "gen": 1,
+        "nonce": {
+         "$hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      },
+      "rows_written": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "a nonce is tried once",
+   "clauses": [
+    "RELAY-LOGIN-001",
+    "RELAY-LOGIN-002",
+    "RELAY-OBJ-009"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "9237c0844eaf5e90aa4610d03a19b0ed",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "nonce": {
+         "$hex": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "n1": "nonce"
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "nonce": "$saved.n1"
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 3,
+        "nonce": "$saved.n1"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "n2": "nonce"
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "nonce": "$saved.n2"
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_gen"
+      },
+      "rows_written": 1,
+      "storage": {
+       "count": {
+        "nonces": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 3,
+        "nonce": "$saved.n2"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 5
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_gen"
+      },
+      "rows_written": 1
+     }
+    }
+   ]
+  },
+  {
+   "name": "a nonce belongs to one device and one purpose",
+   "clauses": [
+    "RELAY-LOGIN-001",
+    "RELAY-ADMIN-001"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "91900f99a8af2fc59bbe83ed4cb72faa",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "register"
+      },
+      "body": {
+       "$admin": {
+        "op": "register",
+        "signer": "alice",
+        "args": {
+         "dev": "bob",
+         "sign_pk": "bob",
+         "frame_hash": {
+          "$hash": {
+           "$frame": {
+            "author": "alice",
+            "ctr": 1
+           }
+          }
+         }
+        },
+        "extra": {
+         "$frame": {
+          "author": "alice",
+          "ctr": 1
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "seq": 2,
+       "chain": {
+        "$chain": 2
+       },
+       "token": {
+        "$token": {
+         "key": "bob"
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "nb": "nonce"
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "nonce": "$saved.nb"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "na": "nonce"
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "nonce": "$saved.na"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "bob",
+        "gen": 2,
+        "nonce": "$saved.nb"
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    }
+   ]
+  },
+  {
+   "name": "a login signature that does not verify",
+   "clauses": [
+    "RELAY-LOGIN-003",
+    "RELAY-LOGIN-002",
+    "SEAL-SIG-001",
+    "SEAL-ENC-005",
+    "SEAL-CTX-001",
+    "RELAY-GEN-009"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "7c6f49386da45b03007fb4855f644dfd",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "origin": "https://other.test"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_login_sig"
+      },
+      "rows_written": 1,
+      "storage": {
+       "count": {
+        "nonces": 0
+       },
+       "devices": {
+        "alice": {
+         "gen": 1
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "sig": "flip"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_login_sig"
+      },
+      "rows_written": 1,
+      "storage": {
+       "count": {
+        "nonces": 0
+       },
+       "devices": {
+        "alice": {
+         "gen": 1
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "signer": "rec"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_login_sig"
+      },
+      "rows_written": 1,
+      "storage": {
+       "count": {
+        "nonces": 0
+       },
+       "devices": {
+        "alice": {
+         "gen": 1
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "context": "frame"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_login_sig"
+      },
+      "rows_written": 1,
+      "storage": {
+       "count": {
+        "nonces": 0
+       },
+       "devices": {
+        "alice": {
+         "gen": 1
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "context": "admin"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_login_sig"
+      },
+      "rows_written": 1,
+      "storage": {
+       "count": {
+        "nonces": 0
+       },
+       "devices": {
+        "alice": {
+         "gen": 1
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "sign_gen": 3
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_login_sig"
+      },
+      "rows_written": 1,
+      "storage": {
+       "count": {
+        "nonces": 0
+       },
+       "devices": {
+        "alice": {
+         "gen": 1
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "origin": "https://relay.test/"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_login_sig"
+      },
+      "rows_written": 1,
+      "storage": {
+       "count": {
+        "nonces": 0
+       },
+       "devices": {
+        "alice": {
+         "gen": 1
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "gen": 2,
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 2
+        }
+       },
+       "gen": 2,
+       "push": "$push"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "a nonce lives 120,000 ms",
+   "clauses": [
+    "RELAY-LOGIN-001"
+   ],
+   "targets": [
+    "core",
+    "standby"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "d2fd28b2152cb525f5289f904d10e9b5",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "n": "nonce"
+     }
+    },
+    {
+     "clock_ms": 1795000120001,
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "nonce": "$saved.n"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "clock_ms": 1795000120001,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "m": "nonce"
+     }
+    },
+    {
+     "clock_ms": 1795000240001,
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "nonce": "$saved.m"
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    }
+   ]
+  },
+  {
+   "name": "at most 64 nonces are kept: expired ones go first, then the oldest",
+   "clauses": [
+    "RELAY-LOGIN-005",
+    "RELAY-TOKEN-005"
+   ],
+   "targets": [
+    "core",
+    "standby"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "8e22f59fd6573e0ad99eee57c17d329f",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "clock_ms": 1795000000000,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "first": "nonce"
+     }
+    },
+    {
+     "clock_ms": 1795000000001,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "second": "nonce"
+     }
+    },
+    {
+     "clock_ms": 1795000000002,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000003,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000004,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000005,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000006,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000007,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000008,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000009,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000010,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000011,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000012,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000013,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000014,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000015,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000016,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000017,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000018,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000019,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000020,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000021,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000022,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000023,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000024,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000025,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000026,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000027,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000028,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000029,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000030,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000031,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000032,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000033,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000034,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000035,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000036,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000037,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000038,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000039,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000040,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000041,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000042,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000043,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000044,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000045,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000046,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000047,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000048,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000049,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000050,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000051,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000052,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000053,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000054,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000055,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000056,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000057,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000058,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000059,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000060,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000061,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000062,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000063,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795000000064,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2,
+      "storage": {
+       "count": {
+        "nonces": 64
+       }
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000000065,
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "nonce": "$saved.first"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000000066,
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2,
+      "storage": {
+       "count": {
+        "nonces": 64
+       }
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000000067,
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2,
+        "nonce": "$saved.second"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000120010,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 9,
+      "storage": {
+       "count": {
+        "nonces": 57
+       }
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000240066,
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 58,
+      "storage": {
+       "count": {
+        "nonces": 1
+       }
+      }
+     }
+    }
+   ]
+  }
+ ]
+}
