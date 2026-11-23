@@ -193,5 +193,28 @@ fn seal_signature_vectors() {
     cases.push(admin("fence, host with the default port", &dw, &fence443, &nonce));
     let no_wraps = AdminOp::Reinstate { dev: dev_n, first_epoch: 4, wraps: vec![] };
     cases.push(admin("reinstate, no wraps", &rw, &no_wraps, &nonce));
+    // Added by task S7b (rulings Q15, Q18): what the registry's words exclude.
+    let reinstate = AdminOp::Reinstate { dev: dev_n, first_epoch: 4, wraps: vec![wrap_to(&dev_n, 0x01)] };
+    cases.push(admin("reinstate, by a device", &dw, &reinstate, &nonce));
+    let epoch_1 = AdminOp::Reinstate { dev: dev_n, first_epoch: 1, wraps: vec![wrap_to(&dev_n, 0x01)] };
+    cases.push(admin("reinstate, first_epoch 1", &rw, &epoch_1, &nonce));
+    let other_dev = AdminOp::MintReadToken { dev: dev_n, epoch: 3 };
+    cases.push(admin("mint_read_token, for a dev other than the signer", &dw, &other_dev, &nonce));
+    let not_dev_r = AdminOp::RecoveryRegister { dev: dev_n, sign_pk: rk.public().sign_pk, frame_hash: fh };
+    cases.push(admin("recovery_register, dev not the dev_R of sign_pk", &rw, &not_dev_r, &nonce));
+    let entry = |i: u16| SeedEntry { dev: DevId([0; 16]), sign_pk: [0; 32], role: 1, status: 2, last_ctr: u64::from(i) };
+    let seed_of = |n: u16| {
+        AdminOp::Seed(SeedArgs {
+            home_gen: 2,
+            first_seq: 1,
+            chain_before: Chain([0; 32]),
+            last_seq: 0,
+            chain_last: Chain([0; 32]),
+            blob_id: BlobId([0; 16]),
+            entries: (0..n).map(entry).collect(),
+        })
+    };
+    cases.push(admin("seed, 320 entries", &dw, &seed_of(320), &nonce));
+    cases.push(admin("seed, 321 entries", &dw, &seed_of(321), &nonce));
     check_or_write("seal-signatures.json", json!({ "spec": "seal.md §16", "cases": cases }));
 }

@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::backup::tests::{Hist, dup};
-use crate::receipt::tests::board::{Who, rand};
-use crate::receipt::tests::board::copy;
+use crate::receipt::tests::board_tests::{Who, rand};
+use crate::receipt::tests::board_tests::copy;
 use crate::{OsEntropy, chain_zero, state_hash};
 
 const BOARD_BYTES: &[u8] = b"{\"cards\":[1,2,3]}";
@@ -320,6 +320,43 @@ fn seal_snapshot_refusals() {
     fails(seal_blob(&vec![0u8; fits as usize + 1], &key(&x, KeyKind::Blob), &x.b.board, 2, &w, &mut OsEntropy), SealError::PayloadTooLarge);
 }
 
+/// An `Entropy` that refuses every draw: a call that draws fails with
+/// `seal/entropy`, so a refusal with another code drew nothing first.
+struct NoDraw;
+
+impl crate::entropy::private::Sealed for NoDraw {}
+
+impl Entropy for NoDraw {
+    fn fill(&mut self, _out: &mut [u8]) -> Result<(), SealError> {
+        Err(SealError::Entropy)
+    }
+}
+
+// `seal_snapshot` refuses, with `seal/blob_open` and before it draws, a body
+// with a history record above its `S` and a membership of another board than
+// the one it seals for (ruling Q56, §20.4): bodies its reader would reject.
+// A body that passes these checks reaches the draws.
+// spec: SEAL-BLOB-006
+#[test]
+fn seal_snapshot_refuses_what_its_reader_would() {
+    let x = hist();
+    let k = key(&x, KeyKind::Snap);
+    let w = writer(&x);
+    let s = |b: &SnapshotBody, board: &BoardId| seal_snapshot(b, &k, board, 2, &w, &mut NoDraw).map(|_| ());
+    fails(s(&body_of(&x), &x.b.board), SealError::Entropy);
+    // A history record above S: the body claims an earlier S.
+    let mut b = body_of(&x);
+    b.seq = b.history.last().unwrap().seq - 1;
+    fails(s(&b, &x.b.board), SealError::BlobOpen);
+    b.seq += 1;
+    fails(s(&b, &x.b.board), SealError::Entropy);
+    // A membership (and its history) of another board.
+    let y = hist();
+    assert_ne!(y.b.board, x.b.board);
+    fails(s(&body_of(&y), &x.b.board), SealError::BlobOpen);
+    fails(s(&body_of(&y), &y.b.board), SealError::Entropy);
+}
+
 // --------------------------------------------------- opening, in order
 
 // A snapshot fails each step of §20.5 once, in order, with every earlier
@@ -434,12 +471,15 @@ fn a_snapshot_fails_each_step_in_order() {
 // Step 7 compares the body's `hash_version` and `state_hash` with the
 // expected values (the signed entry's or the bundle's), as it does `S`: an
 // expected state hash or version other than the body's, and a body whose
-// state hash or version is not the expected one, are `seal/blob_open`. The
-// crate does not recompute the state hash and does not check the version
-// against the membership's rules (ruling Q57): a body whose board does not
-// give its own state hash opens (the engine finds it, recomputing the hash
-// from the board it loads), and so does a version-2 body when version 2 is
-// expected. The declared mode compares neither value.
+// state hash or version is not the expected one, are `seal/blob_open`. It
+// also recomputes the state hash from the body's own `board` and
+// `membership` under the expected version (ruling Q57 as completed): a body
+// whose board does not give its signed state hash is refused, even when the
+// body carries the expected hash, and so is a body that carries a hash of
+// its own board that is not the expected one. It does not check the version
+// against the membership's rules: a version-2 body whose hash is computed
+// under version 2 opens when version 2 is expected. The declared mode
+// compares none of these.
 // spec: SEAL-BLOB-007
 #[test]
 fn step_7_compares_the_expected_values() {
@@ -463,19 +503,31 @@ fn step_7_compares_the_expected_values() {
     b.state_hash[5] ^= 1;
     let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
     fails(go(&f, &rf, &body.state_hash, 1), SealError::BlobOpen);
-    assert!(go(&f, &rf, &b.state_hash, 1).is_ok());
+    // Expected as it stands in the body, it is not the hash of the body's
+    // board and membership.
+    fails(go(&f, &rf, &b.state_hash, 1), SealError::BlobOpen);
     let mut b = body_of(&x);
     b.hash_version = 2;
     let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
     fails(go(&f, &rf, &body.state_hash, 1), SealError::BlobOpen);
-    // A body whose board does not give its signed state hash opens: the
-    // engine finds it.
+    // A body whose board does not give its signed state hash, although it
+    // carries that hash, is refused whoever the caller is.
     let mut b = body_of(&x);
     b.board = b"{\"cards\":[]}".to_vec();
     assert_ne!(state_hash(1, &h(&[&b.board]), &b.membership), body.state_hash);
     let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
-    let got = go(&f, &rf, &body.state_hash, 1).unwrap();
-    assert_eq!((got.board, got.state_hash), (b.board.clone(), body.state_hash));
+    fails(go(&f, &rf, &body.state_hash, 1), SealError::BlobOpen);
+    // The same board with its own hash carried and expected opens.
+    b.state_hash = state_hash(1, &h(&[&b.board]), &b.membership);
+    let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
+    let got = go(&f, &rf, &b.state_hash, 1).unwrap();
+    assert_eq!((got.board, got.state_hash), (b.board.clone(), b.state_hash));
+    // A hash computed under version 1 expected as version 2 (the body
+    // carrying version 2): the recomputation is under the expected version.
+    let mut b = body_of(&x);
+    b.hash_version = 2;
+    let (f, rf) = sealed_body_bytes(&x, &encode_body(&b).unwrap());
+    fails(go(&f, &rf, &body.state_hash, 2), SealError::BlobOpen);
     // A version the membership's rules do not allow, its hash computed
     // under that version, opens when that version is expected.
     let mut b = body_of(&x);

@@ -10,3 +10,19 @@ Frames, contexts, envelope, keys, membership, chain, pairing, HPKE wraps, sealed
   `CI_STAGE`, `CI_OS` and `CI_WIDE` set (the contract is at the top of
   `scripts/ci/stage.sh`). The stage's own checks go in that `ci.sh`, not in
   `ci.yml`.
+- Tests: unit tests beside each module (`src/<module>/tests.rs`); integration
+  targets under `tests/` (`kat`, `tamper`, `contexts`, `pairing_mitm`, `parsers`,
+  the stage gate's five; `vectors` and `fuzz_targets` with `test-entropy`; `memory`;
+  `crate_rules`).
+  The tamper, context and parser matrices are the comment tables at the top of
+  `tests/tamper/main.rs`, `tests/contexts/main.rs` and `tests/parsers/main.rs`.
+- Fuzz targets: `fuzz/`, a crate of its own (own `[workspace]` and lockfile), one
+  target per row of the parser table; `ci.sh` compiles them on Linux, the test
+  target `fuzz_targets` runs each body and its fixture over fixed inputs, stage
+  `release` runs the fuzzers. `crate_rules` keeps `fuzz/Cargo.lock` within the
+  root `Cargo.lock`.
+- Budget: `cargo run --release --locked -p taskdeck-seal --example budget` (run by
+  `ci.sh` on Linux); `budget-baseline.txt` holds the baseline in microseconds,
+  as the CI job measured it on GitHub's Linux runner. The 100 ms limit is judged
+  everywhere, the 25% rule only there (`--judge-baseline`, which `ci.sh` passes
+  on GitHub's runners).

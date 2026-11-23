@@ -8,6 +8,19 @@ pub(crate) mod private {
 }
 
 /// The only way random bytes enter the crate (SEAL-GEN-004, SEAL-GEN-005; seal.md §26).
+///
+/// The trait is sealed: another crate cannot implement it, since its
+/// supertrait is private to this crate.
+///
+/// ```compile_fail,E0277
+/// struct Mine;
+/// impl taskdeck_seal::Entropy for Mine {
+///     fn fill(&mut self, out: &mut [u8]) -> Result<(), taskdeck_seal::SealError> {
+///         out.fill(4);
+///         Ok(())
+///     }
+/// }
+/// ```
 pub trait Entropy: private::Sealed {
     /// Fills `out`, or fails with `seal/entropy` (SEAL-GEN-004).
     fn fill(&mut self, out: &mut [u8]) -> Result<(), SealError>;

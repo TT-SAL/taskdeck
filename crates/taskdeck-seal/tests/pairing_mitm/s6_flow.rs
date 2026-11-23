@@ -618,8 +618,10 @@ fn a_rotation_racing_the_pairing() {
 
 /// Slots replayed under another label or reflected to their sender abort
 /// with `seal/slot_mac`: E's own slot A or C as slot B, N's own slot B back
-/// to N, slot A again where C is awaited, slot C where D is awaited, and a
-/// slot whose label byte the relay rewrote.
+/// to N, and a slot whose label byte the relay rewrote (slot A as C, slot C
+/// as D). Slot A again where C is awaited, and slot C again where D is
+/// awaited, byte for byte as N accepted them, are ignored (§17.10, ruling
+/// Q60; task S7b turned these two round, `s7b_repeats` has the rest).
 // spec: SEAL-PAIR-002
 // spec: SEAL-PAIR-003
 #[test]
@@ -632,8 +634,11 @@ fn slots_replayed_or_reflected() {
         let fx = r.e_on(ExistingEvent::SlotB { bytes });
         assert_eq!(e_abort(&fx), Some(SealError::SlotMac));
     }
+    let mut r = Run::new(Sim::new(691, 1), 0);
+    r.step_b();
+    let bytes = r.slot_a.clone();
+    assert!(r.n_on(NewEvent::Slot { bytes }).is_empty());
     let n_cases: Vec<fn(&Run) -> Vec<u8>> = vec![
-        |r| r.slot_a.clone(),
         |r| r.slot_b.clone(),
         |r| [&[C][..], &r.slot_a[1..]].concat(),
         |r| [&[C, ROLE_E][..], &r.slot_b[2..]].concat(),
@@ -650,7 +655,12 @@ fn slots_replayed_or_reflected() {
         r.step_b().step_c().step_sas();
         let fx = r.n_on(NewEvent::SasEntered { digits: r.digits.clone() });
         assert_eq!(names_n(&fx), ["ShowAccepted", "FetchSlot"]);
-        let bytes = if relabel { [&[D][..], &r.slot_c[1..]].concat() } else { r.slot_c.clone() };
-        aborts(&r.n_on(NewEvent::Slot { bytes }), SealError::SlotMac);
+        if relabel {
+            let bytes = [&[D][..], &r.slot_c[1..]].concat();
+            aborts(&r.n_on(NewEvent::Slot { bytes }), SealError::SlotMac);
+        } else {
+            let bytes = r.slot_c.clone();
+            assert!(r.n_on(NewEvent::Slot { bytes }).is_empty());
+        }
     }
 }

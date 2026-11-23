@@ -432,7 +432,13 @@ fn token_is_valid(t: &[u8]) -> bool {
 /// §21.5, ruling Q38).
 ///
 /// Then: raw DEFLATE of the payload with the roots and the read token kept
-/// out of the compressor (`prim::deflate_split`, §21.3, SEAL-GEN-006), HPKE
+/// out of the compressor (`prim::deflate_split`, §21.3, SEAL-GEN-006),
+/// proved before anything is sealed or drawn (task S7b): the compressed head
+/// followed by an empty final stored block inflates to exactly the bytes
+/// before `n_roots`, and the compressed tail to exactly `vb32(meta)`,
+/// compared while inflating; the bytes from `n_roots` to the end of
+/// `read_token` do not pass through the decompressor. A stream that fails
+/// the proof is `seal/backup_payload` and nothing is written. Then HPKE
 /// base mode to the recovery key with the `info` and `aad` of §21.3 (the
 /// ephemeral key from 32 drawn bytes, `DeriveKeyPair`, as `wrap_root` makes
 /// it), and the signature of §16.3. It keeps and returns nothing that opens

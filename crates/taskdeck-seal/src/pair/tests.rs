@@ -7,7 +7,7 @@ use hkdf::hmac::{Hmac, KeyInit as _, Mac as _};
 use sha2::{Digest as _, Sha256};
 
 use super::*;
-use crate::receipt::tests::board::Board;
+use crate::receipt::tests::board_tests::Board;
 use crate::{Entropy, OsEntropy};
 
 // ------------------------------------------------------------ helpers
@@ -869,10 +869,16 @@ fn unexpected_events_abort() {
         assert!(matches!(fx[..], [ExistingEffect::DeleteTicket { .. }, ExistingEffect::Abort { code: c }] if c == code));
         assert!(!fx.iter().any(|f| matches!(f, ExistingEffect::PostSlot { .. })));
     }
-    // In `Showing`: a second slot B, or `Registered` before `UserConfirmed`.
+    // In `Showing`: a second slot B that is not the one accepted (the same
+    // slot B again is ignored, §17.10), or `Registered` before
+    // `UserConfirmed`.
     let mut p = started();
     let (_, slot_b, _) = p.run_to_sas();
-    let fx = p.e.on(ExistingEvent::SlotB { bytes: slot_b }, &mut p.ern);
+    assert!(p.e.on(ExistingEvent::SlotB { bytes: slot_b.clone() }, &mut p.ern).is_empty());
+    assert_eq!(p.e.state, ExistingState::Showing);
+    let mut other = slot_b;
+    other[5] ^= 1;
+    let fx = p.e.on(ExistingEvent::SlotB { bytes: other }, &mut p.ern);
     assert_eq!(abort_code_e(&fx), Some(SealError::SlotMac));
     let mut p = started();
     p.run_to_sas();
