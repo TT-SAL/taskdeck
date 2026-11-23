@@ -44,12 +44,27 @@ pub fn checked_url(url: &str) -> Result<String, CompileError> {
     unimplemented!()
 }
 
-/// Trims Unicode `White_Space` only (core.md §13.3).
+/// The 25 `White_Space` code points of core.md §2, by an explicit list: not
+/// `str::trim`, whose table follows the toolchain's Unicode version
+/// (CORE-COMP-002).
+const WHITE_SPACE: [char; 25] = [
+    '\u{0009}', '\u{000A}', '\u{000B}', '\u{000C}', '\u{000D}', '\u{0020}', '\u{0085}', '\u{00A0}',
+    '\u{1680}', '\u{2000}', '\u{2001}', '\u{2002}', '\u{2003}', '\u{2004}', '\u{2005}', '\u{2006}',
+    '\u{2007}', '\u{2008}', '\u{2009}', '\u{200A}', '\u{2028}', '\u{2029}', '\u{202F}', '\u{205F}',
+    '\u{3000}',
+];
+
+/// Trims Unicode `White_Space` only (core.md §2, §13.3): every leading and
+/// trailing code point of `WHITE_SPACE`, and nothing else (CORE-COMP-002).
 pub fn trim(text: &str) -> &str {
-    unimplemented!()
+    text.trim_matches(|c: char| WHITE_SPACE.contains(&c))
 }
 
-/// Replaces tabs in text (core.md §13.3).
+/// Replaces every U+0009 by four U+0020 (core.md §2, §13.3), as today's
+/// `utilities::detab` does.
 pub fn detab(text: &str) -> String {
-    unimplemented!()
+    text.replace('\t', "    ")
 }
+
+#[cfg(test)]
+mod tests;

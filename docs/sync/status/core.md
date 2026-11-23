@@ -42,12 +42,24 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 | Unit | Steps (writers) | Plan items | State | Tokens |
 |---|---|---|---|---|
 | A `a-base` | canonical encoding, time and zones, board data and `check`, id minting | 2, 4, 6 | **done**: built, checked (one high finding, fixed, second check clean), security pass (one high finding, fixed); lead's gate 2026-11-23 01:39 UTC: 77 tests, clippy, `ci.sh`, the purity item, CI's reads check | 1.16 M |
-| B `b-apply` | B1 log commands and `parse_command`; B2 `apply`, conflict rules, rules versions, `reset`, `rebind`, golden logs; B3 the lead's rulings applied (the size check of CORE-APPLY-005, the tree budget in fixed numbers, `Record::LIMIT`) | 2, 3, 4, 5, 6 | **done**: built, checked (all 29 commands against §9 line by line, the conflict boundaries, over 170 golden cases worked by hand: nothing high or medium, one low), security pass (nothing high or medium, two lows); lead's gate 2026-11-23 02:14 UTC: 85 tests, the `golden` item, clippy, `ci.sh`, the purity item, CI's reads check | 1.52 M |
-| C `c-ports` | C1 planner, scoring, archive; C2 ICS parser, overlay types, weather report types | 1 | C1 implemented in the working copy (76 ported tests), not yet checked and not yet in the tree; C2 next | 0.28 M so far |
+| B `b-apply` | B1 log commands and `parse_command`; B2 `apply`, conflict rules, rules versions, `reset`, `rebind`, golden logs; B3 the lead's rulings applied (the size check of CORE-APPLY-005, the tree budget in fixed numbers, `Record::LIMIT`) | 2, 3, 4, 5, 6 | **done**: built, checked (all 29 commands against §9 line by line, the conflict boundaries, over 170 golden cases worked by hand: nothing high or medium, one low), security pass (nothing high or medium, two lows); lead's gate 2026-11-23 02:14 UTC. Step B4 then applied spec change 4 (`reset` at the last revision, the 1,001-block golden case, a board that fails `check` no longer encodes to empty bytes) | 1.65 M |
+| C `c-ports` | C1 planner, scoring, archive; C2 ICS parser, overlay types, weather report types, `compile::{trim, detab}` | 1 | C1 and C2 implemented and in the tree (152 ported and new tests; lead's gate 2026-11-23 02:38 UTC: 230 tests, clippy, `ci.sh`, the purity and `golden` items, CI's reads check); **not yet checked**: the check and the security pass (ICS) open the next window | 0.59 M so far |
 | D `d-compile` | intents and the compile step | 3 | not started | |
 | E `e-read` | E1 legacy import; E2 read queries, snapshot builders, reminders, the snapshot-fixtures test | 7, 8 | not started | |
 | F `f-gate` | F1 transcripts test; F2 determinism and rebase property tests, fuzz targets, the budget job, spec coverage | 9 and the gate | not started | |
 | G exit | hygiene pass, exit review, exit pull request | §7 "once per stage" | not started | |
+
+## Next steps
+
+1. **Window 2 (from about 04:57 UTC):** workflow 5, `workflows/w5-args.json` with `workflows/pipeline.js`:
+   the check of task C (both ports) and its security pass (the ICS parser), while the writers go on with D
+   (`briefs/d-compile.md`), E1 (`e1-import.md`) and E2 (`e2-read-snapshot.md`); D gets its check and its
+   security pass (the intent parser) in the same workflow. About 2.7 to 3.2 M tokens. Before launching: bring
+   the working copy to the branch (`git -C target/work/core fetch origin && git -C target/work/core reset --hard origin/<branch>`).
+2. Spec change 5 once the check of C has reported, in its own pull request, then the code.
+3. **Window 3:** the check of E; F1 (`f1-transcripts.md`), F2 (`f2-gate.md`) and their check; the budget
+   baselines from the first CI run of the budget job into `crates/taskdeck-core/ci.sh` and this file; then the
+   hygiene pass, the exit review, and the exit pull request with this file's state set to `final`.
 
 ## Decisions (with reasons)
 
@@ -70,8 +82,10 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
   legacy import (E) reads the owner's own folder once, in a dry run first; it gets the never-panic property
   test CORE-GEN-007 asks for and no separate pass.
 
-- **D6. Counting tokens.** A workflow's own report (1.51 M for workflow 1) was lower than the sum over its
-  agents' transcripts (1.80 M: input, cache writes and output). The lead budgets against the higher number.
+- **D6. Counting tokens.** A workflow's own report and the sum over its agents' transcripts (input, cache
+  writes and output) differ, in both directions (workflow 1: 1.51 M reported, 1.80 M by transcripts; workflow
+  4: 0.13 M reported, 0.08 M by transcripts). The lead counts each workflow at the higher of its two numbers,
+  as foundation's D25 did.
 - **D7. A local time in a fold: the spec's rule stands.** Task A's verifier found that chrono 0.4.45's `Local`
   lists the later instant of a fold first, so today's app resolves 02:30 on a fall-back day to the later
   instant, while CORE-TIME-003 says the earlier. Most platforms take the earlier, and today's result depends
@@ -95,7 +109,8 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 |---|---|---|
 | 1 | core.md §18.3: a golden case may name a generated start board (`start_gen`) for the caps of §17, whose boards are too large to print (200,000 archive rows is about 22 MB of JSON) | merged, TT-SAL/taskdeck#5 |
 | 2 | core.md §18.4, §18.5: what the transcript and snapshot tests do with a fixture folder that `import` refuses. `dst-edges` holds three records before 1970-01-01T00:00:00Z (`instant_range`) and `id-limits` holds ids outside every range (`id_range`); the spec said only "starting from `import` of the starting folder" | merged, TT-SAL/taskdeck#5 |
-| 4 | From task B's check: `reset` at the last notes revision is `core/cap`; a command text over the tree budget is `core/schema` whatever its `op` (§9.1); CORE-ID-003 does not cover a benign `restore`; the 1,001-block `create_task` of §18.3 is a parse error in the golden logs | in its own pull request, opened 2026-11-23 02:26 UTC |
+| 4 | From task B's check: `reset` at the last notes revision is `core/cap`; a command text over the tree budget is `core/schema` whatever its `op` (§9.1); CORE-ID-003 does not cover a benign `restore`; the 1,001-block `create_task` of §18.3 is a parse error in the golden logs | merged, TT-SAL/taskdeck#11 |
+| 5 | From the second port: `weather::build_report` leaves `Report.fetched_at` at 0 and the caller sets it (today's function reads the system clock there); an ICS time in UTC outside the instant range takes the zone's offset at the nearer end of the range. With whatever the check of the ports adds | to come, after the check of task C |
 | 3 | The lead's rulings on what tasks A and B found: the size check of `apply` (new clause CORE-APPLY-005), the parser's tree budget, `Record::LIMIT`, the fold (D7), and nine smaller points made exact. `docs/sync/spec/CHANGES.md` lists them; `briefs/b3-rulings.md` is the same list as a task | merged, TT-SAL/taskdeck#7 |
 
 ## Token ledger
@@ -106,6 +121,9 @@ Agent tokens as the workflows report them (input, cache writes and output).
 |---|---|---|---|---|
 | 2026-11-22 23:57 to 2026-11-23 04:57 | 1: task A whole, B1 and B2 implemented | 8 | 1,514,311 reported; 1,800,254 by transcripts | 1.80 M |
 | | 2: B3, check and security pass of B, C1 implemented | 4 | 1,037,538 reported; 1,159,154 by transcripts | 2.96 M |
+| | 3: C2 implemented | 1 | 245,001 reported; 306,345 by transcripts | 3.27 M |
+| | 4: B4 (four points of spec change 4) | 1 | 129,140 reported; 84,825 by transcripts | **3.39 M: the window is spent**; agents rest until about 04:57 UTC |
+| 2026-11-23 04:57 to 09:57 | 5: check and security pass of C; D; E1; E2 (planned, `workflows/w5-args.json`) | | | |
 
 ## What the checks found
 
@@ -142,6 +160,8 @@ Agent tokens as the workflows report them (input, cache writes and output).
 | A pull request that touches the core crate, in CI | 8 minutes; the core job runs on Windows, macOS and Linux | TT-SAL/taskdeck#8 |
 | The size check of `apply` (CORE-APPLY-005), release build, a board of 10,000 items (2.4 MB) | about 12 µs per command; 5,000 renames in 69 ms; an exact count of a 200,000-row board 2.5 ms | task B3's implementer; not the budget job |
 | Workflow 2 | 4 agents, 42 minutes | 2026-11-23 01:28 to 02:10 UTC |
+| A port: C1 (2,300 lines of today's code, 76 tests) and C2 (2,000 lines, 76 tests) | 0.28 M and 0.31 M tokens, 22 and 13 minutes | workflows 2 and 3 |
+| The first usage window | 14 agent runs, 3.39 M tokens: tasks A and B whole, C implemented | 2026-11-23 00:10 to 02:35 UTC |
 
 ## Facts found along the way
 

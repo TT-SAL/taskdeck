@@ -329,6 +329,37 @@ fn local_at(day: chrono::NaiveDate, x: i32, z: &(impl Zone + ?Sized)) -> Option<
     }
 }
 
+/// The local date-time of `t` in `z` (core.md §5.3): `t + z.offset_at(t)`
+/// read as a naive date-time, for the read queries that print one.
+pub(crate) fn local_date_time(t: Instant, z: &(impl Zone + ?Sized)) -> chrono::NaiveDateTime {
+    let secs = local_secs(t, z);
+    // Within a day of the instant range, so chrono holds it.
+    chrono::DateTime::from_timestamp(secs, t.nanos).map(|d| d.naive_utc()).unwrap_or_default()
+}
+
+/// `to − from` as a chrono span: a difference of two instants needs no zone.
+pub(crate) fn between(from: Instant, to: Instant) -> chrono::TimeDelta {
+    to.to_chrono() - from.to_chrono()
+}
+
+/// English month names, January first (chrono's `%B`, without locales).
+const MONTH_NAMES: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+    "November", "December",
+];
+
+/// chrono's `%B`: the month's full English name.
+pub(crate) fn month_name(month: u32) -> &'static str {
+    let index = usize::try_from(month.saturating_sub(1)).unwrap_or(0);
+    MONTH_NAMES.get(index).copied().unwrap_or("")
+}
+
+/// chrono's `%b`: the month's first three letters.
+pub(crate) fn month_abbrev(month: u32) -> &'static str {
+    let name = month_name(month);
+    name.get(..3).unwrap_or(name)
+}
+
 /// Resolves a local time on a day (core.md §5.4).
 pub fn resolve_on_day(day: chrono::NaiveDate, minutes: i32, z: &(impl Zone + ?Sized)) -> Option<Instant> {
     let m = minutes.clamp(0, 1439);

@@ -546,6 +546,20 @@ impl Record for BoardData {
     /// The canonical board bytes: 62,914,560 (core.md §17).
     const LIMIT: usize = canon::BOARD_LIMIT;
 
+    /// The canonical board bytes (core.md §6.13), never empty.
+    ///
+    /// # Panics
+    ///
+    /// When the board cannot be encoded: an integer outside ±(2^53 − 1)
+    /// (core.md §4.2 rule 5). No board that passes `check` has one, so this
+    /// panics only on a board built by hand that fails `check`.
+    fn to_canonical(&self) -> Vec<u8> {
+        match canon::encode(&self.to_value()) {
+            Ok(bytes) => bytes,
+            Err(e) => panic!("a board that fails check cannot be encoded ({}): encode only a board that passes check", e.code),
+        }
+    }
+
     fn to_value(&self) -> Value {
         let mut m = Map::new();
         put_list(&mut m, "archive", &self.archive, ArchiveRow::to_value);
@@ -656,7 +670,16 @@ impl BoardData {
         }
     }
 
-    /// Canonical board bytes (core.md §6.13).
+    /// Canonical board bytes (core.md §6.13), never empty.
+    ///
+    /// A board that passes `check` always encodes.
+    ///
+    /// # Panics
+    ///
+    /// On a board that fails `check` and holds an integer the canonical
+    /// form cannot write (above 2^53 − 1, core.md §4.2 rule 5), such as one
+    /// built by hand: the bytes would not be a board, and empty bytes would
+    /// pass for one. Encode only a board known to pass `check`.
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
         self.to_canonical()
     }

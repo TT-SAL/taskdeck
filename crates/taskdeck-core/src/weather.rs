@@ -161,14 +161,147 @@ pub struct Report {
     pub days: Vec<Day>,
 }
 
+/// A value from one of the parallel arrays, or a stand-in when the API left it
+/// out (today's weather).
+fn at(values: &[Option<f64>], index: usize, missing: f64) -> f64 {
+    values.get(index).copied().flatten().unwrap_or(missing)
+}
+
 /// Builds a report from the API's response (today's weather; core.md §14.6).
+///
+/// `fetched_at` is 0: the caller fills it from its own clock (CORE-GEN-003).
 pub fn build_report(json: &WeatherResponse, coordinates: [f32; 2]) -> Report {
-    unimplemented!()
+    let hourly = &json.hourly;
+    let mut hours = Vec::with_capacity(hourly.time.len());
+    for (i, t) in hourly.time.iter().enumerate() {
+        let temp = hourly.temperature_2m.get(i).copied().unwrap_or(0.0);
+        let code = hourly.weather_code.get(i).copied().unwrap_or(0);
+        let day = hourly.is_day.get(i).copied().unwrap_or(1) == 1;
+        hours.push(Hour {
+            t: t.clone(),
+            temp,
+            // Falls back to the real temperature, which is what "feels like"
+            // means when nothing is making it feel like anything else.
+            feels: at(&hourly.apparent_temperature, i, temp),
+            code,
+            sym: sky_symbol(code, day),
+            day,
+            pop: at(&hourly.precipitation_probability, i, 0.0).round() as i32,
+            mm: at(&hourly.precipitation, i, 0.0),
+            wind: at(&hourly.wind_speed_10m, i, 0.0),
+            gust: at(&hourly.wind_gusts_10m, i, 0.0),
+            dir: at(&hourly.wind_direction_10m, i, 0.0).round() as i32,
+            uv: at(&hourly.uv_index, i, 0.0),
+            humidity: at(&hourly.relative_humidity_2m, i, 0.0).round() as i32,
+        });
+    }
+
+    let mut days = Vec::new();
+    if let Some(daily) = &json.daily {
+        for (i, date) in daily.time.iter().enumerate() {
+            let high = at(&daily.temperature_2m_max, i, 0.0);
+            let low = at(&daily.temperature_2m_min, i, 0.0);
+            let code = daily.weather_code.get(i).copied().flatten().unwrap_or(0);
+            days.push(Day {
+                date: date.clone(),
+                code,
+                // A whole day is drawn as its daylight self: a week list of
+                // moons would say only that the nights are dark.
+                sym: sky_symbol(code, true),
+                high,
+                low,
+                feels_high: at(&daily.apparent_temperature_max, i, high),
+                feels_low: at(&daily.apparent_temperature_min, i, low),
+                mm: at(&daily.precipitation_sum, i, 0.0),
+                pop: at(&daily.precipitation_probability_max, i, 0.0).round() as i32,
+                wind: at(&daily.wind_speed_10m_max, i, 0.0),
+                gust: at(&daily.wind_gusts_10m_max, i, 0.0),
+                uv: at(&daily.uv_index_max, i, 0.0),
+                sunrise: daily.sunrise.get(i).cloned().flatten().unwrap_or_default(),
+                sunset: daily.sunset.get(i).cloned().flatten().unwrap_or_default(),
+            });
+        }
+    }
+
+    let now = json.current.as_ref().map(|current| {
+        let temp = current.temperature_2m.unwrap_or(0.0);
+        let code = current.weather_code.unwrap_or(0);
+        let day = current.is_day.unwrap_or(1) == 1;
+        Now {
+            temp,
+            feels: current.apparent_temperature.unwrap_or(temp),
+            code,
+            sym: sky_symbol(code, day),
+            day,
+            wind: current.wind_speed_10m.unwrap_or(0.0),
+            gust: current.wind_gusts_10m.unwrap_or(0.0),
+            dir: current.wind_direction_10m.unwrap_or(0.0).round() as i32,
+            humidity: current.relative_humidity_2m.unwrap_or(0.0).round() as i32,
+            mm: current.precipitation.unwrap_or(0.0),
+        }
+    });
+
+    Report {
+        place: nearest_city(coordinates[0], coordinates[1])
+            .map(|city| city.name.to_string())
+            .unwrap_or_default(),
+        latitude: coordinates[0],
+        longitude: coordinates[1],
+        timezone: json.timezone.clone(),
+        utc_offset_seconds: json.utc_offset_seconds,
+        // SPEC-QUESTION: today's `build_report` reads the system clock here; the core reads no clock (CORE-GEN-003), so it writes today's fallback 0 and the caller sets `fetched_at` from its own clock.
+        fetched_at: 0,
+        now,
+        hours,
+        days,
+    }
 }
 
 /// The symbol name of a WMO code (today's weather; core.md §14.6).
 pub fn sky_symbol(code: i32, is_day: bool) -> &'static str {
-    unimplemented!()
+    match code {
+        // --- Clear & clouds ---
+        0 => if is_day { "01d" } else { "01n" },
+        1 => if is_day { "02d" } else { "02n" },
+        2 => if is_day { "03d" } else { "03n" },
+        3 => "04",
+
+        // --- Fog ---
+        45 | 48 => "15",
+
+        // --- Drizzle ---
+        51 | 53 => "46",
+        55 => "09",
+        56 | 57 => "47",
+
+        // --- Rain ---
+        61 => "46",
+        63 => "09",
+        65 => "10",
+        66 => "47",
+        67 => "48",
+
+        // --- Snow ---
+        71 | 77 => "49",
+        73 => "13",
+        75 => "50",
+
+        // --- Rain showers ---
+        80 => if is_day { "40d" } else { "40n" },
+        81 => if is_day { "05d" } else { "05n" },
+        82 => if is_day { "41d" } else { "41n" },
+
+        // --- Snow showers ---
+        85 => if is_day { "44d" } else { "44n" },
+        86 => if is_day { "45d" } else { "45n" },
+
+        // --- Thunderstorms ---
+        95 => "22",
+        96 | 99 => "11",
+
+        // --- Fallback ---
+        _ => "04",
+    }
 }
 
 /// A city of the place-name table (today's weather; core.md §14.6).
@@ -179,8 +312,27 @@ pub struct City {
 }
 
 /// The nearest city of the table (today's weather; core.md §14.6).
+///
+/// Great-circle distance, not the flat difference of the coordinates (today's
+/// weather).
 pub fn nearest_city(latitude: f32, longitude: f32) -> Option<&'static City> {
-    unimplemented!()
+    let central_angle = |city: &City| {
+        let (lat_a, lat_b) = (latitude.to_radians(), city.latitude.to_radians());
+        let delta_lon = (city.longitude - longitude).to_radians();
+        // Clamped because rounding can push the cosine a hair outside the
+        // domain of `acos`, which would answer NaN and poison the comparison.
+        (lat_a.sin() * lat_b.sin() + lat_a.cos() * lat_b.cos() * delta_lon.cos())
+            .clamp(-1.0, 1.0)
+            .acos()
+    };
+
+    // Each angle once. `min_by` compares pairs, and a comparison that measures
+    // both sides afresh is two arc-cosines per step for numbers it already had.
+    CITIES
+        .iter()
+        .map(|city| (central_angle(city), city))
+        .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(_, city)| city)
 }
 
 /// The place-name table (today's weather; core.md §14.6).
@@ -517,3 +669,6 @@ pub static CITIES: &[City] = &[
     City { name: "Uppsala", latitude: 59.8586, longitude: 17.6389 },
     City { name: "Västerås", latitude: 59.6099, longitude: 16.5448 },
 ];
+
+#[cfg(test)]
+mod tests;

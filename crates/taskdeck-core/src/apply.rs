@@ -1351,7 +1351,13 @@ pub fn reset(target: &BoardData, current: &BoardData) -> Result<BoardData, CoreE
         }
     }
     b.marks = marks;
-    b.notes_rev = target.notes_rev.max(current.notes_rev).saturating_add(1);
+    // The revision cannot be raised past 2^53 − 1: `core/cap`, and nothing is
+    // returned (CORE-RULES-005).
+    let rev = target.notes_rev.max(current.notes_rev);
+    if rev >= MAX_U53 {
+        return Err(CoreError::code(CAP));
+    }
+    b.notes_rev = rev + 1;
     // Step 3.
     if b.rules < current.rules {
         upgrade_rules(&mut b, current.rules)?;
