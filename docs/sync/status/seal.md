@@ -60,8 +60,8 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S3 | Membership state machine and receipt checks: canonical bytes, every transition, classification, halts, Skip targets, races | `membership`, `receipt` | §13, §14 | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-rotation` | **done**, merged (TT-SAL/taskdeck#10, with the spec change) |
 | S4 | Sealed files; history records, the projection, backups and the backup signature | `file`, `backup` | §19, §21, §16.3 | `seal-file`, `seal-backup` | **done**, merged (TT-SAL/taskdeck#13, 2026-11-23 07:46 UTC; low findings only, four rulings carried into S5's brief) |
 | S5 | Blobs and snapshots (opening a snapshot uses S4's projection); six rulings carried over from S4's security passes and from the check of the second spec change | `blob`, `backup`, `prim` | §20 | `seal-blob` | **done** (TT-SAL/taskdeck#14; two high findings of its security passes fixed and checked by the lead) |
-| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **implemented and verified** (no finding; CI green on three systems with S6b); the first security pass ran in the third window, the second and the fix pass follow in the fourth (workflow run `wf_7055dfcc-29f`, resumed with `until = "all"`) |
-| S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | **implemented**, gate green in the lead's run (workflow run `wf_eb8420c9-0ef`); reviewed by S6's passes |
+| S6 | Pairing: code, keys, slots, transcript and SAS, bundle, both machines; the relay-in-the-middle test | `pair` | §17 | `seal-pairing`, `seal-code` | **done** (TT-SAL/taskdeck#16; one medium finding of its second security pass fixed) |
+| S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | **done** with S6 (TT-SAL/taskdeck#16); two of its points are completed by S7 (Q57, Q60) |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it, the skeleton's `allow` removed, the low findings that are a few lines | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | brief written (to revise with what S5 and S6 leave) |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | planned |
 
@@ -228,6 +228,27 @@ Notes behind the briefs (the lead's reading of the spec):
   written and read back with their content compared: none failed. No second agent pass ran on the
   fixes (the task shape has none after the security passes); task S7 adds a property test of the
   split stream and a check inside `write_backup` (below).
+
+## Task S6 and S6b: what happened
+
+- Implementer of S6 (0.69 million tokens): `pair.rs` whole, 1,700 lines: the code, the keys, the
+  slots, the transcript and the digits, the bundle with a strict parser, both machines, the join.
+  The gate target `pairing_mitm` (16 tests). Eighteen spec questions (Q60 to Q77).
+- S6b (0.27 million tokens), between S6's implementer and its verify pass: the three API points of
+  the second check of the spec change (Q57 to Q59).
+- Verify pass over both (0.31 million tokens): no finding. It recomputed the pairing and code
+  vectors independently and read every step of §17.6 and §17.9 against the code.
+- Security passes. The protocol lens: one low finding, a limit of the design (Q79), no code defect.
+  The parsing lens: **one medium finding**: the new device's machine took the typed code and the
+  typed digits by value and dropped them without erasing them, on every path (shown with an
+  allocator that scans freed heap blocks); and one low of the same kind in the existing device's
+  start. Both fixed by the one fix pass, with tests in the `memory` target that failed first.
+- The lead's item: tests for the two untested limits of E's check 5 (the code was right).
+- A lesson about the tool, which cost 0.21 million tokens: a call made inside `parallel()` has
+  another cache key than the same call made directly, so the resume that was to reuse the first
+  security pass started it again together with the second; the lead stopped both after two minutes
+  and changed the script (`firstAlone`). An agent that is started and stopped costs about 0.1
+  million tokens at once (it reads its brief and the code first).
 
 ## Decisions (with reasons)
 
@@ -564,6 +585,9 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | third check of the spec change, cut off by the account's limit at 13:05 UTC (void) | 1 | 0.14 M | 0.16 M | 0.16 M |
 | | **window total** (the account's limit was hit with this stage's agents at 3.28 M: the limit is shared with the other session and with both leads' own tokens, so the room for this stage's agents is nearer 3.2 M than 3.5 M) | | | | **3.28 M** |
 | from 2026-11-23 17:40 (the limit reset at 15:40 UTC) | third check of the spec change, run again | 1 | 0.18 M | 0.23 M | 0.23 M |
+| | two agents started by a resume that could not reuse the first security pass, stopped after two minutes | 2 | | 0.21 M | 0.21 M |
+| | S6, the second security pass and the fix pass | 2 | 0.37 M | 0.38 M | 0.38 M |
+| | **window so far** | | | | **0.82 M** |
 
 ## Low findings left as they are
 
@@ -625,6 +649,12 @@ output); the higher is booked. Limit: 3.5 million per window.
 - **S6, reviewers' notes, not findings.** A stack copy of the ticket key, the SAS integer and the
   check-bit string are temporaries the crate cannot wipe. §17.6 check 3 compares like with like
   (an id with ids, a signing key with signing keys), as §13.6 does.
+
+- **S6, security (the parsing lens), notes that are no findings.** The lookup of a typed character
+  stops at its match also for the pairing code (as for the sheet: on S7's list). Copies of the
+  ephemeral key passed by value and the AEAD's key schedule stay on the stack. A very long log in
+  `Entries` (the spec sets no limit for the join, and paging is the caller's) costs one membership
+  copy per entry, as everywhere `classify` runs.
 
 ## Open questions for the owner
 
