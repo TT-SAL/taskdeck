@@ -39,7 +39,9 @@ You work on `crates/taskdeck-core/`, the pure board of the TaskDeck sync design.
 ## The spec
 
 - Do not read `core.md` in full. Read the line ranges your brief names (`Read` with `offset`/`limit`), and
-  find a clause with `grep -n 'CORE-XXX' /home/user/taskdeck/target/work/core-index.txt` (one line per clause).
+  find a clause with `grep -n 'CORE-XXX' docs/sync/spec/core.md`. Read the spec in your own copy (W or your
+  frozen copy). Line ranges in a brief can be off by up to twenty lines after a spec change: go by the
+  section heading (`grep -n '^## \|^### ' docs/sync/spec/core.md`).
 - Names and signatures are those of core.md §20 and of the skeleton files. Change none. Add derives,
   private helpers and `pub(crate)` items freely.
 - Where the spec is wrong, silent or can be read two ways on something you need: take the reading closest

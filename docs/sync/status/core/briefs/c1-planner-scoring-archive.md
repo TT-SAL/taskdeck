@@ -40,6 +40,9 @@ Not ported: UI geometry and drags (`TimelineGeometry`, `Drag`, `preview`, `block
    snapshot fixtures compare `ranked` with today's output, so port the arithmetic operation by operation,
    in the same order and with the same types. Do not "tidy" it.
 6. Keep today's doc comments where they explain the why; drop references to code that is not ported.
+7. A local time in a fold resolves to the earlier instant (core.md §5.4); today's code under chrono 0.4.45
+   took the later. Where a ported test expects the later instant of a fold, expect the earlier and list the
+   test under `for_lead`. This is the one case where an expected value may change.
 
 Everything else is copied: same names, same constants, same strings, same arithmetic. If a function cannot
 be ported without a decision the spec does not make, list it under `for_lead` and port the closest reading.
