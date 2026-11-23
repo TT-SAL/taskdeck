@@ -299,7 +299,9 @@ proptest::proptest! {
 
     // `inflate_raw` on random bytes and on real streams mutated (a byte
     // changed, the stream cut or extended), with any cap: it returns, never
-    // panics, and what it returns is never longer than the cap.
+    // panics, and what it returns is never longer than the cap. A valid
+    // stream inflates to its data under a cap of the data's length, and
+    // fails (no output cut at the cap) under a cap one byte shorter.
     // spec: SEAL-GEN-011
     // spec: SEAL-BLOB-003
     #[test]
@@ -326,5 +328,8 @@ proptest::proptest! {
         let whole = deflate_raw(&data).unwrap();
         let back = inflate_raw(&whole, data.len());
         proptest::prop_assert!(back.as_deref().is_some_and(|v| v[..] == data[..]));
+        if let Some(short) = data.len().checked_sub(1) {
+            proptest::prop_assert!(inflate_raw(&whole, short).is_none());
+        }
     }
 }

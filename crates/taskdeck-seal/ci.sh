@@ -19,7 +19,9 @@
 #   6. on Linux only: the budget job (SYNC_PLAN.md §3.3, §6.3): 256 entries
 #      verified and opened within 100 ms, the median of five runs, in a
 #      release build, and within 25% of `budget-baseline.txt`
-#      (`examples/budget.rs`).
+#      (`examples/budget.rs`). The baseline is what GitHub's Linux runner
+#      measured, so the 25% rule is judged there (`--judge-baseline`); a run
+#      on another machine prints the comparison and judges the limit.
 set -uo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)" || exit 2
@@ -88,7 +90,11 @@ if [[ "$os" == linux ]]; then
     step "test-entropy marker (SEAL-GEN-014)" marker_check
     step "vectors format" bash scripts/gate-lib.sh vectors docs/sync/vectors
     step "fuzz targets build" cargo check --locked --manifest-path crates/taskdeck-seal/fuzz/Cargo.toml
-    step "budget" cargo run --release --locked -p taskdeck-seal --example budget
+    if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+        step "budget" cargo run --release --locked -p taskdeck-seal --example budget -- --judge-baseline
+    else
+        step "budget" cargo run --release --locked -p taskdeck-seal --example budget
+    fi
 else
     echo "==> seal ci: android targets, marker, vectors format, fuzz targets and budget: Linux only, skipped on $os"
 fi

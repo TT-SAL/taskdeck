@@ -55,8 +55,9 @@ pub(crate) fn flip_all(s: &Sim, f: &[u8], o: &Opts) -> usize {
 
 // Every byte of a `cmd`, a `beat`, a control entry that revokes and
 // rotates, and a `Fence`, flipped two ways: never `Accept`; the state as
-// §13.5 allows for the class.
-// spec: SEAL-RCPT-002
+// §13.5 allows for the class. (That steps 1 to 4 give `Skip`, SEAL-RCPT-002,
+// is proven by the unit tests of `src/receipt`: this target accepts `Refuse`
+// as well.)
 // spec: SEAL-MEM-008
 #[test]
 fn flipped_frames_are_never_accepted() {
@@ -76,7 +77,6 @@ fn flipped_frames_are_never_accepted() {
 
 // Every byte of the Genesis frame, flipped, at seq 1 with its anchor: never
 // `Accept`, and the state stays the empty one.
-// spec: SEAL-RCPT-002
 // spec: SEAL-MEM-004
 #[test]
 fn flipped_genesis_is_never_accepted() {

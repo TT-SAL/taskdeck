@@ -129,8 +129,10 @@ pub fn frames() -> &'static Frames {
         let skip = [CtlItem::Skip(SkipItem { seq: 1, frame_hash: FrameHash([2; 32]) })];
         let ctl = ctl_payload(&skip, &s.signer(Who::D(0)), &s.board, 9, &EntryId([5; 16]), s.now).unwrap();
         let beat = Beat { rules: vec![1], envelopes: vec![(1, 1)], hash_versions: vec![1], state: None, acks: vec![] };
+        // §11.5: `seq` is a positive multiple of 64 (the payload builder
+        // refuses anything else).
         let snap = SnapAnnounce {
-            seq: 0,
+            seq: 64,
             hash: [0x55; 32],
             hash_version: 1,
             blob: BlobId([0x10; 16]),
@@ -177,7 +179,9 @@ pub struct Wrap {
 pub fn wrap() -> &'static Wrap {
     static F: OnceLock<Wrap> = OnceLock::new();
     F.get_or_init(|| {
-        let device = DeviceKeys::generate(&mut fixed(64)).unwrap();
+        // `generate` draws 80 bytes: the id (16), the signing key (32) and
+        // the HPKE key material (32).
+        let device = DeviceKeys::generate(&mut fixed(80)).unwrap();
         let p = device.public();
         let root = EpochRoot::from_bytes([9; 32]);
         let epoch = 5;

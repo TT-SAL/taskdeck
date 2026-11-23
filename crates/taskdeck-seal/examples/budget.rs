@@ -12,9 +12,12 @@
 //!
 //!   seal budget: median <n> us, limit 100000 us, baseline <b> us
 //!
-//! and exits 1 when the median is over the limit, or more than 25% over the
-//! baseline in `budget-baseline.txt` (one integer, microseconds; 0 means no
-//! baseline yet). It also prints, without judging them, the same measurement
+//! and exits 1 when the median is over the limit, or, with `--judge-baseline`,
+//! more than 25% over the baseline in `budget-baseline.txt` (one integer,
+//! microseconds; 0 means no baseline yet). The baseline is the number the CI
+//! job measured on its Linux runner, so `ci.sh` passes the flag there and
+//! nowhere else: on another machine the comparison is printed and only the
+//! limit is judged. It also prints, without judging them, the same measurement
 //! on a membership with 100,000 control entries (the cost of the copy of the
 //! state `classify` returns, a low finding of task S4) and the time to read a
 //! backup whose history holds 2,000 records (the projection of §21.6 is
@@ -236,6 +239,7 @@ fn main() {
     let (before, seq0, chain0, frames) = log.commands();
     let median = measure(&log, &before, seq0, chain0, &frames);
     let base = baseline();
+    let judge_baseline = std::env::args().any(|a| a == "--judge-baseline");
     println!("seal budget: median {median} us, limit {LIMIT_US} us, baseline {base} us");
 
     // Not judged: the history read back at 2,000 records, and the same
@@ -260,8 +264,12 @@ fn main() {
         failed = true;
     }
     if base > 0 && u128::from(median) * 100 > u128::from(base) * 125 {
-        println!("seal budget: FAILED: the median is more than 25% over the baseline");
-        failed = true;
+        if judge_baseline {
+            println!("seal budget: FAILED: the median is more than 25% over the baseline");
+            failed = true;
+        } else {
+            println!("seal budget: the median is more than 25% over the baseline (judged only with --judge-baseline, on the CI runner the baseline comes from)");
+        }
     }
     if failed {
         std::process::exit(1);
