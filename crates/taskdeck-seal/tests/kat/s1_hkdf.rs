@@ -6,9 +6,6 @@ use sha2::Sha256;
 
 // HKDF as seal.md §2 defines it, which the recovery keys (§6.1) and the
 // per-epoch keys (§6.5) are derived with.
-// spec: SEAL-KEY-002
-// spec: SEAL-KEY-003
-// spec: SEAL-KEY-012
 #[test]
 fn rfc5869_cases_1_to_3() {
     let doc = read_json("tests/kat/data/rfc5869.json");

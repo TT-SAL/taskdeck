@@ -43,8 +43,6 @@ fn case() -> serde_json::Value {
 // hpke serialises an X25519 private key clamped (RFC 9180 §7.1.2), while
 // the vectors print the unclamped scalar, so the clamped form is compared,
 // and the vector's own bytes must give the same public key.
-// spec: SEAL-KEY-002
-// spec: SEAL-WRAP-004
 #[test]
 fn derive_key_pair() {
     let c = case();
@@ -64,8 +62,6 @@ fn derive_key_pair() {
 // The sender, with the ephemeral key from 32 bytes ikmE: enc, every
 // encryption of the context in order, every export; the single-shot seal
 // that wrap_root calls gives the first encryption.
-// spec: SEAL-WRAP-001
-// spec: SEAL-WRAP-004
 #[test]
 fn sender_key_schedule_and_encryptions() {
     let c = case();
@@ -101,7 +97,6 @@ fn sender_key_schedule_and_encryptions() {
 
 // The receiver opens every encryption in order, the single-shot open that
 // unwrap_root calls opens the first, and a flipped byte does not open.
-// spec: SEAL-WRAP-002
 #[test]
 fn receiver_opens() {
     let c = case();

@@ -65,6 +65,11 @@
       "typed": "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFH5T9E"
     },
     {
+      "error": "seal/sheet_padding",
+      "name": "padding bits not zero and check character wrong",
+      "typed": "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFH5T90"
+    },
+    {
       "error": "seal/sheet_check",
       "name": "check character wrong",
       "typed": "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG5T90"

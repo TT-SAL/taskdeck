@@ -5,9 +5,19 @@
 use crate::common::hex;
 use crate::{check_or_write, count};
 use serde_json::{Value, json};
-use taskdeck_seal::{
-    BoardId, DeviceKeys, EpochRoot, FixedEntropy, KeyKind, RecoverySeed, board_id, derive_epoch_key,
-};
+use taskdeck_seal::{BoardId, DeviceKeys, EpochRoot, FixedEntropy, RecoverySeed, board_id};
+
+/// `K_kind,e = HKDF(salt = board_id, ikm = R_e, info = ctx(kind) ‖ u32 e, 32)`
+/// (seal.md §6.5), computed here with the `hkdf` crate from the root's bytes,
+/// independently of `derive_epoch_key`: the crate has no public function that
+/// returns a derived key's bytes. `src/keys/tests.rs` compares every `K` of
+/// the committed file with what `derive_epoch_key` gives.
+fn epoch_key(root: &EpochRoot, board: &[u8; 16], e: u32, use_: &str) -> String {
+    let info = [format!("taskdeck/v1/{use_}\0").as_bytes(), &e.to_be_bytes()].concat();
+    let mut okm = [0u8; 32];
+    hkdf::Hkdf::<sha2::Sha256>::new(Some(board), &root.to_bytes()[..]).expand(&info, &mut okm).unwrap();
+    hex(&okm)
+}
 
 fn recovery(name: &str, seed: Vec<u8>, salt: [u8; 16]) -> Value {
     let s = RecoverySeed::generate(&mut FixedEntropy::new(seed.clone())).unwrap();
@@ -28,16 +38,15 @@ fn recovery(name: &str, seed: Vec<u8>, salt: [u8; 16]) -> Value {
 fn epoch(name: &str, board: [u8; 16], e: u32, root: [u8; 32]) -> Value {
     let b = BoardId(board);
     let r = EpochRoot::from_bytes(root);
-    let k = |kind| hex(&*derive_epoch_key(&r, &b, e, kind).expose_for_vectors());
     json!({
         "name": name,
         "board_id": hex(&board),
         "epoch": e,
         "root": hex(&root),
         "commitment": hex(&r.commitment(&b, e)),
-        "k_entry": k(KeyKind::Entry),
-        "k_snap": k(KeyKind::Snap),
-        "k_blob": k(KeyKind::Blob),
+        "k_entry": epoch_key(&r, &board, e, "key-entry"),
+        "k_snap": epoch_key(&r, &board, e, "key-snap"),
+        "k_blob": epoch_key(&r, &board, e, "key-blob"),
     })
 }
 

@@ -13,7 +13,6 @@ fn strict(pk: &[u8], msg: &[u8], sig: &[u8]) -> bool {
 
 // RFC 8032 §7.1: the public key and signature of each secret key, and
 // strict verification of each signature (and refusal of a flipped one).
-// spec: SEAL-GEN-010
 #[test]
 fn rfc8032_section_7_1() {
     let doc = read_json("tests/kat/data/rfc8032.json");
@@ -56,7 +55,6 @@ fn expected(t: &serde_json::Value) -> bool {
 
 // Every case of Wycheproof ed25519_test.json gives its expected result under
 // strict verification: non-canonical S, small-order keys and small-order R fail.
-// spec: SEAL-GEN-010
 #[test]
 fn wycheproof_ed25519() {
     let doc = read_json("tests/kat/data/ed25519_test.json");

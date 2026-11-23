@@ -306,17 +306,6 @@ impl SymKey {
     pub(crate) fn as_bytes(&self) -> &[u8; 32] {
         &self.key
     }
-
-    /// The key bytes, for the published vectors only (`seal-kdf.json`).
-    // SPEC-QUESTION: §26 gives `SymKey` no way to show its bytes, yet §24's
-    // `seal-kdf.json` publishes `K_entry,e`, `K_snap,e` and `K_blob,e`, and the
-    // vectors are built through the public API. This accessor exists only
-    // with the feature `test-entropy`, which release builds never enable.
-    #[cfg(feature = "test-entropy")]
-    #[doc(hidden)]
-    pub fn expose_for_vectors(&self) -> Zeroizing<[u8; 32]> {
-        Zeroizing::new(self.key)
-    }
 }
 
 /// `K_entry,e`, `K_snap,e` or `K_blob,e` (seal.md §6.5, SEAL-KEY-012, §26):

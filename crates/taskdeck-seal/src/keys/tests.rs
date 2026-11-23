@@ -106,6 +106,39 @@ fn commitment_and_epoch_keys() {
     assert_eq!(*root.to_bytes(), r);
 }
 
+fn unhex(s: &str) -> Vec<u8> {
+    assert!(s.len().is_multiple_of(2), "{s}");
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+}
+
+// Every K of the committed docs/sync/vectors/seal-kdf.json, which the vectors
+// target computes with the hkdf crate, is what derive_epoch_key gives, so
+// the crate and the published file cannot drift apart.
+// spec: SEAL-KEY-012
+#[test]
+fn published_epoch_keys_match_derive_epoch_key() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/sync/vectors/seal-kdf.json");
+    let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut seen = 0;
+    for c in doc["cases"].as_array().unwrap() {
+        let Some(k_entry) = c.get("k_entry") else { continue };
+        let field = |k: &str| c[k].as_str().unwrap_or_else(|| panic!("{k} in {c}"));
+        let board = BoardId(unhex(field("board_id")).try_into().unwrap());
+        let root = EpochRoot::from_bytes(unhex(field("root")).try_into().unwrap());
+        let e = u32::try_from(c["epoch"].as_u64().unwrap()).unwrap();
+        for (kind, want) in [
+            (KeyKind::Entry, k_entry.as_str().unwrap()),
+            (KeyKind::Snap, field("k_snap")),
+            (KeyKind::Blob, field("k_blob")),
+        ] {
+            assert_eq!(derive_epoch_key(&root, &board, e, kind).as_bytes().to_vec(), unhex(want), "{kind:?} {c}");
+        }
+        assert_eq!(root.commitment(&board, e).to_vec(), unhex(field("commitment")), "{c}");
+        seen += 1;
+    }
+    assert!(seen >= 4, "the file has {seen} epoch cases");
+}
+
 /// The sheet of a seed, built from §18.1's text alone.
 fn sheet_by_hand(s: &[u8; 32]) -> String {
     const A: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -166,8 +199,13 @@ fn reading_a_sheet_follows_the_four_steps() {
     let v = base32::ALPHABET.iter().position(|&a| a == padded[51]).unwrap();
     padded[51] = base32::ALPHABET[v | 1];
     let padded = String::from_utf8(padded).unwrap();
+    // Only a padding bit is set: the 56th character, the last of the check, is good.
     assert_eq!(err(&padded), Some(SealError::SheetPadding));
-    // A padding error wins over a check error: the check of `padded` is wrong too.
+    // A padding error wins over a check error: padding bits and the last
+    // check character both wrong (step 3 comes before step 4).
+    let mut both: Vec<u8> = padded.into_bytes();
+    both[55] = if both[55] == b'0' { b'1' } else { b'0' };
+    assert_eq!(err(&String::from_utf8(both).unwrap()), Some(SealError::SheetPadding));
     // Step 4: the check.
     let mut bad: Vec<u8> = good.clone().into_bytes();
     bad[55] = if bad[55] == b'0' { b'1' } else { b'0' };

@@ -45,7 +45,6 @@ fn every_flipped_byte_fails() {
 
 // The right wrap under another board, epoch, commitment or recipient.
 // spec: SEAL-WRAP-002
-// spec: SEAL-KEY-013
 #[test]
 fn the_right_wrap_in_the_wrong_place_fails() {
     let f = fixture();

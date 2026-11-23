@@ -51,7 +51,11 @@ fn seal_sheet() {
     let alphabet = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     let idx = alphabet.iter().position(|&a| a == pad[51]).unwrap();
     pad[51] = alphabet[idx | 1];
-    cases.push(typed("padding bits not zero", &String::from_utf8(pad).unwrap()));
+    cases.push(typed("padding bits not zero", &String::from_utf8(pad.clone()).unwrap()));
+    // Step 3 comes before step 4: padding bits and the last check character
+    // both wrong is a padding error.
+    pad[55] = if pad[55] == b'0' { b'1' } else { b'0' };
+    cases.push(typed("padding bits not zero and check character wrong", &String::from_utf8(pad).unwrap()));
     let mut check: Vec<u8> = plain.clone().into_bytes();
     check[55] = if check[55] == b'0' { b'1' } else { b'0' };
     cases.push(typed("check character wrong", &String::from_utf8(check).unwrap()));
