@@ -1361,6 +1361,16 @@ One file per topic (for example `create.json`, `blocks.json`, `archive.json`, `n
 
 `code` is present for `refused` and `parse_error`; `notices`, `moved`, `skipped` and `restored_as` when they apply; `board_sha256` always (unchanged for a refusal). Rules version 1's golden logs, which CORE-RULES-003 requires, cover: every check of every op of §9 with a refused case; every row of §10.6; every notice kind and group; skips for both reasons; and the boundary values 200 and 201 scalars, 14, 15, 1,440 and 1,441 minutes, levels 4 and 5 (severity) and 3 and 4 (horizon), notes of 20,000 and 20,001 scalars, ids at and above the mark, `device_no` 8191, the id 2^53 − 1, instants at both ends of the range, every cap at its value and one above, `based_on` equal to a stamp's seq and one below it, and a `complete` whose `ctx.at` is less than a day before the end of the instant range (the saturating clamp). Golden logs contain no zone, so they hold under any `TZ` (V2-4).
 
+**Generated start boards.** A case that needs a start board too large to print (the caps of §17: 200,000 archive rows are about 22 MB of JSON) gives `start_gen` in place of `start_text`, and `end_sha256`, lowercase hex of SHA-256 of the end board's canonical bytes, in place of `end_text`. `start_gen` is `{"blocks": B, "items": I, "rows": R}`, each an integer from 0, an absent member being 0, and names this board, which the test builds:
+
+- `rules` 1;
+- `I` items, item `i` (1 ≤ `i` ≤ `I`) being `{"created":"1970-01-01T00:00:00.000000000Z","id":i,"kind":"task","name":"t","stamps":{"estimate":[1,0],"levels":[1,0],"name":[1,0],"repeat":[1,0],"time":[1,0]}}`;
+- `B` blocks with sids 1 to `B`, block `s` in item `((s − 1) div 1000) + 1` (so `B ≤ 1000 × I`), each `{"minutes":15,"sid":s,"stamp":[1,0],"start":"1970-01-01T00:00:00.000000000Z"}`;
+- `R` archive rows, row `j` (1 ≤ `j` ≤ `R`) being `{"archived_at":t,"created":"1970-01-01T00:00:00.000000000Z","id":I+j,"kind":"task","name":"t"}` with `t` the instant `j − 1` seconds after 1970-01-01T00:00:00Z;
+- unless `I`, `B` and `R` are all 0, the one mark `{"block":B,"device_no":0,"item":I+R}`.
+
+The board passes `check` (§6.12) whenever `I ≤ 10,000`, `B ≤ 1000 × I`, `B ≤ 50,000` and `R ≤ 200,000`.
+
 ### 18.4 Transcripts
 
 Transcripts are `foundation`'s recorded sequences (SYNC_PLAN.md §6.1 item 5): a starting legacy folder, a pinned clock and `TZ`, and per step today's command JSON, today's reply and today's `BoardState` after it. The core replays them as §13.5 states, starting from `import` of the starting folder, with an **id map** `M` (initially the identity; renumberings of the import are added): before compiling a step, every id in the recorded command is translated through `M`, and a recorded `session` index `i` becomes the sid of the `i`-th block of that item in ascending sid; after compiling, when the recorded reply has an `id` `r` and the compiled reply an `id` `c`, `M[r] = c`. The recorded and replayed states are compared through this projection, with ids translated through `M`:
@@ -1379,6 +1389,15 @@ For each fixture board, `foundation` records the JSON today's `phone::snapshot` 
 ### 18.6 Fuzz and property tests
 
 Fuzz targets under `crates/taskdeck-core/fuzz/` (SYNC_PLAN.md §6.2 item 9): `command_apply` (bytes, through `parse_command`, applied to a fixture board), `board_bytes`, `intent_compile`, `ics_parse`, `snapshot`. Property tests (proptest, a dev-dependency): **determinism** — random command sequences from compiled random intents; a second replica built from the canonical bytes at a random point plus the rest of the log; under two `TZ` values for the compile steps' zones and the process; equal canonical bytes and equal notices at the end; **rebase** — commands compiled on a pending view, applied over a confirmed state that other devices' commands moved on, never panic, and give the same results on two replicas.
+
+### 18.7 A fixture folder the import refuses
+
+`import` refuses two of `foundation`'s boards, as §15.3 requires: `dst-edges` with `instant_range` (two items and one archive row hold an instant before 1970-01-01T00:00:00Z, written as 1970-01-01 in a zone east of Greenwich) and `id-limits` with `id_range` (ids with a high part above 8191 or a low part of 0). The tests of §18.4 and §18.5 treat such a folder as follows.
+
+- **`instant_range`.** The test removes from `read_at_startup.json` and `archived.jsonl` exactly the items and rows that hold an instant outside §5.1's range, checks that their ids are the ids the failure lists, and imports the repaired folder. A transcript is then replayed and compared as §18.4 states, with the removed records left out of every recorded state; a recorded command that names a removed item's id or a removed row's key is classified changed (§13.5). A snapshot is compared as §18.5 states after every object that carries a removed item's `id` is deleted from the recorded `items`, `tray.due`, `tray.later` and `days[].entries`, every such id from `ranked`, and every removed row from `done`. A snapshot in which a removed record places an entry or a ghost on one of its days is not compared: that day's `summary` counts it.
+- **Any other failure.** The folder's transcript and snapshots are not replayed. The test asserts the failure kind and the ids the failure lists: for `id-limits`, `id_range` with exactly the folder's ids that §15.3 step 9.4 names.
+
+The import's own vectors (§18.2, `import.json`) record both refusals.
 
 ## 19. Interfaces
 
