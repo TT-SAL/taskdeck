@@ -519,12 +519,19 @@ export function gateAnswer(r, params, cred, config) {
   return null;
 }
 
-// The configuration of §17 from its text values: a Config, or null when a value is invalid (step 0).
-export function makeConfig({ tokenKey, createSecret, origin, push }) {
-  if (typeof tokenKey !== 'string' || !/^[0-9a-f]{64}$/.test(tokenKey)) return null;
+// The first invalid value of a configuration (§17), by its field name, or null.
+export function configError({ tokenKey, createSecret, origin }) {
+  if (typeof tokenKey !== 'string' || !/^[0-9a-f]{64}$/.test(tokenKey)) return 'tokenKey';
   const hasCreate = createSecret !== undefined && createSecret !== null;
-  if (hasCreate && (typeof createSecret !== 'string' || !/^[0-9a-f]{64}$/.test(createSecret))) return null;
-  if (!validOrigin(origin)) return null;
+  if (hasCreate && (typeof createSecret !== 'string' || !/^[0-9a-f]{64}$/.test(createSecret))) return 'createSecret';
+  return validOrigin(origin) ? null : 'origin';
+}
+
+// The configuration of §17 from its text values, decoded once (RELAY-GEN-006):
+// a Config, or null when a value is invalid (step 0 of §6.2).
+export function makeConfig({ tokenKey, createSecret, origin, push }) {
+  if (configError({ tokenKey, createSecret, origin })) return null;
+  const hasCreate = createSecret !== undefined && createSecret !== null;
   return Object.freeze({ tokenKey: fromHex(tokenKey), createSecret: hasCreate ? fromHex(createSecret) : null, origin, push: push === true });
 }
 

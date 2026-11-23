@@ -1,0 +1,20 @@
+# The Worker's configuration (docs/sync/spec/relay.md §17.1).
+# TOKEN_KEY and CREATE_SECRET are secrets and RELAY_ORIGIN is a variable; none of
+# them, and no Worker name, is written here: deploy.sh takes them from the owner.
+name = "taskdeck-relay"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = false
+
+[[durable_objects.bindings]]
+name = "BOARD"
+class_name = "Board"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Board"]

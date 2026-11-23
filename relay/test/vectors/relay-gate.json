@@ -1289,30 +1289,6 @@
       },
       "object_called": false
      }
-    },
-    {
-     "request": {
-      "route": "create",
-      "board": "main",
-      "cred": {
-       "create": true
-      },
-      "slow": {
-       "declare": 100000000000000000000,
-       "send": 0
-      },
-      "headers": {
-       "Content-Length": "99999999999999999999"
-      }
-     },
-     "expect": {
-      "status": 413,
-      "x_td_relay": "gate",
-      "json": {
-       "error": "relay/too_large"
-      },
-      "object_called": false
-     }
     }
    ]
   },
@@ -1562,6 +1538,56 @@
      "expect": {
       "status": 200,
       "x_td_relay": "object"
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "headers": {
+       "Content-Length": "99999999999999999999"
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 413,
+      "x_td_relay": "gate",
+      "json": {
+       "error": "relay/too_large"
+      },
+      "object_called": false
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "headers": {
+       "Content-Length": "9007199254740993"
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 413,
+      "x_td_relay": "gate",
+      "json": {
+       "error": "relay/too_large"
+      },
+      "object_called": false
      }
     },
     {

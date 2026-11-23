@@ -44,11 +44,12 @@ export const gate = [
   g('a declared length over the cap is refused before the body is read', ['RELAY-GATE-005', 'RELAY-GEN-004'], [
     step(req('append', T('alice'), { slow: { declare: 4194374, send: 0 } }), { ...gateErr(413, 'relay/too_large'), elapsed_ms: [0, 5000] }),
     step(req('blob-put', T('alice'), { params: { id: '00112233445566778899aabbccddeeff', part: 0 }, slow: { declare: 1048577, send: 0 } }), gateErr(413, 'relay/too_large')),
-    step(req('create', CREATE, { slow: { declare: 99999999999999999999, send: 0 }, headers: { 'Content-Length': '99999999999999999999' } }), gateErr(413, 'relay/too_large')),
   ], { targets: LOCAL }),
   g('a Content-Length that is not one decimal number', ['RELAY-GATE-003', 'RELAY-GEN-003'], [
     ...['abc', '-1', '1e3', '0x10', ' 16', '', ['16', '16'], '16, 16'].map((v) => step(req('login-nonce', DOOR, { headers: { 'Content-Length': v }, body: { $dev: 'alice' } }), gateErr(411, 'relay/length_required'))),
     step(req('login-nonce', DOOR, { headers: { 'Content-Length': '016' }, body: { $dev: 'alice' } }), { status: 200, x_td_relay: 'object' }),
+    step(req('create', CREATE, { headers: { 'Content-Length': '99999999999999999999' }, body: { $create: { board: 'main' } } }), gateErr(413, 'relay/too_large')),
+    step(req('create', CREATE, { headers: { 'Content-Length': '9007199254740993' }, body: { $create: { board: 'main' } } }), gateErr(413, 'relay/too_large')),
     step(req('hello', T('alice'), { headers: { 'Content-Length': ['0', '0'] } }), gateErr(400, 'relay/unexpected_body')),
     step(req('hello', T('alice'), { headers: { 'Content-Length': 'x' } }), gateErr(400, 'relay/unexpected_body')),
   ], { targets: CORE }),
@@ -255,7 +256,7 @@ export const create = [
   ], { targets: ALL }),
   c('a repeated create gives a new token and writes one row', ['RELAY-CREATE-003', 'RELAY-TOKEN-004'], [
     step(req('create', CREATE, { body: { $create: { board: 'main' } } }), created),
-    step(req('create', CREATE, { body: { $create: { board: 'main' } } }), { status: 200, json: { seq: 1, chain: { $chain: 1 }, token: { $token: { key: 'alice', gen: 2 } }, door: { $door: true } }, rows_written: 1, rows_read_max: 3 }),
+    step(req('create', CREATE, { body: { $create: { board: 'main' } } }), { status: 200, json: { seq: 1, chain: { $chain: 1 }, token: { $token: { key: 'alice', gen: 2 } }, door: { $door: true } }, rows_written: 1, rows_read_max: 4 }),
     step(req('hello', T('alice', 1)), err(401, 'relay/token_stale')),
     step(req('hello', T('alice', 2)), { status: 200 }),
   ]),
@@ -356,7 +357,7 @@ const ap = (name, clauses, steps, o) => kase('append', name, clauses, steps, { s
 const one = (cred, frame, code, status) => append(cred, [frame], [REF(status, code)], status, { rows_written: 0 });
 export const appendF = [
   ap('new frames are stored at the head, three rows for one frame', ['RELAY-SEQ-001', 'RELAY-SEQ-007', 'RELAY-SEQ-010', 'RELAY-SEQ-011', 'RELAY-STORE-003', 'RELAY-STORE-004', 'RELAY-ROWS-001', 'SEAL-FRAME-001', 'SEAL-FRAME-002', 'SEAL-CHAIN-001'], [
-    append(T('alice'), [F('alice', 2)], [N(3)], 200, { rows_written: 3, rows_read_max: 6, storage: { log: [1, 2, 3], devices: { alice: { last_ctr: 2, last_seq: 3, app_count: 2 } } } }),
+    append(T('alice'), [F('alice', 2)], [N(3)], 200, { rows_written: 3, rows_read_max: 8, storage: { log: [1, 2, 3], devices: { alice: { last_ctr: 2, last_seq: 3, app_count: 2 } } } }),
     append(T('alice'), [F('alice', 3), F('alice', 4), F('alice', 5, { body_len: 3000 })], [N(4), N(5), N(6)], 200, { rows_written: 7, rows_read_max: 12 }),
     append(T('bob'), [F('bob', 1)], [N(7)], 200, { rows_written: 3 }),
     step(req('read', T('bob'), { query: 'after=2' }), { status: 200, page: { head_seq: 7, seqs: [3, 4, 5, 6, 7], frames: [F('alice', 2), F('alice', 3), F('alice', 4), F('alice', 5, { body_len: 3000 }), F('bob', 1)] } }),

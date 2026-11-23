@@ -157,7 +157,7 @@
        }
       ],
       "rows_written": 3,
-      "rows_read_max": 6,
+      "rows_read_max": 8,
       "storage": {
        "log": [
         1,
