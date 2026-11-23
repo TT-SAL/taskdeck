@@ -383,6 +383,33 @@ Part 1 has now been checked twice and is closed. Part 2's corrections and the ru
 §17.6 to §17.11, six rows of §22, §25; SEAL-PAIR-010 gains `engine` as an owner (the engine seals the
 `DeviceAdded`). The row of `CHANGES.md` is extended.
 
+**The third check** (one agent; its first run was cut off by the account's usage limit at 13:05 UTC
+and counts for nothing, the second ran at 15:53 UTC: 0.16 and 0.23 million tokens) covered the
+corrections after the second check and part 3: one high, seven medium and six low points, applied at
+16:10 UTC.
+
+- **High: with Q57 as first written, nothing checked that a snapshot's board gives its signed state
+  hash** when the engine rebootstraps or adopts (`engine.md` §19.9, §22.3: both rely on the sealer).
+  The lead's first ruling (Q50) had the crate recompute the hash but compare it with nothing signed;
+  the second (Q57) compared with the signed value but dropped the recomputation, to leave that to
+  the engine, whose spec does not do it in those two places. **Q57 as completed: `open_snapshot`
+  does both.** The recomputation is on S7's list (task S6b built the comparison).
+- A repeated delivery of a slot would have aborted an honest pairing (a runtime that polls and
+  listens can hand one over twice): **Q60 as completed, a machine ignores a slot identical to one it
+  has accepted.** On S7's list.
+- The pairing text and its neighbours: `RegisterFailed`'s own code and E's `DeleteTicket` in the
+  out-of-place rule; the join can end on a `Frames` event; SEAL-KEY-013 states its exception for a
+  joining device; SEAL-PAIR-008 and SEAL-PAIR-013 gain `device` as an owner for the runtime's half;
+  ENG-BOOT-002 lists `hash_version`; §17.11's list of codes.
+- **Left open for `device` and `engine` (a new row of `CHANGES.md`):** E's machine is `Done` at the
+  `register` answer, so a failure the engine reports afterwards must be shown by the device itself,
+  or the user sees success on both devices (this is what bounds Q79); `device.md` §18.3's tables
+  predate §17.10 (one `Entries` event, `FetchFrames`, `DeleteTicket`); who revokes a device whose
+  `DeviceAdded` is sequenced when E aborts after `Registered`.
+
+Because this check found a high point, the corrected parts 2 and 3 are checked once more, before the
+exit (one agent).
+
 **E2, left open for `engine` and `device` (a row of `CHANGES.md`):** the check found the same kind of
 defect as E1 for an own `Fence`: the relay fences itself in the same transaction that appends the
 frame, so a `Fence` that loses a rotation race leaves the old relay fenced with no accepted `Fence`
@@ -443,7 +470,7 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q46 | §21.6 projection, SEAL-MEM-004 | the projection accepted a first record whose `ctr` is not 1 | refused (`seal/backup_history`): the projection accepts no history a log cannot produce. Code in S5's brief |
 | Q47 | §21.5, §21.6 | nothing in a file says at which seq its membership was taken, so a device revoked at seq `k` can still write a file that reads as a backup at any head with its history cut before `k` (S4 security, reproduced) | by design, and no check inside a file can change it: an authentic backup written before the revocation must stay readable. A backup proves that its writer was a current device at the end of its history and nothing later; its `seq` and date are the writer's claims. Spec change 2 says so in §21.6; `recovery` shows the writer, the date and the last control entry and trusts no file for its seq or date alone; what it compares with a relay copy is left open for `device` and `recovery` (`CHANGES.md`) |
 | Q50 | §20.5 step 7, §26 | `open_snapshot` receives no expected state hash | *withdrawn after the second check of the spec change (see Q57).* It had the crate check the body in itself and left the comparison with the signed entry to "the caller" |
-| Q57 | §20.5 step 7, §26 | the same question, ruled again | `open_snapshot` takes the expected `state_hash` and `hash_version` (the signed entry's or the bundle's) and compares the body's with them (`seal/blob_open`); the crate does not recompute the hash from the board, the engine does. The declared mode compares neither. An API change of §26; built by S6b |
+| Q57 | §20.5 step 7, §26 | the same question, ruled again, and completed after the third check | `open_snapshot` takes the expected `state_hash` and `hash_version` (the signed entry's or the bundle's), compares the body's with them, and recomputes the hash from the body's own board and membership (`seal/blob_open`): no caller can leave either check out. The declared mode makes neither. An API change of §26; the comparison built by S6b, the recomputation on S7's list |
 | Q58 | §21.6 step 11, §20.5 step 7 | the agreement lists no board id | it names it; `agrees` compares it. Built by S6b |
 | Q59 | §26 `VerifiedBackup`, `HistoryRecord` | `device.md` §15.8 reads "the backup's verified history", which `read_backup` did not return, and a record showed only its seq | `VerifiedBackup` gains `history`; `HistoryRecord` gains `dev()`, `ctr()`, `frame_hash()`, `items()`. Built by S6b |
 | Q51 | §20.4, §20.5 step 7 | a history record with a seq above `S` | `seal/blob_open` (as Q41 for a backup). Spec note |
@@ -452,7 +479,7 @@ stages that build them; seal's lead recorded it and did not change them.
 | Q54 | §20.5 step 3 | `BlobRef.id` against the header's `blob_id` | not compared: the signed `sha256` fixes every sealed byte, and the id is what the caller fetches by. Spec note |
 | Q55 | §20.5 step 1 | sealed bytes under 67 bytes are refused at step 1, which states no minimum | the code stays: step 1 now states that `size` is 67 to 67,108,864 (as §11.5 bounds a signed size). Spec note |
 | Q56 | §20.4 | `seal_snapshot` sealed a body with a history record above `S`, and a membership of another board; its reader rejects both | it refuses both with `seal/blob_open`, as `write_backup` refuses a membership of another board. A few lines: on S7's list. Spec note |
-| Q60 | §17.10, §17.11 | an event the machine's state has no row for | it aborts: a slot with `seal/slot_mac`; `Snapshot`, `Entries`, `Frames` with `seal/bundle_invalid`; any other with `seal/pair_cancelled`; `RegisterFailed{code}` with its code. A `Tick` before the limit changes nothing; `Done` and `Aborted` ignore every event. Spec note |
+| Q60 | §17.10, §17.11 | an event the machine's state has no row for | a slot identical to one already accepted is ignored (completed after the third check; on S7's list); otherwise it aborts: a slot with `seal/slot_mac`; `Snapshot`, `Entries`, `Frames` with `seal/bundle_invalid`; any other with `seal/pair_cancelled`; `RegisterFailed{code}` with its code. A `Tick` before the limit changes nothing; `Done` and `Aborted` ignore every event. Spec note |
 | Q61 | §26, SEAL-GEN-006 | the code and the digits are plain strings in the API | kept: they go to a screen and come from a keyboard; the crate erases its own copies, the caller clears the strings. Told to `device`, `desktop`, `android` |
 | Q62 | §17.2 | which form `new_code` returns | the display form `XXXX-XXXX-XXXX-XXXX-CC`; `parse_code` reads both. Spec note |
 | Q63 | §17.4, §17.6, SEAL-GEN-008 | a slot's framing against its MAC | framing first (`body_len` at most 16,040, the slot exactly `36 + body_len` bytes), failing with `seal/slot_mac` since nothing is authenticated yet; then MAC, label, role; then the body's layout (`seal/slot_format`). Spec note |
@@ -534,7 +561,9 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | S6b, the implementer | 1 | 0.23 M | 0.27 M | 0.27 M |
 | | S6, the verifier (S6 and S6b) | 1 | 0.27 M | 0.31 M | 0.31 M |
 | | S6, the first security pass, alone (both passes and their fix would not fit) | 1 | 0.20 M | 0.19 M | 0.20 M |
-| | **window so far** | | | | **3.12 M** |
+| | third check of the spec change, cut off by the account's limit at 13:05 UTC (void) | 1 | 0.14 M | 0.16 M | 0.16 M |
+| | **window total** (the account's limit was hit with this stage's agents at 3.28 M: the limit is shared with the other session and with both leads' own tokens, so the room for this stage's agents is nearer 3.2 M than 3.5 M) | | | | **3.28 M** |
+| from 2026-11-23 17:40 (the limit reset at 15:40 UTC) | third check of the spec change, run again | 1 | 0.18 M | 0.23 M | 0.23 M |
 
 ## Low findings left as they are
 
