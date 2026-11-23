@@ -51,13 +51,13 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 
 ## Next steps
 
-1. **Window 2 (from about 04:57 UTC):** workflow 5, `workflows/w5-args.json` with `workflows/pipeline.js`:
+1. **The window from 10:00 UTC:** workflow 5, `workflows/w5-args.json` with `workflows/pipeline.js`:
    the check of task C (both ports) and its security pass (the ICS parser), while the writers go on with D
    (`briefs/d-compile.md`), E1 (`e1-import.md`) and E2 (`e2-read-snapshot.md`); D gets its check and its
    security pass (the intent parser) in the same workflow. About 2.7 to 3.2 M tokens. Before launching: bring
    the working copy to the branch (`git -C target/work/core fetch origin && git -C target/work/core reset --hard origin/<branch>`).
 2. Spec change 5 once the check of C has reported, in its own pull request, then the code.
-3. **Window 3:** the check of E; F1 (`f1-transcripts.md`), F2 (`f2-gate.md`) and their check; the budget
+3. **The window after it:** the check of E; F1 (`f1-transcripts.md`), F2 (`f2-gate.md`) and their check; the budget
    baselines from the first CI run of the budget job into `crates/taskdeck-core/ci.sh` and this file; then the
    hygiene pass, the exit review, and the exit pull request with this file's state set to `final`.
 
@@ -103,6 +103,12 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
   now fixes the charges. A parser that reads a board straight into its records, without the generic tree,
   would use far less memory; it is left until the budget job shows whether the 150 ms load budget needs it.
 
+- **D10. Fewer turns of the lead.** The first window ended at the account's limit although this stage's agents
+  stayed under their 3.5 M: the lead took about a hundred turns, most of them woken by a single GitHub event
+  (a check finished, a pull request merged), and every turn reads the whole conversation again. From the
+  second session window on the lead does not subscribe to a pull request's events and sets no safety-net
+  timers: it reads the `gate` check once, when it integrates, and waits for workflows only.
+
 ## Spec changes raised by this stage
 
 | # | What | State |
@@ -123,7 +129,8 @@ Agent tokens as the workflows report them (input, cache writes and output).
 | | 2: B3, check and security pass of B, C1 implemented | 4 | 1,037,538 reported; 1,159,154 by transcripts | 2.96 M |
 | | 3: C2 implemented | 1 | 245,001 reported; 306,345 by transcripts | 3.27 M |
 | | 4: B4 (four points of spec change 4) | 1 | 129,140 reported; 84,825 by transcripts | **3.39 M: the window is spent**; agents rest until about 04:57 UTC |
-| 2026-11-23 04:57 to 09:57 | 5: check and security pass of C; D; E1; E2 (planned, `workflows/w5-args.json`) | | | |
+| 2026-11-23 05:00 to 10:00 | none: the account's limit was hit at about 02:53 UTC, in the first window, and this session stood still until 09:45 UTC | 0 | 0 | 0 |
+| 2026-11-23 10:00 to 15:00 | 5: check and security pass of C; E1; D with its check and security pass; E2 (`workflows/w5-args.json`) | | | |
 
 ## What the checks found
 
