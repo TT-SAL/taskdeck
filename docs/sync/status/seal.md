@@ -64,8 +64,8 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S6b | Three small changes to the API of snapshots and backups, from the second check of the spec change (Q57 to Q59); runs between S6's implementer and S6's verify pass, whose passes review it | `blob`, `backup`, `pair` | §20.5, §21.6, §26 | `seal-blob`, `seal-backup` | **done** with S6 (TT-SAL/taskdeck#16); two of its points are completed by S7 (Q57, Q60) |
 | S7b | The last small code changes: rulings the spec states and the code does not yet do (Q57, Q60, Q56, Q18, Q15), and `write_backup` proving its stream before it seals, with a property test | `blob`, `pair`, `signatures`, `backup`, `prim` | §16, §17.10, §20.4, §20.5, §21.3 | `seal-blob`, `seal-signatures` | **done**, merged with S7 (TT-SAL/taskdeck#20, 2026-11-23 21:00 UTC): S7's verify pass and both its security passes covered it; no finding in the library |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | **done**, merged (TT-SAL/taskdeck#20, 2026-11-23 21:00 UTC): one medium finding of its security passes fixed (six fuzz targets could not run); the stage gate passes in the lead's run, 164 of 164 clauses cited |
-| S8 | Hygiene pass, stage exit review, exit pull request | | | | **the exit review is done** (one high, four medium, six low points: "The exit review" below); the hygiene pass (`docs/sync/status/seal/workflows/exit.js` with `only: "hygiene"`) runs beside S9's verify pass; the exit pull request follows S9 |
-| S9 | The exit review's two findings in code: the five fuzz targets that do not reach the parsers their rows name; SEAL-GEN-007 proven for pairing's comparisons | `fuzz/`, tests | §3, §17 | | **implemented** (workflow run `wf_c7e0a075-ba6`, brief `briefs/s9.md`): no change to the library, no defect found; both gates pass in the lead's run. Its verify pass and two security passes follow |
+| S8 | Hygiene pass, stage exit review, exit pull request | | | | **the exit review and the hygiene pass are done** ("The exit review" and "The hygiene pass" below); the exit pull request (TT-SAL/taskdeck#21, a draft) waits for S9's security passes |
+| S9 | The exit review's two findings in code: the five fuzz targets that do not reach the parsers their rows name; SEAL-GEN-007 proven for pairing's comparisons | `fuzz/`, tests | §3, §17 | | **implemented and verified** (workflow run `wf_c7e0a075-ba6`, brief `briefs/s9.md`): no change to the library, no defect found in it; the verify pass's one medium finding (no property test reached a blob's padding check) is fixed; both gates pass in the lead's run. Its two security passes follow |
 
 The briefs of S4, S5 and S6 name line ranges of `seal.md` as it stood on 2026-11-23 02:30 UTC; after
 a change to that file, check them against its headings before launching.
@@ -326,6 +326,33 @@ work (SYNC_PLAN.md §7); what the lead did with each:
 - Low, noted: the budget runs as a step of the seal job's hook and not as a CI job of its own
   (under L18); the review read the stage lists of two open rows against the "specs" column of
   `CHANGES.md`, and they match its "stages affected" column, so nothing changes there.
+
+## The hygiene pass
+
+One agent that did no work in the stage (0.15 million tokens, 2026-11-23 21:12 UTC, after S9's
+implementer, so that S9's files are among the 186 it read): the working copy's files of the stage,
+grepped and sampled for secrets, addresses, names and board content; every hex string of the
+vectors decoded and read; the dependency tree and both lockfiles.
+
+- **Nothing of the kind the plan forbids:** no secret, no real address, token or account name,
+  nothing from a real board (device names are "Laptop" and "Phone", boards are `{"cards":[]}`, hosts
+  are reserved example names), no stray, empty or binary file, no `dbg!` or print in `src`, no
+  commented-out code. Every key-like value it sampled in the vectors comes from a seed its
+  generating test states. Each third-party data file names its source, its SHA-256 and its licence
+  (`tests/kat/README.md`).
+- **Dependencies:** each is one §3.4 approves. `getrandom` is the only entropy crate in the normal
+  tree and SEAL-GEN-005 requires it. The stage's one lockfile change (TT-SAL/taskdeck#6) added two
+  edges and no package. Every package of the fuzz lockfile stands in the root lockfile.
+- **Medium: two dependencies of the fuzz crate are not pinned exactly** (`serde_json`, `flate2`:
+  caret requirements, where every other line of that manifest has `=`). To S9's fix pass.
+- Low, listed: seven `#[allow(...)]` attributes give no reason beside them (five
+  `clippy::too_many_arguments`, two `dead_code` in a test macro); the host checker's unit test uses
+  `a.com` and `1.2.3.4` as syntax inputs, which are not reserved example names; the wording of the
+  pass's own brief about `getrandom` (corrected in `workflows/exit.js`).
+- Low, not this stage's file: the root manifest gives `serde`, `serde_json`, `flate2`, `subtle`,
+  `zeroize` and `proptest` as caret requirements (the lockfile holds them; the manifest's own
+  comment plans `zeroize = "=1.9.2"` once its cooldown ends on 2026-11-24). For whoever next
+  changes the root manifest, in a pull request of its own.
 
 ## Decisions (with reasons)
 
@@ -751,7 +778,9 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | the exit review | 1 | 0.21 M | 0.25 M | 0.25 M |
 | | **window total** (nothing more was started in it. The account's limit was hit all the same at about 17:57 UTC, with this stage's agents at 2.96 M and none of them running: the other session, which finished its stage in this window, and both leads' own turns used the rest. So the room for this stage's agents depends on what else runs, and 3.5 M is an upper bound, not a plan) | | | | **2.96 M** |
 | from 2026-11-23 22:40 (the owner: the limit has reset; 20:40 UTC) | S9, the implementer | 1 | 0.27 M | 0.35 M | 0.35 M |
-| | **window so far** | | | | **0.35 M** |
+| | the hygiene pass | 1 | 0.14 M | 0.15 M | 0.15 M |
+| | S9, the verifier and its fix pass | 2 | 0.28 M | 0.31 M | 0.31 M |
+| | **window so far** | | | | **0.81 M** |
 
 ## Low findings left as they are
 
@@ -854,6 +883,14 @@ output); the higher is booked. Limit: 3.5 million per window.
   `snapshot_body` reaches the body parser only when the mutated length stays within one byte of the
   original. Whether rustdoc on the pinned toolchain enforces the error code of the compile-fail doc
   test (E0277) was not checked; the test fails to compile either way.
+
+- **S9, verify.** Its medium finding is fixed (a property test for a blob's padding check). Its two
+  low findings complete the exit review's two points and went to the fix pass (the source scan for
+  SEAL-GEN-007 did not name one comparison of `pair.rs`; the two snapshot targets did not reach
+  the padding refusal). A note that is no finding: `pair_new` builds arbitrary frames of at most
+  65,535 bytes, so frames near the limit of 262,144 bytes do not come from that fuzz target.
+- **The hygiene pass.** Seven `#[allow(...)]` attributes without a reason beside them; `a.com` and
+  `1.2.3.4` as syntax inputs of the host checker's unit test.
 
 ## Open questions for the owner
 
