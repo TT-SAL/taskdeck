@@ -314,8 +314,18 @@ fn seal_backup() {
     let mut f = file.clone();
     resign(&mut f, &s.devs[1]);
     cases.push(verify_case("verify: re-signed by another key", &f, &pk0, Some("seal/backup_signature")));
+    // The header names device 1's key, the file is signed by the given key
+    // (device 0's): only the comparison of the header's key rejects it.
+    let mut names_one = Header::of(&s, &s.devs[0], 1, file_seq(&file));
+    names_one.writer.sign_pk = s.devs[1].public().sign_pk;
+    let names_one = seal_compressed(&names_one, &s.devs[0], &good, [5; 32]);
+    let m = names_one.len() - 64;
+    let msg = [b"taskdeck/v1/backup\0".as_slice(), &sha(&[&names_one[..m]])].concat();
+    let sig = ed25519_dalek::Signature::from_bytes(names_one[m..].try_into().unwrap());
+    assert!(signing_key(&s.devs[0]).verifying_key().verify_strict(&msg, &sig).is_ok());
+    cases.push(verify_case("verify: header names another key", &names_one, &pk0, Some("seal/backup_signature")));
     let by_one = write(&s, 1, vec![4; 32]);
-    cases.push(verify_case("verify: header names another key", &by_one, &pk0, Some("seal/backup_signature")));
+    cases.push(verify_case("verify: written and signed by another key", &by_one, &pk0, Some("seal/backup_signature")));
     cases.push(verify_case("verify: truncated", &file[..n - 1], &pk0, Some("seal/backup_header")));
 
     // Replay the reads and verifications as another implementation would.

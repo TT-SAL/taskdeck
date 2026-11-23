@@ -123,6 +123,17 @@ fn step2_authority() {
     let mut r = x.recs();
     r[0].dev = DevId(rand());
     rejected(&x, &r);
+    // The Genesis record re-signed under another dev by the real recovery
+    // key: its signature (step 4) holds, only step 2 rejects it, in the
+    // projection and in `read_backup`.
+    let mut r = x.recs();
+    r[0].dev = DevId(rand());
+    let inner = ctl_inner(&x.b.board, &r[0].dev, r[0].ctr, &r[0].entry_id, r[0].at_ms, &r[0].items);
+    r[0].sig = sign_with(x.b.rec[0].signing_key(), &[&inner]);
+    rejected(&x, &r);
+    let file = x.seal_payload(&x.b.devs[0], &x.payload(&r));
+    assert_eq!(x.read(&file).err(), Some(SealError::BackupHistory));
+    assert!(x.read(&x.seal_payload(&x.b.devs[0], &x.payload(&x.recs()))).is_ok());
     // A stranger's properly signed record.
     x.b.devs.push(DeviceKeys::generate(&mut OsEntropy).unwrap());
     let s = x.b.seq() + 1;
@@ -332,13 +343,26 @@ fn genesis_record(x: &Hist, board: &BoardId, g: crate::Genesis) -> HistoryRecord
 // the device and `dev_R`.
 // spec: SEAL-BKP-008
 // spec: SEAL-BKP-004
+// spec: SEAL-KEY-017
 #[test]
 fn step6_genesis() {
     let x = Hist::new(1);
     let g = x.b.genesis_item();
     assert!(project(&[genesis_record(&x, &x.b.board, g.clone())], &x.b.board).is_ok());
+    // Another board: the item is the board's own except that its wraps name
+    // `dev_R` of `other`, so only the `board_id` check rejects it.
     let other = BoardId([0x5A; 16]);
-    assert_eq!(project(&[genesis_record(&x, &other, g.clone())], &other).err(), Some(SealError::BackupHistory));
+    let mut for_other = g.clone();
+    let root = &x.b.roots[&1];
+    let rp = x.b.rec[0].public();
+    let mut rc = [(g.device.dev, g.device.hpke_pk), (rp.dev(&other), rp.hpke_pk)];
+    rc.sort();
+    for_other.commit = root.commitment(&other, 1);
+    for_other.wraps = rc
+        .iter()
+        .map(|(id, pk)| crate::wrap_root(root, &other, 1, &for_other.commit, *id, pk, &mut OsEntropy).unwrap())
+        .collect();
+    assert_eq!(project(&[genesis_record(&x, &other, for_other)], &other).err(), Some(SealError::BackupHistory));
     let mut bad_wraps = g.clone();
     bad_wraps.wraps[0][..16].copy_from_slice(&[0; 16]);
     bad_wraps.wraps.sort_by_key(|w| w[..16].to_vec());

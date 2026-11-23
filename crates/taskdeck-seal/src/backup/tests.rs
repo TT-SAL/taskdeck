@@ -727,6 +727,95 @@ fn step9_history() {
     fails(x.read(&f), SealError::BackupHistory);
 }
 
+// Step 9, a history forged by someone who is no member: an attacker with
+// its own recovery keys X and device A writes, for the victim's board id, a
+// Genesis with its own salt and X (epoch 1, wraps to A and to dev_R(X)),
+// signed by X as recovery signer for the victim's board, then a direct
+// recovery-key change by X to the victim's recovery key with a rotation
+// wrapped to A and the victim's dev_R; the rest of the payload agrees with
+// that history, it is sealed to the victim's recovery key and signed by A.
+// Only the Genesis `board_id` check (§6.2: the victim's board id is not
+// H(X, salt)) rejects it.
+// spec: SEAL-BKP-008
+// spec: SEAL-BKP-004
+// spec: SEAL-KEY-017
+#[test]
+fn step9_history_forged_by_a_stranger() {
+    use crate::membership::transitions::{self, Auth, EntryCx};
+    use crate::payloads::items_bytes;
+    use crate::{EpochRotated, Signer, Genesis, GenesisDevice, RecoveryKeyChange, RecoveryKeyMode, wrap_root};
+
+    let victim = Hist::new(2);
+    let bv = victim.b.board;
+    let rv = victim.rec_keys().public();
+    let xk = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
+    let xp = xk.public();
+    let dev_x = xp.dev(&bv);
+    let a = DeviceKeys::generate(&mut OsEntropy).unwrap();
+    let ap = a.public();
+    let at_ms = 1_767_225_600_000;
+    let wraps = |root: &EpochRoot, epoch: u32, rc: &mut Vec<(DevId, [u8; 32])>| {
+        let commit = root.commitment(&bv, epoch);
+        rc.sort();
+        let w: Vec<_> =
+            rc.iter().map(|(id, pk)| wrap_root(root, &bv, epoch, &commit, *id, pk, &mut OsEntropy).unwrap()).collect();
+        (commit, w)
+    };
+    let r1 = EpochRoot::from_bytes(rand());
+    let (c1, w1) = wraps(&r1, 1, &mut vec![(ap.dev, ap.hpke_pk), (dev_x, xp.hpke_pk)]);
+    let g = Genesis {
+        salt: rand(),
+        recovery: xp,
+        device: GenesisDevice { dev: ap.dev, sign_pk: ap.sign_pk, hpke_pk: ap.hpke_pk, name: "A".into() },
+        epoch: 1,
+        commit: c1,
+        wraps: w1,
+        rules: 1,
+        hash_version: 1,
+        state_hash: [0x33; 32],
+        snapshot: None,
+    };
+    assert_ne!(crate::board_id(&xp.sign_pk, &g.salt), bv);
+    let r2 = EpochRoot::from_bytes(rand());
+    let (c2, w2) = wraps(&r2, 2, &mut vec![(ap.dev, ap.hpke_pk), (rv.dev(&bv), rv.hpke_pk)]);
+    let change = RecoveryKeyChange { mode: RecoveryKeyMode::Direct, sign_pk: Some(rv.sign_pk), hpke_pk: Some(rv.hpke_pk) };
+    let rot = EpochRotated { epoch: 2, commit: c2, wraps: w2, purge_before: None };
+    let (_, sk) = signer_identity(&Signer::Recovery(&xk, bv), &bv).unwrap();
+    let record = |seq: u64, items: &[CtlItem]| {
+        let (_, items) = items_bytes(items).unwrap();
+        let entry_id = EntryId(rand());
+        let inner = ctl_inner(&bv, &dev_x, seq, &entry_id, at_ms, &items);
+        HistoryRecord { seq, dev: dev_x, ctr: seq, entry_id, at_ms, frame_hash: FrameHash(rand()), items, sig: sign_with(sk, &[&inner]) }
+    };
+    let recs = vec![
+        record(1, &[CtlItem::Genesis(g.clone())]),
+        record(2, &[CtlItem::RecoveryKeyChange(change.clone()), CtlItem::EpochRotated(rot.clone())]),
+    ];
+    // The membership that history leads to, by the rows of §13.3 and §13.6.
+    let mut m = Membership::genesis(bv, &g, dev_x, at_ms);
+    m.set_last_ctr(&dev_x, 1);
+    let none = |_: u64| -> Option<&[u8]> { None };
+    let cx = EntryCx { s: 2, at_ms, tau: at_ms, author: Auth::Recovery(dev_x), board: bv, skip_targets: &none };
+    transitions::recovery_key_change(&mut m, &change, &cx, false).unwrap();
+    transitions::rotate(&mut m, &rot, &cx).unwrap();
+    m.set_last_ctr(&dev_x, 2);
+    m.ctl_seqs.push(2);
+    // The membership bytes carry the victim's salt and recovery records, so
+    // that they parse (§13.2 binds the first recovery key and the salt to
+    // `board_id`) and still agree with the projection on what step 11
+    // compares: the check that stops the file is the projection's.
+    m.salt = victim.b.salt;
+    m.recovery = victim.b.m.recovery.iter().map(|r| r.dup()).collect();
+    let membership = m.to_canonical_bytes();
+    assert!(Membership::from_canonical_bytes(&membership).is_ok());
+    let board = b"{}".to_vec();
+    let state_hash = state_hash(1, &h(&[&board]), &membership);
+    let content = BackupContent::Nightly { membership, board, head: Head { seq: 2, chain: Chain(rand()) }, hash_version: 1, state_hash };
+    let p = encode_payload(&recs, &content, &[(1, r1), (2, r2)], b"", b"{}").unwrap();
+    let forged = victim.seal_compressed(&a, NIGHTLY, 2, &deflate_raw(&p).unwrap());
+    fails(victim.read(&forged), SealError::BackupHistory);
+}
+
 // Step 10: a forged file (sealed to the recovery public key, signed by a
 // key that is no member) and a file by a revoked writer are
 // `seal/backup_writer`; so is a member's file sealed to a recovery key the
@@ -886,6 +975,29 @@ fn step11_rest() {
         p.membership = m.to_canonical_bytes();
         p.state_hash = state_hash(1, &h(&[&p.board]), &p.membership);
         cases.push(p);
+        // Each differing from the projection in one thing alone: one
+        // device's sign_pk; the current recovery key; ctl_seqs.
+        let mut m = x.b.m.dup();
+        m.devices[1].sign_pk = DeviceKeys::generate(&mut OsEntropy).unwrap().public().sign_pk;
+        let mut p = Parts::of(&x);
+        p.membership = m.to_canonical_bytes();
+        p.state_hash = state_hash(1, &h(&[&p.board]), &p.membership);
+        cases.push(p);
+        let mut m = x.b.m.dup();
+        let fresh = RecoverySeed::generate(&mut OsEntropy).unwrap().keys().public();
+        let cur = m.recovery.iter_mut().find(|r| r.until_seq == 0).unwrap();
+        cur.hpke_pk = fresh.hpke_pk;
+        let mut p = Parts::of(&x);
+        p.membership = m.to_canonical_bytes();
+        p.state_hash = state_hash(1, &h(&[&p.board]), &p.membership);
+        cases.push(p);
+        let mut m = x.b.m.dup();
+        let last = *m.ctl_seqs.last().unwrap();
+        m.ctl_seqs.push(last + 1);
+        let mut p = Parts::of(&x);
+        p.membership = m.to_canonical_bytes();
+        p.state_hash = state_hash(1, &h(&[&p.board]), &p.membership);
+        cases.push(p);
     }
     // The roots: one that does not match; one of an epoch with no
     // commitment; out of order; a count beyond the bytes.
@@ -1009,6 +1121,14 @@ fn verify_backup_file_steps() {
     let mut re = file.clone();
     resign(&mut re, &x.b.devs[1]);
     assert_eq!(verify_backup_file(&re, &pk).err(), Some(SealError::BackupSignature));
+    // The header names key B, the file is signed by the given key A: only
+    // the comparison of the header's key rejects it.
+    let mut fb = x.fields(&x.b.devs[0], NIGHTLY, x.b.seq());
+    fb.writer_sign_pk = x.b.dev_pub(1).sign_pk;
+    let names_b = seal_file(&x.b.devs[0], &fb, &x.rec_keys().public().hpke_pk, &[0xFF; 64], &mut OsEntropy).unwrap();
+    assert!(check_signature(&names_b, &pk).is_ok());
+    assert_eq!(verify_backup_file(&names_b, &pk).err(), Some(SealError::BackupSignature));
+    // Written and signed by another key B, checked under A.
     let by_other = x.write(1);
     assert_eq!(verify_backup_file(&by_other, &pk).err(), Some(SealError::BackupSignature));
     assert!(verify_backup_file(&by_other, &x.b.dev_pub(1).sign_pk).is_ok());
