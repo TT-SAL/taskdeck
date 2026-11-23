@@ -10,6 +10,8 @@ mod common;
 mod board;
 #[path = "../common/backup.rs"]
 mod backup;
+#[path = "../common/blob.rs"]
+mod blob;
 
 mod s1_chain;
 mod s1_kdf;
@@ -24,6 +26,7 @@ mod s3_receipt;
 mod s3_rotation;
 mod s4_backup;
 mod s4_file;
+mod s5_blob;
 
 use serde_json::Value;
 

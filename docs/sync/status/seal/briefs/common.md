@@ -68,7 +68,7 @@ for every task. `W` is the working copy, `/home/user/taskdeck/target/work/seal`.
   - `kat`: the known-answer suites;
   - `tamper`: flipping any byte of any frame, wrap, bundle or file is rejected;
   - `contexts`: nothing made for one use verifies or opens for another;
-  - `pairing_mitm`: task S5's;
+  - `pairing_mitm`: task S6's;
   - `parsers`: property tests (proptest), parsers never panic.
   Shared helpers live in `tests/common/mod.rs`, included with `#[path = "../common/mod.rs"] mod common;`.
 - `FixedEntropy` exists only with the cargo feature `test-entropy`. A test that needs it carries

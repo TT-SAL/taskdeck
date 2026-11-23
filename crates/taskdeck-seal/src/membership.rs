@@ -68,6 +68,13 @@ pub struct Membership {
     pub(crate) ctl_seqs: Vec<u64>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test builds only: how many times `Membership::dup` ran on this
+    /// thread (the projection must copy nothing per record, §21.6).
+    pub(crate) static DUPS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+}
+
 /// What `current_recovery` returns for the empty state `M_0`, which has no
 /// recovery record (seal.md §2: "`M_0` is empty").
 static NO_RECOVERY: RecoveryRecord =
@@ -270,6 +277,8 @@ impl Membership {
     /// A copy (the working copy `W` of §13.6). `Membership` holds no
     /// secret (§13.1); the copy is private so that §26 stays the API.
     pub(crate) fn dup(&self) -> Membership {
+        #[cfg(test)]
+        DUPS.with(|c| c.set(c.get().saturating_add(1)));
         Membership {
             board_id: self.board_id,
             salt: self.salt,

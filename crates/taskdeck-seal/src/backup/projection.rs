@@ -21,7 +21,8 @@ use crate::{BoardId, CtlItem, DevId, SealError, board_id};
 ///    and for the first record the `dev_R` of its Genesis item's recovery
 ///    key;
 /// 3. its `ctr` is above the `ctr` of the previous record by the same `dev`
-///    (gaps are normal);
+///    (gaps are normal), and the first record's `ctr` is 1 (SEAL-MEM-004,
+///    ruling Q46: the projection accepts no history a log cannot produce);
 /// 4. its `sig` verifies strictly under that author's `sign_pk` over the
 ///    inner message of §11.3 with `board`, the record's `dev`, `ctr`,
 ///    `entry_id`, `at_ms` and `H(items)` (SEAL-KIND-004, SEAL-GEN-010);
@@ -30,7 +31,13 @@ use crate::{BoardId, CtlItem, DevId, SealError, board_id};
 /// 6. the items change the projection by the reduced rules (below).
 ///
 /// Every failure is `seal/backup_history`, and the first failing record
-/// ends the projection.
+/// ends the projection. So each record's items are applied to the
+/// projection itself, with no copy to undo them (a copy per record would
+/// make the time grow with the square of the history): nothing of a failed
+/// projection is returned. The cost of each record is bounded by the limits
+/// of §23 on what it reads (the devices, the recovery records, its items),
+/// never by the number of records before it; `ctl_seqs` and the
+/// commitments only grow at their end.
 ///
 /// `board` is the board id the reader trusts: the sheet's for a backup
 /// (§21.6 step 9), and, for task S5's `open_snapshot` (§20.5), the
@@ -106,25 +113,23 @@ pub(crate) fn project(history: &[HistoryRecord], board: &BoardId) -> Result<Memb
         let tau = m.clock_ms.max(rec.at_ms);
         let none = |_: u64| -> Option<&[u8]> { None };
         let cx = EntryCx { s: rec.seq, at_ms: rec.at_ms, tau, author: auth, board: *board, skip_targets: &none };
-        let mut w = m.dup();
         for (i, item) in items.iter().enumerate() {
             let later = items.get(i + 1..).unwrap_or(&[]);
-            reduced(&mut w, item, later, &cx).map_err(|_| bad)?;
+            reduced(&mut m, item, later, &cx).map_err(|_| bad)?;
         }
-        if w.ctl_seqs.len() >= CTL_SEQS_MAX {
+        if m.ctl_seqs.len() >= CTL_SEQS_MAX {
             return Err(bad);
         }
-        w.set_last_ctr(&rec.dev, rec.ctr);
-        w.clock_ms = tau;
-        w.ctl_seqs.push(rec.seq);
-        m = w;
+        m.set_last_ctr(&rec.dev, rec.ctr);
+        m.clock_ms = tau;
+        m.ctl_seqs.push(rec.seq);
         prev_seq = rec.seq;
     }
     Ok(m)
 }
 
 /// Steps 1 to 6 for the first record: seq 1, `dev = dev_R` of the Genesis
-/// recovery key, the signature, the shape `G`, and Genesis (§13.3).
+/// recovery key, `ctr` 1, the signature, the shape `G`, and Genesis (§13.3).
 fn genesis(rec: &HistoryRecord, board: &BoardId) -> Option<Membership> {
     // 1.
     if rec.seq != 1 {
@@ -137,7 +142,12 @@ fn genesis(rec: &HistoryRecord, board: &BoardId) -> Option<Membership> {
     if rec.dev != dev_r {
         return None;
     }
-    // 3. No earlier record. 4.
+    // 3. No earlier record; the counter of the entry at seq 1 is 1
+    // (SEAL-MEM-004).
+    if rec.ctr != 1 {
+        return None;
+    }
+    // 4.
     let inner = ctl_inner(board, &rec.dev, rec.ctr, &rec.entry_id, rec.at_ms, &rec.items);
     verify_strict(&g.recovery.sign_pk, &inner, &rec.sig).ok()?;
     // 5.

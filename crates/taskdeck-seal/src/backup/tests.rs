@@ -7,6 +7,7 @@ use zeroize::Zeroizing;
 
 use super::*;
 use crate::payloads::ctl_inner;
+use crate::prim::deflate_raw;
 use crate::receipt::tests::board::{Board, Spec, Who, copy, rand};
 use crate::receipt::tests::scalar;
 use crate::signatures::signer_identity;
@@ -367,6 +368,9 @@ fn write_then_read() {
     let v = x.read(&file).unwrap();
     assert_eq!(v.writer, x.b.dev_pub(0));
     assert_eq!((v.seq, v.file_type), (x.b.seq(), 1));
+    // `written_ms` as the header carries it (§26).
+    assert_eq!(v.written_ms, 1_767_225_600_123);
+    assert_eq!(&file[95..103], &v.written_ms.to_be_bytes());
     assert_eq!(v.read_token.as_deref(), Some("tok-1"));
     assert_eq!(v.meta, b"{\"m\":1}");
     assert_eq!(v.roots.iter().map(|(e, r)| (*e, *r.to_bytes())).collect::<Vec<_>>(), x.roots().iter().map(|(e, r)| (*e, *r.to_bytes())).collect::<Vec<_>>());
@@ -425,6 +429,7 @@ fn unpinned_key_is_refused() {
 // `ctl_seqs`, a writer that is not a current member, a root that does not
 // match its commitment or appears twice, a bad token, `meta` over its limit,
 // a head other than `seq`, a segment whose frames are not first_seq to seq.
+// A root of an epoch with no commitment is left out, not refused.
 // spec: SEAL-BKP-002
 // spec: SEAL-KEY-015
 // spec: SEAL-KEY-013
@@ -449,7 +454,7 @@ fn writer_refuses_inconsistent_inputs() {
     assert_eq!(w(i, 0), bad);
     let mut i = x.input(&recs, x.nightly());
     i.roots.push((3, EpochRoot::from_bytes([9; 32])));
-    assert_eq!(w(i, 0), bad);
+    assert_eq!(w(i, 0), None);
     for t in [String::new(), "x".repeat(513), "é".into()] {
         let mut i = x.input(&recs, x.nightly());
         i.read_token = Some(t);
@@ -1141,4 +1146,227 @@ fn verify_backup_file_steps() {
     let garbage = x.seal_compressed(&x.b.devs[0], NIGHTLY, 9, &[0xFF; 64]);
     assert!(verify_backup_file(&garbage, &pk).is_ok());
     assert!(x.read(&garbage).is_err());
+}
+
+// --------------------------------------------- task S5: carried rulings
+
+// Step 10 compares the keys, not only `dev_R` (ruling Q45): two devices
+// propose and confirm a recovery key made of a new sheet's signing key and
+// a third party's HPKE key; a current device seals a file to the new
+// sheet's real HPKE key. Every step up to 9 passes and the projection's
+// current `dev_R` is the recipient, but its HPKE key is not the sheet's:
+// reading with the new sheet's seed is `seal/backup_writer`.
+// spec: SEAL-BKP-004
+#[test]
+fn step10_compares_the_recovery_keys() {
+    use crate::{RecoveryKeyChange, RecoveryKeyMode};
+    let mut x = Hist::new(2);
+    let sheet = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
+    let third = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
+    let mixed = RecoveryPublic { sign_pk: sheet.public().sign_pk, hpke_pk: third.public().hpke_pk };
+    let change = |mode| CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode, sign_pk: Some(mixed.sign_pk), hpke_pk: Some(mixed.hpke_pk) });
+    x.ctl(Who::D(0), vec![change(RecoveryKeyMode::Propose)]);
+    x.b.now += 259_200_000;
+    let items = x.b.rotate_items(vec![change(RecoveryKeyMode::Confirm)]);
+    x.ctl(Who::D(1), items);
+    let cur = x.b.m.current_recovery();
+    assert_eq!((cur.sign_pk, cur.hpke_pk), (mixed.sign_pk, mixed.hpke_pk));
+    // Sealed by device 0 to the sheet's own keys.
+    let sp = sheet.public();
+    let mut f = x.fields(&x.b.devs[0], NIGHTLY, x.b.seq());
+    f.recipient = sp.dev(&x.b.board);
+    assert_eq!(f.recipient, cur.dev);
+    let c = deflate_raw(&x.payload(&x.recs())).unwrap();
+    let file = seal_file(&x.b.devs[0], &f, &sp.hpke_pk, &c, &mut OsEntropy).unwrap();
+    fails(read_backup(&file, &x.b.board, &sheet), SealError::BackupWriter);
+    // The writer refuses to seal to a key the membership does not hold.
+    let recs = x.recs();
+    let mut i = x.input(&recs, x.nightly());
+    i.pinned_recovery = sp;
+    assert_eq!(write_backup(&x.b.devs[0], i, &mut OsEntropy).err(), Some(SealError::BackupUnpinned));
+    // A file sealed to the membership's own pair is read by no sheet of
+    // these: the third party's seed gives another `dev_R` (step 4).
+    let mut i = x.input(&recs, x.nightly());
+    i.pinned_recovery = mixed;
+    let to_mixed = write_backup(&x.b.devs[0], i, &mut OsEntropy).unwrap();
+    fails(read_backup(&to_mixed, &x.b.board, &third), SealError::BackupRecipient);
+    fails(read_backup(&to_mixed, &x.b.board, &sheet), SealError::BackupOpen);
+}
+
+// The first record's counter must be 1 (SEAL-MEM-004, ruling Q46): the
+// Genesis record re-signed by the real recovery key with `ctr` 7 is
+// `seal/backup_history`.
+// spec: SEAL-MEM-004
+// spec: SEAL-BKP-008
+#[test]
+fn the_first_record_counter_is_1() {
+    let x = Hist::new(2);
+    let mut r = x.recs();
+    r[0].ctr = 7;
+    let inner = ctl_inner(&x.b.board, &r[0].dev, 7, &r[0].entry_id, r[0].at_ms, &r[0].items);
+    r[0].sig = sign_with(x.b.rec[0].signing_key(), &[&inner]);
+    fails(x.read(&x.seal_payload(&x.b.devs[0], &x.payload(&r))), SealError::BackupHistory);
+    assert!(x.read(&x.seal_payload(&x.b.devs[0], &x.payload(&x.recs()))).is_ok());
+}
+
+// `write_backup` leaves out the roots its file's membership has no
+// commitment for (ruling Q38): a segment written by a device that holds the
+// roots of epochs rotated inside the segment and after it, and a nightly
+// file with a root drawn for a rotation not yet accepted, read back with
+// only the roots that have commitments. A root that does not match its
+// commitment, and two roots for one epoch (even an epoch with no
+// commitment), stay `seal/backup_payload`.
+// spec: SEAL-BKP-002
+// spec: SEAL-KEY-013
+#[test]
+fn roots_without_a_commitment_are_left_out() {
+    let epochs = |v: &VerifiedBackup| v.roots.iter().map(|(e, _)| *e).collect::<Vec<_>>();
+    let mut x = Hist::new(2);
+    x.rotate(Who::D(0));
+    let recs = x.recs();
+    let before = x.b.m.to_canonical_bytes();
+    let first_seq = x.b.seq() + 1;
+    let chain_before = x.b.head().chain;
+    x.cmd(Who::D(0));
+    x.rotate(Who::D(1));
+    x.cmd(Who::D(1));
+    x.rotate(Who::D(0));
+    assert_eq!(x.b.m.epoch, 4);
+    let frames: Vec<Vec<u8>> = x.b.frames[first_seq as usize - 1..].to_vec();
+    let content = BackupContent::Segment { membership: before, first_seq, chain_before, frames };
+    let input = x.input(&recs, content);
+    assert_eq!(input.roots.len(), 4);
+    let file = write_backup(&x.b.devs[0], input, &mut OsEntropy).unwrap();
+    let v = x.read(&file).unwrap();
+    assert_eq!(epochs(&v), [1, 2]);
+    // Nightly, with a root for epoch 5 that no accepted rotation committed.
+    let recs = x.recs();
+    let mut i = x.input(&recs, x.nightly());
+    i.roots.push((5, EpochRoot::from_bytes(rand())));
+    let v = x.read(&write_backup(&x.b.devs[0], i, &mut OsEntropy).unwrap()).unwrap();
+    assert_eq!(epochs(&v), [1, 2, 3, 4]);
+    // No roots at all.
+    let mut i = x.input(&recs, x.nightly());
+    i.roots.clear();
+    let v = x.read(&write_backup(&x.b.devs[0], i, &mut OsEntropy).unwrap()).unwrap();
+    assert!(v.roots.is_empty());
+    // The two refusals.
+    let mut i = x.input(&recs, x.nightly());
+    i.roots[3].1 = EpochRoot::from_bytes(rand());
+    assert_eq!(write_backup(&x.b.devs[0], i, &mut OsEntropy).err(), Some(SealError::BackupPayload));
+    let mut i = x.input(&recs, x.nightly());
+    i.roots.push((2, EpochRoot::from_bytes(*x.b.roots[&2].to_bytes())));
+    assert_eq!(write_backup(&x.b.devs[0], i, &mut OsEntropy).err(), Some(SealError::BackupPayload));
+    let mut i = x.input(&recs, x.nightly());
+    i.roots.push((9, EpochRoot::from_bytes(rand())));
+    i.roots.push((9, EpochRoot::from_bytes(rand())));
+    assert_eq!(write_backup(&x.b.devs[0], i, &mut OsEntropy).err(), Some(SealError::BackupPayload));
+}
+
+// The epoch roots and the read token never pass through a DEFLATE
+// compressor (ruling Q48, §21.3): of every byte the writer hands to a
+// compressor, none is a root or the token, while the history and `meta` are
+// among them; the file reads back with the roots and the token.
+// spec: SEAL-GEN-006
+#[test]
+fn the_roots_never_reach_the_compressor() {
+    use crate::prim::COMPRESSOR_INPUT;
+    let mut x = Hist::new(2);
+    x.rotate(Who::D(1));
+    let recs = x.recs();
+    let mut i = x.input(&recs, x.nightly());
+    i.read_token = Some("rt1.secret-read-token-0123456789".into());
+    i.meta = b"{\"meta\":\"visible\"}".to_vec();
+    COMPRESSOR_INPUT.with(|c| c.borrow_mut().clear());
+    let file = write_backup(&x.b.devs[0], i, &mut OsEntropy).unwrap();
+    let seen = COMPRESSOR_INPUT.with(|c| std::mem::take(&mut *c.borrow_mut()));
+    for r in x.b.roots.values() {
+        let root = *r.to_bytes();
+        assert!(!seen.windows(32).any(|w| w == root));
+    }
+    assert!(!seen.windows(10).any(|w| w == b"rt1.secret"));
+    assert!(seen.windows(4).any(|w| w == b"TDBP"));
+    assert!(seen.windows(recs[1].to_bytes().len()).any(|w| w == recs[1].to_bytes()));
+    assert!(seen.windows(7).any(|w| w == b"visible"));
+    let v = x.read(&file).unwrap();
+    assert_eq!(v.roots.len(), 2);
+    assert_eq!(v.read_token.as_deref(), Some("rt1.secret-read-token-0123456789"));
+    assert_eq!(v.meta, b"{\"meta\":\"visible\"}");
+}
+
+// The compressed payload of a file is one raw DEFLATE stream of the whole
+// payload, which any inflater reads: here flate2's reader and the crate's,
+// for files with no roots, with two, and with no token.
+// spec: SEAL-BKP-001
+// spec: SEAL-BKP-002
+#[test]
+fn the_compressed_payload_is_one_stream() {
+    use hpke::Deserializable as _;
+    let mut x = Hist::new(2);
+    x.rotate(Who::D(1));
+    let recs = x.recs();
+    for (roots, token) in [(true, true), (false, true), (true, false), (false, false)] {
+        let mut i = x.input(&recs, x.nightly());
+        if !roots {
+            i.roots.clear();
+        }
+        if !token {
+            i.read_token = None;
+        }
+        let want = encode_payload(&recs, &x.nightly(), &if roots { x.roots() } else { Vec::new() }, if token { b"tok-1" } else { b"" }, b"{\"m\":1}").unwrap();
+        let file = write_backup(&x.b.devs[0], i, &mut OsEntropy).unwrap();
+        let n = file.len();
+        let rp = x.rec_keys().public();
+        let info = hpke_info(&x.b.board, x.b.seq(), &x.b.dev_pub(0).dev, &rp.dev(&x.b.board), &rp.hpke_pk);
+        let sk = <Kem as hpke::Kem>::PrivateKey::from_bytes(x.rec_keys().hpke_secret().as_bytes()).unwrap();
+        let enc = <Kem as hpke::Kem>::EncappedKey::from_bytes(&file[103..135]).unwrap();
+        let c = hpke::single_shot_open::<HpkeAead, Kdf, Kem>(&hpke::OpModeR::Base, &sk, &enc, &info, &file[143..n - 64], &hpke_aad(&file[..143])).unwrap();
+        let mut got = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::DeflateDecoder::new(&c[..]), &mut got).unwrap();
+        assert_eq!(got, want.to_vec());
+        assert_eq!(inflate_raw(&c, INFLATE_CAP).unwrap().to_vec(), want.to_vec());
+        assert!(x.read(&file).is_ok());
+    }
+}
+
+/// Board bytes of which two in three do not compress and one is `a`
+/// (security-1's reproduction of the incomplete sync flush).
+fn mixed_board(n: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(n + 32);
+    let mut i = 3u64 << 32;
+    while out.len() < n {
+        out.extend_from_slice(&h(&[&i.to_be_bytes()]));
+        i += 1;
+    }
+    out.truncate(n);
+    for b in out.iter_mut().step_by(3) {
+        *b = b'a';
+    }
+    out
+}
+
+// Every file `write_backup` writes reads back (§21.3: the payload is one raw
+// DEFLATE stream; ruling Q48's sync flush ends on a byte boundary only once
+// it is complete): boards at whose sizes the compressor's LZ code buffer
+// fills while the last bytes of the head are still in its lookahead, so that
+// the first sync-flush call returns with all input taken and room left in
+// the output but no sync marker written (security-1, S5 finding 1).
+// spec: SEAL-BKP-001
+#[test]
+fn write_then_read_boards_where_the_code_buffer_fills() {
+    let mut x = Hist::new(2);
+    x.rotate(Who::D(1));
+    let recs = x.recs();
+    let mut failed = Vec::new();
+    for n in [120_045usize, 120_256, 181_657] {
+        let board = mixed_board(n);
+        let membership = x.b.m.to_canonical_bytes();
+        let state_hash = state_hash(1, &h(&[&board]), &membership);
+        let c = BackupContent::Nightly { membership, board, head: x.b.head(), hash_version: 1, state_hash };
+        let file = write_backup(&x.b.devs[0], x.input(&recs, c), &mut OsEntropy).unwrap();
+        if let Err(e) = x.read(&file) {
+            failed.push((n, e.code()));
+        }
+    }
+    assert!(failed.is_empty(), "files that do not read back: {failed:?}");
 }

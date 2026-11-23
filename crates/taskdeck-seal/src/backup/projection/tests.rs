@@ -371,3 +371,46 @@ fn step6_genesis() {
     same.device.dev = x.b.dev(Who::R);
     rejected(&x, &[genesis_record(&x, &x.b.board, same)]);
 }
+
+// The projection copies nothing per record (task S4's security pass: a copy
+// per record made its time grow with the square of the history): over a
+// history of 300 records, `Membership::dup` runs not once.
+// spec: SEAL-BKP-008
+#[test]
+fn the_projection_copies_nothing_per_record() {
+    use crate::membership::DUPS;
+    let x = Hist::new(2);
+    let mut recs = x.recs();
+    let item = CtlItem::Fence(Fence { host: "a.example".into(), door: [0; 5], home_gen: 2 });
+    let (ctr0, seq0) = (x.b.next_ctr(Who::D(0)), x.b.seq());
+    for i in 0..300u64 {
+        recs.push(x.signed(Who::D(0), seq0 + 2 * (i + 1), ctr0 + i, std::slice::from_ref(&item)));
+    }
+    DUPS.with(|c| c.set(0));
+    let p = project_ok(&x, &recs);
+    assert_eq!(DUPS.with(|c| c.get()), 0);
+    assert_eq!(p.ctl_seqs.len(), 302);
+    // A failing record ends it, with nothing copied either.
+    let mut bad = x.recs();
+    bad.push(x.signed(Who::D(0), x.b.seq() + 1, 1, &[item]));
+    DUPS.with(|c| c.set(0));
+    rejected(&x, &bad);
+    assert_eq!(DUPS.with(|c| c.get()), 0);
+}
+
+// Step 3 for the first record: its counter is 1 (SEAL-MEM-004, ruling Q46);
+// the Genesis record re-signed by the real recovery key with `ctr` 7 fails.
+// spec: SEAL-BKP-008
+// spec: SEAL-MEM-004
+#[test]
+fn step3_the_first_counter_is_1() {
+    let x = Hist::new(1);
+    for ctr in [0u64, 2, 7] {
+        let mut r = x.recs();
+        r[0].ctr = ctr;
+        let inner = ctl_inner(&x.b.board, &r[0].dev, ctr, &r[0].entry_id, r[0].at_ms, &r[0].items);
+        r[0].sig = sign_with(x.b.rec[0].signing_key(), &[&inner]);
+        rejected(&x, &r);
+    }
+    project_ok(&x, &x.recs());
+}
