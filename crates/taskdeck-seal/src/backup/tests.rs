@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 use super::*;
 use crate::payloads::ctl_inner;
 use crate::prim::deflate_raw;
-use crate::receipt::tests::board::{Board, Spec, Who, copy, rand};
+use crate::receipt::tests::board_tests::{Board, Spec, Who, copy, rand};
 use crate::receipt::tests::scalar;
 use crate::signatures::signer_identity;
 use crate::{Class, CtlItem, OsEntropy, RecoverySeed};

@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::backup::tests::{Hist, dup};
-use crate::receipt::tests::board::{Who, rand};
-use crate::receipt::tests::board::copy;
+use crate::receipt::tests::board_tests::{Who, rand};
+use crate::receipt::tests::board_tests::copy;
 use crate::{OsEntropy, chain_zero, state_hash};
 
 const BOARD_BYTES: &[u8] = b"{\"cards\":[1,2,3]}";

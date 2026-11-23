@@ -341,7 +341,8 @@ fn invalid_arguments_are_refused() {
 // `register` names the hash of the frame that carries the DeviceAdded, and
 // its keys are the ones that DeviceAdded names: built here from a sealed
 // DeviceAdded frame through the crate's functions, and read back from it.
-// spec: SEAL-SIG-005
+// (§16.2 states this as a duty of `engine` and `device`, which build
+// the arguments; this test cites no clause.)
 #[test]
 fn register_names_the_device_added_frame() {
     let e = DeviceKeys::generate(&mut OsEntropy).unwrap();

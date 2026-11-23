@@ -4,7 +4,6 @@ use super::*;
 // wiped on drop: sha2's `zeroize` feature is on (the crate's Cargo.toml), and
 // the HMAC and HKDF states are built from these cores.
 // spec: SEAL-GEN-006
-// spec: SEAL-SHEET-003
 #[test]
 fn hash_states_zeroize_on_drop() {
     fn zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
@@ -292,5 +291,40 @@ proptest::proptest! {
         let want = [&head[..], &secret[..], &tail[..]].concat();
         let got = inflate_raw(&c, want.len());
         proptest::prop_assert!(got.as_deref().is_some_and(|g| g == &want[..]));
+    }
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(256))]
+
+    // `inflate_raw` on random bytes and on real streams mutated (a byte
+    // changed, the stream cut or extended), with any cap: it returns, never
+    // panics, and what it returns is never longer than the cap.
+    // spec: SEAL-GEN-011
+    // spec: SEAL-BLOB-003
+    #[test]
+    fn inflate_never_panics(
+        random in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..600),
+        kind in 0u8..3, n in 0usize..20_000, seed in proptest::prelude::any::<u64>(),
+        at in proptest::prelude::any::<usize>(), x in proptest::prelude::any::<u8>(), op in 0u8..4,
+        cap in 0usize..40_000,
+    ) {
+        let data = run_of(kind, n, seed);
+        let mut c = deflate_raw(&data).unwrap().to_vec();
+        let i = at % (c.len() + 1);
+        match op {
+            0 => if let Some(b) = c.get_mut(i) { *b ^= x | 1 },
+            1 => c.truncate(i),
+            2 => c.extend(std::iter::repeat_n(x, i % 64 + 1)),
+            _ => c.insert(i, x),
+        }
+        for input in [&random, &c] {
+            if let Some(out) = inflate_raw(input, cap) {
+                proptest::prop_assert!(out.len() <= cap);
+            }
+        }
+        let whole = deflate_raw(&data).unwrap();
+        let back = inflate_raw(&whole, data.len());
+        proptest::prop_assert!(back.as_deref().is_some_and(|v| v[..] == data[..]));
     }
 }

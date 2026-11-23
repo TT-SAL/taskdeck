@@ -12,7 +12,14 @@
 #      spec: SEAL-GEN-014
 #   4. on Linux only (the check needs python3, which a Windows runner's
 #      bash may lack; the files are the same on every system): the format of
-#      the published vectors (README §7).
+#      the published vectors (README §7);
+#   5. on Linux only: the fuzz targets compile on the pinned toolchain
+#      (`fuzz/`, a crate of its own with its own lockfile; stage `release`
+#      runs them, nightly);
+#   6. on Linux only: the budget job (SYNC_PLAN.md §3.3, §6.3): 256 entries
+#      verified and opened within 100 ms, the median of five runs, in a
+#      release build, and within 25% of `budget-baseline.txt`
+#      (`examples/budget.rs`).
 set -uo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)" || exit 2
@@ -80,8 +87,10 @@ if [[ "$os" == linux ]]; then
         --target aarch64-linux-android --target armv7-linux-androideabi --target x86_64-linux-android
     step "test-entropy marker (SEAL-GEN-014)" marker_check
     step "vectors format" bash scripts/gate-lib.sh vectors docs/sync/vectors
+    step "fuzz targets build" cargo check --locked --manifest-path crates/taskdeck-seal/fuzz/Cargo.toml
+    step "budget" cargo run --release --locked -p taskdeck-seal --example budget
 else
-    echo "==> seal ci: android targets, marker and vectors format: Linux only, skipped on $os"
+    echo "==> seal ci: android targets, marker, vectors format, fuzz targets and budget: Linux only, skipped on $os"
 fi
 
 if [[ ${#failed[@]} -gt 0 ]]; then

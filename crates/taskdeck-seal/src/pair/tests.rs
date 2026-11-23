@@ -7,7 +7,7 @@ use hkdf::hmac::{Hmac, KeyInit as _, Mac as _};
 use sha2::{Digest as _, Sha256};
 
 use super::*;
-use crate::receipt::tests::board::Board;
+use crate::receipt::tests::board_tests::Board;
 use crate::{Entropy, OsEntropy};
 
 // ------------------------------------------------------------ helpers

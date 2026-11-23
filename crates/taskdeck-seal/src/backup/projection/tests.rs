@@ -5,7 +5,7 @@
 use super::*;
 use crate::backup::tests::{Hist, dup};
 use crate::payloads::items_bytes;
-use crate::receipt::tests::board::{Spec, Who, rand};
+use crate::receipt::tests::board_tests::{Spec, Who, rand};
 use crate::receipt::tests::scalar;
 use crate::signatures::{sign_with, signer_identity};
 use crate::{

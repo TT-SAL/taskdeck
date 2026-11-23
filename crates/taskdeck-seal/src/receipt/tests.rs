@@ -1,12 +1,12 @@
 //! Unit tests of `classify` (seal.md §13, §14): one test per step of §14.2,
 //! passing and failing; Genesis (§13.3); the halts (§14.5); the flags
 //! (§14.7, §14.8); the races of V2-8; determinism. The rows of §13.6 are in
-//! `items.rs`.
+//! `items_tests.rs`.
 
-pub(crate) mod board;
-mod items;
+pub(crate) mod board_tests;
+mod items_tests;
 
-use board::*;
+use board_tests::*;
 
 use crate::membership::DeviceStatus;
 use crate::*;

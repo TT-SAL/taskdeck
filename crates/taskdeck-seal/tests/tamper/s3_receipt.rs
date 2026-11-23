@@ -12,9 +12,18 @@ fn diff(a: &[u8], b: &[u8]) -> Vec<usize> {
     (0..a.len()).filter(|&i| a[i] != b[i]).collect()
 }
 
-/// Checks the class of a tampered frame and what it did to the state.
-fn check(prev: &[u8], r: &Receipt) {
+/// Checks the class of a tampered frame and what it did to the state:
+/// never `Accept`, nothing of the plaintext returned, no root learned.
+pub(crate) fn check(prev: &[u8], r: &Receipt) {
     assert!(!matches!(r.class, Class::Accept), "a flipped byte was accepted");
+    assert!(r.opened.is_none(), "a flipped frame returned its plaintext");
+    assert!(r.learned_root.is_none(), "a flipped frame taught a root");
+    check_state(prev, r);
+}
+
+/// What a class other than `Accept` may do to the state (§13.5).
+pub(crate) fn check_state(prev: &[u8], r: &Receipt) {
+    assert!(!matches!(r.class, Class::Accept), "accepted");
     let after = r.membership.to_canonical_bytes();
     match r.class {
         // §13.5: Refuse sets the author's counter and nothing else: the
@@ -27,7 +36,7 @@ fn check(prev: &[u8], r: &Receipt) {
     }
 }
 
-fn flip_all(s: &Sim, f: &[u8], o: &Opts) -> usize {
+pub(crate) fn flip_all(s: &Sim, f: &[u8], o: &Opts) -> usize {
     let prev = s.m.to_canonical_bytes();
     let ok = s.classify(f, o).unwrap();
     assert!(matches!(ok.class, Class::Accept));
