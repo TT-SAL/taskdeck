@@ -88,6 +88,13 @@ pub fn parse_intent(text: &str) -> Result<Intent, CompileError> {
     if text.len() > INTENT_LIMIT {
         return Err(intent_json("That request is too large."));
     }
+    // Step 2: an object. The derive of an internally tagged enum also reads
+    // a JSON array as `[op, field, ...]`, a second wire form the spec refuses.
+    // After leading JSON whitespace (RFC 8259 §2) a value that starts with
+    // `[` is an array; any other non-object is refused by the derive itself.
+    if text.trim_start_matches([' ', '\t', '\n', '\r']).starts_with('[') {
+        return Err(intent_json("invalid type: sequence, expected internally tagged enum Command"));
+    }
     // Steps 2 to 6.
     let command: Command = serde_json::from_str(text).map_err(|e| intent_json(e.to_string()))?;
     command.into_intent()

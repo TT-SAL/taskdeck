@@ -1011,3 +1011,29 @@ proptest! {
         }
     }
 }
+
+// spec: CORE-INT-001
+#[test]
+fn an_array_is_not_an_intent() {
+    for t in [r#"["forget",5]"#, r#"["rename",3,"n"]"#, r#"["quick_add","x",null]"#, " \n[\"forget\",5]"] {
+        let e = parse_intent(t).expect_err(t);
+        assert_eq!((e.code, e.status), ("core/intent_json", 400), "{t}");
+    }
+}
+
+// spec: CORE-COMP-008
+#[test]
+fn set_notes_base_beyond_u53_is_not_emitted() {
+    let view = BoardData::empty();
+    for base in ["9007199254740992", "18446744073709551615"] {
+        let text = format!(r#"{{"op":"set_notes","text":"hi","base":{base}}}"#);
+        let intent = parse_intent(&text).expect("parses");
+        let overlay = Overlay::default();
+        let cx = CompileCtx { view: &view, zone: &FixedZone(0), now: at(720), device_no: 1, overlay: &overlay };
+        let mut minter = IdMinter::new(1);
+        if let Ok(Compiled { command: Some(c), .. }) = compile(&intent, &cx, &mut minter) {
+            let bytes = c.to_canonical();
+            assert_eq!(parse_command(&bytes).as_ref(), Ok(&c), "{:?}", String::from_utf8_lossy(&bytes));
+        }
+    }
+}

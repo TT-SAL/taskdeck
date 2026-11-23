@@ -60,6 +60,8 @@ const MAX_MOVES: usize = 1000;
 /// Years a day or a naive time may fall in (G3, G4).
 const FIRST_YEAR: i32 = 1970;
 const LAST_YEAR: i32 = 9999;
+/// The largest `u53`, which the canonical form can write (core.md §4.2 rule 5).
+const MAX_U53: u64 = (1 << 53) - 1;
 /// One part of a picture blob (core.md §6.9).
 const PICTURE_PART: u64 = 1_048_576;
 /// Today's `NEW_TASK_HORIZON` and `NEW_TASK_IMPORTANCE` (board.rs).
@@ -99,6 +101,8 @@ fn fail(code: &'static str) -> CompileError {
         "core/horizon_kind" => (400, "Only a task has a horizon."),
         "core/repeat_kind" => (400, "Only a routine repeats."),
         "core/notes_long" => (400, "Those notes are too long for the notepad."),
+        // SPEC-QUESTION: §16 has `core/notes_stale` only for apply (§9.20); compile refuses an intent `base` above 2^53 − 1 with it, status 400 and a new message.
+        "core/notes_stale" => (400, "Those notes have changed since you started editing."),
         "core/archive_gone" => (410, "That is no longer in the archive."),
         "core/calendars_full" => (400, "That is already 20 calendars, which is as many as this keeps."),
         "core/url_empty" => (400, "An address is needed."),
@@ -117,6 +121,8 @@ fn fail(code: &'static str) -> CompileError {
         "core/id_taken" => (400, "That item's blocks are already on the board."),
         // SPEC-QUESTION: §16 has no compile code for an op outside `view.rules`' op table (CORE-RULES-004); this uses apply's `core/rules` with status 400 and a new message.
         "core/rules" => (400, "This board's rules do not allow that yet."),
+        // SPEC-QUESTION: §16 has no compile code for a command apply would refuse for size (§8.4 step 4, CORE-APPLY-005) though G6 and CORE-COMP-008 require compile to refuse it on `view`; this uses apply's `core/cap` with status 400 and a new message.
+        "core/cap" => (400, "The board is full."),
         _ => (400, ""),
     };
     CompileError { code, status, message: message.to_owned() }
@@ -145,6 +151,18 @@ pub fn compile<Z: Zone + ?Sized>(
         && !crate::apply::op_table(cx.view.rules).contains(&c.op())
     {
         return Err(fail("core/rules"));
+    }
+    // G6: apply's size check (§8.4 step 4) on `view`, so `apply` on `view`
+    // does not refuse the command `core/cap` (CORE-COMP-008). The entry's
+    // `seq` is not known here; the largest one writes the longest stamps, so
+    // a command that fits under it fits under every `seq`, and `based_on` just
+    // below it means the origin saw every change of `view`.
+    if let Some(c) = &out.command {
+        let seq = crate::apply::LAST_SEQ;
+        let ctx = crate::apply::Ctx { seq, device_no: cx.device_no, at: cx.now, based_on: seq - 1 };
+        if crate::apply::refused_for_size(cx.view, c, &ctx) {
+            return Err(fail("core/cap"));
+        }
     }
     *minter = m;
     Ok(out)
@@ -562,7 +580,16 @@ impl<'a, Z: Zone + ?Sized> Rows<'_, 'a, Z> {
                     return Err(fail("core/notes_long"));
                 }
                 // SPEC-QUESTION: an intent `base` other than `view.notes_rev` is emitted as given (§13.4), so `apply` on `view` refuses it `core/notes_stale` (§9.20), against CORE-COMP-008; and `view.notes_rev` at 2^53 − 1 has no compile code (apply: `core/cap`).
-                done(LogCommand::SetNotes { text: t, base: base.unwrap_or(self.view().notes_rev) })
+                let base = base.unwrap_or(self.view().notes_rev);
+                // A base above 2^53 − 1 has no canonical encoding (§4.2 rule 5),
+                // and it can never be `view.notes_rev` (a `u53`), so apply on
+                // `view` would refuse it `core/notes_stale` (§9.20): refuse it here
+                // with that code, so the command returned always encodes (CORE-COMP-008).
+                // SPEC-QUESTION: §13.4 and §16 give no compile refusal for an intent `base` above 2^53 − 1; this uses apply's `core/notes_stale`.
+                if base > MAX_U53 {
+                    return Err(fail("core/notes_stale"));
+                }
+                done(LogCommand::SetNotes { text: t, base })
             }
 
             Intent::Restore { id, archived_at } => {

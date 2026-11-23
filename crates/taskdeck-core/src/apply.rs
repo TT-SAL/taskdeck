@@ -432,6 +432,37 @@ pub fn apply(board: &mut BoardData, command: &LogCommand, ctx: &Ctx) -> Result<A
 
 // ---------------------------------------------------------------- the size check (§8.4 step 4)
 
+/// Whether `apply` would refuse `command` on `board` under `ctx` for size
+/// alone (§8.4 step 4, CORE-APPLY-005): its checks pass and its effects leave
+/// canonical bytes over the cap and longer than before. `compile` asks this of
+/// `view` (G6, CORE-COMP-008), with the same bounds `apply` uses to skip the
+/// count on all but the largest boards.
+pub(crate) fn refused_for_size(board: &BoardData, command: &LogCommand, ctx: &Ctx) -> bool {
+    if !ctx_ok(ctx) || board.rules != 1 || !op_table(board.rules).contains(&command.op()) {
+        return false;
+    }
+    let growth = growth_bound(command, board);
+    if size_bound(board).saturating_add(growth) <= SIZE_CAP {
+        return false;
+    }
+    let before = canonical_len(board);
+    if before.saturating_add(growth) <= SIZE_CAP {
+        return false;
+    }
+    let mut copy = board.clone();
+    match (V1 { board: &mut copy, ctx, command, out: Applied::default() }.run()) {
+        Ok(out) if !out.benign => {
+            let after = canonical_len(&copy);
+            after > SIZE_CAP && after > before
+        }
+        _ => false,
+    }
+}
+
+/// The largest `seq` a `Ctx` may carry (core.md §8.1): the entry whose
+/// stamps take the most bytes.
+pub(crate) const LAST_SEQ: u64 = MAX_U53;
+
 /// The size cap: a command may not leave canonical board bytes over
 /// 61,865,984 (59 MiB) that are longer than before it (core.md §8.4 step 4,
 /// §17, CORE-APPLY-005).
