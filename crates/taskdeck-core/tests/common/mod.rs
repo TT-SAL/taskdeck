@@ -3,4 +3,5 @@
 
 pub mod boards;
 pub mod snapshots;
+pub mod transcripts;
 pub mod zones;

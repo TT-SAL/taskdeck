@@ -46,23 +46,21 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 | C `c-ports` | C1 planner, scoring, archive; C2 ICS parser, overlay types, weather report types, `compile::{trim, detab}`; C3 the calendar parser's cost bounded in six ways; C4 one step budget for all the rules of a file | 1 | **done**: built, checked (nothing high or medium), security pass (seven lows, fixed by ruling D11 in C3 with their reproductions as tests: the 8 MiB hostile feeds that timed out at 60 s now parse in 1.5 to 4.2 s in a debug build; C4: 20,000 events that each walk a full rule went from 37.7 s to 0.41 s in a release build); lead's gate 2026-11-23 12:10 UTC (332 tests) | 1.59 M |
 | D `d-compile` | D1 intents and the compile step; D2 the lead's rulings applied (`briefs/d2-rulings.md`) | 3 | **done**: built, checked, security-passed (one medium and two high findings fixed with their reproductions as tests), rulings applied; lead's gate 11:59 UTC | 1.37 M |
 | E `e-read` | E1 legacy import; E2 read queries, snapshot builders, reminders, the snapshot-fixtures test | 7, 8 | **done**: built and checked. The check found nothing (the fifteen import steps against the code, two folders worked by hand, the fourteen snapshot differences, mutations of the builders caught by the fixture test, the reminder vectors by hand). 43 of the 48 recorded snapshots match field for field; the other five are those core.md §18.7 excludes. Lead's gate 11:59 UTC with the `snapshot-fixtures` item | 0.93 M |
-| F `f-gate` | F1 transcripts test; F2 determinism and rebase property tests, fuzz targets, the budget job, spec coverage | 9 and the gate | not started | |
+| F `f-gate` | F1 transcripts test; F3 three points from it (`briefs/f3-rulings.md`); F2 determinism and rebase property tests, fuzz targets, the budget job, spec coverage | 9 and the gate | F1 in the tree (lead's gate 2026-11-23 15:47 UTC: 334 tests, the `transcripts` item green; 18 of the 20 transcripts replay, `every-command` and the six seeded ones compared in full in both zones). F2 was cut by the account's usage limit at 13:2x UTC and runs again in workflow 10 with F3 and the check of F | 0.31 M so far |
 | G exit | hygiene pass, exit review, exit pull request | §7 "once per stage" | not started | |
 
 ## Next steps
 
-1. **The window from about 15:00 UTC (2026-11-23):** workflow 8, `workflows/w8-args.json` with
-   `workflows/pipeline.js`: F1 (`briefs/f1-transcripts.md`), F2 (`briefs/f2-gate.md`), then one check of both.
-   About 1.5 M tokens. Before launching: bring the working copy to the branch
-   (`git -C target/work/core fetch origin && git -C target/work/core reset --hard origin/<branch>`).
-2. Integrate, open a draft pull request, and read the budget job's three numbers from the first CI run of
-   `crates/taskdeck-core/ci.sh` on Linux: they are the baselines. Write them into `ci.sh` and into
-   "Measurements" here. A baseline over its limit is a question for the owner (SYNC_PLAN.md §3.3).
-3. Workflow 9, `workflows/w9-args.json`: the hygiene pass and the exit review (`briefs/g-hygiene.md`,
-   `briefs/g-exit-review.md`), each with one fix pass for what is high or medium. About 0.8 M tokens.
+1. **Window from 15:40 UTC (2026-11-23):** workflow 10 with `workflows/pipeline.js`: F3 (`briefs/f3-rulings.md`),
+   F2 (`briefs/f2-gate.md`), then one check of F (the `verify:f-gate` step of `workflows/w8-args.json`).
+2. Integrate, push, and read the budget job's numbers from the first CI run of `crates/taskdeck-core/ci.sh` on
+   Linux: they are the baselines. Write them into `ci.sh` and into "Measurements". A baseline over its limit
+   is a question for the owner (SYNC_PLAN.md §3.3).
+3. Workflow 9, `workflows/w9-args.json`: the hygiene pass and the exit review, each with one fix pass for what
+   is high or medium.
 4. The exit: `bash scripts/gate.sh core` green in the lead's own run, CI green, this file's state set to
    `final` with "What the next stages need to know", the exit pull request, merge, and tell the owner which
-   sessions to start (wave 2: `device` and `recovery`, once `seal`, `relay` and `engine` are merged too).
+   sessions to start.
 
 ## Decisions (with reasons)
 
@@ -126,7 +124,7 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 | 1 | core.md §18.3: a golden case may name a generated start board (`start_gen`) for the caps of §17, whose boards are too large to print (200,000 archive rows is about 22 MB of JSON) | merged, TT-SAL/taskdeck#5 |
 | 2 | core.md §18.4, §18.5: what the transcript and snapshot tests do with a fixture folder that `import` refuses. `dst-edges` holds three records before 1970-01-01T00:00:00Z (`instant_range`) and `id-limits` holds ids outside every range (`id_range`); the spec said only "starting from `import` of the starting folder" | merged, TT-SAL/taskdeck#5 |
 | 4 | From task B's check: `reset` at the last notes revision is `core/cap`; a command text over the tree budget is `core/schema` whatever its `op` (§9.1); CORE-ID-003 does not cover a benign `restore`; the 1,001-block `create_task` of §18.3 is a parse error in the golden logs | merged, TT-SAL/taskdeck#11 |
-| 6 | From the transcript test (F1): a naive wire time outside the instant range keeps today's answer ("not a time"), where change 5 had made it `core/date_range` without need; §18.4 says how the replay keeps its id map (per id list), that a row's id is not compared, and what a block index with no block becomes | in its own pull request, opened 2026-11-23 13:25 UTC |
+| 6 | From the transcript test (F1): a naive wire time outside the instant range keeps today's answer ("not a time"), where change 5 had made it `core/date_range` without need; §18.4 says how the replay keeps its id map (per id list), that a row's id is not compared, and what a block index with no block becomes | merged, TT-SAL/taskdeck#17 |
 | 5 | From tasks C, D and E: the calendar parser's seven bounds (new clause CORE-READ-007); a local time outside the instant range is `core/date_range`, not a daylight-saving gap (CORE-TIME-003 reworded); `compile` makes every check `apply` makes (`core/cap_board`, a stale `set_notes` base, the two `restore` checks, the rules check, a minter that is not the device's); an intent is a JSON object; the import's open points as implemented; `unreadable` and `legacy-other/empty` in §18.7; `build_report` leaves `fetched_at` to the caller. `docs/sync/spec/CHANGES.md` has the row | merged, TT-SAL/taskdeck#15 |
 | 3 | The lead's rulings on what tasks A and B found: the size check of `apply` (new clause CORE-APPLY-005), the parser's tree budget, `Record::LIMIT`, the fold (D7), and nine smaller points made exact. `docs/sync/spec/CHANGES.md` lists them; `briefs/b3-rulings.md` is the same list as a task | merged, TT-SAL/taskdeck#7 |
 
@@ -143,7 +141,9 @@ Agent tokens as the workflows report them (input, cache writes and output).
 | 2026-11-23 05:00 to 10:00 | none: the account's limit was hit at about 02:53 UTC, in the first window, and this session stood still until 09:45 UTC | 0 | 0 | 0 |
 | 2026-11-23 10:00 to 15:00 | 5: check and security pass of C; E1; D with its check and security pass; E2 (`workflows/w5-args.json`) | 9 | 1,879,829 reported; 2,298,333 by transcripts | 2.30 M |
 | | 6: the check of E; D2 (rulings); C3 (the calendar parser's bounds) | 3 | 742,325 reported; 877,782 by transcripts | 3.18 M |
-| | 7: C4 (a step budget for a file's rules) | 1 | 125,831 reported; 86,852 by transcripts | **3.30 M: the window is spent**; the last unit starts with the next window, about 15:00 UTC |
+| | 7: C4 (a step budget for a file's rules) | 1 | 125,831 reported; 86,852 by transcripts | 3.30 M |
+| 2026-11-23 10:40 to 15:40 (the owner's window; it began at 17:40 Helsinki time the day before's limit) | 8: F1 written; F2 cut by the limit | 2 | 395,808 reported; 337,147 by transcripts | the account's limit was reached at about 13:20 UTC with this stage's agents at about 2.0 M in that window: the other session and the lead's turns used the rest |
+| 2026-11-23 15:40 to 20:40 | 10: F3, F2, the check of F; 9: hygiene pass and exit review | | | |
 
 ## What the checks found
 
