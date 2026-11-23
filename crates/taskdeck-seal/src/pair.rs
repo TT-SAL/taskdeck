@@ -30,7 +30,7 @@
 use chacha20poly1305::aead::{Aead as _, KeyInit as _, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use subtle::ConstantTimeEq;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize as _, Zeroizing};
 
 use crate::canon::INT_MAX;
 use crate::encodings::{device_name_is_valid, host_is_valid};
@@ -970,6 +970,9 @@ impl Existing {
         let board = membership.board();
         // Draws, in the order of §17.10: `s`, `esk_E`, `r_E` (SEAL-PAIR-016).
         let (secret, code) = new_code(rng)?;
+        // The code text is erased if this aborts before it is handed out
+        // (§17.11); once handed out (`ShowCode`) it is the caller's.
+        let mut code = Zeroizing::new(code);
         let mut sec = Secrets::boxed();
         rng.fill(&mut sec.esk)?;
         rng.fill(&mut sec.r)?;
@@ -988,7 +991,7 @@ impl Existing {
         self.membership = Some(membership.dup());
         self.origin = relay_origin.to_owned();
         self.state = ExistingState::Posted;
-        Ok(vec![ExistingEffect::RegisterTicket { tid, slot_a }, ExistingEffect::ShowCode { code }])
+        Ok(vec![ExistingEffect::RegisterTicket { tid, slot_a }, ExistingEffect::ShowCode { code: core::mem::take(&mut *code) }])
     }
 
     /// Handles one event (seal.md §17.10).
@@ -1149,6 +1152,16 @@ impl Existing {
     }
 }
 
+/// Erases the typed code or digits an event carries before it is dropped
+/// (§17.11): `NewEvent` hands them to the crate by value.
+fn erase_typed(ev: NewEvent) {
+    match ev {
+        NewEvent::CodeEntered { mut code, .. } => code.zeroize(),
+        NewEvent::SasEntered { mut digits } => digits.zeroize(),
+        _ => {}
+    }
+}
+
 /// N's progress through §17.9 step 6.
 struct Join {
     /// `M_{t−1}`, from the snapshot's `M_h`.
@@ -1210,10 +1223,16 @@ impl New {
     }
 
     /// Handles one event (seal.md §17.10).
+    ///
+    /// The typed code and digits come by value: from here the crate holds
+    /// the only copy, and erases it on every path (§17.11).
     pub fn on(&mut self, ev: NewEvent, rng: &mut dyn super::Entropy) -> Vec<NewEffect> {
         use NewState as S;
         let r = match (self.state, ev) {
-            (S::Done | S::Aborted, _) => return Vec::new(),
+            (S::Done | S::Aborted, ev) => {
+                erase_typed(ev);
+                return Vec::new();
+            }
             (_, NewEvent::Cancel) => Err(SealError::PairCancelled),
             (S::Idle, NewEvent::Tick { .. }) => Ok(Vec::new()),
             (_, NewEvent::Tick { now }) => {
@@ -1224,11 +1243,15 @@ impl New {
                 }
             }
             (S::Idle, NewEvent::CodeEntered { code, host, board_id, door, name, now }) => {
+                let code = Zeroizing::new(code);
                 Ok(self.code_entered(&code, host, board_id, door, name, now))
             }
             (S::AwaitA, NewEvent::Slot { bytes }) => self.slot_a(bytes, rng),
             (S::AwaitC, NewEvent::Slot { bytes }) => self.slot_c(&bytes),
-            (S::AwaitSas, NewEvent::SasEntered { digits }) => self.sas_entered(&digits),
+            (S::AwaitSas, NewEvent::SasEntered { digits }) => {
+                let digits = Zeroizing::new(digits);
+                self.sas_entered(&digits)
+            }
             (S::AwaitD, NewEvent::Slot { bytes }) => self.slot_d(&bytes),
             (S::AwaitSnapshot, NewEvent::Snapshot { parts }) => self.snapshot(&parts),
             (S::Joining, NewEvent::Entries { frames }) => self.entries(frames),
@@ -1237,7 +1260,10 @@ impl New {
             (_, NewEvent::Snapshot { .. } | NewEvent::Entries { .. } | NewEvent::Frames { .. }) => {
                 Err(SealError::BundleInvalid)
             }
-            (_, NewEvent::CodeEntered { .. } | NewEvent::SasEntered { .. }) => Err(SealError::PairCancelled),
+            (_, ev @ (NewEvent::CodeEntered { .. } | NewEvent::SasEntered { .. })) => {
+                erase_typed(ev);
+                Err(SealError::PairCancelled)
+            }
         };
         match r {
             Ok(fx) => fx,

@@ -906,3 +906,85 @@ fn unexpected_events_abort() {
     let fx = p.n.on(code_entered(&p.code, p.b.board), &mut p.nrn);
     assert_eq!(abort_code_n(&fx), Some(SealError::PairCancelled));
 }
+
+// ---------------------------------------- §17.6 check 5, E's two other limits
+
+/// E (started on a two-device board) with its copy of the membership edited
+/// by `edit`, given N's slot B: E's effects.
+fn e_on_b_with(edit: impl FnOnce(&mut Membership)) -> (Existing, Vec<ExistingEffect>) {
+    let mut p = started();
+    edit(p.e.membership.as_mut().unwrap());
+    p.n.on(code_entered(&p.code, p.b.board), &mut p.nrn);
+    let fx = p.n.on(NewEvent::Slot { bytes: p.slot_a.clone() }, &mut p.nrn);
+    let NewEffect::PostSlot { slot } = &fx[0] else { panic!("slot B") };
+    let fx = p.e.on(ExistingEvent::SlotB { bytes: slot.clone() }, &mut p.ern);
+    (p.e, fx)
+}
+
+/// E refused slot B with `seal/ctl_device_cap`: `DeleteTicket`, `Abort`,
+/// nothing posted, and the machine aborted.
+fn refused_for_cap(e: &Existing, fx: &[ExistingEffect]) {
+    assert!(
+        matches!(fx[..], [ExistingEffect::DeleteTicket { .. }, ExistingEffect::Abort { code: SealError::CtlDeviceCap }]),
+        "{:?}",
+        abort_code_e(fx)
+    );
+    assert!(matches!(e.state, ExistingState::Aborted));
+    assert!(e.sec.is_none());
+}
+
+fn accepted(fx: &[ExistingEffect]) {
+    assert!(matches!(fx[..], [ExistingEffect::PostSlot { .. }, ExistingEffect::ShowSas { .. }]), "{:?}", abort_code_e(fx));
+}
+
+/// Fills the membership with revoked device records up to `total` records;
+/// the current ones stay as they were.
+fn revoked_up_to(m: &mut Membership, total: usize) {
+    let base = m.devices[0].dup();
+    let mut i: u16 = 0;
+    while m.devices.len() < total {
+        i += 1;
+        let mut d = base.dup();
+        let mut id = [0xA0u8; 16];
+        id[14..].copy_from_slice(&i.to_be_bytes());
+        d.dev = DevId(id);
+        d.sign_pk = [0xB0; 32];
+        d.sign_pk[30..].copy_from_slice(&i.to_be_bytes());
+        d.hpke_pk = [0xC0; 32];
+        d.hpke_pk[30..].copy_from_slice(&i.to_be_bytes());
+        d.device_no = 100 + i;
+        d.status = crate::DeviceStatus::Revoked;
+        m.devices.push(d);
+    }
+    m.devices.sort_by_key(|d| d.dev);
+    m.next_device_no = 101 + i;
+}
+
+// §17.6 check 5 (ruling Q66): a membership that already holds 256 device
+// records, with fewer than 16 current, has no room for N: E refuses slot B
+// with `seal/ctl_device_cap` and posts nothing (slot C is never posted).
+// With 255 records, E goes on.
+// spec: SEAL-PAIR-005
+#[test]
+fn e_refuses_slot_b_at_256_device_records() {
+    let (e, fx) = e_on_b_with(|m| {
+        revoked_up_to(m, 256);
+        assert!(m.current_count() < 16);
+    });
+    refused_for_cap(&e, &fx);
+    let (_, fx) = e_on_b_with(|m| revoked_up_to(m, 255));
+    accepted(&fx);
+}
+
+// §17.6 check 5: a membership whose `next_device_no` is above 8191 has no
+// `device_no` left for N (the `DeviceAdded` would be refused): E refuses
+// slot B with `seal/ctl_device_cap` and posts nothing. At 8191, E goes on.
+// spec: SEAL-PAIR-005
+// spec: SEAL-MEM-014
+#[test]
+fn e_refuses_slot_b_when_no_device_no_is_left() {
+    let (e, fx) = e_on_b_with(|m| m.next_device_no = 8192);
+    refused_for_cap(&e, &fx);
+    let (_, fx) = e_on_b_with(|m| m.next_device_no = 8191);
+    accepted(&fx);
+}
