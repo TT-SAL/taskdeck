@@ -51,15 +51,18 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 
 ## Next steps
 
-1. **The window from 10:00 UTC:** workflow 5, `workflows/w5-args.json` with `workflows/pipeline.js`:
-   the check of task C (both ports) and its security pass (the ICS parser), while the writers go on with D
-   (`briefs/d-compile.md`), E1 (`e1-import.md`) and E2 (`e2-read-snapshot.md`); D gets its check and its
-   security pass (the intent parser) in the same workflow. About 2.7 to 3.2 M tokens. Before launching: bring
-   the working copy to the branch (`git -C target/work/core fetch origin && git -C target/work/core reset --hard origin/<branch>`).
-2. Spec change 5 once the check of C has reported, in its own pull request, then the code.
-3. **The window after it:** the check of E; F1 (`f1-transcripts.md`), F2 (`f2-gate.md`) and their check; the budget
-   baselines from the first CI run of the budget job into `crates/taskdeck-core/ci.sh` and this file; then the
-   hygiene pass, the exit review, and the exit pull request with this file's state set to `final`.
+1. **The window from about 15:00 UTC (2026-11-23):** workflow 8, `workflows/w8-args.json` with
+   `workflows/pipeline.js`: F1 (`briefs/f1-transcripts.md`), F2 (`briefs/f2-gate.md`), then one check of both.
+   About 1.5 M tokens. Before launching: bring the working copy to the branch
+   (`git -C target/work/core fetch origin && git -C target/work/core reset --hard origin/<branch>`).
+2. Integrate, open a draft pull request, and read the budget job's three numbers from the first CI run of
+   `crates/taskdeck-core/ci.sh` on Linux: they are the baselines. Write them into `ci.sh` and into
+   "Measurements" here. A baseline over its limit is a question for the owner (SYNC_PLAN.md §3.3).
+3. Workflow 9, `workflows/w9-args.json`: the hygiene pass and the exit review (`briefs/g-hygiene.md`,
+   `briefs/g-exit-review.md`), each with one fix pass for what is high or medium. About 0.8 M tokens.
+4. The exit: `bash scripts/gate.sh core` green in the lead's own run, CI green, this file's state set to
+   `final` with "What the next stages need to know", the exit pull request, merge, and tell the owner which
+   sessions to start (wave 2: `device` and `recovery`, once `seal`, `relay` and `engine` are merged too).
 
 ## Decisions (with reasons)
 
@@ -123,7 +126,8 @@ The plan's nine items (§6.2) are built as six task units; each unit is one pass
 | 1 | core.md §18.3: a golden case may name a generated start board (`start_gen`) for the caps of §17, whose boards are too large to print (200,000 archive rows is about 22 MB of JSON) | merged, TT-SAL/taskdeck#5 |
 | 2 | core.md §18.4, §18.5: what the transcript and snapshot tests do with a fixture folder that `import` refuses. `dst-edges` holds three records before 1970-01-01T00:00:00Z (`instant_range`) and `id-limits` holds ids outside every range (`id_range`); the spec said only "starting from `import` of the starting folder" | merged, TT-SAL/taskdeck#5 |
 | 4 | From task B's check: `reset` at the last notes revision is `core/cap`; a command text over the tree budget is `core/schema` whatever its `op` (§9.1); CORE-ID-003 does not cover a benign `restore`; the 1,001-block `create_task` of §18.3 is a parse error in the golden logs | merged, TT-SAL/taskdeck#11 |
-| 5 | From tasks C, D and E: the calendar parser's seven bounds (new clause CORE-READ-007); a local time outside the instant range is `core/date_range`, not a daylight-saving gap (CORE-TIME-003 reworded); `compile` makes every check `apply` makes (`core/cap_board`, a stale `set_notes` base, the two `restore` checks, the rules check, a minter that is not the device's); an intent is a JSON object; the import's open points as implemented; `unreadable` and `legacy-other/empty` in §18.7; `build_report` leaves `fetched_at` to the caller. `docs/sync/spec/CHANGES.md` has the row | in its own pull request, opened 2026-11-23 12:25 UTC |
+| 6 | From the transcript test (F1): a naive wire time outside the instant range keeps today's answer ("not a time"), where change 5 had made it `core/date_range` without need; §18.4 says how the replay keeps its id map (per id list), that a row's id is not compared, and what a block index with no block becomes | in its own pull request, opened 2026-11-23 13:25 UTC |
+| 5 | From tasks C, D and E: the calendar parser's seven bounds (new clause CORE-READ-007); a local time outside the instant range is `core/date_range`, not a daylight-saving gap (CORE-TIME-003 reworded); `compile` makes every check `apply` makes (`core/cap_board`, a stale `set_notes` base, the two `restore` checks, the rules check, a minter that is not the device's); an intent is a JSON object; the import's open points as implemented; `unreadable` and `legacy-other/empty` in §18.7; `build_report` leaves `fetched_at` to the caller. `docs/sync/spec/CHANGES.md` has the row | merged, TT-SAL/taskdeck#15 |
 | 3 | The lead's rulings on what tasks A and B found: the size check of `apply` (new clause CORE-APPLY-005), the parser's tree budget, `Record::LIMIT`, the fold (D7), and nine smaller points made exact. `docs/sync/spec/CHANGES.md` lists them; `briefs/b3-rulings.md` is the same list as a task | merged, TT-SAL/taskdeck#7 |
 
 ## Token ledger
