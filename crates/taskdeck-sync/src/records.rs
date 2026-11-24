@@ -25,7 +25,7 @@ pub struct Checkpoint {
 }
 
 /// Engine data the log alone does not give (engine.md §7.3).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Registry {
     pub snapshots: Vec<SnapRecord>,
     pub reports: Vec<Report>,
@@ -175,7 +175,7 @@ pub enum StopKind {
 }
 
 /// The duties' persisted state (engine.md §7.8 `duties`, §29.3).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct DutyState {
     pub snapshot: Option<(u64, i64, u8)>,
     pub last_compact_day: i64,
@@ -184,7 +184,7 @@ pub struct DutyState {
 }
 
 /// The engine's meta record (engine.md §7.8).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Meta {
     pub attempt: u64,
     pub last_failed: Option<(u64, u64)>,
@@ -240,7 +240,7 @@ pub enum Bootstrap {
 pub struct Loaded {
     pub checkpoint: Option<Checkpoint>,
     pub bases: Vec<(u64, Hash32)>,
-    pub chains: Vec<(u64, Hash32)>,
+    pub chains: Vec<(u64, Hash32, i64)>,
     pub log_floor: u64,
     pub floor_chain: Option<Hash32>,
     pub tail: Vec<LogRecord>,

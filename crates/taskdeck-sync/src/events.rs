@@ -92,7 +92,7 @@ pub enum Effect {
 }
 
 /// Where a device syncs (engine.md §7.8 `relay`, §37).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct RelayTarget {
     pub host: String,
     pub door: [u8; 5],

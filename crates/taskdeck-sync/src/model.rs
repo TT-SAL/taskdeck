@@ -124,7 +124,7 @@ pub type Dev = [u8; 16];
 pub type Hash32 = [u8; 32];
 
 /// A log position and its chain value (engine.md §6.1).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Head {
     pub seq: u64,
     pub chain: Hash32,
@@ -329,6 +329,10 @@ pub trait Sealer {
     /// A membership state (engine.md §6.1).
     type Membership: Clone;
 
+    /// `M_0`, the membership state before seq 1 (`seal.md` §13.3): what the
+    /// engine hands to `classify` for the genesis entry (§19.8).
+    fn membership_zero(&self) -> Self::Membership;
+
     /// This device's id (engine.md §6.1 contracts).
     fn own_dev(&self) -> Dev;
     /// The read-only membership view (engine.md §6.1 contracts, §6.2).
@@ -437,7 +441,7 @@ pub struct RecoveryView {
 }
 
 /// The read-only membership view (engine.md §6.2, `seal.md` §13.1).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct MembershipView {
     pub board_id: [u8; 16],
     pub rules: u32,

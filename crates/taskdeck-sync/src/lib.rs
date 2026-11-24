@@ -12,7 +12,6 @@
 //! (ENG-GEN-003): `clippy.toml` in this directory disallows them.
 #![forbid(unsafe_code)]
 // The skeleton's bodies do not read their parameters yet; the owning stage removes this.
-#![allow(unused_variables)]
 
 mod events;
 mod model;
@@ -58,96 +57,19 @@ pub use records::{
 
 /// The state hash of a board hash and membership bytes (engine.md §18.3, ruling S7).
 pub fn state_hash(hash_version: u32, board_hash: &Hash32, membership_bytes: &[u8]) -> Hash32 {
-    unimplemented!()
+    use sha2::{Digest, Sha256};
+    // The 86 bytes of §18.3 (ENG-HASH-001): ctx("state"), the version, the board hash, the membership hash.
+    let mut input = [0u8; 86];
+    input[..18].copy_from_slice(b"taskdeck/v1/state\0");
+    input[18..22].copy_from_slice(&hash_version.to_be_bytes());
+    input[22..54].copy_from_slice(board_hash);
+    let mh: [u8; 32] = Sha256::digest(membership_bytes).into();
+    input[54..].copy_from_slice(&mh);
+    Sha256::digest(input).into()
 }
 
-/// The engine's configuration, reserved (engine.md §37).
-pub struct Config {}
-
-/// One board's replica (engine.md §4.1).
-pub struct Engine<SM: StateMachine, S: Sealer> {
-    _parts: core::marker::PhantomData<(SM, S)>,
-}
-
-impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
-    /// An engine, inert until `Start` (engine.md §37).
-    pub fn new(sm: SM, sealer: S, config: Config) -> Self {
-        unimplemented!()
-    }
-
-    /// Handles one input (engine.md §4.1, §4.5).
-    pub fn handle(&mut self, input: Input<SM::Command>) -> Vec<Effect> {
-        unimplemented!()
-    }
-
-    /// The pending view (engine.md §8.2).
-    pub fn view(&self) -> &SM::State {
-        unimplemented!()
-    }
-
-    /// The pending view's version (engine.md §8.2).
-    pub fn view_version(&self) -> u64 {
-        unimplemented!()
-    }
-
-    /// The confirmed state at `B` (engine.md §8.1).
-    pub fn confirmed(&self) -> (&SM::State, Head) {
-        unimplemented!()
-    }
-
-    /// The membership view of `M_K` (engine.md §6.2, §7.1).
-    pub fn membership(&self) -> MembershipView {
-        unimplemented!()
-    }
-
-    /// The bytes of `M_B`, for backups (engine.md §37).
-    pub fn membership_bytes(&self) -> Vec<u8> {
-        unimplemented!()
-    }
-
-    /// This device's number, once known (engine.md §37).
-    pub fn device_no(&self) -> Option<u16> {
-        unimplemented!()
-    }
-
-    /// The status (engine.md §30.1).
-    pub fn status(&self) -> Status {
-        unimplemented!()
-    }
-
-    /// The pending entries' marks (engine.md §8.2, §37).
-    pub fn pending(&self) -> Vec<PendingMark> {
-        unimplemented!()
-    }
-
-    /// The notice and refusal records (engine.md §13.4, §37).
-    pub fn notices(&self) -> Vec<NoticeEntry> {
-        unimplemented!()
-    }
-
-    /// The points a restore can target, as `(seq, τ)` (engine.md §28.1).
-    pub fn restore_targets(&self) -> Vec<(u64, i64)> {
-        unimplemented!()
-    }
-
-    /// A purge's preview, `(p, τ_{p−1})` (engine.md §28.2 step 1).
-    pub fn purge_preview(&self) -> Result<(u64, i64), &'static str> {
-        unimplemented!()
-    }
-
-    /// The sealer (engine.md §37).
-    pub fn sealer(&self) -> &S {
-        unimplemented!()
-    }
-}
-
-// Declared for the stage that fills this crate: each dependency is named once
-// so that it is resolved and compiled now, and a wrong feature set fails today
-// rather than in wave 1.
-const _: () = {
-    let _ = <sha2::Sha256 as sha2::Digest>::new;
-    let _ = zeroize::Zeroizing::<Vec<u8>>::new;
-};
+mod engine;
+pub use engine::{Config, Engine};
 
 #[cfg(test)]
 mod tests {
