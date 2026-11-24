@@ -151,7 +151,7 @@ fn puts_in(write: &[PersistOp]) -> Vec<crate::OutboxRecord> {
     out
 }
 
-// spec: ENG-OPS-002
+// spec: ENG-OPS-002 ENG-CTL-002
 #[test]
 fn a_rotation_that_loses_a_race_is_composed_again() {
     let (mut net, mut a) = board(121);
@@ -173,6 +173,27 @@ fn a_rotation_that_loses_a_race_is_composed_again() {
     assert_eq!((op_result(&a, 5), op_result(&b, 6)), (Some(Ok(())), Some(Ok(()))));
     assert_eq!(rotations(&b, fb).len(), 1);
     assert_eq!(rotations(&a, fa).len(), 2);
+    // The pending root of A's refused rotation is discarded and the identity written before A
+    // seals anything further: between the write that sealed the first rotation and the one
+    // that seals the second, an identity is written that differs from the one before it.
+    let ids = rotations(&a, fa);
+    let sealed_at = |id: &[u8; 16]| {
+        position(&a, fa, |op| matches!(op, PersistOp::Outbox(ops) if ops.iter().any(|o| matches!(o, crate::OutboxOp::Put(r) if r.entry_id == *id && r.frame.is_some())))).expect("sealed")
+    };
+    let (first, second) = (sealed_at(&ids[0]), sealed_at(&ids[1]));
+    let identities: Vec<(usize, Vec<u8>)> = a.persists[..=second]
+        .iter()
+        .enumerate()
+        .flat_map(|(i, w)| w.iter().filter_map(move |op| match op {
+            PersistOp::WriteIdentity(bytes) => Some((i, bytes.to_vec())),
+            _ => None,
+        }))
+        .collect();
+    let with_pending = identities.iter().rev().find(|x| x.0 <= first + 1).expect("the identity with the pending root");
+    let discarded = identities.iter().find(|x| x.0 > first + 1 && x.0 < second).expect("the identity after the refusal");
+    assert_ne!(discarded.1, with_pending.1);
+    let dropped = position(&a, fa, |op| matches!(op, PersistOp::Outbox(ops) if ops.iter().any(|o| matches!(o, crate::OutboxOp::Drop(id) if *id == ids[0])))).expect("the refused record dropped");
+    assert!(dropped < second);
     for n in [&a, &b] {
         assert_eq!((status_of(n, &c), status_of(n, &d)), (DeviceStatus::Revoked, DeviceStatus::Revoked));
     }
@@ -1127,4 +1148,69 @@ fn a_relay_rolled_back_gets_its_tail_from_a_devices_log() {
     net.settle(&mut [&mut a, &mut b, &mut c]);
     assert_eq!(a.board_bytes(), c.board_bytes());
     assert_eq!(b.e.confirmed().0.keys[&30].0, 30);
+}
+
+// spec: ENG-OPS-005
+#[test]
+fn a_recovery_key_change_is_registered_by_the_engine_only_in_a_repair() {
+    use crate::Sealer;
+    use crate::sim::relay::Cred;
+    let (mut net, mut a) = board(271);
+    let mut b = pair(&mut net, &mut a, 272, "Laptop", 1);
+    a.set(1, 1, 1);
+    net.settle(&mut [&mut a, &mut b]);
+    let earlier = net.relay().clone();
+    let cut = net.log_len();
+
+    // The recovery tool, holding the sheet, seals a K-shape entry and appends it through the door.
+    let m_old = a.e.mk.clone().expect("a membership");
+    let old = a.e.sealer().view(&m_old).recovery.last().cloned().expect("the recovery identity");
+    let (_, spk, hpk) = crate::fake::FakeSealer::join_keys(279);
+    let entry = |id: u8, n: &Node| crate::PlainEntry {
+        entry_id: [id; 16],
+        at_ms: n.wall,
+        based_on: n.e.status().head,
+        body: Body::Ctl(CtlIntent::Rotate { revoke: vec![], reinstate: vec![], purge_before: None }),
+    };
+    let e1 = entry(5, &a);
+    let change = a.e.sealer.seal_recovery_key_change(&m_old, old.last_ctr + 1, &e1, (spk, hpk)).expect("sealed");
+    let at = a.wall;
+    assert!(net.relay().append(at, &Cred::Door, &[change.frame.clone()]).result.is_ok());
+    let k_seq = net.log_len();
+    let admins = net.admins.len();
+    net.settle(&mut [&mut a, &mut b]);
+    for n in [&a, &b] {
+        assert!(n.e.status().banners.iter().any(|x| x.kind == crate::BannerKind::RecoveryChanged));
+        assert_ne!(n.e.sealer().view(n.e.mk.as_ref().expect("a membership")).recovery.last().map(|r| r.sign_pk), Some(old.sign_pk));
+    }
+    // A second change signed with the old sheet, which is no longer the recovery identity: refused.
+    let (_, spk2, hpk2) = crate::fake::FakeSealer::join_keys(280);
+    let e2 = entry(6, &a);
+    let stale = a.e.sealer.seal_recovery_key_change(&m_old, old.last_ctr + 2, &e2, (spk2, hpk2)).expect("sealed");
+    assert!(net.relay().append(at, &Cred::Door, &[stale.frame.clone()]).result.is_ok());
+    let refused_seq = net.log_len();
+    a.set(2, 2, 2);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(a.e.sealer().view(a.e.mk.as_ref().expect("a membership")).recovery.last().map(|r| r.sign_pk), Some(spk));
+    // Reading them, no engine registers anything: that is the sender's call.
+    assert!(net.admins[admins..].iter().all(|(_, op)| !matches!(op, AdminRequest::RecoveryRegisterSeq { .. })));
+
+    // The relay loses the tail; the device that restores it repairs the accepted change, by seq,
+    // and sends nothing for the refused one.
+    let head = net.log_len();
+    net.relay().rollback_to(&earlier);
+    let admins = net.admins.len();
+    net.settle(&mut [&mut b]);
+    assert_eq!(net.log_len(), head);
+    let repairs: Vec<_> = net.admins[admins..]
+        .iter()
+        .filter_map(|(_, op)| match op {
+            AdminRequest::RecoveryRegisterSeq { seq, sign_pk, frame_hash, .. } => Some((*seq, *sign_pk, *frame_hash)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(repairs, vec![(k_seq, spk, change.frame_hash)]);
+    assert!(k_seq > cut && refused_seq > k_seq);
+    net.settle(&mut [&mut a, &mut b]);
+    assert!(a.e.status().stops.is_empty() && b.e.status().stops.is_empty());
 }

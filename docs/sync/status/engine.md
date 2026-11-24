@@ -6,15 +6,38 @@ in the order it happened; this file is the current truth and is rewritten, not a
 
 ## Resuming: read this first
 
+**Where things stand (2026-11-24 about 22:10 UTC, the owner's usage limit reached):**
+
+- TT-SAL/taskdeck#28 is merged (squash d21e05e). TT-SAL/taskdeck#29 (the spec change, the remote
+  branch's only commit 1d19960) is open, its CI was running. When it is green: merge it (squash),
+  nothing else is needed for it.
+- **The engine's newest work is only local**: branch `park/engine` in `/home/user/taskdeck`, on top
+  of the spec commit. After #29 has merged: `git fetch origin day-planner`,
+  `git rebase --onto origin/day-planner 1d19960 park/engine`,
+  `git checkout -B claude/cool-franklin-c6e6um park/engine`, `bash scripts/ci/reads.sh`,
+  push (force-with-lease: the remote then holds only merged history), open the next pull request
+  titled "... (stage in progress, not the exit)". If the container was replaced and `park/engine`
+  is gone, that work (the tests of `relay_tests.rs` from the move on, the last of `flow_tests.rs`,
+  five engine fixes, this file) must be redone from the journal.
+- Task D (the simulator), workflow wf_70e5dcc6-438, was running in `/home/user/wt/d` (branch
+  `wt/d`, commits up to fa9dfda seen at 22:03). If no completion notice exists, look at the
+  working copy: commits there are work to check and integrate, not to redo. It was written
+  against the engine of 7a764c7: merge `park/engine` into it (or it into the branch) and run its
+  seeds again before reading any failing seed.
+- Left to test (9 clauses): ENG-SEALER-003, ENG-SKIP-003, ENG-BOOT-005, ENG-DIVERGE-004, and
+  ENG-SIM-002 to 005 (task D's). Then: the simulator under `ci.sh`, `bash scripts/gate.sh engine`,
+  the one round of checks, the exit pull request.
+- One question waits for the owner: the divergence rule (see "Open threads").
+
 1. Read this file, then the last 40 lines of `engine/journal.md`. Do not read `engine.md` (the
    spec) in full again: use the clause index
    (`python3 docs/sync/status/foundation/tools/clause-index.py docs/sync/spec /tmp/td-clauses.txt`,
    output outside the repository) and the sections a step names.
-2. `git status`, `git log --oneline -5`, `git worktree list`. A restart loses running workflows:
-   look at "Workflows" below and at each working copy (`/home/user/wt/<task>`, branch `wt/<task>`)
-   before starting one again. A working copy with commits is work to integrate, not to redo.
-3. The step in progress is under "Steps". The to-do list is `bash scripts/spec-coverage.sh engine`
-   (clauses not yet cited) and `grep -rn 'unimplemented!()' crates/taskdeck-sync/src | wc -l`.
+2. `git status`, `git log --oneline -5`, `git worktree list`, `git branch`. A restart loses running
+   workflows: look at "Workflows" below and at each working copy (`/home/user/wt/<task>`, branch
+   `wt/<task>`) before starting one again.
+3. The to-do list is `bash scripts/spec-coverage.sh engine` (clauses not yet cited) and
+   `grep -rn 'unimplemented!()' crates/taskdeck-sync/src | wc -l`.
 
 ## How this stage is run (the owner's instructions, which override plan §3.1 and §7)
 
@@ -82,8 +105,8 @@ The tests' own relay (`Hub` in `kit_tests.rs`) answers only Connect, Hello, Read
 
 Numbers at the start (2026-11-24, day-planner `99b510e`): `spec-coverage.sh engine` 233 clauses
 owned, 2 cited; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
-Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **216 of 233
-cited, 17 uncovered, 1 bad until the spec change merges (ENG-DUTY-003)**. 130 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
+Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **225 of 234
+cited, 9 uncovered, 0 bad** (on `park/engine`). 132 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
 B's seven families pass.
 
 ## Map of the code (`crates/taskdeck-sync/`)
@@ -167,7 +190,8 @@ Agents' files: `src/fake.rs`, `src/fake/**`, `src/toy.rs`, `src/sim/splitmix.rs`
 | # | What | State |
 |---|---|---|
 | TT-SAL/taskdeck#27 | the dev-dependency on itself with `sim` (L1) | merged (squash `cb8ac72`); two macOS runner cancellations re-run |
-| TT-SAL/taskdeck#28 | the engine as written so far, the fake and the toy, the first vectors (stage in progress, not the exit) | draft, open. First CI run failed on Windows only: a test of task A reads `Cargo.toml` and `src/lib.rs` with `include_str!` and the checkout had CRLF; fixed with `crates/taskdeck-sync/.gitattributes` (`* -text`, as the seal crate does) |
+| TT-SAL/taskdeck#29 | the spec change (tau in `Loaded.chains`, `membership_zero`, a repeatable `classify`, ENG-DUTY-003, `engine/restore_target`, the closed board's move code, wordings) | open, CI running at 22:05 UTC |
+| TT-SAL/taskdeck#28 | the engine as written so far, the fake and the toy, the first vectors (stage in progress, not the exit) | merged (squash d21e05e). History: First CI run failed on Windows only: a test of task A reads `Cargo.toml` and `src/lib.rs` with `include_str!` and the checkout had CRLF; fixed with `crates/taskdeck-sync/.gitattributes` (`* -text`, as the seal crate does) |
 
 Order (L4, L5): #28 merges; the branch restarts from day-planner; the spec change is the branch's
 only commit in a pull request of its own; then work goes on.
