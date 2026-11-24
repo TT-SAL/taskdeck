@@ -356,8 +356,15 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                         let req = self.want(Want::OpBlob(ticket));
                         let seq = self.opx.mv.s;
                         self.fx(Effect::Blob { req, op: BlobRequest::Upload { purpose: 1, seq, blob } });
+                        return;
                     }
                 self.move_report(ticket);
+                // Done when the Fence is reported and the snapshot is uploaded or given up (stage 6).
+                let settled =
+                    self.opx.mv.uploaded || self.opx.mv.upload_failures >= 3 || self.opx.mv.blob.is_none();
+                if self.opx.mv.reported && settled {
+                    self.op_done(ticket, Ok(()));
+                }
             }
             _ => {}
         }
@@ -376,7 +383,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             carried_through: self.opx.mv.carried,
             old_relay_answered: self.opx.mv.old_answered,
         });
-        self.op_done(ticket, Ok(()));
+        let _ = ticket;
     }
 
     /// The Fence record's entry reached the board head.
@@ -477,14 +484,16 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         while first > 1 && first <= s + 1 && self.base_at_or_below(first - 1).is_none() {
             first += 1;
         }
-        if first > s + 1 || self.base_at_or_below((first - 1).min(s)).is_none() {
+        // Before seq 1 there is nothing to rebuild (`M_0`, every counter zero): no base is needed for it.
+        if first > s + 1 || (first > 1 && self.base_at_or_below((first - 1).min(s)).is_none()) {
             return self.op_done(ticket, Err("engine/local_fault"));
         }
         self.opx.mv.s = s;
         self.opx.mv.first_seq = first;
         self.opx.mv.carried = self.l;
-        let mut job = Job::new(Purpose::Seed { ticket }, (first - 1).min(s), (first - 1).max(s));
-        job.want_states = vec![first - 1, s];
+        let from = if first > 1 { (first - 1).min(s) } else { s };
+        let mut job = Job::new(Purpose::Seed { ticket }, from, (first - 1).max(s));
+        job.want_states = if first > 1 { vec![first - 1, s] } else { vec![s] };
         if self.start_job(job) {
             self.mv_busy(ticket, true);
         } else {
@@ -500,10 +509,15 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         let (first, s) = (self.opx.mv.first_seq, self.opx.mv.s);
         let fail = |me: &mut Self| me.op_done(ticket, Err("engine/local_fault"));
-        let before = out.stash.iter().find(|x| x.0 == first - 1);
-        let at_s = out.stash.iter().find(|x| x.0 == s);
-        let (Some(before), Some(at_s)) = (before, at_s) else { return fail(self) };
-        let Ok(m_before) = self.sealer.membership_from_bytes(&before.2) else { return fail(self) };
+        let Some(at_s) = out.stash.iter().find(|x| x.0 == s) else { return fail(self) };
+        let m_before = if first > 1 {
+            let Some(before) = out.stash.iter().find(|x| x.0 == first - 1) else { return fail(self) };
+            let Ok(m) = self.sealer.membership_from_bytes(&before.2) else { return fail(self) };
+            m
+        } else {
+            // Before seq 1 nobody had sealed anything.
+            self.sealer.membership_zero()
+        };
         let v0 = self.sealer.view(&m_before);
         let v = &self.vk;
         // Every device and recovery identity of M_L; a revoked device or a retired recovery
