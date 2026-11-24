@@ -206,7 +206,6 @@ export const adminF = [
       ['register', { args: REG('carol', F('alice', 2)), extra: { $hex: '00'.repeat(669) } }, 'relay/bad_body'],
       ['compact', { args: { below_seq: 2, snap_entry_seq: 2, blob_id: ID(1), keep: [] }, extra: { $hex: '00' } }, 'relay/bad_body'],
       ['compact', { args: { below_seq: 2, snap_entry_seq: 2, blob_id: ID(1), keep: [1], n: 2 } }, 'relay/bad_args'],
-      ['compact', { args: { below_seq: '0020000000000000', snap_entry_seq: 2, blob_id: ID(1), keep: [] } }, 'relay/bad_args'],
       ['reinstate', { args: { dev: 'bob', first_epoch: 2, wraps: 0 } }, 'relay/bad_args'],
       ['reinstate', { args: { dev: 'bob', first_epoch: 2, wraps: 1, n: 2 } }, 'relay/bad_args'],
       ['restore_tail', { args: { first_seq: 3, hashes: [] }, extra: { $hex: K(0) } }, 'relay/bad_args'],
@@ -219,6 +218,10 @@ export const adminF = [
       ['mint_read_token', { args: { $hex: '00'.repeat(20) }, admin: { args_len: 19 } }, 'relay/bad_body'],
     ].map(([name, o, code]) => op(name, T('alice'), { signer: 'alice', nonce: '$saved.n', args: o.args, extra: o.extra, ...(o.admin || {}) }, { ...err(400, code), rows_written: 0 })),
     op('mint_read_token', T('alice'), { signer: 'alice', nonce: '$saved.n', args: { dev: 'alice', epoch: 1 } }, { status: 200 }),
+    // A u64 above 2^53 - 1 is refused by the check that names its field, after the nonce.
+    admin('compact', 'alice', T('alice'), { below_seq: '0020000000000000', snap_entry_seq: 2, blob_id: ID(1), keep: [] }, used(409, 'relay/target')),
+    admin('compact', 'alice', T('alice'), { below_seq: 2, snap_entry_seq: 'ffffffffffffffff', blob_id: ID(1), keep: [] }, used(409, 'relay/target')),
+    admin('purge', 'alice', T('alice'), { before_seq: 'ffffffffffffffff', epoch: 2 }, used(409, 'relay/target')),
   ]),
   ad('a nonce is bound to its signer and its purpose, and is tried once', ['RELAY-ADMIN-001', 'RELAY-ADMIN-002', 'RELAY-OBJ-009'], [
     op('revoke', T('alice'), { signer: 'alice', nonce: { $hex: K(0) }, args: { dev: 'bob' } }, { ...err(401, 'relay/no_nonce'), rows_written: 0 }),

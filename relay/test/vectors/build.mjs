@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as a from './cases-a.mjs';
 import * as b from './cases-b.mjs';
+import * as c from './cases-c.mjs';
 
 const family = (spec, cases) => {
   const names = new Set();
@@ -22,6 +23,13 @@ export const families = {
   'relay-blobs.json': family('relay.md §10.7, §13', b.blobs),
   'relay-pairing.json': family('relay.md §10.8', b.pairing),
   'relay-admin.json': family('relay.md §12.1 to §12.6, §12.11, §12.12', b.adminF),
+  'relay-seed.json': family('relay.md §12.7', c.seedF),
+  'relay-compact.json': family('relay.md §12.8, §13.4', c.compactF),
+  'relay-restore.json': family('relay.md §12.9', c.restoreF),
+  'relay-purge.json': family('relay.md §12.10', c.purgeF),
+  'relay-budget.json': family('relay.md §14', c.budgetF),
+  'relay-socket.json': family('relay.md §11', c.socketF),
+  'relay-standby.json': family('relay.md §15.2', c.standbyF),
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -194,6 +194,7 @@ export class World {
         const entries = [];
         for (const e of f.entries) entries.push(cat(await dev(e.dev), await pk(e.sign_pk), u8(e.role), u8(e.status), await B({ $u64: e.last_ctr })));
         if (f.sort !== false) entries.sort((x, y) => Buffer.compare(x, y));
+        if (f.sort === 'reverse') entries.reverse();
         return cat(u32(f.home_gen), await B({ $u64: f.first_seq }), await B(f.chain_before), await B({ $u64: f.last_seq }), await B(f.chain_last), f.blob_id ? await B(f.blob_id) : new Uint8Array(16), u16(f.n ?? entries.length), ...entries);
       }
       case 'compact': return cat(await B({ $u64: f.below_seq }), await B({ $u64: f.snap_entry_seq }), await B(f.blob_id), u32(f.n ?? f.keep.length), ...f.keep.map((k) => u64(k)));
@@ -256,6 +257,7 @@ export class World {
       if (s.socket) return await this.socketStep(s);
       if (s.fill_log) return await this.fillLog(s.fill_log);
       if (s.storage_fault !== undefined) { this.target.fault = s.storage_fault; return undefined; }
+      if (s.entropy_fault !== undefined) { this.target.noEntropy = s.entropy_fault; return undefined; }
       const rq = s.request, b = this.board(rq.board), e = s.expect || {};
       const stats = e.object_called !== undefined || e.rows_written !== undefined || e.rows_read_max !== undefined;
       const before = stats ? await this.target.stats(b.hex) : null;
@@ -266,6 +268,7 @@ export class World {
       this.track(rq, r, j);
       if (j) this.last = j;
       if (s.save) for (const [name, field] of Object.entries(s.save)) this.saved[name] = j[field];
+      if (process.env.TD_ROWS && after) console.error(`rows ${rq.route}${rq.params && rq.params.op ? '/' + rq.params.op : ''} ${r.status}: written ${after.rowsWritten - before.rowsWritten}, read ${after.rowsRead - before.rowsRead}`);
       await this.check(e, r, j, rq.board, before, after);
       return r;
     } catch (err) {
@@ -306,7 +309,8 @@ export class World {
     if (exp === '$push') return assert.equal(got, this.target.name !== 'standby', where);
     if (exp !== null && typeof exp === 'object' && !Array.isArray(exp)) {
       const [k] = Object.keys(exp);
-      if (k === '$time') { const want = (this.target.realClock ? Date.now() : this.clock) + exp.$time; return assert.ok(Math.abs(got - want) <= (this.target.realClock ? 60000 : 0), `${where}: time ${got}, expected ${want}`); }
+      // The harness Worker's clock is the case's clock plus the real time that has passed since it was set.
+      if (k === '$time') { const want = this.clock + exp.$time + (this.target.realClock ? Date.now() - this.target.setAt : 0); return assert.ok(Math.abs(got - want) <= (this.target.realClock ? 5000 : 0), `${where}: time ${got}, expected ${want}`); }
       if (k && k.startsWith('$')) { const x = await this.val(exp, bn); return assert.equal(got, x instanceof Uint8Array ? hex(x) : x, where); }
       assert.ok(got !== null && typeof got === 'object', `${where}: not an object`);
       assert.deepEqual(Object.keys(got), Object.keys(exp), `${where}: the fields and their order`);
@@ -391,12 +395,18 @@ export class World {
     }
     const sock = this.sockets.get(s.socket);
     assert.ok(sock, `socket ${s.socket}`);
-    if (s.send !== undefined) { const v = await this.val(s.send, sock.board); await sock.send(typeof v === 'string' ? v : await this.bytes(s.send, sock.board)); }
+    if (s.send !== undefined) {
+      const v = await this.val(s.send, sock.board);
+      if (s.send.$sock_append && Array.isArray(s.send.$sock_append.batch)) sock.frames = await Promise.all(s.send.$sock_append.batch.map((f) => this.bytes(f, sock.board)));
+      await sock.send(typeof v === 'string' ? v : await this.bytes(s.send, sock.board));
+    }
     if (s.close) sock.close(typeof s.close === 'number' ? s.close : 1000);
     for (const m of e.messages || (e.message ? [e.message] : [])) {
       const got = await sock.next(5000);
       assert.ok(got && got.data, `socket ${s.socket}: expected ${m.type}, got ${JSON.stringify(got)}`);
-      await this.expectMessage(m, decodeMessage(got.data), sock.board);
+      const msg = decodeMessage(got.data);
+      if (msg.type === 'result' && sock.frames) noteResults(this.board(sock.board), msg.results, sock.frames);
+      await this.expectMessage(m, msg, sock.board);
     }
     if (e.text !== undefined) { const got = await sock.next(5000); assert.equal(got && got.text, e.text); }
     if (e.closed !== undefined) { const got = await sock.next(5000); assert.deepEqual(got, { close: e.closed }, `socket ${s.socket} close`); }
@@ -477,7 +487,9 @@ export function decodeMessage(data) {
 // ---------- the counting storage (§18): rows written as the platform counts them
 
 export function countingStorage(inner, stats) {
-  const cost = (sql, n) => { const m = /^\s*(?:INSERT INTO|UPDATE|DELETE FROM)\s+(\w+)/i.exec(sql); return m ? n * (m[1] === 'log' ? 2 : 1) : 0; };
+  // An inserted `log` row is two rows written (the row and its index entry); a deleted row of any
+  // table is one: so the platform counts under `wrangler dev`, and the Worker target checks it.
+  const cost = (sql, n) => { const m = /^\s*(INSERT INTO|UPDATE|DELETE FROM)\s+(\w+)/i.exec(sql); return m ? n * (m[2] === 'log' && m[1].toUpperCase() !== 'DELETE FROM' ? 2 : 1) : 0; };
   return {
     all(sql, ...p) { const rows = inner.all(sql, ...p); stats.rowsRead += rows.length; stats.rowsWritten += cost(sql, rows.length); return rows; },
     run(sql, ...p) { const r = inner.run(sql, ...p); stats.rowsWritten += cost(sql, r.changes); return r; },
@@ -521,7 +533,9 @@ export class CoreTarget {
       const faulty = { ...inner, run: (sql, ...p) => { if (this.fault && sql.startsWith(this.fault)) throw new Error('storage full'); return inner.run(sql, ...p); } };
       const storage = countingStorage(faulty, stats);
       const world = this.world;
-      const c = new core.BoardCore({ storage, sockets, now: () => world.clock, random: this.random, config: this.cfg, board: unhex(boardHex) });
+      // A step may make the entropy source throw: an exception the core does not expect, so the object call fails.
+      const random = (n) => { if (this.noEntropy) throw new Error('no entropy'); return crypto.getRandomValues(new Uint8Array(n)); };
+      const c = new core.BoardCore({ storage, sockets, now: () => world.clock, random, config: this.cfg, board: unhex(boardHex) });
       c.migrate();
       stats.rowsWritten = 0;
       b = { db, stats, sockets, core: c, storage };
@@ -657,9 +671,14 @@ export class WorkerTarget {
     // The harness Worker has one configuration; a case that needs another one names a variant of it.
     this.variant = s.create_secret === null ? 'no-create' : s.token_key !== STD.token_key ? 'bad-key' : s.origin !== STD.origin ? 'bad-origin' : null;
     if (!this.variant) assert.deepEqual([s.token_key, s.create_secret, s.origin], [STD.token_key, STD.create_secret, STD.origin], 'the Worker target runs with the standard configuration');
+    await this.setClock(world, world.clock);
   }
   async stop() {}
-  async setClock(world, ms) { for (const b of world.boards.values()) await this.test('POST', `/__test/clock/${b.hex}`, String(ms - Date.now())); }
+  // The object's clock: real time plus an offset the harness Worker keeps per board (a test-only route).
+  async setClock(world, ms) {
+    this.setAt = Date.now();
+    for (const b of world.boards.values()) await this.test('POST', `/__test/clock/${b.hex}`, String(ms - this.setAt));
+  }
   request(r) { return send(this.base, this.variant ? { ...r, headers: { ...r.headers, 'X-Test-Env': this.variant } } : r); }
   async test(method, p, body) {
     const r = await send(this.base, { method, path: p, headers: body ? { 'Content-Length': String(Buffer.byteLength(body)) } : {}, body: body ? Buffer.from(body) : null });

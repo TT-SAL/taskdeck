@@ -867,40 +867,6 @@
        "gen": 1
       },
       "params": {
-       "op": "compact"
-      },
-      "body": {
-       "$admin": {
-        "op": "compact",
-        "signer": "alice",
-        "nonce": "$saved.n",
-        "args": {
-         "below_seq": "0020000000000000",
-         "snap_entry_seq": 2,
-         "blob_id": "01010101010101010101010101010101",
-         "keep": []
-        }
-       }
-      }
-     },
-     "expect": {
-      "status": 400,
-      "x_td_relay": "object",
-      "json": {
-       "error": "relay/bad_args"
-      },
-      "rows_written": 0
-     }
-    },
-    {
-     "request": {
-      "route": "admin",
-      "board": "main",
-      "cred": {
-       "token": "alice",
-       "gen": 1
-      },
-      "params": {
        "op": "reinstate"
       },
       "body": {
@@ -1316,6 +1282,169 @@
      },
      "expect": {
       "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "alice",
+        "args": {
+         "below_seq": "0020000000000000",
+         "snap_entry_seq": 2,
+         "blob_id": "01010101010101010101010101010101",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "alice",
+        "args": {
+         "below_seq": 2,
+         "snap_entry_seq": "ffffffffffffffff",
+         "blob_id": "01010101010101010101010101010101",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": "ffffffffffffffff",
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 1
      }
     }
    ]

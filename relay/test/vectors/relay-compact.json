@@ -1,0 +1,1839 @@
+{
+ "spec": "relay.md §12.8, §13.4",
+ "cases": [
+  {
+   "name": "compaction deletes old entries in daily slices, keeps what it is told to keep, and never the newest 16,384",
+   "clauses": [
+    "RELAY-COMPACT-001",
+    "RELAY-COMPACT-002",
+    "RELAY-COMPACT-003",
+    "RELAY-COMPACT-004",
+    "RELAY-COMPACT-005",
+    "RELAY-COMPACT-006",
+    "RELAY-COMPACT-007",
+    "RELAY-STORE-005",
+    "RELAY-BLOB-005",
+    "RELAY-BLOB-007",
+    "RELAY-ROWS-001",
+    "RELAY-OBJ-005"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "ce7dba35629511516881739916b5a204",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "fill_log": {
+       "board": "main",
+       "cred": {
+        "door": true
+       },
+       "author": "rec",
+       "from_ctr": 2,
+       "count": 21500
+      }
+     },
+     {
+      "request": {
+       "route": "blob-begin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$blob_begin": {
+         "id": "33333333333333333333333333333333",
+         "purpose": 3,
+         "seq": 1,
+         "size": 67
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "route": "blob-put",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "id": "33333333333333333333333333333333",
+        "part": 0
+       },
+       "body": {
+        "$part": {
+         "size": 67,
+         "index": 0
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "route": "blob-begin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$blob_begin": {
+         "id": "51515151515151515151515151515151",
+         "purpose": 1,
+         "seq": 5120,
+         "size": 67
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "route": "blob-put",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "id": "51515151515151515151515151515151",
+        "part": 0
+       },
+       "body": {
+        "$part": {
+         "size": 67,
+         "index": 0
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "route": "append",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$batch": [
+         {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        ]
+       }
+      },
+      "expect": {
+       "status": 200,
+       "x_td_relay": "object",
+       "results": [
+        {
+         "status": "new",
+         "seq": 21502
+        }
+       ]
+      }
+     },
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 2
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 2
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 21503,
+        "chain": {
+         "$chain": 21503
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "blob-begin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$blob_begin": {
+         "id": "52525252525252525252525252525252",
+         "purpose": 1,
+         "seq": 5120,
+         "size": 67
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "clock_ms": 1826449600000,
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/too_recent"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "clock_ms": 1826622400000,
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": [
+          5,
+          3
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": [
+          5,
+          5
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": [
+          100
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 1,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5120,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 21503,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 30000,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_snapshot"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "99999999999999999999999999999999",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_snapshot"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "33333333333333333333333333333333",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_snapshot"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "52525252525252525252525252525252",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_snapshot"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 100,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_snapshot"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 5120,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_snapshot"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "alice",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": []
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/not_signer"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": [
+          1,
+          7,
+          4999,
+          5000,
+          5050
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "deleted": 4996,
+       "floor": 5001,
+       "more": true
+      },
+      "rows_written": 5000,
+      "storage": {
+       "board": {
+        "compact_floor": 5001,
+        "purge_floor": 1,
+        "compact_snap": "51515151515151515151515151515151",
+        "del_count": 4996,
+        "del_day": 21141
+       },
+       "blobs": [
+        {
+         "id": "51515151515151515151515151515151"
+        },
+        {
+         "id": "52525252525252525252525252525252",
+         "complete": 0
+        }
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "query": "after=0&limit=6"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "head_seq": 21503,
+       "floor": 5001,
+       "purge_floor": 1,
+       "truncated": true,
+       "more": true,
+       "seqs": [
+        1,
+        7,
+        4999,
+        5000,
+        5001,
+        5002
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "query": "after=5000&limit=2"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "truncated": false,
+       "seqs": [
+        5001,
+        5002
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": [
+          5050
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "deleted": 4,
+       "floor": 5005,
+       "more": true
+      },
+      "rows_written": 6
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": [
+          5050
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 429,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/delete_budget",
+       "until": 1826668800000
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "bob",
+        "args": {
+         "before_seq": 100,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "purge_floor": 100,
+       "done": 1
+      },
+      "rows_written": 2
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "query": "after=0&limit=3"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "floor": 5005,
+       "purge_floor": 100,
+       "truncated": true,
+       "seqs": [
+        4999,
+        5000,
+        5005
+       ]
+      }
+     }
+    },
+    {
+     "clock_ms": 1826708800000,
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": [
+          5050
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "deleted": 94,
+       "floor": 5100,
+       "more": false
+      },
+      "rows_written": 96,
+      "storage": {
+       "board": {
+        "compact_floor": 5100,
+        "del_count": 94
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "bob",
+        "args": {
+         "before_seq": 100,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "purge_floor": 100,
+       "done": 100
+      },
+      "rows_written": 4,
+      "storage": {
+       "board": {
+        "purge_done": 100,
+        "del_count": 96
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "query": "after=0&limit=4"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "floor": 5100,
+       "truncated": true,
+       "seqs": [
+        4999,
+        5000,
+        5050,
+        5100
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "op": "compact"
+      },
+      "body": {
+       "$admin": {
+        "op": "compact",
+        "signer": "bob",
+        "args": {
+         "below_seq": 5100,
+         "snap_entry_seq": 21502,
+         "blob_id": "51515151515151515151515151515151",
+         "keep": [
+          5050
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "clock_ms": 1826708801000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "61616161616161616161616161616161",
+        "purpose": 1,
+        "seq": 5184,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "61616161616161616161616161616161",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1826708802000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "62626262626262626262626262626262",
+        "purpose": 1,
+        "seq": 5184,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "62626262626262626262626262626262",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1826708803000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "63636363636363636363636363636363",
+        "purpose": 1,
+        "seq": 5184,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "63636363636363636363636363636363",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1826708804000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "64646464646464646464646464646464",
+        "purpose": 1,
+        "seq": 5184,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "64646464646464646464646464646464",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "storage": {
+       "blobs": [
+        {
+         "id": "51515151515151515151515151515151"
+        },
+        {
+         "id": "62626262626262626262626262626262"
+        },
+        {
+         "id": "63636363636363636363636363636363"
+        },
+        {
+         "id": "64646464646464646464646464646464"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

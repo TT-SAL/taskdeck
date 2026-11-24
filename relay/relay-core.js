@@ -811,18 +811,19 @@ const ARGS = {
   },
   seed(b) {
     const r = A(b);
-    const o = { homeGen: r.u32(), first: r.u64(), chainBefore: r.bytes(32), last: r.u64(), chainLast: r.bytes(32), blob: r.bytes(16), entries: [] };
+    // A u64 above 2^53 - 1 is read as null and refused by the check that names the field (RELAY-GEN-008).
+    const o = { homeGen: r.u32(), first: r.u64OrNull(), chainBefore: r.bytes(32), last: r.u64OrNull(), chainLast: r.bytes(32), blob: r.bytes(16), entries: [] };
     const n = r.u16();
     if (n < 1 || n > 320 || r.left() !== 58 * n) fail('relay/bad_args');
-    for (let i = 0; i < n; i++) o.entries.push({ dev: r.bytes(16), pk: r.bytes(32), role: r.u8(), status: r.u8(), last_ctr: r.u64() });
+    for (let i = 0; i < n; i++) o.entries.push({ dev: r.bytes(16), pk: r.bytes(32), role: r.u8(), status: r.u8(), last_ctr: r.u64OrNull() });
     return o;
   },
   compact(b) {
     const r = A(b);
-    const o = { below: r.u64(), snapSeq: r.u64(), blob: r.bytes(16), keep: [] };
+    const o = { below: r.u64OrNull(), snapSeq: r.u64OrNull(), blob: r.bytes(16), keep: [] };
     const n = r.u32();
     if (n > 131072 || r.left() !== 8 * n) fail('relay/bad_args');
-    for (let i = 0; i < n; i++) o.keep.push(r.u64());
+    for (let i = 0; i < n; i++) o.keep.push(r.u64OrNull());
     return o;
   },
   restore_tail(b) {
@@ -833,7 +834,7 @@ const ARGS = {
     for (let i = 0; i < n; i++) o.hashes.push(r.bytes(32));
     return o;
   },
-  purge(b) { const r = A(b); const o = { before: r.u64(), epoch: r.u32() }; r.end(); return o; },
+  purge(b) { const r = A(b); const o = { before: r.u64OrNull(), epoch: r.u32() }; r.end(); return o; },
   mint_read_token(b) { const r = A(b); const o = { dev: r.bytes(16), epoch: r.u32() }; r.end(); return o; },
   revoke_read_token(b) { const r = A(b); const o = { dev: r.bytes(16) }; r.end(); return o; },
   recovery_register(b) { const r = A(b); const o = { dev: r.bytes(16), pk: r.bytes(32), hash: r.bytes(32) }; r.end(); return o; },
@@ -1812,12 +1813,12 @@ const ADMIN = {
   seed(c, { p, board, now }) {
     const a = p.a, e = a.entries;
     // 1
-    if (a.homeGen < 2 || a.first < 1 || a.last < a.first - 1 || (a.last === a.first - 1 && !ctEqual(a.chainLast, a.chainBefore))) fail('relay/bad_args');
+    if (a.homeGen < 2 || a.first === null || a.last === null || a.first < 1 || a.last < a.first - 1 || (a.last === a.first - 1 && !ctEqual(a.chainLast, a.chainBefore))) fail('relay/bad_args');
     // 2 (the count stood in A1)
     const keys = new Set();
     for (let i = 0; i < e.length; i++) {
       if (i && cmp(e[i - 1].dev, e[i].dev) >= 0) fail('relay/bad_args');
-      if ((e[i].role !== 1 && e[i].role !== 2) || (e[i].status !== 1 && e[i].status !== 2)) fail('relay/bad_args');
+      if ((e[i].role !== 1 && e[i].role !== 2) || (e[i].status !== 1 && e[i].status !== 2) || e[i].last_ctr === null) fail('relay/bad_args');
       keys.add(hex(e[i].pk));
     }
     if (keys.size !== e.length) fail('relay/bad_args');
@@ -1838,10 +1839,11 @@ const ADMIN = {
   // §12.8
   compact(c, { p, board, now }) {
     const a = p.a;
-    for (let i = 0; i < a.keep.length; i++) if (a.keep[i] >= a.below || (i && a.keep[i] <= a.keep[i - 1])) fail('relay/bad_args'); // 1
+    const below = a.below === null ? Infinity : a.below;
+    for (let i = 0; i < a.keep.length; i++) if (a.keep[i] === null || a.keep[i] >= below || (i && a.keep[i] <= a.keep[i - 1])) fail('relay/bad_args'); // 1
     const lo = Math.max(board.compact_floor, board.purge_floor), head = c.head(board);
-    if (!(lo < a.below && a.below <= head.seq - 16384)) fail('relay/target'); // 2
-    const snap = c.one(SQL.logAt, a.snapSeq);
+    if (a.below === null || !(lo < a.below && a.below <= head.seq - 16384)) fail('relay/target'); // 2
+    const snap = a.snapSeq === null ? null : c.one(SQL.logAt, a.snapSeq);
     if (!snap || snap.seq < board.purge_floor) fail('relay/no_snapshot'); // 3
     const blob = c.one(SQL.blobGet, a.blob);
     if (!blob || blob.complete !== 1 || blob.purpose !== 1 || !ctEqual(blob.author, snap.dev) || blob.seq < a.below || blob.seq >= a.snapSeq) fail('relay/no_snapshot'); // 4
@@ -1879,7 +1881,7 @@ const ADMIN = {
   purge(c, { p, board, now }) {
     const { before, epoch } = p.a;
     if (epoch < 1) fail('relay/bad_args');
-    if (before < board.purge_floor || before > c.head(board).seq) fail('relay/target');
+    if (before === null || before < board.purge_floor || before > c.head(board).seq) fail('relay/target');
     let floor = board.purge_floor, snap = board.compact_snap, readEpoch = board.read_epoch;
     if (before > floor) { // 1: nothing below it is served from now on
       floor = before;
