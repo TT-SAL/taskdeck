@@ -1,11 +1,12 @@
 # Stage `relay`: status
 
-*In progress: built, gate green in the lead's own run, the checks by agents are next. Lead: one
-Fable session that wrote the whole stage itself (the owner's instruction for this stage: no
-implementation by agents; agents on model `opus` only check the finished work, one round). Branch
-`claude/amazing-hawking-4p2tf6`, draft pull request TT-SAL/taskdeck#24.*
+*Final: built, checked once by agents that did not write it, the gate green in the lead's own run
+and in CI. Lead: one Fable session that wrote the whole stage itself (the owner's instruction for
+this stage: no implementation by agents; agents on model `opus` only checked the finished work,
+one round and one repeat). Branch `claude/amazing-hawking-4p2tf6`, exit pull request
+TT-SAL/taskdeck#24; the spec change is TT-SAL/taskdeck#25, merged.*
 
-## Resuming: read this first
+## After the exit: read this first
 
 1. The contract is `docs/sync/spec/relay.md`. The code is `relay/relay-core.js` (every rule),
    `relay/worker.js`, `relay/standby.js`; the suite is `relay/test/`; `relay/README.md` says what
@@ -15,8 +16,8 @@ implementation by agents; agents on model `opus` only check the finished work, o
 3. The vector families are written in `relay/test/vectors/cases-*.mjs` with the short forms of
    `dsl.mjs`; `node relay/test/vectors/build.mjs` rewrites the JSON files, and the suite fails
    when a file is stale. The bounds on rows read are `relay/test/vectors/reads.mjs`.
-4. The task table says what is done and what is next. Everything is committed and pushed after
-   each step.
+4. Nothing is left to do in this stage. "What the next stages need to know" is at the end; the
+   low findings that were left as they are stand in their own section.
 
 ## Tasks
 
@@ -28,10 +29,10 @@ implementation by agents; agents on model `opus` only check the finished work, o
 | 4 | the nineteen vector families of spec §21 | done: 143 cases |
 | 5 | Wycheproof and seal's vectors (`strict.test.mjs`); the day and the import (`day.test.mjs`); standby and scan tests | done |
 | 6 | `ci.sh`, `deploy.sh`, `README.md`, `test/vectors/README.md` | done |
-| 7 | the spec change (TT-SAL/taskdeck#25) | its two commits are merged into the stage branch; the pull request itself is merged before the stage's |
+| 7 | the spec change (TT-SAL/taskdeck#25) | merged into `day-planner` before the stage's pull request |
 | 8 | gate in the lead's run | passes: core 166 tests, standby 106, worker 118; coverage 183 of 183 clauses |
 | 9 | the checks by agents (spec, works, security x2, hygiene), fixes of high and medium findings | done, one round and one repeat (below) |
-| 10 | exit: status `final`, the exit pull request's body, merge | see the header |
+| 10 | exit: status `final`, the exit pull request's body, merge | done |
 
 ## What was built
 
@@ -162,9 +163,15 @@ it acted on before changing anything.
 | security, input: parsers, limits, memory, budgets, the gate | 4 low | 262,294 (output 66,586; cache reads 10.57 M) |
 | hygiene: what is committed | 1 medium, 1 low | 47,020 (output 10,855; cache reads 1.89 M) |
 | **the round** | 2 high, 1 medium, 11 low (four of them the same path finding) | 1,200,833; the harness reports 1,161,552 for the workflow |
-| repeat: the change to `worker.js`, and the claim about the request target | running when this was written | |
+| repeat (one agent): the change to `worker.js`, and the claim about the request target | 1 low; both points confirmed | 108,566 as the harness counts them |
 
-No agent failed, and every agent's own run of the suite and of the gate passed.
+No agent failed, and every agent's own run of the suite and of the gate passed. The repeat
+confirmed with probes of its own that the Worker and every board object now take one Config (under
+`wrangler dev` the Worker's `fetch` and every object's constructor receive the same `env` object),
+that an invalid configuration answers `503 relay/misconfigured` without an object call, that
+nothing a Worker can read (the URL, the headers, `request.cf`) carries the request target as sent,
+and that no rewritten target reaches a route or a board its credential would not reach when
+written canonically.
 
 ### What was found and what was done
 
@@ -229,6 +236,11 @@ Listed, not fixed (the owner's rule for this stage).
    `relay-x.workers.dev` and `relay-x7k2.example.workers.dev` as symbolic examples; they lie under
    a real Cloudflare domain. This stage's own files use reserved names only.
 
+10. The test of RELAY-GEN-006 (`relay/test/worker.test.mjs`) compares the configurations of two
+    board objects and checks by reading the source that `worker.js` calls `makeConfig` in one
+    place; it does not observe the Worker's `fetch` using that same Config, so a `fetch` that
+    decoded again on every request would still pass (from the repeat check).
+
 Noted by the spec check as left open inside the spec, not as findings; the code follows the
 section named last in each: §5.2's table does not list the generation raised by a repeated
 `create` (§10.2) or `register` (§12.3); RELAY-SEED-005 says `409 relay/seeding` where §12.7 says
@@ -240,8 +252,8 @@ invalid as a whole (§17.1 names only `TOKEN_KEY` and `RELAY_ORIGIN`).
 ## Token ledger
 
 The stage was written by the lead; no agent wrote code. Agents ran only for the checks: 1,161,552
-tokens for the round as the harness counts them (per agent in the table above), and the repeat's
-tokens are added when it ends.
+tokens for the round as the harness counts them (per agent in the table above) and 108,566 for
+the repeat: 1,270,118 in all.
 
 ## Open questions for the owner
 
