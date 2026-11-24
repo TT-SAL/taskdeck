@@ -20,6 +20,11 @@ sha2 = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+# The test targets need the toy, the fake and the simulator, and the gate's
+# commands name no feature (scripts/gates/engine.gate): the crate depends on
+# itself with `sim` for its tests only. No default feature enables `sim`
+# (ENG-TOY-002), and a build that is not a test build never sees it.
+taskdeck-sync = { path = ".", features = ["sim"] }
 proptest = { workspace = true }
 # The JSON test vectors (engine.md §35). Dev-only: ENG-GEN-005 keeps them out
 # of the crate's own dependencies.
