@@ -3,8 +3,9 @@
 *Final: built, checked once by agents that did not write it, the gate green in the lead's own run
 and in CI. Lead: one Fable session that wrote the whole stage itself (the owner's instruction for
 this stage: no implementation by agents; agents on model `opus` only checked the finished work,
-one round and one repeat). Branch `claude/amazing-hawking-4p2tf6`, exit pull request
-TT-SAL/taskdeck#24; the spec change is TT-SAL/taskdeck#25, merged.*
+one round and one repeat). Branch `claude/amazing-hawking-4p2tf6`; the exit pull request is
+TT-SAL/taskdeck#24, merged on 2026-11-24 as `f2dc70d`; the spec change is TT-SAL/taskdeck#25,
+merged.*
 
 ## After the exit: read this first
 
@@ -197,8 +198,8 @@ written canonically.
   and holds no credential. Fixed: the file is removed and `.wrangler/` is ignored
   (`relay/.gitignore`); `run.sh` runs wrangler on a copy of the sources in a temporary directory and
   sets `CLOUDFLARE_CF_FETCH_ENABLED=false`, so that fetch no longer happens; a test in
-  `scan.test.mjs` fails if such a file is tracked. **The file is still in the branch's earlier
-  commits** (see the open questions).
+  `scan.test.mjs` fails if such a file is tracked. **The file is still in the exit pull
+  request's earlier commits** (see the open questions).
 - The brief the lead gave the agents named the clause-index tool wrongly (it writes to its second
   argument): three agents so wrote `relay.md`, a generated index, into the repository root. It was
   never tracked and is deleted.
@@ -257,14 +258,22 @@ the repeat: 1,270,118 in all.
 
 ## Open questions for the owner
 
-None blocks the stage. Two things to know:
+None blocks anything. Two things to know (rewritten after the merge; the first corrects what this
+file said before):
 
-- **The committed cache file is gone from the tree but not from the branch's history.** The stage's
-  pull request is squash-merged, so `day-planner` never holds it, and it leaves GitHub's reachable
-  history when the branch `claude/amazing-hawking-4p2tf6` is deleted after the merge. Purging it
-  sooner means rewriting the branch and force-pushing; say so if you want that.
-- **A second branch was pushed**, `claude/relay-spec-change`, because a spec change goes in a pull
-  request of its own (TT-SAL/taskdeck#25). It can be deleted once that pull request is merged.
+- **The committed cache file is not in `day-planner`, but it can still be opened on GitHub.** The
+  exit pull request was squash-merged, so `day-planner` never held the file. The stage's branch
+  holds it in its history, and so do the stage's pull requests: GitHub keeps the commits of a
+  merged pull request, so the file is still shown under the Commits tab of TT-SAL/taskdeck#24 (the
+  second commit, `233b11e`) and of the pull request that brought this note, whatever happens to
+  the branch. This file said before that deleting the branch would remove it; that was wrong. Only
+  GitHub Support can remove a pull request's commits. The file says how one connection from the
+  cloud container looked to Cloudflare: the network operator, city and coordinates of the
+  container's exit, the TLS parameters of that connection, the names of the request's headers. It
+  holds no IP address, no credential and nothing of the owner, of a board or of a relay. The lead's
+  advice: leave it.
+- **Two branches can be deleted**: `claude/relay-spec-change` (pushed because a spec change goes in
+  a pull request of its own, TT-SAL/taskdeck#25, merged) and `claude/amazing-hawking-4p2tf6`.
 
 ## What the next stages need to know
 
