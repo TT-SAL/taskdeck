@@ -68,9 +68,9 @@ in the order it happened; this file is the current truth and is rewritten, not a
 (the list is under "Spec changes to make"); then task C merged, task D launched, the engine under
 the simulator. Meanwhile: flow tests for the clauses not yet cited.
 
-Every section of the spec has code. Left to test (83 clauses, `bash scripts/spec-coverage.sh engine`):
-- with `Node`/`Hub` (`kit_tests.rs`): crash halt + read-ahead + Skip + Skip replay (ENG-HALT-003/004/006/007,
-  ENG-SKIP-002/003/004, ENG-CTL-001/002, ENG-REF-004, ENG-BANNER-002); checkpoints, bases, shutdown
+Every section of the spec has code. Left to test (67 clauses, `bash scripts/spec-coverage.sh engine`):
+- with `Node`/`Hub` (`kit_tests.rs`; `flow_tests.rs` has the crash halt with read-ahead and Skip, and the
+  Skip replay): ENG-SKIP-003/004, ENG-CTL-002, ENG-BANNER-002; checkpoints, bases, shutdown
   (ENG-CKPT-001/002/003, ENG-HASH-002); ENG-BEAT-002; ENG-SNAP-004/005; ENG-UI-001/003; ENG-EPOCH-003;
   ENG-OPS-007/011; ENG-RULES-001/002; ENG-DIVERGE-001..004; ENG-SEALER-003; ENG-SESS-007.
 - with the model relay (task C): pairing (ENG-OPS-001/004/006/008), revoke (ENG-OPS-002/009), purge
@@ -82,8 +82,8 @@ The tests' own relay (`Hub` in `kit_tests.rs`) answers only Connect, Hello, Read
 
 Numbers at the start (2026-11-24, day-planner `99b510e`): `spec-coverage.sh engine` 233 clauses
 owned, 2 cited; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
-Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **150 of 233
-cited, 83 uncovered, 0 bad**. 104 lib tests and 4 integration tests pass; all 197 cases of task
+Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **166 of 233
+cited, 67 uncovered, 0 bad** (was 150 before task C and `flow_tests.rs`). 106 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
 B's seven families pass.
 
 ## Map of the code (`crates/taskdeck-sync/`)
@@ -197,7 +197,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_3b93dd8a-626 | B seven vector families | `engine/briefs/b-vectors.md` | done, merged | 197 cases, generators under `engine/tools/vectors-b/`, 14 spec questions in `tests/vectors/README.md`; 1 high and 2 medium fixed, 1 low (a clock case's name) | 777,276 |
 | wf_4e7bb2da-24b | A2 fake follow-up | `engine/briefs/a2-fake-followup.md` | done, merged | `seal` no longer returns a stored frame for a reused counter unless entry and epoch are the same; `membership_zero`, `restore` | 341,974 |
 | wf_6790fa34-60e | C model relay, first attempt | `engine/briefs/c-model-relay.md` | lost: the owner's usage limit cut the writer off | nothing kept beyond commit 678fdc2 on `wt/c` | 265,340 |
-| wf_e736e661-ee0 | C model relay, second attempt | `engine/briefs/c-model-relay.md` | running in `/home/user/wt/c` (branch `wt/c`, target `/home/user/wt/target-c`) | | |
+| wf_e736e661-ee0 | C model relay, second attempt | `engine/briefs/c-model-relay.md` | done, merged (the lead ran its gate: 16 conformance tests pass) | `src/sim/relay.rs` + `relay/{seq,admin,blobs,socket,util}.rs`, `tests/relay_conformance.rs` (11 families of `relay/test/vectors/`, about 575 steps; 7 families left out with reasons in the file header), `engine/api-model-relay.md`; check: no findings; 8 questions on relay.md; asks the fake for an accessor of the genesis `rsign_pk` and `salt` | 532,591 |
 | (not started) | D simulator | `engine/briefs/d-simulator.md` | to launch after C: `/home/user/wt/d`, target `/home/user/wt/target-d` | | |
 
 ## Open threads

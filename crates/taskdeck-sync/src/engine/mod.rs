@@ -44,6 +44,8 @@ mod status;
 #[cfg(test)]
 mod core_tests;
 #[cfg(test)]
+mod flow_tests;
+#[cfg(test)]
 mod kit_tests;
 #[cfg(test)]
 mod poison_tests;
