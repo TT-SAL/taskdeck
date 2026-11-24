@@ -872,3 +872,94 @@ fn an_operation_goes_on_from_its_stage_after_a_restart() {
     assert_eq!(status_of(&b, &d), DeviceStatus::Revoked);
     assert_eq!(status_of(&a, &d), DeviceStatus::Revoked);
 }
+
+fn has_alarm(n: &Node, kind: crate::AlarmKind) -> bool {
+    n.e.status().alarms.iter().any(|x| x.kind == kind)
+}
+
+fn diverged(n: &Node) -> bool {
+    n.e.status().stops.iter().any(|s| s.kind == crate::StopKind::Divergence)
+}
+
+// spec: ENG-DIVERGE-001 ENG-DIVERGE-002 ENG-DIVERGE-003
+#[test]
+fn the_minority_stops_and_adopts_with_a_typed_fingerprint() {
+    const DAY: u64 = 86_400_000;
+    let (mut net, mut a) = board(251);
+    let mut b = pair(&mut net, &mut a, 252, "Laptop", 1);
+    let mut c = pair(&mut net, &mut a, 253, "Phone", 2);
+    let mut k = 0u64;
+    let mut grow = |net: &mut super::rkit_tests::Net, a: &mut Node, b: &mut Node, to: u64| {
+        while net.log_len() < to {
+            k += 1;
+            a.set(k, (k % 40) as u8, k as i64);
+            net.settle(&mut [&mut *a, &mut *b]);
+        }
+    };
+    grow(&mut net, &mut a, &mut b, 60);
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    // C's replica goes wrong (a build that computes differently): one value is off. C is away
+    // while the other two pass seq 64, write its snapshot and exchange their beats.
+    if let Some(state) = c.e.state.as_mut() {
+        state.keys.get_mut(&1).expect("key 1").0 += 1;
+    }
+    c.e.pipe.pre = c.e.state.clone();
+    grow(&mut net, &mut a, &mut b, 70);
+    for _ in 0..3 {
+        a.advance(3_600_000);
+        b.advance(3_600_000);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    a.advance(DAY);
+    b.advance(DAY);
+    net.settle(&mut [&mut a, &mut b]);
+    let writer = net.calls.iter().rev().find(|x| x.1 == "blob:upload:1").map(|x| x.0).expect("the snapshot of 64");
+    assert!(!diverged(&a) && !diverged(&b));
+
+    // The rule of §22.2 at A, which holds B's agreeing report at 64. One differing report:
+    // two against one, A raises StateMismatch and does not stop.
+    let own = a.e.hashes[&64].hash;
+    assert!(a.e.registry.reports.iter().any(|r| r.seq == 64 && r.dev == b.dev() && r.hash == own));
+    a.e.registry.reports.push(crate::Report { seq: 64, dev: c.dev(), hash: [9; 32], hash_version: 1, report_seq: a.e.b });
+    a.e.check_divergence(64);
+    assert!(has_alarm(&a, crate::AlarmKind::StateMismatch));
+    assert!(!diverged(&a));
+
+    // C comes back, applies seq 64 its own way and reads the others' reports: one against
+    // two (at first one against one, a tie): it stops.
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    assert!(diverged(&c));
+    assert!(!diverged(&a) && !diverged(&b));
+    // Under the stop C seals nothing, sends nothing and takes no duty; it keeps reading.
+    let sent_by = |net: &super::rkit_tests::Net, n: &Node| net.calls.iter().filter(|x| x.0 == n.dev() && (x.1 == "append" || x.1.starts_with("blob:upload"))).count();
+    let sent = sent_by(&net, &c);
+    c.set(900, 30, 900);
+    grow(&mut net, &mut a, &mut b, 80);
+    for _ in 0..3 {
+        for n in [&mut a, &mut b, &mut c] {
+            n.advance(DAY);
+        }
+        net.settle(&mut [&mut a, &mut b, &mut c]);
+    }
+    assert_eq!(sent_by(&net, &c), sent);
+    assert_eq!(c.e.status().queued, 1);
+    assert_eq!(c.e.status().head.seq, net.log_len());
+    assert!(diverged(&c));
+
+    // C adopts the snapshot of the device its user names only with that device's fingerprint typed right.
+    assert_ne!(writer, c.dev());
+    let fp = c.e.status().devices.iter().find(|d| d.dev == writer).expect("its row").key_fp.clone();
+    let calls = net.calls.len();
+    c.feed(Event::Op { ticket: 7, op: Operation::Adopt { dev: writer, typed_fp: "AAAA-BBBB-CCCC-DDDD".into() } });
+    assert!(matches!(op_result(&c, 7), Some(Err(_))));
+    assert_eq!(net.calls.len(), calls);
+    assert!(c.fx.iter().all(|f| !matches!(f, Effect::Blob { .. })));
+    c.feed(Event::Op { ticket: 8, op: Operation::Adopt { dev: writer, typed_fp: fp } });
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(op_result(&c, 8), Some(Ok(())));
+    assert!(!diverged(&c));
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(c.board_bytes(), a.board_bytes());
+    assert_eq!(c.e.status().queued, 0);
+    assert_eq!(a.e.confirmed().0.keys[&30].0, 900);
+}

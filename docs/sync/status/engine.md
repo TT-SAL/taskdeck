@@ -68,7 +68,7 @@ in the order it happened; this file is the current truth and is rewritten, not a
 (the list is under "Spec changes to make"); then task C merged, task D launched, the engine under
 the simulator. Meanwhile: flow tests for the clauses not yet cited.
 
-Every section of the spec has code. Left to test (37 clauses, `bash scripts/spec-coverage.sh engine`):
+Every section of the spec has code. Left to test (17 clauses, `bash scripts/spec-coverage.sh engine`):
 - with `Node`/`Hub` (`kit_tests.rs`; `flow_tests.rs` has 9 flows): ENG-CTL-002 (needs a refused own
   rotation), ENG-RULES-001/002 (needs a kit device with `rules2`), ENG-SNAP-004/005 and ENG-UI-003 (need
   blobs: the model relay), ENG-SKIP-003, ENG-DIVERGE-001..004 and ENG-SEALER-003 (scripted sealer),
@@ -82,8 +82,8 @@ The tests' own relay (`Hub` in `kit_tests.rs`) answers only Connect, Hello, Read
 
 Numbers at the start (2026-11-24, day-planner `99b510e`): `spec-coverage.sh engine` 233 clauses
 owned, 2 cited; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
-Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **196 of 233
-cited, 37 uncovered, 0 bad**. 122 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
+Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **216 of 233
+cited, 17 uncovered, 1 bad until the spec change merges (ENG-DUTY-003)**. 130 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
 B's seven families pass.
 
 ## Map of the code (`crates/taskdeck-sync/`)
@@ -202,7 +202,26 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 
 ## Open threads
 
-None yet.
+**For the owner (a MUST would change, so the lead does not decide it): the divergence stop can
+halt the healthy majority.** §22.2 and ENG-DIVERGE-001 make a device stop when, among the reports
+it knows at an aligned seq, its own group is not larger than another. A device that has seen one
+differing report and no agreeing one yet is in a tie of one against one and stops; under the stop
+it sends nothing (ENG-DIVERGE-002), so its own report never reaches the others, and the stop ends
+only at a later aligned seq. Reproduced on 2026-11-24 with three devices of which one computes a
+different state: the diverged device had beaten last, so it wrote the snapshot of seq 64; the two
+healthy devices each read its report first and both stopped; nothing was sent any more except by
+the diverged device. The engine does what the spec says. The lead's proposal, not applied: under
+the divergence stop a device still sends its beat (the report is the evidence everyone needs) and
+sends one at once when it enters the stop; and the stop also ends when, at the seq where it began,
+the device's group has become strictly larger with another member. With two devices that
+disagree nothing changes (both stay stopped). The test
+`the_minority_stops_and_adopts_with_a_typed_fingerprint` arranges the order so that the rule as
+written gives the intended result, and says so in a comment.
+
+Low, for the round of checks to weigh: the engine's trial apply is `apply` on a copy, not
+`SM::trial_apply` (§9.1 says "apply the command to a copy"; ENG-GEN-012 lists `trial_apply`).
+A session's `Disconnected` also drops requests in flight to another relay (the door, seed and
+tail of a move), which are sent again; harmless.
 
 ## Spec questions met
 

@@ -69,13 +69,16 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         let g = groups[0].1.len();
         let m = groups.iter().skip(1).map(|x| x.1.len()).max().unwrap_or(0);
-        if m == 0 {
-            // Everyone who reported agrees. A later aligned seq with another member ends the stop.
-            if g >= 2 && self.evid.diverged_at.is_some_and(|d| s > d) {
-                self.evid.diverged_at = None;
-                self.end_stops(|x| x.kind == StopKind::Divergence);
+        // §22.2: the stop ends when, at a later aligned seq, this device's group is strictly
+        // larger than every other group and has another member.
+        if g > m && g >= 2 && self.evid.diverged_at.is_some_and(|d| s > d) {
+            self.evid.diverged_at = None;
+            self.end_stops(|x| x.kind == StopKind::Divergence);
+            if m == 0 {
                 self.resolve_alarms(|a| a.kind == AlarmKind::StateMismatch);
             }
+        }
+        if m == 0 {
             return;
         }
         groups.sort();
