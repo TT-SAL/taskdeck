@@ -201,7 +201,8 @@ re-sealing; absent when `identity_clone` is true), `alarm` (`RestoredCopy`, `Rel
    `beat`/`snap`/`ctl` entries refused with `seal/stale_epoch` or `seal/old_epoch` as if they
    were not re-sealed, so whether such an entry leaves a refusal record is not decided: those
    cases are left out (only `cmd` is re-sealed, §24.3). For a `beat`/`snap`/`ctl` refused with a
-   non-re-sealable code the vectors follow ENG-REF-001; `core.md` §10.7 refusal records describe
+   non-re-sealable code the vectors follow ENG-REF-001 (own `beat` and `snap` refused with
+   `seal/bad_payload`, own `ctl` with `seal/ctl_target`); `core.md` §10.7 refusal records describe
    commands, and what `op`/`target` such a record carries is not stated.
 4. Whether `based_on_unchecked` counts an accepted entry whose `apply` is refused, or a `beat`,
    `snap` or `ctl` ("applied to the board"): left out.

@@ -1274,6 +1274,94 @@
       }
     },
     {
+      "name": "own beat refused seal/bad_payload: alarm, dropped with a refusal record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "§13.3",
+        "ENG-REF-001",
+        "§24.3",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_payload",
+        "kind": "beat",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_payload",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": "seal/bad_payload",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "own snap refused seal/bad_payload: alarm, dropped with a refusal record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "§13.3",
+        "ENG-REF-001",
+        "§24.3",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_payload",
+        "kind": "snap",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_payload",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": "seal/bad_payload",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
       "name": "own ctl refused seal/ctl_target: dropped with a refusal record",
       "clauses": [
         "ENG-CLASS-001",

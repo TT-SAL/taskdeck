@@ -12,4 +12,6 @@ writes the JSON. The meaning of every field is in `crates/taskdeck-sync/tests/ve
 `check_left_out.py` (run from the repository root) exits non-zero when a vector asserts a value
 the spec leaves open: a refusal record for an own `beat`/`snap`/`ctl` refused with a re-sealable
 code (question 3 of the vectors README), or a multi-entry marker written by the page-wise replay
-at `Start` (question 7).
+at `Start` (question 7). `check_coverage.py` (also from the root) exits non-zero when the receipts
+vectors lose an own `beat`, `snap` or `ctl` entry refused with a code that is not re-sealable,
+which the brief's Cover list asks for.

@@ -226,7 +226,13 @@ def main():
         receipt("Refuse", "seal/bad_plaintext", kind="cmd", own=True))
     # Refuse, own beat / snap / ctl.
     # An own beat, snap or ctl refused with seal/stale_epoch or seal/old_epoch is left out
-    # (README question 3).
+    # (README question 3). A code that is not re-sealable is decided: §24.3 second paragraph
+    # (dropped), ENG-REF-001 (a refusal record), §13.2 (seal/bad_payload names its author;
+    # seal.md §14.2 step 15 gives it to a beat or snap payload that does not parse).
+    add("own beat refused seal/bad_payload: alarm, dropped with a refusal record",
+        receipt("Refuse", "seal/bad_payload", kind="beat", own=True))
+    add("own snap refused seal/bad_payload: alarm, dropped with a refusal record",
+        receipt("Refuse", "seal/bad_payload", kind="snap", own=True))
     add("own ctl refused seal/ctl_target: dropped with a refusal record",
         receipt("Refuse", "seal/ctl_target", kind="ctl", own=True))
     # Accept cmd.
