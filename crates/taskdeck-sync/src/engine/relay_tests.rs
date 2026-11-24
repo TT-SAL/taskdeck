@@ -511,12 +511,20 @@ fn a_snapshot_is_uploaded_once_announced_after_and_acknowledged() {
 }
 
 // spec: ENG-COMPACT-001 ENG-COMPACT-002 ENG-COMPACT-003 ENG-COMPACT-004
+// spec: ENG-BOOT-001 ENG-BOOT-002 ENG-BOOT-007 ENG-BOOT-008 ENG-UI-003
 #[test]
-fn compaction_keeps_what_the_board_needs() {
+fn compaction_keeps_what_the_board_needs_and_a_device_left_behind_rejoins() {
     const DAY: i64 = 86_400_000;
     let (mut net, mut a) = board(181);
     let mut b = pair(&mut net, &mut a, 182, "Laptop", 1);
     let added_seq = pair_result(&a, 1).expect("an answer").expect("paired").1;
+    // A third device pairs, queues one change and is then away for more than a year.
+    let mut c = pair(&mut net, &mut a, 183, "Phone", 3);
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    c.feed(Event::Disconnected { unreachable: true, paused_until_ms: None });
+    c.set(77, 99, 990);
+    let waiting = puts(&c, 0).into_iter().rev().find(|r| r.kind == Kind::Cmd).expect("the queued record");
+    let c_head = c.e.status().head.seq;
     // A Skip early in the log: its entry and its target must outlive every compaction.
     b.set(1, 77, 7);
     net.settle(&mut [&mut a, &mut b]);
@@ -600,6 +608,65 @@ fn compaction_keeps_what_the_board_needs() {
     for must in [added_seq, target, skip_seq] {
         assert!(net.relay().log().contains_key(&must));
     }
+
+    // The device that was away comes back: the relay no longer holds the log after its head.
+    assert!(c_head + 1 < floor);
+    let dw = (a.wall - c.wall) as u64;
+    c.advance(dw);
+    let from = c.persists.len();
+    c.feed(Event::Tick);
+    net.settle(&mut [&mut c]);
+    // It waits for its user: Rejoining, shown as one stop that is no record, and its log untouched.
+    let st = c.e.status();
+    assert_eq!(st.session, crate::SessionState::Rejoining);
+    let stops: Vec<_> = st.stops.iter().map(|x| (x.kind.clone(), x.action)).collect();
+    assert_eq!(stops, vec![(crate::StopKind::Rejoin, crate::StopAction::ConfirmRejoin)]);
+    assert!(c.store.meta.as_ref().is_none_or(|m| m.stops.iter().all(|x| x.kind != crate::StopKind::Rejoin)));
+    assert!(position(&c, from, |op| matches!(op, PersistOp::TruncateLogBelow(..))).is_none());
+    assert!(position(&c, from, |op| matches!(op, PersistOp::WriteCheckpoint(x) if x.board_seq != c_head)).is_none());
+    assert_eq!(c.e.status().head.seq, c_head);
+    let old_board = c.board_bytes();
+    c.feed(Event::User(crate::UserAction::ConfirmRejoin));
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    // Its state before the rejoin is kept as a base, written before anything is replaced.
+    let kept = position(&c, from, |op| matches!(op, PersistOp::WriteBase(x) if x.board_seq == c_head && x.board == old_board)).expect("the base of the old state");
+    let cut = position(&c, from, |op| matches!(op, PersistOp::TruncateLogBelow(..))).expect("the log replaced");
+    assert!(kept < cut);
+    // It ended on a usable snapshot at or above the relay's floor and caught up from there.
+    let st = c.e.status();
+    assert_eq!(st.session, crate::SessionState::Live);
+    assert!(st.stops.is_empty());
+    let continuity = |n: &Node| {
+        n.e.status()
+            .warnings
+            .iter()
+            .filter_map(|w| match w {
+                crate::StatusWarning::ContinuityUnchecked { from } => Some(*from),
+                _ => None,
+            })
+            .collect::<Vec<u64>>()
+    };
+    let from_seq = match continuity(&c).as_slice() {
+        [from] => *from,
+        other => panic!("one continuity warning, got {other:?}"),
+    };
+    assert!(from_seq + 1 >= floor);
+    let rec = c.e.registry.snapshots.iter().find(|r| r.info.seq == from_seq).expect("the snapshot's record");
+    assert!(super::duty::usable(rec, &c.dev()));
+    assert_eq!(c.board_bytes(), a.board_bytes());
+    // The record queued before the absence was sent as it was enqueued, and applied.
+    let sent = puts(&c, from).into_iter().rev().find(|r| r.entry_id == waiting.entry_id).expect("sealed after the rejoin");
+    assert_eq!((sent.at_ms, sent.based_on), (waiting.at_ms, waiting.based_on));
+    assert!(sent.frame.is_some());
+    assert_eq!(a.e.confirmed().0.keys[&99].0, 990);
+    assert_eq!(c.e.status().queued, 0);
+    // The warning stays across a restart until it is acknowledged, then it is gone for good.
+    c.restart(184);
+    assert_eq!(continuity(&c), vec![from_seq]);
+    c.feed(Event::User(crate::UserAction::AckContinuity));
+    assert!(continuity(&c).is_empty());
+    c.restart(185);
+    assert!(continuity(&c).is_empty());
 }
 
 fn notes_of<T>(n: &Node, f: impl Fn(&crate::Notification) -> Option<T>) -> Vec<T> {
