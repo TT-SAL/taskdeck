@@ -599,3 +599,71 @@ fn a_duty_that_waits_only_for_a_fresh_head_asks_for_one() {
     a.feed(Event::Welcome(w));
     assert_eq!(appends(&a), 1);
 }
+
+// spec: RELAY-STORE-006
+#[test]
+fn the_relays_times_decide_nothing() {
+    // The same run twice: once with the relay's times as they are, once with every `at` and
+    // every `relay_now` ten years off.
+    let run = |skew: i64| {
+        let (mut a, f1) = creator(301);
+        let mut hub = Hub::with_genesis(&a, &f1);
+        for round in 0..40u64 {
+            if round % 4 == 0 {
+                a.set(round, (round % 7) as u8, round as i64);
+            }
+            if round == 20 {
+                a.advance(86_400_000);
+            }
+            for _ in 0..200 {
+                let Some(fx) = a.fx.pop_front() else { break };
+                match fx {
+                    Effect::Connect { .. } => a.feed(Event::Connected { push: false }),
+                    Effect::Hello => {
+                        let mut w = hub.welcome(&a);
+                        w.relay_now += skew;
+                        a.feed(Event::Welcome(w));
+                        // The guard of §27.2 is the one use of `relay_now`: an hour or more off blocks
+                        // composing until the user confirms the clock.
+                        if a.e.status().clock.blocked {
+                            a.feed(Event::User(UserAction::ConfirmClock));
+                        }
+                    }
+                    Effect::Read { req, after, limit } => {
+                        let mut page = hub.page(&a, after, limit);
+                        for e in &mut page.entries {
+                            e.at += skew;
+                        }
+                        a.feed(Event::Page { req: Some(req), page });
+                    }
+                    Effect::Append { req, frames } => {
+                        let results = hub.append(a.e.sealer(), frames);
+                        a.feed(Event::AppendResults { req, results });
+                    }
+                    _ => {}
+                }
+            }
+            a.tick(30_000);
+        }
+        let taus: Vec<(u64, i64)> = a.store.log.iter().map(|(s, r)| (*s, r.tau)).collect();
+        let stamps: Vec<(Kind, i64, u64)> = puts(&a, 0).iter().map(|r| (r.kind, r.at_ms, r.based_on.seq)).collect();
+        let clock = a.e.status().clock;
+        let values: Vec<(u8, i64)> = a.e.confirmed().0.keys.iter().map(|(k, v)| (*k, v.0)).collect();
+        (values, taus, stamps, hub.log.len(), clock)
+    };
+    let honest = run(0);
+    let off = run(315_360_000_000);
+    assert!(honest.3 > 10);
+    // The same entries and the same board (the block of §27.2 moved one beat before the
+    // confirmation, nothing else), and no stamp anywhere near the relay's time: every log
+    // clock value and every `at_ms` is this device's own clock.
+    assert_eq!((&honest.0, honest.3), (&off.0, off.3));
+    let own_clock = |t: i64| (0..=1_700_000_000_000 + 2 * 86_400_000).contains(&t);
+    assert!(off.1.iter().all(|x| own_clock(x.1)) && off.2.iter().all(|x| own_clock(x.1)));
+    assert_eq!(honest.2.iter().filter(|x| x.0 == Kind::Cmd).collect::<Vec<_>>(), off.2.iter().filter(|x| x.0 == Kind::Cmd).collect::<Vec<_>>());
+    // Only the clock guard of SYNC.md §4.5 looks at `relay_now`: the warning stays after the confirmation.
+    assert!(!honest.4.warning);
+    assert!(off.4.warning);
+    assert_eq!(off.4.skew_ms.map(i64::abs), Some(315_360_000_000));
+    assert!(!off.4.blocked);
+}

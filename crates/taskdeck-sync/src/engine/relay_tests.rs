@@ -8,7 +8,7 @@ use crate::{
     AdminRequest, BlobRequest, Body, CtlIntent, DeviceStatus, Effect, Event, Kind, Operation, PersistOp, RelayRefusal, Via,
 };
 
-// spec: ENG-OPS-001 ENG-OPS-008 ENG-BOOT-003
+// spec: ENG-OPS-001 ENG-OPS-008 ENG-BOOT-003 SEAL-SIG-005 SEAL-PAIR-010
 #[test]
 fn a_pairing_uploads_the_snapshot_then_registers_the_device() {
     let (mut net, mut a) = board(101);
@@ -30,6 +30,23 @@ fn a_pairing_uploads_the_snapshot_then_registers_the_device() {
     let Body::Ctl(CtlIntent::AddDevice { bootstrap_seq, .. }) = &ctl[0].body else { panic!("a DeviceAdded") };
     assert_eq!((*bootstrap_seq, ctl[0].based_on), (snapshot.seq, head));
     assert!(matches!(ctl[0].via, Via::Register { dev, .. } if dev == new_device(102, "Laptop").dev));
+    // The DeviceAdded names exactly what the new device sent, and the `register` arguments
+    // name the same keys and carry the frame the relay stored at the added seq.
+    let sent = new_device(102, "Laptop");
+    let Body::Ctl(CtlIntent::AddDevice { dev, sign_pk, hpke_pk, name, transcript, .. }) = &ctl[0].body else { panic!("a DeviceAdded") };
+    assert_eq!((dev, sign_pk, hpke_pk, name, transcript), (&sent.dev, &sent.sign_pk, &sent.hpke_pk, &sent.name, &sent.transcript));
+    let (reg_frame, reg_dev, reg_pk) = net
+        .admins
+        .iter()
+        .find_map(|(_, op)| match op {
+            AdminRequest::Register { frame, dev, sign_pk } => Some((frame.clone(), *dev, *sign_pk)),
+            _ => None,
+        })
+        .expect("the register request");
+    assert_eq!((reg_dev, reg_pk), (sent.dev, sent.sign_pk));
+    assert_eq!(net.relay().log()[&added_seq].frame, reg_frame);
+    let sealed = puts(&a, from).into_iter().rev().find(|r| r.entry_id == ctl[0].entry_id).expect("the sealed record");
+    assert_eq!(sealed.frame.as_ref(), Some(&reg_frame));
     // The new device starts from the bundle and converges.
     let mut b = pair(&mut net, &mut a, 103, "Phone", 8);
     b.set(1, 2, 20);
