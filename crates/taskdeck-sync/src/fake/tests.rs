@@ -1469,6 +1469,29 @@ fn rules_above_1_allow_what_rules_1_allows() {
 }
 
 #[test]
+fn forged_frames_reach_the_steps_a_sealed_frame_cannot_fail() {
+    let (net, mut n1, n2) = two_devices();
+    let s = net.next_seq();
+    let (dev, pk) = (n2.dev(), n2.fake.sign_pk);
+    let p = FakeSealer::plaintext_bytes(&[1; 16], 1, 5, &net.head(), b"x").expect("fits");
+    // A forged frame with the right fields is a sealed one, nonce apart.
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 1, None, &p))), ACCEPT);
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 2, 1, None, &p))), refused(code::BAD_VERSION));
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 2, None, &p))), refused(code::BAD_EPOCH));
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 1, Some([9; 32]), &p))), refused(code::AEAD));
+    let mut bad = p.clone();
+    let last = bad.len() - 1;
+    bad[last] = 1;
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 1, None, &bad))), refused(code::BAD_PLAINTEXT));
+    let mut kind = p.clone();
+    kind[16] = 5;
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 1, None, &kind))), refused(code::BAD_PLAINTEXT));
+    assert!(FakeSealer::plaintext_bytes(&[1; 16], 1, 5, &net.head(), &vec![0; 257_980]).is_none());
+    n1.fake.roots.clear();
+    assert_eq!(n1.fake.forge_frame(&dev, &pk, 1, 1, 1, None, &p), n1.fake.forge_frame(&dev, &pk, 1, 1, 1, Some([0; 32]), &p));
+}
+
+#[test]
 fn skips_need_their_target_frames() {
     let (mut net, mut n1, mut n2) = two_devices();
     let f = cmd(&mut n2, &net, 100);

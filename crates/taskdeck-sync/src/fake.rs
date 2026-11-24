@@ -38,8 +38,9 @@
 //!   simulator's workload (engine.md §31.5); such frames keep no pending root.
 //! - The simulator reaches the fake also through the crate-private
 //!   `create_at`, `join_keys`, `bundle`, `set_supported_rules`,
-//!   `seal_as_recovery`, `seal_recovery_key_change` and `reinstate_wraps`, so
-//!   the public surface stays engine.md §37's.
+//!   `seal_as_recovery`, `seal_recovery_key_change` and `reinstate_wraps`,
+//!   and tests forge frames with `plaintext_bytes` and `forge_frame`, so the
+//!   public surface stays engine.md §37's.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -2129,6 +2130,48 @@ impl FakeSealer {
         let r = m.current_recovery().ok_or(SealerError { code: code::BAD_PAYLOAD })?;
         let (dev_r, rsign_pk) = (r.dev_r, r.sign_pk);
         self.seal_as(&dev_r, &rsign_pk, m, ctr, entry, Content::KeyChange(new_key.0, new_key.1))
+    }
+
+    /// The padded plaintext of `seal.md` §10.1 for `forge_frame`: `entry_id`,
+    /// `kind` (any byte), `at_ms` (any value), `based_on` and `payload`, padded
+    /// with zeros to `P(69 + len)`; `None` above the 258,048-byte cap. Draws nothing.
+    // Used by the engine's and the simulator's tests.
+    #[allow(dead_code)]
+    pub(crate) fn plaintext_bytes(entry_id: &[u8; 16], kind: u8, at_ms: i64, based_on: &Head, payload: &[u8]) -> Option<Vec<u8>> {
+        build_plain(entry_id, kind, at_ms, based_on, payload)
+    }
+
+    /// A frame with every envelope field chosen (`seal.md` §8.1, §9): author
+    /// `dev` signing with `sign_pk`, counter `ctr`, `ver` (suite 1), `epoch`,
+    /// the AEAD under `K_entry` of `root` (this fake's root of `epoch` when
+    /// `None`, 32 zero bytes when it holds none), a zero nonce, and `plaintext`
+    /// as given (from `plaintext_bytes`, then altered at will). For the steps of
+    /// §14.2 a sealed frame cannot fail. Draws nothing.
+    // Used by the engine's and the simulator's tests.
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn forge_frame(
+        &self,
+        dev: &Dev,
+        sign_pk: &Hash32,
+        ctr: u64,
+        ver: u8,
+        epoch: u32,
+        root: Option<[u8; 32]>,
+        plaintext: &[u8],
+    ) -> Vec<u8> {
+        let root = root.or_else(|| self.roots.get(&epoch).copied()).unwrap_or([0; 32]);
+        let env = Envelope {
+            board_id: &self.board_id,
+            dev,
+            sign_pk,
+            ctr,
+            ver,
+            suite: 1,
+            epoch,
+            key: entry_key(&self.board_id, epoch, &root),
+        };
+        build_frame(&env, &[0; 24], plaintext)
     }
 
     /// The wraps of the `reinstate` admin operation (`seal.md` §16.2, ruling
