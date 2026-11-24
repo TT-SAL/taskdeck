@@ -7,6 +7,7 @@ import * as a from './cases-a.mjs';
 import * as b from './cases-b.mjs';
 import * as c from './cases-c.mjs';
 import * as d from './cases-d.mjs';
+import * as e from './cases-e.mjs';
 
 const family = (spec, cases) => {
   const names = new Set();
@@ -32,6 +33,7 @@ export const families = {
   'relay-socket.json': family('relay.md §11', c.socketF),
   'relay-standby.json': family('relay.md §15.2', c.standbyF),
   'relay-rows.json': family('relay.md §16.1', d.rows),
+  'relay-day.json': family('relay.md §16.2', e.day),
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

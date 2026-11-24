@@ -534,7 +534,7 @@ export class CoreTarget {
       const storage = countingStorage(faulty, stats);
       const world = this.world;
       // A step may make the entropy source throw: an exception the core does not expect, so the object call fails.
-      const random = (n) => { if (this.noEntropy) throw new Error('no entropy'); return crypto.getRandomValues(new Uint8Array(n)); };
+      const random = (n) => { if (this.noEntropy) throw new Error('no entropy'); return this.fixedRandom ? this.fixedRandom(n) : crypto.getRandomValues(new Uint8Array(n)); };
       const c = new core.BoardCore({ storage, sockets, now: () => world.clock, random, config: this.cfg, board: unhex(boardHex) });
       c.migrate();
       stats.rowsWritten = 0;

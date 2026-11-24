@@ -36,7 +36,7 @@ function callCase(c) {
 
 for (const [file, family] of Object.entries(JSON.parse(JSON.stringify(families)))) {
   for (const c of family.cases) {
-    if (!c.targets.includes(TARGET)) continue;
+    if (!c.targets.includes(TARGET) || c.script) continue; // a scripted case is day.test.mjs's
     test(`${file.replace(/\.json$/, '')}: ${c.name}`, () => (c.call ? callCase(c) : runCase(c)));
   }
 }
