@@ -45,6 +45,8 @@ mod status;
 mod core_tests;
 #[cfg(test)]
 mod kit_tests;
+#[cfg(test)]
+mod vectors_tests;
 
 /// The limits of engine.md §34 that more than one file uses.
 pub(crate) mod lim {
