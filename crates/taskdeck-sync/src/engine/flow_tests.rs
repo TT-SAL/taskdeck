@@ -19,7 +19,7 @@ fn poison(n: &mut Node) {
     n.feed(Event::Tick);
 }
 
-fn op_result(n: &Node, t: u64) -> Option<Result<(), &'static str>> {
+pub(crate) fn op_result(n: &Node, t: u64) -> Option<Result<(), &'static str>> {
     n.notes.iter().find_map(|x| match x {
         Notification::OpDone { ticket, result } if *ticket == t => Some(*result),
         _ => None,
@@ -320,7 +320,7 @@ fn hashes_at_every_aligned_seq_and_bases_with_the_state_at_theirs() {
 }
 
 /// Every record put into the outbox from write `from` on, in order.
-fn puts(n: &Node, from: usize) -> Vec<OutboxRecord> {
+pub(crate) fn puts(n: &Node, from: usize) -> Vec<OutboxRecord> {
     let mut out = Vec::new();
     for op in n.persists[from..].iter().flatten() {
         if let PersistOp::Outbox(ops) = op {

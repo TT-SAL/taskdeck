@@ -483,12 +483,19 @@ pub(crate) fn join(hub: &mut Hub, a: &mut Node, seed: u64, name: &str) -> Node {
     let added_seq = hub.log.len() as u64;
     let bundle = a.e.sealer().bundle(material.clone(), added_seq);
     let sealer = FakeSealer::join(seed, name, bundle);
+    let mut n = joined(sealer, seed, a.wall, material, added_seq, relay());
+    hub.settle(&mut [a, &mut n]);
+    n
+}
+
+/// A new device with its bundle, started (the pairing machines' last step).
+pub(crate) fn joined(sealer: FakeSealer, seed: u64, wall: i64, material: SnapshotMaterial, added_seq: u64, at: RelayTarget) -> Node {
     let identity0 = sealer.export_identity().to_vec();
     let e = Engine::new(ToyMachine::new(false), sealer, Config {});
     let mut n = Node {
         e,
         store: Store::default(),
-        wall: a.wall,
+        wall,
         mono: 5_000,
         pq: VecDeque::new(),
         auto: true,
@@ -499,12 +506,11 @@ pub(crate) fn join(hub: &mut Hub, a: &mut Node, seed: u64, name: &str) -> Node {
         persists: Vec::new(),
         build: "build-1".into(),
         session: 100,
-        bootstrap: Some(Bootstrap::Join { material, added_seq, relay: relay() }),
+        bootstrap: Some(Bootstrap::Join { material, added_seq, relay: at }),
         seed,
         identity0,
     };
     n.start();
-    hub.settle(&mut [a, &mut n]);
     n
 }
 

@@ -68,12 +68,13 @@ in the order it happened; this file is the current truth and is rewritten, not a
 (the list is under "Spec changes to make"); then task C merged, task D launched, the engine under
 the simulator. Meanwhile: flow tests for the clauses not yet cited.
 
-Every section of the spec has code. Left to test (56 clauses, `bash scripts/spec-coverage.sh engine`):
+Every section of the spec has code. Left to test (50 clauses, `bash scripts/spec-coverage.sh engine`):
 - with `Node`/`Hub` (`kit_tests.rs`; `flow_tests.rs` has 9 flows): ENG-CTL-002 (needs a refused own
   rotation), ENG-RULES-001/002 (needs a kit device with `rules2`), ENG-SNAP-004/005 and ENG-UI-003 (need
   blobs: the model relay), ENG-SKIP-003, ENG-DIVERGE-001..004 and ENG-SEALER-003 (scripted sealer),
   ENG-SESS-007.
-- with the model relay (task C): pairing (ENG-OPS-001/004/006/008), revoke (ENG-OPS-002/009), purge
+- with the model relay (`rkit_tests.rs` is the lead's driver over it, poll sessions; `relay_tests.rs` has
+  pairing and revoke): purge
   (ENG-PURGE-*), restore (ENG-RESET-*), move (ENG-MOVE-*), compaction (ENG-COMPACT-*), restore tail
   (ENG-EVID-004/007), rejoin (ENG-BOOT-*), ENG-OPS-003/005/010.
 - RELAY-* and ENG-SIM-* citations come with tasks C and D.
@@ -82,8 +83,8 @@ The tests' own relay (`Hub` in `kit_tests.rs`) answers only Connect, Hello, Read
 
 Numbers at the start (2026-11-24, day-planner `99b510e`): `spec-coverage.sh engine` 233 clauses
 owned, 2 cited; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
-Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **177 of 233
-cited, 56 uncovered, 0 bad**. 113 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
+Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **183 of 233
+cited, 50 uncovered, 0 bad**. 118 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
 B's seven families pass.
 
 ## Map of the code (`crates/taskdeck-sync/`)

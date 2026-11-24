@@ -52,6 +52,10 @@ mod poison_tests;
 #[cfg(test)]
 mod reconcile_tests;
 #[cfg(test)]
+mod relay_tests;
+#[cfg(test)]
+mod rkit_tests;
+#[cfg(test)]
 mod rules_tests;
 #[cfg(test)]
 mod script_tests;
