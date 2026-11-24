@@ -1,0 +1,4699 @@
+{
+ "spec": "relay.md §10.4, §10.5",
+ "cases": [
+  {
+   "name": "hello states the head, the counters and the budget",
+   "clauses": [
+    "RELAY-HELLO-001",
+    "RELAY-ENC-004",
+    "RELAY-DOOR-003",
+    "RELAY-OBJ-005"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "d308d67ba41b4387b64e1ebae3b9c381",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "head": {
+        "seq": 1,
+        "chain": {
+         "$chain": 1
+        }
+       },
+       "last_ctr": 0,
+       "last_seq": 0,
+       "appends_left": 3000,
+       "relay_now": {
+        "$time": 0
+       },
+       "floor": 1,
+       "purge_floor": 1,
+       "state": "open",
+       "door": {
+        "$door": true
+       },
+       "push": "$push"
+      },
+      "rows_written": 0,
+      "rows_read_max": 3
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 1
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 2
+       },
+       {
+        "status": "new",
+        "seq": 3
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "head": {
+        "seq": 3,
+        "chain": {
+         "$chain": 3
+        }
+       },
+       "last_ctr": 2,
+       "last_seq": 3,
+       "appends_left": 2998,
+       "relay_now": {
+        "$time": 0
+       },
+       "floor": 1,
+       "purge_floor": 1,
+       "state": "open",
+       "door": {
+        "$door": true
+       },
+       "push": "$push"
+      },
+      "rows_written": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "pages follow the cursor and the limit",
+   "clauses": [
+    "RELAY-READ-001",
+    "RELAY-READ-002",
+    "RELAY-READ-003",
+    "RELAY-ROWS-001"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "959a629a8b6f3c5a8fb804c459a75b0f",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 1
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 4
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 5
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 6
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 7
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 8
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 9
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 2
+       },
+       {
+        "status": "new",
+        "seq": 3
+       },
+       {
+        "status": "new",
+        "seq": 4
+       },
+       {
+        "status": "new",
+        "seq": 5
+       },
+       {
+        "status": "new",
+        "seq": 6
+       },
+       {
+        "status": "new",
+        "seq": 7
+       },
+       {
+        "status": "new",
+        "seq": 8
+       },
+       {
+        "status": "new",
+        "seq": 9
+       },
+       {
+        "status": "new",
+        "seq": 10
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 10,
+       "floor": 1,
+       "purge_floor": 1,
+       "more": false,
+       "truncated": false,
+       "fenced": false,
+       "relay_now": {
+        "$time": 0
+       },
+       "seqs": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+       ]
+      },
+      "rows_written": 0,
+      "rows_read_max": 14
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0&limit=3"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 10,
+       "more": true,
+       "seqs": [
+        1,
+        2,
+        3
+       ]
+      },
+      "rows_written": 0,
+      "rows_read_max": 7
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=3&limit=3"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 10,
+       "more": true,
+       "seqs": [
+        4,
+        5,
+        6
+       ]
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=7&limit=3"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 10,
+       "more": false,
+       "seqs": [
+        8,
+        9,
+        10
+       ]
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=9&limit=1"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 10,
+       "more": false,
+       "seqs": [
+        10
+       ],
+       "frames": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 9
+         }
+        }
+       ]
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=10"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 10,
+       "more": false,
+       "truncated": false,
+       "seqs": []
+      },
+      "rows_written": 0,
+      "rows_read_max": 4
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=500"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 10,
+       "more": false,
+       "seqs": []
+      },
+      "rows_written": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "a page holds at most 256 entries",
+   "clauses": [
+    "RELAY-READ-001"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "03e7ac328dc6aad4095e3ca8ffff0669",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 1
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 4
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 5
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 6
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 7
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 8
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 9
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 10
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 11
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 12
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 13
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 14
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 15
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 16
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 2
+       },
+       {
+        "status": "new",
+        "seq": 3
+       },
+       {
+        "status": "new",
+        "seq": 4
+       },
+       {
+        "status": "new",
+        "seq": 5
+       },
+       {
+        "status": "new",
+        "seq": 6
+       },
+       {
+        "status": "new",
+        "seq": 7
+       },
+       {
+        "status": "new",
+        "seq": 8
+       },
+       {
+        "status": "new",
+        "seq": 9
+       },
+       {
+        "status": "new",
+        "seq": 10
+       },
+       {
+        "status": "new",
+        "seq": 11
+       },
+       {
+        "status": "new",
+        "seq": 12
+       },
+       {
+        "status": "new",
+        "seq": 13
+       },
+       {
+        "status": "new",
+        "seq": 14
+       },
+       {
+        "status": "new",
+        "seq": 15
+       },
+       {
+        "status": "new",
+        "seq": 16
+       },
+       {
+        "status": "new",
+        "seq": 17
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 17
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 18
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 19
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 20
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 21
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 22
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 23
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 24
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 25
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 26
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 27
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 28
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 29
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 30
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 31
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 32
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 18
+       },
+       {
+        "status": "new",
+        "seq": 19
+       },
+       {
+        "status": "new",
+        "seq": 20
+       },
+       {
+        "status": "new",
+        "seq": 21
+       },
+       {
+        "status": "new",
+        "seq": 22
+       },
+       {
+        "status": "new",
+        "seq": 23
+       },
+       {
+        "status": "new",
+        "seq": 24
+       },
+       {
+        "status": "new",
+        "seq": 25
+       },
+       {
+        "status": "new",
+        "seq": 26
+       },
+       {
+        "status": "new",
+        "seq": 27
+       },
+       {
+        "status": "new",
+        "seq": 28
+       },
+       {
+        "status": "new",
+        "seq": 29
+       },
+       {
+        "status": "new",
+        "seq": 30
+       },
+       {
+        "status": "new",
+        "seq": 31
+       },
+       {
+        "status": "new",
+        "seq": 32
+       },
+       {
+        "status": "new",
+        "seq": 33
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 33
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 34
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 35
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 36
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 37
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 38
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 39
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 40
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 41
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 42
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 43
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 44
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 45
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 46
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 47
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 48
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 34
+       },
+       {
+        "status": "new",
+        "seq": 35
+       },
+       {
+        "status": "new",
+        "seq": 36
+       },
+       {
+        "status": "new",
+        "seq": 37
+       },
+       {
+        "status": "new",
+        "seq": 38
+       },
+       {
+        "status": "new",
+        "seq": 39
+       },
+       {
+        "status": "new",
+        "seq": 40
+       },
+       {
+        "status": "new",
+        "seq": 41
+       },
+       {
+        "status": "new",
+        "seq": 42
+       },
+       {
+        "status": "new",
+        "seq": 43
+       },
+       {
+        "status": "new",
+        "seq": 44
+       },
+       {
+        "status": "new",
+        "seq": 45
+       },
+       {
+        "status": "new",
+        "seq": 46
+       },
+       {
+        "status": "new",
+        "seq": 47
+       },
+       {
+        "status": "new",
+        "seq": 48
+       },
+       {
+        "status": "new",
+        "seq": 49
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 49
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 50
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 51
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 52
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 53
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 54
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 55
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 56
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 57
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 58
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 59
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 60
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 61
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 62
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 63
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 64
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 50
+       },
+       {
+        "status": "new",
+        "seq": 51
+       },
+       {
+        "status": "new",
+        "seq": 52
+       },
+       {
+        "status": "new",
+        "seq": 53
+       },
+       {
+        "status": "new",
+        "seq": 54
+       },
+       {
+        "status": "new",
+        "seq": 55
+       },
+       {
+        "status": "new",
+        "seq": 56
+       },
+       {
+        "status": "new",
+        "seq": 57
+       },
+       {
+        "status": "new",
+        "seq": 58
+       },
+       {
+        "status": "new",
+        "seq": 59
+       },
+       {
+        "status": "new",
+        "seq": 60
+       },
+       {
+        "status": "new",
+        "seq": 61
+       },
+       {
+        "status": "new",
+        "seq": 62
+       },
+       {
+        "status": "new",
+        "seq": 63
+       },
+       {
+        "status": "new",
+        "seq": 64
+       },
+       {
+        "status": "new",
+        "seq": 65
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 65
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 66
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 67
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 68
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 69
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 70
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 71
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 72
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 73
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 74
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 75
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 76
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 77
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 78
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 79
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 80
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 66
+       },
+       {
+        "status": "new",
+        "seq": 67
+       },
+       {
+        "status": "new",
+        "seq": 68
+       },
+       {
+        "status": "new",
+        "seq": 69
+       },
+       {
+        "status": "new",
+        "seq": 70
+       },
+       {
+        "status": "new",
+        "seq": 71
+       },
+       {
+        "status": "new",
+        "seq": 72
+       },
+       {
+        "status": "new",
+        "seq": 73
+       },
+       {
+        "status": "new",
+        "seq": 74
+       },
+       {
+        "status": "new",
+        "seq": 75
+       },
+       {
+        "status": "new",
+        "seq": 76
+       },
+       {
+        "status": "new",
+        "seq": 77
+       },
+       {
+        "status": "new",
+        "seq": 78
+       },
+       {
+        "status": "new",
+        "seq": 79
+       },
+       {
+        "status": "new",
+        "seq": 80
+       },
+       {
+        "status": "new",
+        "seq": 81
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 81
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 82
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 83
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 84
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 85
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 86
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 87
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 88
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 89
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 90
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 91
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 92
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 93
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 94
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 95
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 96
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 82
+       },
+       {
+        "status": "new",
+        "seq": 83
+       },
+       {
+        "status": "new",
+        "seq": 84
+       },
+       {
+        "status": "new",
+        "seq": 85
+       },
+       {
+        "status": "new",
+        "seq": 86
+       },
+       {
+        "status": "new",
+        "seq": 87
+       },
+       {
+        "status": "new",
+        "seq": 88
+       },
+       {
+        "status": "new",
+        "seq": 89
+       },
+       {
+        "status": "new",
+        "seq": 90
+       },
+       {
+        "status": "new",
+        "seq": 91
+       },
+       {
+        "status": "new",
+        "seq": 92
+       },
+       {
+        "status": "new",
+        "seq": 93
+       },
+       {
+        "status": "new",
+        "seq": 94
+       },
+       {
+        "status": "new",
+        "seq": 95
+       },
+       {
+        "status": "new",
+        "seq": 96
+       },
+       {
+        "status": "new",
+        "seq": 97
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 97
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 98
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 99
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 100
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 101
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 102
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 103
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 104
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 105
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 106
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 107
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 108
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 109
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 110
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 111
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 112
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 98
+       },
+       {
+        "status": "new",
+        "seq": 99
+       },
+       {
+        "status": "new",
+        "seq": 100
+       },
+       {
+        "status": "new",
+        "seq": 101
+       },
+       {
+        "status": "new",
+        "seq": 102
+       },
+       {
+        "status": "new",
+        "seq": 103
+       },
+       {
+        "status": "new",
+        "seq": 104
+       },
+       {
+        "status": "new",
+        "seq": 105
+       },
+       {
+        "status": "new",
+        "seq": 106
+       },
+       {
+        "status": "new",
+        "seq": 107
+       },
+       {
+        "status": "new",
+        "seq": 108
+       },
+       {
+        "status": "new",
+        "seq": 109
+       },
+       {
+        "status": "new",
+        "seq": 110
+       },
+       {
+        "status": "new",
+        "seq": 111
+       },
+       {
+        "status": "new",
+        "seq": 112
+       },
+       {
+        "status": "new",
+        "seq": 113
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 113
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 114
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 115
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 116
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 117
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 118
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 119
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 120
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 121
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 122
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 123
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 124
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 125
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 126
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 127
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 128
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 114
+       },
+       {
+        "status": "new",
+        "seq": 115
+       },
+       {
+        "status": "new",
+        "seq": 116
+       },
+       {
+        "status": "new",
+        "seq": 117
+       },
+       {
+        "status": "new",
+        "seq": 118
+       },
+       {
+        "status": "new",
+        "seq": 119
+       },
+       {
+        "status": "new",
+        "seq": 120
+       },
+       {
+        "status": "new",
+        "seq": 121
+       },
+       {
+        "status": "new",
+        "seq": 122
+       },
+       {
+        "status": "new",
+        "seq": 123
+       },
+       {
+        "status": "new",
+        "seq": 124
+       },
+       {
+        "status": "new",
+        "seq": 125
+       },
+       {
+        "status": "new",
+        "seq": 126
+       },
+       {
+        "status": "new",
+        "seq": 127
+       },
+       {
+        "status": "new",
+        "seq": 128
+       },
+       {
+        "status": "new",
+        "seq": 129
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 129
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 130
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 131
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 132
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 133
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 134
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 135
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 136
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 137
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 138
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 139
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 140
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 141
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 142
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 143
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 144
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 130
+       },
+       {
+        "status": "new",
+        "seq": 131
+       },
+       {
+        "status": "new",
+        "seq": 132
+       },
+       {
+        "status": "new",
+        "seq": 133
+       },
+       {
+        "status": "new",
+        "seq": 134
+       },
+       {
+        "status": "new",
+        "seq": 135
+       },
+       {
+        "status": "new",
+        "seq": 136
+       },
+       {
+        "status": "new",
+        "seq": 137
+       },
+       {
+        "status": "new",
+        "seq": 138
+       },
+       {
+        "status": "new",
+        "seq": 139
+       },
+       {
+        "status": "new",
+        "seq": 140
+       },
+       {
+        "status": "new",
+        "seq": 141
+       },
+       {
+        "status": "new",
+        "seq": 142
+       },
+       {
+        "status": "new",
+        "seq": 143
+       },
+       {
+        "status": "new",
+        "seq": 144
+       },
+       {
+        "status": "new",
+        "seq": 145
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 145
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 146
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 147
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 148
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 149
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 150
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 151
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 152
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 153
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 154
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 155
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 156
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 157
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 158
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 159
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 160
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 146
+       },
+       {
+        "status": "new",
+        "seq": 147
+       },
+       {
+        "status": "new",
+        "seq": 148
+       },
+       {
+        "status": "new",
+        "seq": 149
+       },
+       {
+        "status": "new",
+        "seq": 150
+       },
+       {
+        "status": "new",
+        "seq": 151
+       },
+       {
+        "status": "new",
+        "seq": 152
+       },
+       {
+        "status": "new",
+        "seq": 153
+       },
+       {
+        "status": "new",
+        "seq": 154
+       },
+       {
+        "status": "new",
+        "seq": 155
+       },
+       {
+        "status": "new",
+        "seq": 156
+       },
+       {
+        "status": "new",
+        "seq": 157
+       },
+       {
+        "status": "new",
+        "seq": 158
+       },
+       {
+        "status": "new",
+        "seq": 159
+       },
+       {
+        "status": "new",
+        "seq": 160
+       },
+       {
+        "status": "new",
+        "seq": 161
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 161
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 162
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 163
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 164
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 165
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 166
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 167
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 168
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 169
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 170
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 171
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 172
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 173
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 174
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 175
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 176
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 162
+       },
+       {
+        "status": "new",
+        "seq": 163
+       },
+       {
+        "status": "new",
+        "seq": 164
+       },
+       {
+        "status": "new",
+        "seq": 165
+       },
+       {
+        "status": "new",
+        "seq": 166
+       },
+       {
+        "status": "new",
+        "seq": 167
+       },
+       {
+        "status": "new",
+        "seq": 168
+       },
+       {
+        "status": "new",
+        "seq": 169
+       },
+       {
+        "status": "new",
+        "seq": 170
+       },
+       {
+        "status": "new",
+        "seq": 171
+       },
+       {
+        "status": "new",
+        "seq": 172
+       },
+       {
+        "status": "new",
+        "seq": 173
+       },
+       {
+        "status": "new",
+        "seq": 174
+       },
+       {
+        "status": "new",
+        "seq": 175
+       },
+       {
+        "status": "new",
+        "seq": 176
+       },
+       {
+        "status": "new",
+        "seq": 177
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 177
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 178
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 179
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 180
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 181
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 182
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 183
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 184
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 185
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 186
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 187
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 188
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 189
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 190
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 191
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 192
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 178
+       },
+       {
+        "status": "new",
+        "seq": 179
+       },
+       {
+        "status": "new",
+        "seq": 180
+       },
+       {
+        "status": "new",
+        "seq": 181
+       },
+       {
+        "status": "new",
+        "seq": 182
+       },
+       {
+        "status": "new",
+        "seq": 183
+       },
+       {
+        "status": "new",
+        "seq": 184
+       },
+       {
+        "status": "new",
+        "seq": 185
+       },
+       {
+        "status": "new",
+        "seq": 186
+       },
+       {
+        "status": "new",
+        "seq": 187
+       },
+       {
+        "status": "new",
+        "seq": 188
+       },
+       {
+        "status": "new",
+        "seq": 189
+       },
+       {
+        "status": "new",
+        "seq": 190
+       },
+       {
+        "status": "new",
+        "seq": 191
+       },
+       {
+        "status": "new",
+        "seq": 192
+       },
+       {
+        "status": "new",
+        "seq": 193
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 193
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 194
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 195
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 196
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 197
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 198
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 199
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 200
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 201
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 202
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 203
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 204
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 205
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 206
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 207
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 208
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 194
+       },
+       {
+        "status": "new",
+        "seq": 195
+       },
+       {
+        "status": "new",
+        "seq": 196
+       },
+       {
+        "status": "new",
+        "seq": 197
+       },
+       {
+        "status": "new",
+        "seq": 198
+       },
+       {
+        "status": "new",
+        "seq": 199
+       },
+       {
+        "status": "new",
+        "seq": 200
+       },
+       {
+        "status": "new",
+        "seq": 201
+       },
+       {
+        "status": "new",
+        "seq": 202
+       },
+       {
+        "status": "new",
+        "seq": 203
+       },
+       {
+        "status": "new",
+        "seq": 204
+       },
+       {
+        "status": "new",
+        "seq": 205
+       },
+       {
+        "status": "new",
+        "seq": 206
+       },
+       {
+        "status": "new",
+        "seq": 207
+       },
+       {
+        "status": "new",
+        "seq": 208
+       },
+       {
+        "status": "new",
+        "seq": 209
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 209
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 210
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 211
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 212
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 213
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 214
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 215
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 216
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 217
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 218
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 219
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 220
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 221
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 222
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 223
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 224
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 210
+       },
+       {
+        "status": "new",
+        "seq": 211
+       },
+       {
+        "status": "new",
+        "seq": 212
+       },
+       {
+        "status": "new",
+        "seq": 213
+       },
+       {
+        "status": "new",
+        "seq": 214
+       },
+       {
+        "status": "new",
+        "seq": 215
+       },
+       {
+        "status": "new",
+        "seq": 216
+       },
+       {
+        "status": "new",
+        "seq": 217
+       },
+       {
+        "status": "new",
+        "seq": 218
+       },
+       {
+        "status": "new",
+        "seq": 219
+       },
+       {
+        "status": "new",
+        "seq": 220
+       },
+       {
+        "status": "new",
+        "seq": 221
+       },
+       {
+        "status": "new",
+        "seq": 222
+       },
+       {
+        "status": "new",
+        "seq": 223
+       },
+       {
+        "status": "new",
+        "seq": 224
+       },
+       {
+        "status": "new",
+        "seq": 225
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 225
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 226
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 227
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 228
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 229
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 230
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 231
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 232
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 233
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 234
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 235
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 236
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 237
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 238
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 239
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 240
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 226
+       },
+       {
+        "status": "new",
+        "seq": 227
+       },
+       {
+        "status": "new",
+        "seq": 228
+       },
+       {
+        "status": "new",
+        "seq": 229
+       },
+       {
+        "status": "new",
+        "seq": 230
+       },
+       {
+        "status": "new",
+        "seq": 231
+       },
+       {
+        "status": "new",
+        "seq": 232
+       },
+       {
+        "status": "new",
+        "seq": 233
+       },
+       {
+        "status": "new",
+        "seq": 234
+       },
+       {
+        "status": "new",
+        "seq": 235
+       },
+       {
+        "status": "new",
+        "seq": 236
+       },
+       {
+        "status": "new",
+        "seq": 237
+       },
+       {
+        "status": "new",
+        "seq": 238
+       },
+       {
+        "status": "new",
+        "seq": 239
+       },
+       {
+        "status": "new",
+        "seq": 240
+       },
+       {
+        "status": "new",
+        "seq": 241
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 241
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 242
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 243
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 244
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 245
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 246
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 247
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 248
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 249
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 250
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 251
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 252
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 253
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 254
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 255
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 256
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 242
+       },
+       {
+        "status": "new",
+        "seq": 243
+       },
+       {
+        "status": "new",
+        "seq": 244
+       },
+       {
+        "status": "new",
+        "seq": 245
+       },
+       {
+        "status": "new",
+        "seq": 246
+       },
+       {
+        "status": "new",
+        "seq": 247
+       },
+       {
+        "status": "new",
+        "seq": 248
+       },
+       {
+        "status": "new",
+        "seq": 249
+       },
+       {
+        "status": "new",
+        "seq": 250
+       },
+       {
+        "status": "new",
+        "seq": 251
+       },
+       {
+        "status": "new",
+        "seq": 252
+       },
+       {
+        "status": "new",
+        "seq": 253
+       },
+       {
+        "status": "new",
+        "seq": 254
+       },
+       {
+        "status": "new",
+        "seq": 255
+       },
+       {
+        "status": "new",
+        "seq": 256
+       },
+       {
+        "status": "new",
+        "seq": 257
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 257
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 258
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 259
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 260
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 261
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 262
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 263
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 264
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 265
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 266
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 267
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 268
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 269
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 270
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 271
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 272
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 258
+       },
+       {
+        "status": "new",
+        "seq": 259
+       },
+       {
+        "status": "new",
+        "seq": 260
+       },
+       {
+        "status": "new",
+        "seq": 261
+       },
+       {
+        "status": "new",
+        "seq": 262
+       },
+       {
+        "status": "new",
+        "seq": 263
+       },
+       {
+        "status": "new",
+        "seq": 264
+       },
+       {
+        "status": "new",
+        "seq": 265
+       },
+       {
+        "status": "new",
+        "seq": 266
+       },
+       {
+        "status": "new",
+        "seq": 267
+       },
+       {
+        "status": "new",
+        "seq": 268
+       },
+       {
+        "status": "new",
+        "seq": 269
+       },
+       {
+        "status": "new",
+        "seq": 270
+       },
+       {
+        "status": "new",
+        "seq": 271
+       },
+       {
+        "status": "new",
+        "seq": 272
+       },
+       {
+        "status": "new",
+        "seq": 273
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 273,
+       "more": true,
+       "seqs": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        200,
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+        207,
+        208,
+        209,
+        210,
+        211,
+        212,
+        213,
+        214,
+        215,
+        216,
+        217,
+        218,
+        219,
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227,
+        228,
+        229,
+        230,
+        231,
+        232,
+        233,
+        234,
+        235,
+        236,
+        237,
+        238,
+        239,
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249,
+        250,
+        251,
+        252,
+        253,
+        254,
+        255,
+        256
+       ]
+      },
+      "rows_written": 0,
+      "rows_read_max": 260
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=256"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 273,
+       "more": false,
+       "seqs": [
+        257,
+        258,
+        259,
+        260,
+        261,
+        262,
+        263,
+        264,
+        265,
+        266,
+        267,
+        268,
+        269,
+        270,
+        271,
+        272,
+        273
+       ]
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0&limit=256"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "more": true,
+       "seqs": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        200,
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+        207,
+        208,
+        209,
+        210,
+        211,
+        212,
+        213,
+        214,
+        215,
+        216,
+        217,
+        218,
+        219,
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227,
+        228,
+        229,
+        230,
+        231,
+        232,
+        233,
+        234,
+        235,
+        236,
+        237,
+        238,
+        239,
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249,
+        250,
+        251,
+        252,
+        253,
+        254,
+        255,
+        256
+       ]
+      },
+      "rows_written": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "a page holds at most 1 MiB of frames, and always one entry",
+   "clauses": [
+    "RELAY-READ-001",
+    "SEAL-FRAME-003"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "3c199abef9096078c9d885a6288e1ac0",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 1,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 4,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 5,
+          "body_len": 262032
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 2
+       },
+       {
+        "status": "new",
+        "seq": 3
+       },
+       {
+        "status": "new",
+        "seq": 4
+       },
+       {
+        "status": "new",
+        "seq": 5
+       },
+       {
+        "status": "new",
+        "seq": 6
+       }
+      ],
+      "rows_written": 11
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 6
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 7
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=1"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 7,
+       "more": true,
+       "seqs": [
+        2,
+        3,
+        4,
+        5
+       ]
+      },
+      "rows_written": 0,
+      "rows_read_max": 9
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 7,
+       "more": true,
+       "seqs": [
+        1,
+        2,
+        3,
+        4
+       ]
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=5"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 7,
+       "more": false,
+       "seqs": [
+        6,
+        7
+       ]
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=2&limit=1"
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "page": {
+       "head_seq": 7,
+       "more": true,
+       "seqs": [
+        3
+       ],
+       "frames": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2,
+          "body_len": 262032
+         }
+        }
+       ]
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 7,
+          "body_len": 262033
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "refused",
+        "http_status": 400,
+        "code": "relay/bad_frame"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

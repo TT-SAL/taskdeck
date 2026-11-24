@@ -1,0 +1,1497 @@
+{
+ "spec": "relay.md §5.1, §5.2, §8.2",
+ "cases": [
+  {
+   "name": "token text of a device, generation 1",
+   "clauses": [
+    "RELAY-TOKEN-001",
+    "SEAL-CTX-001"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "makeToken",
+   "args": {
+    "token_key": "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1",
+    "role": 1,
+    "board": "42424242424242424242424242424242",
+    "dev": "246fbc2f25b9fa4e4b0c8659e9f0a807",
+    "gen": 1
+   },
+   "expect": "TD1.AUJCQkJCQkJCQkJCQkJCQkIkb7wvJbn6TksMhlnp8KgHAAAAAWrdLudiYZ8X3AalAWAmLxX8nThgQPYdTwmBJ7fxdian"
+  },
+  {
+   "name": "token text of a backup reader, the largest generation",
+   "clauses": [
+    "RELAY-TOKEN-001"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "makeToken",
+   "args": {
+    "token_key": "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1",
+    "role": 2,
+    "board": "42424242424242424242424242424242",
+    "dev": "d94e0aa26d783924a469ccdd83c3b6cf",
+    "gen": 4294967295
+   },
+   "expect": "TD1.AkJCQkJCQkJCQkJCQkJCQkLZTgqibXg5JKRpzN2Dw7bP_____8REyc8uOh7rfWsFFb0fnQFfIOgKAnNPIF8wNGDJkihR"
+  },
+  {
+   "name": "a token is read back",
+   "clauses": [
+    "RELAY-TOKEN-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "checkToken",
+   "args": {
+    "token_key": "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1",
+    "board": "42424242424242424242424242424242",
+    "text": "TD1.AUJCQkJCQkJCQkJCQkJCQkIkb7wvJbn6TksMhlnp8KgHAAAAB7RyCTvuSPF7raFONBthJQjOnEWHfoyjFd96UtIwn7Zh"
+   },
+   "expect": {
+    "role": 1,
+    "dev": "246fbc2f25b9fa4e4b0c8659e9f0a807",
+    "gen": 7
+   }
+  },
+  {
+   "name": "a token under another key",
+   "clauses": [
+    "RELAY-TOKEN-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "checkToken",
+   "args": {
+    "token_key": "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1",
+    "board": "42424242424242424242424242424242",
+    "text": "TD1.AUJCQkJCQkJCQkJCQkJCQkIkb7wvJbn6TksMhlnp8KgHAAAAB8KUJAe2z30KzWq_x1cgXm-QlxW45atuxg1hfYzSHtAr"
+   },
+   "error": "relay/unauthorized"
+  },
+  {
+   "name": "a token of another board",
+   "clauses": [
+    "RELAY-TOKEN-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "checkToken",
+   "args": {
+    "token_key": "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1",
+    "board": "42424242424242424242424242424242",
+    "text": "TD1.AUNDQ0NDQ0NDQ0NDQ0NDQ0Mkb7wvJbn6TksMhlnp8KgHAAAABxz0HTqVnrpWNW7v_CdYNidhfcgv4DIA2AtCyGE1vhWI"
+   },
+   "error": "relay/unauthorized"
+  },
+  {
+   "name": "a token of role 3",
+   "clauses": [
+    "RELAY-TOKEN-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "checkToken",
+   "args": {
+    "token_key": "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1",
+    "board": "42424242424242424242424242424242",
+    "text": "TD1.A0JCQkJCQkJCQkJCQkJCQkIkb7wvJbn6TksMhlnp8KgHAAAAB4aphc57qT2IQ89NpIAf3O55WZOxwzYiJREguF75npsE"
+   },
+   "error": "relay/unauthorized"
+  },
+  {
+   "name": "a token one character short",
+   "clauses": [
+    "RELAY-TOKEN-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "checkToken",
+   "args": {
+    "token_key": "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1",
+    "board": "42424242424242424242424242424242",
+    "text": "TD1.AUJCQkJCQkJCQkJCQkJCQkIkb7wvJbn6TksMhlnp8KgHAAAAB7RyCTvuSPF7raFONBthJQjOnEWHfoyjFd96UtIwn7Z"
+   },
+   "error": "relay/unauthorized"
+  },
+  {
+   "name": "a token with a changed generation",
+   "clauses": [
+    "RELAY-TOKEN-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "checkToken",
+   "args": {
+    "token_key": "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1",
+    "board": "42424242424242424242424242424242",
+    "text": "TD1.AUJCQkJCQkJCQkJCQkJCQkIkb7wvJbn6TksMhlnp8KgHAAAAA7RyCTvuSPF7raFONBthJQjOnEWHfoyjFd96UtIwn7Zh"
+   },
+   "error": "relay/unauthorized"
+  },
+  {
+   "name": "the door of a board",
+   "clauses": [
+    "RELAY-DOOR-001",
+    "RELAY-DOOR-003",
+    "SEAL-CTX-001"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "door",
+   "args": {
+    "token_key": "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1",
+    "board": "42424242424242424242424242424242"
+   },
+   "expect": "e7651b2325"
+  },
+  {
+   "name": "a login makes every older token stale, and the login routes still take it",
+   "clauses": [
+    "RELAY-TOKEN-004",
+    "RELAY-OBJ-003",
+    "RELAY-LOGIN-004",
+    "RELAY-TOKEN-005"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "fc83dcf0bae23e1c430cd8ddc8418306",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "gen": 2,
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 2
+        }
+       },
+       "gen": 2,
+       "push": "$push"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/token_stale"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/token_stale"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 1
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/token_stale"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 3
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/token_stale"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "gen": 3,
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 3
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 3
+        }
+       },
+       "gen": 3,
+       "push": "$push"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/token_stale"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 3
+      }
+     },
+     "expect": {
+      "status": 200,
+      "storage": {
+       "devices": {
+        "alice": {
+         "gen": 3,
+         "state": 1
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "a token of a device the board does not know, or of the recovery identity",
+   "clauses": [
+    "RELAY-OBJ-003",
+    "RELAY-OBJ-004"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "6bd3a77012d1be7c3b6d3b9b0df7ff43",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "mallory",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unauthorized"
+      },
+      "object_called": true,
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "rec",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unauthorized"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "token": "rec",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "rec"
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unauthorized"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "rec",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "rec",
+          "ctr": 2
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unauthorized"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unauthorized"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "a revoked device is told so whatever its generation, on every route",
+   "clauses": [
+    "RELAY-OBJ-010",
+    "RELAY-OBJ-003",
+    "RELAY-REVOKE-001",
+    "RELAY-TOKEN-004"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "736bef06fa55b1029bace0313797ff49",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "register"
+      },
+      "body": {
+       "$admin": {
+        "op": "register",
+        "signer": "alice",
+        "args": {
+         "dev": "bob",
+         "sign_pk": "bob",
+         "frame_hash": {
+          "$hash": {
+           "$frame": {
+            "author": "alice",
+            "ctr": 1
+           }
+          }
+         }
+        },
+        "extra": {
+         "$frame": {
+          "author": "alice",
+          "ctr": 1
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "seq": 2,
+       "chain": {
+        "$chain": 2
+       },
+       "token": {
+        "$token": {
+         "key": "bob"
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "revoke"
+      },
+      "body": {
+       "$admin": {
+        "op": "revoke",
+        "signer": "alice",
+        "args": {
+         "dev": "bob"
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {},
+      "storage": {
+       "devices": {
+        "bob": {
+         "state": 2,
+         "gen": 2
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/revoked"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/revoked"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 3
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/revoked"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/revoked"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 2
+      },
+      "body": {
+       "$login": {
+        "dev": "bob",
+        "gen": 3,
+        "nonce": {
+         "$hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/revoked"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/revoked"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 2
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "bob",
+          "ctr": 1
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/revoked"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 2
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/revoked"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "a backup-read token: minted, replaced, revoked",
+   "clauses": [
+    "RELAY-RTOKEN-001",
+    "RELAY-TOKEN-004",
+    "RELAY-RTOKEN-003",
+    "RELAY-OBJ-003"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "72cb58484b79fa97a341f4b3efc5ce64",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "mint_read_token"
+      },
+      "body": {
+       "$admin": {
+        "op": "mint_read_token",
+        "signer": "alice",
+        "args": {
+         "dev": "alice",
+         "epoch": 1
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "token": {
+        "$token": {
+         "key": "alice",
+         "role": 2,
+         "gen": 1
+        }
+       },
+       "gen": 1
+      },
+      "rows_written": 2
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "head": {
+        "seq": 1,
+        "chain": {
+         "$chain": 1
+        }
+       },
+       "relay_now": {
+        "$time": 0
+       },
+       "floor": 1,
+       "purge_floor": 1,
+       "state": "open",
+       "door": {
+        "$door": true
+       },
+       "push": "$push"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 1
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "seqs": [
+        1
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-list",
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "blobs": []
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "mint_read_token"
+      },
+      "body": {
+       "$admin": {
+        "op": "mint_read_token",
+        "signer": "alice",
+        "args": {
+         "dev": "alice",
+         "epoch": 1
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "token": {
+        "$token": {
+         "key": "alice",
+         "role": 2,
+         "gen": 2
+        }
+       },
+       "gen": 2
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/token_stale"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "revoke_read_token"
+      },
+      "body": {
+       "$admin": {
+        "op": "revoke_read_token",
+        "signer": "alice",
+        "args": {
+         "dev": "alice"
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {},
+      "rows_written": 2
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/token_stale"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "revoke_read_token"
+      },
+      "body": {
+       "$admin": {
+        "op": "revoke_read_token",
+        "signer": "alice",
+        "args": {
+         "dev": "bob"
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

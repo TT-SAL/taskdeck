@@ -1,0 +1,4845 @@
+{
+ "spec": "relay.md §12.7",
+ "cases": [
+  {
+   "name": "a seed without a tail opens the board at the old relay's head",
+   "clauses": [
+    "RELAY-SEED-001",
+    "RELAY-SEED-002",
+    "RELAY-OBJ-001",
+    "RELAY-OBJ-002",
+    "RELAY-ROWS-001",
+    "RELAY-SEQ-002",
+    "RELAY-READ-002",
+    "RELAY-DOOR-003"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "fe2bfa9837537b8d0b84230d4dbb7205",
+      "recovery": "rec",
+      "first": "alice",
+      "create": false
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "door": {
+        "$door": true
+       },
+       "token": {
+        "$token": {
+         "key": "alice"
+        }
+       },
+       "next_seq": 101,
+       "state": "open"
+      },
+      "rows_written": 5,
+      "storage": {
+       "board": {
+        "schema": 1,
+        "state": 1,
+        "created_at": {
+         "$time": 0
+        },
+        "base_seq": 100,
+        "base_chain": {
+         "$fill": {
+          "len": 32,
+          "seed": "the chain of the old relay"
+         }
+        },
+        "compact_floor": 101,
+        "purge_floor": 101,
+        "purge_done": 101,
+        "compact_snap": null,
+        "read_epoch": 1,
+        "home_gen": 2,
+        "fence_host": null,
+        "seed_signer": null,
+        "seed_last_seq": null,
+        "seed_chain": null
+       },
+       "devices": {
+        "alice": {
+         "role": 1,
+         "state": 1,
+         "gen": 1,
+         "last_ctr": 2,
+         "last_seq": 0,
+         "wraps": null
+        },
+        "bob": {
+         "role": 1,
+         "state": 1,
+         "gen": 0,
+         "last_ctr": 0
+        },
+        "rec": {
+         "role": 2,
+         "state": 1,
+         "gen": 0,
+         "last_ctr": 7,
+         "last_seq": 0
+        }
+       },
+       "log": [],
+       "count": {
+        "devices": 3,
+        "nonces": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "head": {
+        "seq": 100,
+        "chain": {
+         "$fill": {
+          "len": 32,
+          "seed": "the chain of the old relay"
+         }
+        }
+       },
+       "last_ctr": 2,
+       "last_seq": 0,
+       "appends_left": 3000,
+       "relay_now": {
+        "$time": 0
+       },
+       "floor": 101,
+       "purge_floor": 101,
+       "state": "open",
+       "door": {
+        "$door": true
+       },
+       "push": "$push"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "head_seq": 100,
+       "floor": 101,
+       "purge_floor": 101,
+       "more": false,
+       "truncated": true,
+       "seqs": []
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=100"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "head_seq": 100,
+       "truncated": false,
+       "seqs": []
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "conflict",
+        "seq": 0,
+        "frame": null
+       }
+      ],
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 101
+       }
+      ],
+      "rows_written": 3
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "rec",
+          "ctr": 8
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 102
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "bob",
+          "ctr": 1
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "refused",
+        "http_status": 403,
+        "code": "relay/not_author"
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "gen": 1,
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "bob",
+        "gen": 1
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "token": {
+        "$token": {
+         "key": "bob",
+         "gen": 1
+        }
+       },
+       "gen": 1,
+       "push": "$push"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "bob",
+          "ctr": 1
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 103
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "query": "after=100"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "head_seq": 103,
+       "seqs": [
+        101,
+        102,
+        103
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/exists"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/exists"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "fence"
+      },
+      "body": {
+       "$admin": {
+        "op": "fence",
+        "signer": "alice",
+        "args": {
+         "host": "old.relay.test",
+         "door": "0102030405",
+         "home_gen": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/home_gen"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 104
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 4
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "a seed with a tail: the board is seeding until its last frame is stored",
+   "clauses": [
+    "RELAY-SEED-003",
+    "RELAY-SEED-004",
+    "RELAY-SEED-005",
+    "RELAY-OBJ-001",
+    "RELAY-OBJ-002",
+    "RELAY-ROWS-001",
+    "RELAY-ENC-006"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "0aad5c36b7774d2bb25bd27da0fe58ed",
+      "recovery": "rec",
+      "first": "alice",
+      "create": false
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 5,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 7,
+         "chain_last": {
+          "$chain_from": {
+           "before": {
+            "$fill": {
+             "len": 32,
+             "seed": "the chain of the old relay"
+            }
+           },
+           "first": 5,
+           "frames": [
+            {
+             "$frame": {
+              "author": "alice",
+              "ctr": 3
+             }
+            },
+            {
+             "$frame": {
+              "author": "bob",
+              "ctr": 1
+             }
+            },
+            {
+             "$frame": {
+              "author": "rec",
+              "ctr": 8
+             }
+            }
+           ]
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "door": {
+        "$door": true
+       },
+       "token": {
+        "$token": {
+         "key": "alice"
+        }
+       },
+       "next_seq": 5,
+       "state": "seeding"
+      },
+      "rows_written": 5,
+      "storage": {
+       "board": {
+        "state": 3,
+        "base_seq": 4,
+        "base_chain": {
+         "$fill": {
+          "len": 32,
+          "seed": "the chain of the old relay"
+         }
+        },
+        "compact_floor": 5,
+        "purge_floor": 5,
+        "purge_done": 5,
+        "seed_signer": {
+         "$dev": "alice"
+        },
+        "seed_last_seq": 7,
+        "seed_chain": {
+         "$chain_from": {
+          "before": {
+           "$fill": {
+            "len": 32,
+            "seed": "the chain of the old relay"
+           }
+          },
+          "first": 5,
+          "frames": [
+           {
+            "$frame": {
+             "author": "alice",
+             "ctr": 3
+            }
+           },
+           {
+            "$frame": {
+             "author": "bob",
+             "ctr": 1
+            }
+           },
+           {
+            "$frame": {
+             "author": "rec",
+             "ctr": 8
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "rec",
+          "ctr": 8
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "bob"
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-list",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "rec"
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "pair-open",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$fill": {
+        "len": 100,
+        "seed": "x"
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "revoke"
+      },
+      "body": {
+       "$admin": {
+        "op": "revoke",
+        "signer": "alice",
+        "nonce": {
+         "$hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "args": {
+         "dev": "bob"
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 6
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "bob",
+            "ctr": 1
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/not_next",
+       "head": {
+        "seq": 4,
+        "chain": {
+         "$fill": {
+          "len": 32,
+          "seed": "the chain of the old relay"
+         }
+        }
+       }
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 2
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          },
+          {
+           "$frame": {
+            "author": "bob",
+            "ctr": 1
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "head": {
+        "seq": 6,
+        "chain": {
+         "$chain": 6
+        }
+       },
+       "state": "seeding"
+      },
+      "rows_written": 6,
+      "storage": {
+       "log": [
+        5,
+        6
+       ],
+       "devices": {
+        "alice": {
+         "last_ctr": 3,
+         "last_seq": 5,
+         "app_count": 0
+        },
+        "bob": {
+         "last_ctr": 1,
+         "last_seq": 6
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 2
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          },
+          {
+           "$frame": {
+            "author": "bob",
+            "ctr": 1
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/not_next",
+       "head": {
+        "seq": 6,
+        "chain": {
+         "$chain": 6
+        }
+       }
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 7
+        },
+        {
+         "$u16": 2
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "rec",
+            "ctr": 8
+           }
+          },
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 4
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/seeding"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 7
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "rec",
+            "ctr": 8
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "head": {
+        "seq": 7,
+        "chain": {
+         "$chain": 7
+        }
+       },
+       "state": "open"
+      },
+      "rows_written": 4,
+      "storage": {
+       "board": {
+        "state": 1,
+        "seed_signer": null,
+        "seed_last_seq": null,
+        "seed_chain": null
+       },
+       "log": [
+        5,
+        6,
+        7
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "head": {
+        "seq": 7,
+        "chain": {
+         "$chain": 7
+        }
+       },
+       "last_ctr": 3,
+       "last_seq": 5,
+       "appends_left": 3000,
+       "relay_now": {
+        "$time": 0
+       },
+       "floor": 5,
+       "purge_floor": 5,
+       "state": "open",
+       "door": {
+        "$door": true
+       },
+       "push": "$push"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=4"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "head_seq": 7,
+       "floor": 5,
+       "truncated": false,
+       "seqs": [
+        5,
+        6,
+        7
+       ],
+       "frames": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3
+         }
+        },
+        {
+         "$frame": {
+          "author": "bob",
+          "ctr": 1
+         }
+        },
+        {
+         "$frame": {
+          "author": "rec",
+          "ctr": 8
+         }
+        }
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 8
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 4
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 4
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 8
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "a tail frame that does not fit refuses the whole request; a new seed replaces an unfinished one",
+   "clauses": [
+    "RELAY-SEED-003",
+    "RELAY-SEED-004",
+    "RELAY-TOKEN-005",
+    "RELAY-COMPACT-006",
+    "RELAY-ENC-006",
+    "RELAY-ENC-003"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "8c4c167dcf74a3fbb8c92c5465164cfe",
+      "recovery": "rec",
+      "first": "alice",
+      "create": false
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 5,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 6,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "not the chain of this tail"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "mallory",
+            "ctr": 1
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unknown_author",
+       "index": 0
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 2
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          },
+          {
+           "$frame": {
+            "author": "bob",
+            "ctr": 1,
+            "sig": "flip"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_signature",
+       "index": 1
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 4
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/gap",
+       "index": 0
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 2
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/conflict",
+       "index": 0
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 2
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          },
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3,
+            "fill": "again"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/conflict",
+       "index": 1
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3,
+            "magic": "TDF2"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_frame",
+       "index": 0
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 2
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          },
+          {
+           "$frame": {
+            "author": "bob",
+            "ctr": 1,
+            "board_id": "00000000000000000000000000000000"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/wrong_board",
+       "index": 1
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 0,
+            "ctr_hex": "ffffffffffffffff"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_frame",
+       "index": 0
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 0
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_body"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 2
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_body"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          }
+         ]
+        },
+        {
+         "$hex": "00"
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_body"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": "ffffffffffffffff"
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/not_next",
+       "head": {
+        "seq": 4,
+        "chain": {
+         "$fill": {
+          "len": 32,
+          "seed": "the chain of the old relay"
+         }
+        }
+       }
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 2
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          },
+          {
+           "$frame": {
+            "author": "bob",
+            "ctr": 1
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/chain_mismatch"
+      },
+      "rows_written": 0,
+      "storage": {
+       "log": [],
+       "board": {
+        "state": 3
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 1
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "head": {
+        "seq": 5,
+        "chain": {
+         "$chain": 5
+        }
+       },
+       "state": "seeding"
+      },
+      "rows_written": 3
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 5,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 6,
+         "chain_last": {
+          "$chain_from": {
+           "before": {
+            "$fill": {
+             "len": 32,
+             "seed": "the chain of the old relay"
+            }
+           },
+           "first": 5,
+           "frames": [
+            {
+             "$frame": {
+              "author": "alice",
+              "ctr": 3
+             }
+            },
+            {
+             "$frame": {
+              "author": "bob",
+              "ctr": 1
+             }
+            }
+           ]
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "door": {
+        "$door": true
+       },
+       "token": {
+        "$token": {
+         "key": "alice"
+        }
+       },
+       "next_seq": 5,
+       "state": "seeding"
+      },
+      "rows_written": 10,
+      "storage": {
+       "log": [],
+       "count": {
+        "devices": 3
+       },
+       "devices": {
+        "alice": {
+         "last_ctr": 2,
+         "gen": 1
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "seed-tail",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$u64": 5
+        },
+        {
+         "$u16": 2
+        },
+        {
+         "$frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          },
+          {
+           "$frame": {
+            "author": "bob",
+            "ctr": 1
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "head": {
+        "seq": 6,
+        "chain": {
+         "$chain": 6
+        }
+       },
+       "state": "open"
+      },
+      "rows_written": 7
+     }
+    }
+   ]
+  },
+  {
+   "name": "what seed refuses",
+   "clauses": [
+    "RELAY-SEED-001",
+    "RELAY-SEED-002",
+    "RELAY-ADMIN-002",
+    "SEAL-SIG-004",
+    "SEAL-KEY-006"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "1c145a172ce564e70e3d61dbbf5904e8",
+      "recovery": "rec",
+      "first": "alice",
+      "create": false
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 1,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 0,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 0,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 99,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "another"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ],
+         "sort": "reverse"
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 1
+          }
+         ],
+         "sort": false
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          },
+          {
+           "dev": {
+            "$dev": "carol"
+           },
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 2,
+           "last_ctr": 0
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 3,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 1
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 0,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 1
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 1
+          },
+          {
+           "dev": {
+            "$dev": "carol"
+           },
+           "sign_pk": "rec2",
+           "role": 2,
+           "status": 2,
+           "last_ctr": 0
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 1
+          },
+          {
+           "dev": "rec2",
+           "sign_pk": "rec2",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 0
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 2,
+           "last_ctr": 1
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 1
+          },
+          {
+           "dev": "x01",
+           "sign_pk": "x01",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x02",
+           "sign_pk": "x02",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x03",
+           "sign_pk": "x03",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x04",
+           "sign_pk": "x04",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x05",
+           "sign_pk": "x05",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x06",
+           "sign_pk": "x06",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x07",
+           "sign_pk": "x07",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x08",
+           "sign_pk": "x08",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x09",
+           "sign_pk": "x09",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x10",
+           "sign_pk": "x10",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x11",
+           "sign_pk": "x11",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x12",
+           "sign_pk": "x12",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x13",
+           "sign_pk": "x13",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x14",
+           "sign_pk": "x14",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x15",
+           "sign_pk": "x15",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "x16",
+           "sign_pk": "x16",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": "0020000000000000"
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 1
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "carol"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "carol",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/not_signer"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 2,
+           "last_ctr": 0
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 1
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/not_signer"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "rec"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "rec",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/not_signer"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        },
+        "sig": "flip"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_admin_sig"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        },
+        "sign_key": "bob"
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_admin_sig"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "bob",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_nonce"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200
+     },
+     "save": {
+      "n": "nonce"
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "nonce": "$saved.n",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [],
+         "n": 0
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "nonce": "$saved.n",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ],
+         "n": 4
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unauthorized"
+      },
+      "storage": {
+       "board": null,
+       "count": {
+        "devices": 0,
+        "log": 0
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "params": {
+       "op": "seed"
+      },
+      "body": {
+       "$admin": {
+        "op": "seed",
+        "signer": "alice",
+        "nonce": "$saved.n",
+        "args": {
+         "home_gen": 2,
+         "first_seq": 101,
+         "chain_before": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "last_seq": 100,
+         "chain_last": {
+          "$fill": {
+           "len": 32,
+           "seed": "the chain of the old relay"
+          }
+         },
+         "entries": [
+          {
+           "dev": "alice",
+           "sign_pk": "alice",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 2
+          },
+          {
+           "dev": "bob",
+           "sign_pk": "bob",
+           "role": 1,
+           "status": 1,
+           "last_ctr": 0
+          },
+          {
+           "dev": "rec",
+           "sign_pk": "rec",
+           "role": 2,
+           "status": 1,
+           "last_ctr": 7
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    }
+   ]
+  }
+ ]
+}

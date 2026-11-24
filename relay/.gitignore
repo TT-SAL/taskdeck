@@ -1,0 +1,2 @@
+# What `wrangler dev` writes while it runs: never part of the repository.
+.wrangler/
