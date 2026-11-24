@@ -268,17 +268,19 @@ fn engine_poison_vectors() {
             c["outcomes"].as_array().unwrap().iter().map(|o| o.as_str().unwrap().to_owned()).collect();
         let m = ScriptM { my_ctr: 0, other_ctr: b, ..Default::default() };
         let chain_b = [9u8; 32];
-        let mut store = Store::default();
-        store.ckpt = Some(Checkpoint {
-            board_seq: b,
-            board_chain: chain_b,
-            board: board(),
-            membership: sealer.membership_bytes(&m),
+        let mut store = Store {
+            ckpt: Some(Checkpoint {
+                board_seq: b,
+                board_chain: chain_b,
+                board: board(),
+                membership: sealer.membership_bytes(&m),
+                log_floor: b + 1,
+                registry: Default::default(),
+            }),
             log_floor: b + 1,
-            registry: Default::default(),
-        });
-        store.log_floor = b + 1;
-        store.floor_chain = Some(chain_b);
+            floor_chain: Some(chain_b),
+            ..Default::default()
+        };
         let mut chains = vec![(b, chain_b)];
         let mut chain = chain_b;
         for seq in b + 1..=log_head {
