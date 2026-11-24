@@ -294,6 +294,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.duty.snap_busy {
             return;
         }
+        if self.outbox.iter().any(|r| r.r.kind == Kind::Snap) {
+            // The announcement of the uploaded snapshot is on its way (§19.4 step 4): the duty
+            // waits for its fate instead of uploading again.
+            return;
+        }
         if failures >= 3 {
             self.meta.duties.snapshot = None;
             self.touch_meta();
@@ -361,7 +366,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
     }
 
-    fn bump_snapshot_failure(&mut self) {
+    pub(crate) fn bump_snapshot_failure(&mut self) {
         if let Some((s, tau, f)) = self.meta.duties.snapshot {
             self.meta.duties.snapshot = if f + 1 >= 3 { None } else { Some((s, tau, f + 1)) };
             self.touch_meta();

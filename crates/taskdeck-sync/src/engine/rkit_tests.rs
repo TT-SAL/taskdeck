@@ -25,6 +25,11 @@ pub(crate) struct Net {
     pub at: BTreeMap<Dev, String>,
     /// Every relay call in order: the device and a short name (`append`, `admin:revoke`, `blob:upload:2`).
     pub calls: Vec<(Dev, String)>,
+    /// Every admin request sent, in order.
+    pub admins: Vec<(Dev, AdminRequest)>,
+    /// For each of them: the relay's head and compaction floor and the sender's clock when it
+    /// was sent, and the answer's code.
+    pub admin_ctx: Vec<(u64, u64, i64, Result<(), String>)>,
 }
 
 pub(crate) fn admin_name(op: &AdminRequest) -> &'static str {
@@ -118,6 +123,7 @@ impl Net {
             }
             Effect::Admin { req, op } => {
                 self.calls.push((dev, admin_name(&op).into()));
+                self.admins.push((dev, op.clone()));
                 // A request that names a host goes to that relay (the new relay of a move).
                 let to = match &op {
                     AdminRequest::Door { host } | AdminRequest::Seed { host, .. } | AdminRequest::SeedTail { host, .. } => {
@@ -131,10 +137,14 @@ impl Net {
                 };
                 let Some(r) = self.relays.get_mut(&to) else {
                     let refusal = RelayRefusal { status: 503, code: "relay/unavailable".into(), until: None, head: None, index: None };
+                    self.admin_ctx.push((0, 0, now, Err(refusal.code.clone())));
                     n.feed(Event::AdminResult { req, result: Err(refusal) });
                     return true;
                 };
+                let head_then = r.head().map_or(0, |h| h.seq);
+                let floor_then = r.board_row().map_or(0, |b| b.compact_floor.max(b.purge_floor));
                 let reply = r.admin(now, &cred, &dev, &op);
+                self.admin_ctx.push((head_then, floor_then, now, reply.result.as_ref().map(|_| ()).map_err(|e| e.code.clone())));
                 if let (Ok(_), Some(g)) = (&reply.result, reply.token_gen) {
                     match &op {
                         AdminRequest::Register { dev: new, .. } | AdminRequest::RegisterSeq { dev: new, .. } => {
@@ -164,7 +174,8 @@ impl Net {
             let Some(fx) = n.fx.pop_front() else { return };
             self.answer(n, fx);
         }
-        panic!("the node did not settle");
+        let tail: Vec<_> = self.calls.iter().rev().take(8).map(|c| c.1.clone()).collect();
+        panic!("the node did not settle: last calls {tail:?}, waiting {:?}", n.fx.iter().take(4).map(super::kit_tests::fx_name).collect::<Vec<_>>());
     }
 
     /// The head of the relay a device is at.
@@ -231,7 +242,7 @@ pub(crate) fn board(seed: u64) -> (Net, Node) {
     let reply = model.create(a.wall, &rsign_pk, &salt, &dev, &sign_pk, &f1);
     assert!(reply.result.is_ok(), "{:?}", reply.result);
     let host = relay().host;
-    let mut net = Net { relays: BTreeMap::new(), gens: BTreeMap::new(), at: BTreeMap::new(), calls: Vec::new() };
+    let mut net = Net { relays: BTreeMap::new(), gens: BTreeMap::new(), at: BTreeMap::new(), calls: Vec::new(), admins: Vec::new(), admin_ctx: Vec::new() };
     net.gens.insert((host.clone(), dev), reply.token_gen.expect("a token"));
     net.relays.insert(host, model);
     net.settle(&mut [&mut a]);

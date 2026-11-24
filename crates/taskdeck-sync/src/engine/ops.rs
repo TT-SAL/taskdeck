@@ -787,6 +787,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.touch_meta();
             }
         }
+        if r.kind == Kind::Snap && code.is_some() {
+            // A `snap` entry refused or not sealed counts against the duty (§19.4: three failures end it).
+            self.bump_snapshot_failure();
+        }
         let Some(ticket) = r.op else { return };
         if self.opx.pair.as_ref().is_some_and(|p| p.ticket == ticket) {
             return self.pair_entry_done(code);

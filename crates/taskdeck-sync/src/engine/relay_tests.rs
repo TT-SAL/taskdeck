@@ -340,3 +340,247 @@ fn a_restore_to_a_point_resets_the_board_and_nothing_else() {
     assert!(st.alarms.iter().any(|x| x.kind == crate::AlarmKind::ResetMismatch));
     assert!(st.stops.iter().any(|s| matches!(s.kind, crate::StopKind::Divergence)));
 }
+
+fn position(n: &Node, from: usize, f: impl Fn(&PersistOp) -> bool) -> Option<usize> {
+    n.persists[from..].iter().position(|w| w.iter().any(&f)).map(|i| i + from)
+}
+
+fn identity_writes(n: &Node, from: usize) -> usize {
+    n.persists[from..].iter().flatten().filter(|op| matches!(op, PersistOp::WriteIdentity(_))).count()
+}
+
+// spec: ENG-PURGE-001 ENG-PURGE-002 ENG-PURGE-003 ENG-PURGE-004
+#[test]
+fn a_purge_leaves_no_current_device_behind() {
+    let (mut net, mut a) = board(161);
+    let mut b = pair(&mut net, &mut a, 162, "Laptop", 1);
+    for k in 1..=6u64 {
+        a.set(k, k as u8, k as i64);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    // B's newest entry stands on this head; what A appends after it B has not reported on.
+    let reported = b.e.status().head.seq;
+    b.set(20, 20, 1);
+    net.settle(&mut [&mut a, &mut b]);
+    for k in 7..=9u64 {
+        a.set(k, k as u8, k as i64);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    assert!(a.e.status().board_seq > reported + 2);
+
+    let (p, before_ms) = a.e.purge_preview().expect("something to purge");
+    assert_eq!(p, reported + 1);
+    assert_eq!(Some(before_ms), a.e.tau_at(p - 1));
+    let (fa, fb) = (a.persists.len(), b.persists.len());
+    let admins = net.admins.len();
+    let epoch = a.e.membership().epoch;
+    a.feed(Event::Op { ticket: 4, op: Operation::Purge });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 4), Some(Ok(())));
+    let n = a.e.membership().epoch;
+    assert_eq!(n, epoch + 1);
+    // The relay is asked to purge below `p` under the new epoch, after the rotation was accepted.
+    assert!(net.admins[admins..].contains(&(a.dev(), AdminRequest::Purge { before_seq: p, epoch: n })));
+    assert!(a.has_note(|x| matches!(x, crate::Notification::PurgeBackups { before_ms: t } if *t == before_ms)));
+    assert!(a.has_note(|x| matches!(x, crate::Notification::ReuploadPicture { epoch: e } if *e == n)));
+    // Every device: a base at the rotation's seq first, then the log below `p` and the older bases go.
+    for (node, from) in [(&a, fa), (&b, fb)] {
+        let base = position(node, from, |op| matches!(op, PersistOp::WriteBase(_))).expect("a base");
+        let r = node.persists[base]
+            .iter()
+            .find_map(|op| match op {
+                PersistOp::WriteBase(c) => Some(c.board_seq),
+                _ => None,
+            })
+            .expect("its seq");
+        let cut = position(node, from, |op| matches!(op, PersistOp::TruncateLogBelow(below, _) if *below == p)).expect("the truncation");
+        let gone = position(node, from, |op| matches!(op, PersistOp::DeleteBases(_))).expect("the older bases deleted");
+        assert!(base < cut && base < gone);
+        assert_eq!(node.store.log_floor, p);
+        assert!(node.store.bases.keys().all(|s| *s >= r));
+        assert!(node.store.log.keys().all(|s| *s >= p));
+        assert_eq!(node.e.membership().purge_seq, p);
+    }
+    // Nothing more to purge until another device reports a newer head.
+    assert_eq!(a.e.purge_preview(), Err("engine/nothing_to_purge"));
+    a.feed(Event::Op { ticket: 5, op: Operation::Purge });
+    assert_eq!(op_result(&a, 5), Some(Err("engine/nothing_to_purge")));
+
+    // The old roots go once the log clock is more than thirty days past the rotation, not before.
+    let (ia, ib) = (a.persists.len(), b.persists.len());
+    for _ in 0..29 {
+        a.advance(86_400_000);
+        b.advance(86_400_000);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    assert_eq!((identity_writes(&a, ia), identity_writes(&b, ib)), (0, 0));
+    for _ in 0..3 {
+        a.advance(86_400_000);
+        b.advance(86_400_000);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    assert!(identity_writes(&a, ia) >= 1 && identity_writes(&b, ib) >= 1);
+    a.set(30, 30, 30);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(a.board_bytes(), b.board_bytes());
+}
+
+// spec: ENG-SNAP-004 ENG-SNAP-005 ENG-SNAP-002
+#[test]
+fn a_snapshot_is_uploaded_once_announced_after_and_acknowledged() {
+    let (mut net, mut a) = board(171);
+    let mut b = pair(&mut net, &mut a, 172, "Laptop", 1);
+    let (fa, fb) = (a.persists.len(), b.persists.len());
+    let calls = net.calls.len();
+    let snaps = |n: &Node, from: usize| {
+        let mut ids = Vec::new();
+        for r in puts(n, from) {
+            if let Body::Snap(info) = &r.body
+                && !ids.iter().any(|x: &([u8; 16], u64)| x.0 == r.entry_id)
+            {
+                ids.push((r.entry_id, info.seq));
+            }
+        }
+        ids
+    };
+    // Like `settle`, but looking at every upload before it is answered: no announcement
+    // exists while the upload of a snapshot is still on its way.
+    let rounds = |net: &mut super::rkit_tests::Net, a: &mut Node, b: &mut Node, n: usize| {
+        for _ in 0..n {
+            for (node, from) in [(&mut *a, fa), (&mut *b, fb)] {
+                while let Some(fx) = node.fx.pop_front() {
+                    if matches!(&fx, Effect::Blob { op: BlobRequest::Upload { purpose: 1, .. }, .. }) {
+                        assert!(snaps(node, from).is_empty());
+                    }
+                    net.answer(node, fx);
+                }
+            }
+            a.tick(30_000);
+            b.tick(30_000);
+        }
+    };
+    // The log passes seq 64: the snapshot of 64 is due, and whoever's turn it is writes it.
+    let mut k = 0u64;
+    while net.log_len() < 70 {
+        k += 1;
+        a.set(k, (k % 50) as u8, k as i64);
+        rounds(&mut net, &mut a, &mut b, 3);
+    }
+    for _ in 0..3 {
+        a.advance(86_400_000);
+        b.advance(86_400_000);
+        rounds(&mut net, &mut a, &mut b, 6);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    let uploads: Vec<_> = net.calls[calls..].iter().filter(|c| c.1 == "blob:upload:1").map(|c| c.0).collect();
+    assert_eq!(uploads.len(), 1);
+    let (writer, wf, other, of) = if uploads[0] == a.dev() { (&a, fa, &b, fb) } else { (&b, fb, &a, fa) };
+    assert_eq!(snaps(writer, wf).iter().map(|x| x.1).collect::<Vec<_>>(), vec![64]);
+    assert!(snaps(other, of).is_empty());
+    // The other device recorded a hash at 64: one verdict, Ack, in its next beat.
+    let acks: Vec<_> = puts(other, of)
+        .into_iter()
+        .filter_map(|r| match r.body {
+            Body::Beat(info) if !info.acks.is_empty() => Some((r.entry_id, info.acks)),
+            _ => None,
+        })
+        .collect();
+    assert!(!acks.is_empty());
+    assert!(acks.iter().all(|x| x.0 == acks[0].0), "one beat carries it");
+    assert_eq!(acks[0].1.len(), 1);
+    assert_eq!(acks[0].1[0].1, crate::Verdict::Ack);
+    // The writer's own beats carry none.
+    assert!(puts(writer, wf).iter().all(|r| !matches!(&r.body, Body::Beat(info) if !info.acks.is_empty())));
+}
+
+// spec: ENG-COMPACT-001 ENG-COMPACT-002 ENG-COMPACT-003 ENG-COMPACT-004
+#[test]
+fn compaction_keeps_what_the_board_needs() {
+    const DAY: i64 = 86_400_000;
+    let (mut net, mut a) = board(181);
+    let mut b = pair(&mut net, &mut a, 182, "Laptop", 1);
+    let added_seq = pair_result(&a, 1).expect("an answer").expect("paired").1;
+    // A Skip early in the log: its entry and its target must outlive every compaction.
+    b.set(1, 77, 7);
+    net.settle(&mut [&mut a, &mut b]);
+    let target = net.log_len();
+    a.feed(Event::Op { ticket: 2, op: Operation::Skip { seq: target } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 2), Some(Ok(())));
+    let skip_seq = net.log_len();
+    let mut k = 0u64;
+    let mut grow = |net: &mut super::rkit_tests::Net, a: &mut Node, b: &mut Node, n: u64| {
+        let to = net.log_len() + n;
+        while net.log_len() < to {
+            for _ in 0..(to - net.log_len()).min(1_000) {
+                k += 1;
+                a.set(10 + k, (k % 60) as u8, k as i64);
+            }
+            net.settle(&mut [&mut *a, &mut *b]);
+            // The relay's daily append budget pauses the sender until the next UTC day.
+            if let Some(until) = a.e.status().paused_until_ms {
+                let wait = (until - a.wall).max(0) as u64 + 60_000;
+                a.advance(wait);
+                b.advance(wait);
+                net.settle(&mut [&mut *a, &mut *b]);
+            }
+        }
+    };
+    grow(&mut net, &mut a, &mut b, 100);
+    // More than a year passes (beats, weekly snapshots), then the log grows past 16,384 more.
+    let mut seen: Vec<(u64, i64)> = Vec::new();
+    for _ in 0..370 {
+        a.advance(DAY as u64);
+        b.advance(DAY as u64);
+        net.settle(&mut [&mut a, &mut b]);
+        seen.push((net.log_len(), a.wall));
+    }
+    grow(&mut net, &mut a, &mut b, 16_500);
+    for _ in 0..3 {
+        a.advance(DAY as u64);
+        b.advance(DAY as u64);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    let compacts: Vec<_> = net
+        .admins
+        .iter()
+        .zip(&net.admin_ctx)
+        .filter_map(|((dev, op), ctx)| match op {
+            AdminRequest::Compact { below_seq, snap_entry_seq, blob_id, keep } => {
+                Some((*dev, *below_seq, *snap_entry_seq, *blob_id, keep.clone(), ctx.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(!compacts.is_empty());
+    let mut days = std::collections::BTreeSet::new();
+    for (dev, below, snap_entry, blob, keep, (head_then, floor_then, now, answer)) in &compacts {
+        let node = if *dev == a.dev() { &a } else { &b };
+        assert_eq!(answer, &Ok(()), "the relay took it");
+        // A usable snapshot by the other device, acknowledged by this one.
+        let rec = node.e.registry.snapshots.iter().find(|r| r.entry_seq == *snap_entry).expect("the snapshot's record");
+        assert_ne!(rec.author, *dev);
+        assert_eq!(rec.own, Some(crate::Verdict::Ack));
+        assert_eq!(rec.info.blob, *blob);
+        // Not above the snapshot, not within the newest 16,384, not within 366 days.
+        assert!(*below <= rec.info.seq);
+        assert!(*below + 16_384 <= *head_then, "{below} {head_then}");
+        assert!(seen.iter().any(|(h, w)| *h + 1 >= *below && *w + 366 * DAY <= *now), "{below}");
+        // Every control entry and Skip target between the relay's floor and `below_seq` is kept
+        // (what lies below the floor was kept by an earlier compaction and is not a candidate).
+        for must in [added_seq, target, skip_seq] {
+            assert!(must >= *below || must < *floor_then || keep.contains(&must), "{must} {keep:?}");
+        }
+        assert!(keep.windows(2).all(|w| w[0] < w[1]));
+        assert!(days.insert((*dev, now.div_euclid(DAY))), "one Compact per UTC day");
+    }
+    // The board goes on, and what was kept is still served.
+    a.set(5, 5, 5);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(a.board_bytes(), b.board_bytes());
+    let floor = net.relay().board_row().map(|r| r.compact_floor).unwrap_or(0);
+    assert!(floor > target, "something was deleted: floor {floor}");
+    for must in [added_seq, target, skip_seq] {
+        assert!(net.relay().log().contains_key(&must));
+    }
+}
