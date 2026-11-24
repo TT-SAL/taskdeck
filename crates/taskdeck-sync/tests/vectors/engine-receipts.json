@@ -1,0 +1,2349 @@
+{
+  "spec": "engine.md §13.1, §13.2, §13.3, §13.4, §24.3",
+  "cases": [
+    {
+      "name": "Skip seal/frame_format",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-002",
+        "§21.1"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Skip",
+        "code": "seal/frame_format",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "SkippedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "code": "seal/frame_format",
+          "frame_hash_some": true
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Skip seal/wrong_board",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-002",
+        "§21.1"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Skip",
+        "code": "seal/wrong_board",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "SkippedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "code": "seal/wrong_board",
+          "frame_hash_some": true
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Skip seal/unknown_author",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-002",
+        "§21.1"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Skip",
+        "code": "seal/unknown_author",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "SkippedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "code": "seal/unknown_author",
+          "frame_hash_some": true
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Skip seal/bad_signature",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-002",
+        "§21.1"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Skip",
+        "code": "seal/bad_signature",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "SkippedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "code": "seal/bad_signature",
+          "frame_hash_some": true
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Tamper seal/counter_replay",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-003",
+        "§21.1",
+        "§21.2",
+        "§12.3 step 6"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Tamper",
+        "code": "seal/counter_replay",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": false,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "Counter",
+          "evidence": "Counter",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/counter_replay"
+        },
+        "stop": {
+          "kind": "Evidence"
+        },
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Tamper seal/counter_gap",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-003",
+        "§21.1",
+        "§21.2",
+        "§12.3 step 6"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Tamper",
+        "code": "seal/counter_gap",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": false,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "Counter",
+          "evidence": "Counter",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/counter_gap"
+        },
+        "stop": {
+          "kind": "Evidence"
+        },
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Tamper seal/based_on_fork",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-003",
+        "§21.1",
+        "§21.2",
+        "§12.3 step 6"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Tamper",
+        "code": "seal/based_on_fork",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": false,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "Fork",
+          "evidence": "Fork",
+          "seq": 140,
+          "source": "BasedOn"
+        },
+        "stop": {
+          "kind": "Evidence"
+        },
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Tamper seal/based_on_future",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-003",
+        "§21.1",
+        "§21.2",
+        "§12.3 step 6"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Tamper",
+        "code": "seal/based_on_future",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": false,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "Fork",
+          "evidence": "Fork",
+          "seq": 140,
+          "source": "BasedOn"
+        },
+        "stop": {
+          "kind": "Evidence"
+        },
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Tamper on an own record's counter leaves the record untouched",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-003",
+        "§21.1",
+        "§21.2",
+        "§12.3 step 6"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Tamper",
+        "code": "seal/counter_gap",
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": false,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "Counter",
+          "evidence": "Counter",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/counter_gap"
+        },
+        "stop": {
+          "kind": "Evidence"
+        },
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "untouched",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/aead from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/aead",
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/aead",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/bad_ctl_sig from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_ctl_sig",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_ctl_sig",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/bad_epoch from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_epoch",
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_epoch",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/bad_payload from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_payload",
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_payload",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/bad_plaintext from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_plaintext",
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_plaintext",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/bad_version from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_version",
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_version",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/ctl_author from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/ctl_author",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/ctl_author",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/ctl_shape from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/ctl_shape",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/ctl_shape",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/not_authorized from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/not_authorized",
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/not_authorized",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/revoked_author from another device: alarm naming the author, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/revoked_author",
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/revoked_author",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/old_epoch from another device: no alarm, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/old_epoch",
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/stale_epoch from another device: no alarm, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/stale_epoch",
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/ctl_target from another device: no alarm, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/ctl_target",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/ctl_duplicate_key from another device: no alarm, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/ctl_duplicate_key",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/ctl_epoch from another device: no alarm, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/ctl_epoch",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/ctl_support from another device: no alarm, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/ctl_support",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse seal/ctl_last_device from another device: no alarm, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/ctl_last_device",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Refuse at seq 1 leaves M_0",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 1,
+        "class": "Refuse",
+        "code": "seal/bad_epoch",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": false,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 1,
+          "author": "author",
+          "code": "seal/bad_epoch",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "own cmd refused seal/stale_epoch: kept for re-sealing",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§24.3",
+        "ENG-RESEAL-001",
+        "ENG-RESEAL-002",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/stale_epoch",
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "kept_for_reseal",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "own cmd refused seal/old_epoch after two re-seals: kept for re-sealing",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§24.3",
+        "ENG-RESEAL-001",
+        "ENG-RESEAL-002",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/old_epoch",
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 2,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "kept_for_reseal",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "own cmd refused seal/stale_epoch after its third re-seal: engine/reseal_limit",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§24.3",
+        "ENG-RESEAL-001",
+        "ENG-RESEAL-002",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/stale_epoch",
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 3,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": "engine/reseal_limit",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "own cmd refused seal/revoked_author: alarm and a refusal record with the sealer's code",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "§13.3",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/revoked_author",
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/revoked_author",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": "seal/revoked_author",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "own cmd refused seal/bad_plaintext: alarm and a refusal record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "§13.3",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_plaintext",
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_plaintext",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": "seal/bad_plaintext",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "own beat refused seal/bad_payload: alarm, dropped with a refusal record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "§13.3",
+        "ENG-REF-001",
+        "§24.3",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_payload",
+        "kind": "beat",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_payload",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": "seal/bad_payload",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "own snap refused seal/bad_payload: alarm, dropped with a refusal record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.2",
+        "§13.3",
+        "ENG-REF-001",
+        "§24.3",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/bad_payload",
+        "kind": "snap",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "seal/bad_payload",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": "seal/bad_payload",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "own ctl refused seal/ctl_target: dropped with a refusal record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.3",
+        "ENG-REF-001",
+        "§24.3",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/ctl_target",
+        "kind": "ctl",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": "seal/ctl_target",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept cmd from another device, apply ok",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§12.4"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "ok",
+        "apply": "ok",
+        "apply_code": null
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "applied",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept own cmd, apply ok: the record is dropped",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§12.4"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "ok",
+        "apply": "ok",
+        "apply_code": null
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "applied",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept own cmd, benign repeat: a success, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§12.4",
+        "§13.3 benign repeats"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "ok",
+        "apply": "benign",
+        "apply_code": null
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "applied",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept cmd from another device, apply refused: no alarm, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-005",
+        "§13.3",
+        "ENG-REF-001"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "ok",
+        "apply": "refused",
+        "apply_code": "engine/toy_gone"
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept own cmd, apply refused: a refusal record with the apply code",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-CLASS-005",
+        "§13.3",
+        "ENG-REF-001"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "ok",
+        "apply": "refused",
+        "apply_code": "engine/toy_fail"
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": "engine/toy_fail",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept cmd from another device, parse fails: alarm, no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-SM-003",
+        "ENG-CLASS-004",
+        "§13.2",
+        "§13.3"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "fail",
+        "parse_code": "engine/toy_parse"
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "engine/toy_parse",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept own cmd, parse fails: alarm and a refusal record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-SM-003",
+        "ENG-CLASS-004",
+        "§13.2",
+        "§13.3"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "fail",
+        "parse_code": "engine/toy_parse"
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": {
+          "kind": "RefusedFrame",
+          "evidence": "Frame",
+          "seq": 140,
+          "author": "author",
+          "code": "engine/toy_parse",
+          "frame_hash_some": false
+        },
+        "stop": null,
+        "halt": null,
+        "refusal_record": "engine/toy_parse",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept cmd, apply panics: the poison-pill rules",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§15.3"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "ok",
+        "apply": "panic",
+        "apply_code": null
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": true
+      }
+    },
+    {
+      "name": "Accept own cmd, apply panics: the record waits",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§15.3"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "ok",
+        "apply": "panic",
+        "apply_code": null
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "untouched",
+        "based_on_unchecked_rises": false,
+        "poison": true
+      }
+    },
+    {
+      "name": "Accept ctl",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§14.1"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "ctl_items",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept own ctl: the record is dropped",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§14.1"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "ctl",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "ctl_items",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept ctl with the commitment halt",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§16.1",
+        "§16.3",
+        "§14.1"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": "Commitment",
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "ctl_items",
+        "alarm": null,
+        "stop": null,
+        "halt": "Commitment",
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept ctl with the rules halt",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§16.1",
+        "§16.3",
+        "ENG-HALT-005"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": "UnknownRules",
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "held",
+        "alarm": null,
+        "stop": null,
+        "halt": "Rules",
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "Accept beat",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§23.3"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "beat",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false,
+        "registry": true
+      }
+    },
+    {
+      "name": "Accept own beat: the record is dropped",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§23.3"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "beat",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false,
+        "registry": true
+      }
+    },
+    {
+      "name": "Accept snap",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§19.5"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "snap",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false,
+        "registry": true
+      }
+    },
+    {
+      "name": "Accept own snap: the record is dropped",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§19.5"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "snap",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false,
+        "registry": true
+      }
+    },
+    {
+      "name": "NeedFrames",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§17.2",
+        "ENG-SKIP-001"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "NeedFrames",
+        "code": null,
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "membership_changes": false,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false,
+        "need_frames": true
+      }
+    },
+    {
+      "name": "own_dev_foreign: stop sending with foreign_signer, applying goes on",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§21.1",
+        "SEAL-RCPT-010",
+        "§12.4"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": true,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "ok",
+        "apply": "ok",
+        "apply_code": null
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "applied",
+        "alarm": {
+          "kind": "ForeignSigner",
+          "evidence": "ForeignSigner",
+          "seq": 140,
+          "author": "this_device"
+        },
+        "stop": {
+          "kind": "ForeignSigner"
+        },
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "based_on_unchecked on an accepted cmd applied for the first time: the count rises",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§13.1 based_on_unchecked row",
+        "§12.4"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": true,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "parse": "ok",
+        "apply": "ok",
+        "apply_code": null
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "applied",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": true,
+        "poison": false
+      }
+    },
+    {
+      "name": "based_on_unchecked on a replay from a base at Start: the count does not rise",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§12.4"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": true,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": false,
+        "parse": "ok",
+        "apply": "ok",
+        "apply_code": null
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "applied",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "based_on_unchecked on a refused entry: the count does not rise",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "ENG-REF-001",
+        "ENG-CLASS-004"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Refuse",
+        "code": "seal/ctl_target",
+        "kind": "ctl",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": true,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "an own cmd skipped by an accepted Skip: refusal record engine/skipped",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§12.4 step 1",
+        "§13.3",
+        "§17.3",
+        "ENG-REF-001"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": true,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": true,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": "engine/skipped",
+        "own_record": "dropped",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "another device's cmd skipped by an accepted Skip: no record",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§12.4 step 1",
+        "§13.3",
+        "§17.3",
+        "ENG-REF-001"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "Accept",
+        "code": null,
+        "kind": "cmd",
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": true,
+        "reseals": 0,
+        "first_apply": true
+      },
+      "expected": {
+        "frame_persisted": true,
+        "membership_changes": true,
+        "board": "none",
+        "alarm": null,
+        "stop": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "seal/missing_root on a device not revoked: the local fault engine/missing_root",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§21.4",
+        "ENG-EVID-006"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "SealerError",
+        "code": "seal/missing_root",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "revoked_in_prev": false
+      },
+      "expected": {
+        "membership_changes": false,
+        "board": "none",
+        "alarm": null,
+        "stop": {
+          "kind": "LocalFault",
+          "code": "engine/missing_root"
+        },
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false
+      }
+    },
+    {
+      "name": "seal/missing_root on a device revoked in M_{s-1}: §24.4, no local fault",
+      "clauses": [
+        "ENG-CLASS-001",
+        "§13.1",
+        "§24.4",
+        "ENG-EPOCH-005"
+      ],
+      "receipt": {
+        "seq": 140,
+        "class": "SealerError",
+        "code": "seal/missing_root",
+        "kind": null,
+        "own": false,
+        "own_dev_foreign": false,
+        "based_on_unchecked": false,
+        "halt": null,
+        "in_skips": false,
+        "reseals": 0,
+        "first_apply": true,
+        "revoked_in_prev": true
+      },
+      "expected": {
+        "membership_changes": false,
+        "board": "none",
+        "alarm": null,
+        "halt": null,
+        "refusal_record": null,
+        "own_record": "none",
+        "based_on_unchecked_rises": false,
+        "poison": false,
+        "paused": true
+      }
+    }
+  ]
+}

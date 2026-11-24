@@ -1,0 +1,1400 @@
+{
+  "spec": "engine.md §15, §16.1, §16.2",
+  "cases": [
+    {
+      "name": "a clean page",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.1",
+        "ENG-POISON-005"
+      ],
+      "start": {
+        "attempt": 0,
+        "last_failed": null,
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 4
+      },
+      "script": [
+        "start",
+        {
+          "page": [
+            5,
+            6,
+            7
+          ]
+        }
+      ],
+      "outcomes": [
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 1
+        },
+        {
+          "step": "page",
+          "seqs": [
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            7,
+            1
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "apply": 6,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "apply": 7,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "two clean pages",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.1"
+      ],
+      "start": {
+        "attempt": 7,
+        "last_failed": null,
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 4
+      },
+      "script": [
+        "start",
+        {
+          "page": [
+            5,
+            6
+          ]
+        },
+        {
+          "page": [
+            7,
+            8,
+            9
+          ]
+        }
+      ],
+      "outcomes": [
+        "ok",
+        "ok",
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 8
+        },
+        {
+          "step": "page",
+          "seqs": [
+            5,
+            6
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            6,
+            8
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "apply": 6,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "step": "page",
+          "seqs": [
+            7,
+            8,
+            9
+          ]
+        },
+        {
+          "set_marker": [
+            7,
+            9,
+            8
+          ]
+        },
+        {
+          "apply": 7,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "apply": 8,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "apply": 9,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "Start replays the entry above the checkpoint",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.2 step 3",
+        "ENG-STATE-002"
+      ],
+      "start": {
+        "attempt": 2,
+        "last_failed": null,
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 5
+      },
+      "script": [
+        "start"
+      ],
+      "outcomes": [
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 3
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            3
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "an OS kill in a page: single mode on the next start, no last_failed, no halt",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.2 step 2",
+        "ENG-POISON-002",
+        "ENG-POISON-003"
+      ],
+      "start": {
+        "attempt": 0,
+        "last_failed": null,
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 4
+      },
+      "script": [
+        "start",
+        {
+          "page": [
+            5,
+            6,
+            7
+          ]
+        },
+        "start"
+      ],
+      "outcomes": [
+        "ok",
+        "kill",
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 1
+        },
+        {
+          "step": "page",
+          "seqs": [
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            7,
+            1
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "apply": 6,
+          "mode": "page",
+          "outcome": "kill"
+        },
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 2
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            2
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "single",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            2
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "single",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            7,
+            7,
+            2
+          ]
+        },
+        {
+          "apply": 7,
+          "mode": "single",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "an OS kill in the second page: the first is replayed page-wise, the second entry by entry",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.2 step 2",
+        "ENG-POISON-002"
+      ],
+      "start": {
+        "attempt": 0,
+        "last_failed": null,
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 4
+      },
+      "script": [
+        "start",
+        {
+          "page": [
+            5
+          ]
+        },
+        {
+          "page": [
+            6,
+            7,
+            8
+          ]
+        },
+        "start"
+      ],
+      "outcomes": [
+        "ok",
+        "ok",
+        "kill",
+        "ok",
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 1
+        },
+        {
+          "step": "page",
+          "seqs": [
+            5
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            1
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "step": "page",
+          "seqs": [
+            6,
+            7,
+            8
+          ]
+        },
+        {
+          "set_marker": [
+            6,
+            8,
+            1
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "apply": 7,
+          "mode": "page",
+          "outcome": "kill"
+        },
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 2
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            2
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            2
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "single",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            7,
+            7,
+            2
+          ]
+        },
+        {
+          "apply": 7,
+          "mode": "single",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            8,
+            8,
+            2
+          ]
+        },
+        {
+          "apply": 8,
+          "mode": "single",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "an OS kill in a page, then a kill on the same entry in single mode, then it applies",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.2 step 2",
+        "ENG-POISON-003"
+      ],
+      "start": {
+        "attempt": 0,
+        "last_failed": null,
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 4
+      },
+      "script": [
+        "start",
+        {
+          "page": [
+            5,
+            6,
+            7
+          ]
+        },
+        "start",
+        "start"
+      ],
+      "outcomes": [
+        "ok",
+        "kill",
+        "ok",
+        "kill",
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 1
+        },
+        {
+          "step": "page",
+          "seqs": [
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            7,
+            1
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "apply": 6,
+          "mode": "page",
+          "outcome": "kill"
+        },
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 2
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            2
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "single",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            2
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "single",
+          "outcome": "kill"
+        },
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 3
+        },
+        {
+          "last_failed": [
+            6,
+            2
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            3
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            3
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "single",
+          "outcome": "ok",
+          "clears_last_failed": true
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            7,
+            7,
+            3
+          ]
+        },
+        {
+          "apply": 7,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "a deterministic panic halts within one run after its second attempt",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.3",
+        "§16.1",
+        "ENG-POISON-003",
+        "ENG-POISON-004",
+        "§7.12 D5",
+        "§7.12 D6"
+      ],
+      "start": {
+        "attempt": 0,
+        "last_failed": null,
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 4
+      },
+      "script": [
+        "start",
+        {
+          "page": [
+            5
+          ]
+        }
+      ],
+      "outcomes": [
+        "panic",
+        "panic"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 1
+        },
+        {
+          "step": "page",
+          "seqs": [
+            5
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            1
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "panic"
+        },
+        {
+          "last_failed": [
+            5,
+            1
+          ]
+        },
+        {
+          "attempt": 2
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            2
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "single",
+          "outcome": "panic"
+        },
+        {
+          "halt": 5,
+          "code": "engine/crash_halt"
+        }
+      ],
+      "halt": 5
+    },
+    {
+      "name": "a panic that does not repeat clears last_failed; the next page applies",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.3",
+        "ENG-POISON-004"
+      ],
+      "start": {
+        "attempt": 0,
+        "last_failed": null,
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 4
+      },
+      "script": [
+        "start",
+        {
+          "page": [
+            5
+          ]
+        },
+        {
+          "page": [
+            6,
+            7
+          ]
+        }
+      ],
+      "outcomes": [
+        "panic",
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 1
+        },
+        {
+          "step": "page",
+          "seqs": [
+            5
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            1
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "panic"
+        },
+        {
+          "last_failed": [
+            5,
+            1
+          ]
+        },
+        {
+          "attempt": 2
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            2
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "single",
+          "outcome": "ok",
+          "clears_last_failed": true
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "step": "page",
+          "seqs": [
+            6,
+            7
+          ]
+        },
+        {
+          "set_marker": [
+            6,
+            7,
+            2
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "apply": 7,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "a panic on the last entry of a page right after the checkpoint",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.3"
+      ],
+      "start": {
+        "attempt": 3,
+        "last_failed": null,
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 4
+      },
+      "script": [
+        "start",
+        {
+          "page": [
+            5
+          ]
+        }
+      ],
+      "outcomes": [
+        "panic",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 4
+        },
+        {
+          "step": "page",
+          "seqs": [
+            5
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            4
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "panic"
+        },
+        {
+          "last_failed": [
+            5,
+            4
+          ]
+        },
+        {
+          "attempt": 5
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            5
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "single",
+          "outcome": "ok",
+          "clears_last_failed": true
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "a single-entry marker left by a kill, twice in a row: halt",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.2 step 2",
+        "§16.1",
+        "ENG-POISON-003",
+        "§7.12 D6"
+      ],
+      "start": {
+        "attempt": 2,
+        "last_failed": null,
+        "marker": [
+          6,
+          6,
+          2
+        ],
+        "checkpoint_seq": 5,
+        "log_head": 7
+      },
+      "script": [
+        "start",
+        "start"
+      ],
+      "outcomes": [
+        "kill"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 3
+        },
+        {
+          "last_failed": [
+            6,
+            2
+          ]
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            3
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "single",
+          "outcome": "kill"
+        },
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 4
+        },
+        {
+          "halt": 6,
+          "code": "engine/crash_halt"
+        }
+      ],
+      "halt": 6
+    },
+    {
+      "name": "a single-entry marker left by a kill once: last_failed set, then cleared",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.2 step 2",
+        "§15.3"
+      ],
+      "start": {
+        "attempt": 2,
+        "last_failed": null,
+        "marker": [
+          6,
+          6,
+          2
+        ],
+        "checkpoint_seq": 5,
+        "log_head": 7
+      },
+      "script": [
+        "start"
+      ],
+      "outcomes": [
+        "ok",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 3
+        },
+        {
+          "last_failed": [
+            6,
+            2
+          ]
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            3
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "single",
+          "outcome": "ok",
+          "clears_last_failed": true
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            7,
+            7,
+            3
+          ]
+        },
+        {
+          "apply": 7,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "a marker at or below the checkpoint is ignored",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.2 step 3"
+      ],
+      "start": {
+        "attempt": 4,
+        "last_failed": null,
+        "marker": [
+          3,
+          4,
+          4
+        ],
+        "checkpoint_seq": 4,
+        "log_head": 5
+      },
+      "script": [
+        "start"
+      ],
+      "outcomes": [
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 5
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            5
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "a stale last_failed from a non-consecutive attempt does not halt",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.3",
+        "ENG-POISON-003"
+      ],
+      "start": {
+        "attempt": 3,
+        "last_failed": [
+          5,
+          1
+        ],
+        "marker": null,
+        "checkpoint_seq": 4,
+        "log_head": 4
+      },
+      "script": [
+        "start",
+        {
+          "page": [
+            5
+          ]
+        }
+      ],
+      "outcomes": [
+        "panic",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 4
+        },
+        {
+          "step": "page",
+          "seqs": [
+            5
+          ]
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            4
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "page",
+          "outcome": "panic"
+        },
+        {
+          "last_failed": [
+            5,
+            4
+          ]
+        },
+        {
+          "attempt": 5
+        },
+        {
+          "set_marker": [
+            5,
+            5,
+            5
+          ]
+        },
+        {
+          "apply": 5,
+          "mode": "single",
+          "outcome": "ok",
+          "clears_last_failed": true
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "a kill, then a panic on another entry: no halt",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.2 step 2",
+        "§15.3",
+        "ENG-POISON-003"
+      ],
+      "start": {
+        "attempt": 1,
+        "last_failed": null,
+        "marker": [
+          7,
+          7,
+          1
+        ],
+        "checkpoint_seq": 5,
+        "log_head": 7
+      },
+      "script": [
+        "start"
+      ],
+      "outcomes": [
+        "panic",
+        "ok",
+        "ok"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 2
+        },
+        {
+          "last_failed": [
+            7,
+            1
+          ]
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            2
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "page",
+          "outcome": "panic"
+        },
+        {
+          "last_failed": [
+            6,
+            2
+          ]
+        },
+        {
+          "attempt": 3
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            3
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "single",
+          "outcome": "ok",
+          "clears_last_failed": true
+        },
+        {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            7,
+            7,
+            3
+          ]
+        },
+        {
+          "apply": 7,
+          "mode": "single",
+          "outcome": "ok"
+        },
+        {
+          "clear_marker": true
+        }
+      ],
+      "halt": null
+    },
+    {
+      "name": "a kill, then a panic on another entry that repeats: halt on that entry",
+      "clauses": [
+        "ENG-POISON-001",
+        "§15",
+        "§15.2 step 2",
+        "§15.3",
+        "§16.1"
+      ],
+      "start": {
+        "attempt": 1,
+        "last_failed": null,
+        "marker": [
+          7,
+          7,
+          1
+        ],
+        "checkpoint_seq": 5,
+        "log_head": 7
+      },
+      "script": [
+        "start"
+      ],
+      "outcomes": [
+        "panic",
+        "panic"
+      ],
+      "events": [
+        {
+          "step": "start"
+        },
+        {
+          "attempt": 2
+        },
+        {
+          "last_failed": [
+            7,
+            1
+          ]
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            2
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "page",
+          "outcome": "panic"
+        },
+        {
+          "last_failed": [
+            6,
+            2
+          ]
+        },
+        {
+          "attempt": 3
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            3
+          ]
+        },
+        {
+          "apply": 6,
+          "mode": "single",
+          "outcome": "panic"
+        },
+        {
+          "halt": 6,
+          "code": "engine/crash_halt"
+        }
+      ],
+      "halt": 6
+    }
+  ]
+}

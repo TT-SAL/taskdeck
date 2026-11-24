@@ -4,6 +4,7 @@
 use crate::{Dev, DeviceStatus, HaltKind, Hash32, Head, NoticeKind, SnapInfo, StopKind};
 
 /// The engine's status (engine.md §30.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Status {
     pub session: SessionState,
     pub relay_host: String,
@@ -25,7 +26,6 @@ pub struct Status {
     pub banners: Vec<Banner>,
     pub devices: Vec<DeviceRow>,
     pub rules: RulesStatus,
-    pub recovery_change: Option<RecoveryChangeView>,
     pub moving: Option<MovingView>,
     pub ops: Vec<OpStatus>,
     pub notices_unread: u32,
@@ -34,6 +34,7 @@ pub struct Status {
 }
 
 /// The session state shown (engine.md §30.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionState {
     Offline,
     Connecting,
@@ -43,6 +44,7 @@ pub enum SessionState {
 }
 
 /// The clock guard shown (engine.md §30.1, §27.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClockStatus {
     pub skew_ms: Option<i64>,
     pub warning: bool,
@@ -51,12 +53,14 @@ pub struct ClockStatus {
 }
 
 /// A Skip the user may start (engine.md §30.1, §17).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SkipOffer {
     pub seq: u64,
     pub here: bool,
 }
 
 /// The halt shown (engine.md §30.1, §16).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HaltView {
     pub kind: HaltKind,
     pub seq: u64,
@@ -69,6 +73,7 @@ pub struct HaltView {
 }
 
 /// The action a stop offers (engine.md §30.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StopAction {
     RestoreTail,
     ReHome,
@@ -82,6 +87,7 @@ pub enum StopAction {
 }
 
 /// A stop shown (engine.md §30.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StopView {
     pub kind: StopKind,
     pub since_ms: i64,
@@ -90,6 +96,7 @@ pub struct StopView {
 }
 
 /// A device row shown (engine.md §30.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceRow {
     pub dev: Dev,
     pub name: String,
@@ -104,6 +111,7 @@ pub struct DeviceRow {
 }
 
 /// A device that blocks a rules version (engine.md §30.1, §25.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Blocker {
     pub dev: Dev,
     pub name: String,
@@ -113,6 +121,7 @@ pub struct Blocker {
 }
 
 /// One rules version's readiness (engine.md §30.1, §25.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VersionStatus {
     pub version: u32,
     pub blockers: Vec<Blocker>,
@@ -120,22 +129,14 @@ pub struct VersionStatus {
 }
 
 /// The rules shown (engine.md §30.1, §25.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RulesStatus {
     pub active: u32,
     pub versions: Vec<VersionStatus>,
 }
 
-/// A recovery-key change shown (engine.md §30.1, §26.1).
-pub struct RecoveryChangeView {
-    pub proposer: Dev,
-    pub proposer_name: String,
-    pub key_fp: String,
-    pub start_ms: i64,
-    pub confirm_after_ms: i64,
-    pub can_confirm: bool,
-}
-
 /// A move in progress shown (engine.md §30.1, §28.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MovingView {
     pub host: String,
     pub home_gen: u32,
@@ -145,6 +146,7 @@ pub struct MovingView {
 }
 
 /// An operation in progress shown (engine.md §30.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpStatus {
     pub ticket: u64,
     pub kind: String,
@@ -153,6 +155,7 @@ pub struct OpStatus {
 }
 
 /// A warning shown until acknowledged (engine.md §30.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StatusWarning {
     RestoredCopy { entries: u32 },
     ContinuityUnchecked { from: u64 },
@@ -160,6 +163,7 @@ pub enum StatusWarning {
 }
 
 /// A pending entry's mark (engine.md §37, §8.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingMark {
     pub entry_id: [u8; 16],
     pub provisional_seq: u64,
@@ -170,6 +174,7 @@ pub struct PendingMark {
 }
 
 /// A notice or refusal record shown (engine.md §37, §13.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NoticeEntry {
     pub kind: NoticeKind,
     pub seq: u64,
@@ -179,6 +184,7 @@ pub struct NoticeEntry {
 }
 
 /// A notification to the facade (engine.md §30.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Notification {
     Enqueued { ticket: u64, entry_id: Option<[u8; 16]>, provisional_seq: Option<u64> },
     EnqueueRefused { ticket: u64, code: &'static str },
@@ -204,6 +210,7 @@ pub enum Notification {
 }
 
 /// A user's acknowledgement, confirmation or choice (engine.md §30.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UserAction {
     AckBanner { id: (u64, u8) },
     DismissNotice { seq: u64, index: u32 },
@@ -219,6 +226,7 @@ pub enum UserAction {
 }
 
 /// A banner about an accepted control item (engine.md §14.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Banner {
     pub id: (u64, u8),
     pub kind: BannerKind,
@@ -235,16 +243,14 @@ pub struct Banner {
 }
 
 /// The kinds of banner (engine.md §14.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BannerKind {
     DeviceAdded,
     DeviceRevoked,
     DeviceReinstated,
     KeysRotated,
     HistoryPurged,
-    RecoveryProposed,
-    RecoveryConfirmed,
     RecoveryChanged,
-    RecoveryCancelled,
     Moved,
     Reset,
     Skipped,
@@ -253,10 +259,11 @@ pub enum BannerKind {
 }
 
 /// A banner's detail (engine.md §14.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BannerDetail {
     None,
     Purge { before_seq: u64 },
-    Recovery { key_fp: String, confirm_after_ms: Option<i64> },
+    Recovery { key_fp: String },
     Moved { host: String, home_gen: u32 },
     Reset { target: u64 },
     Skipped { target: u64, target_author: Dev },
@@ -264,6 +271,7 @@ pub enum BannerDetail {
 }
 
 /// An alarm raised with evidence (engine.md §21.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlarmRecord {
     pub id: u64,
     pub kind: AlarmKind,
@@ -276,6 +284,7 @@ pub struct AlarmRecord {
 }
 
 /// The kinds of alarm (engine.md §21.1, the `AlarmKind` table).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AlarmKind {
     RelayBehind,
     Fork,
@@ -295,6 +304,7 @@ pub enum AlarmKind {
 }
 
 /// Where a fork was seen (engine.md §21.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForkSource {
     Welcome,
     PageHead,
@@ -303,6 +313,7 @@ pub enum ForkSource {
 }
 
 /// An alarm's evidence (engine.md §21.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Evidence {
     RelayBehind { relay_head: Head, relay_last_ctr: Option<u64>, local_head: Head, ack: Option<(u64, Hash32)> },
     Fork { local_chain: Hash32, relay_chain: Hash32, source: ForkSource },
