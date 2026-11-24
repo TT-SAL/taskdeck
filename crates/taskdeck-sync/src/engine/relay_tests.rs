@@ -829,3 +829,46 @@ fn a_closed_board_is_fenced_to_nowhere_and_stops_who_follows() {
     }
     assert!(b.fx.iter().all(|f| !matches!(f, Effect::Connect { .. })));
 }
+
+// spec: ENG-OPS-003
+#[test]
+fn an_operation_goes_on_from_its_stage_after_a_restart() {
+    let (mut net, mut a) = board(241);
+    let mut b = pair(&mut net, &mut a, 242, "Laptop", 1);
+    let c = pair(&mut net, &mut a, 243, "Phone", 2);
+    let d = pair(&mut net, &mut a, 244, "Tablet", 3);
+    net.settle(&mut [&mut a, &mut b]);
+    let has_admin = |n: &Node| n.fx.iter().any(|f| matches!(f, Effect::Admin { .. }));
+
+    // The stage is durable before its relay call is made.
+    a.auto = false;
+    a.feed(Event::Op { ticket: 9, op: Operation::Revoke { dev: c.dev(), replace: false } });
+    assert!(!has_admin(&a));
+    a.auto = true;
+    a.persist_all();
+    assert!(has_admin(&a));
+    // The process dies before the relay answered: after the Start the call is made again.
+    let calls = net.calls.len();
+    a.fx.clear();
+    a.restart(245);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    assert_eq!(net.calls[calls..].iter().filter(|x| x.1 == "admin:revoke").count(), 1);
+    assert_eq!(status_of(&b, &c), DeviceStatus::Revoked);
+
+    // It dies at stage 2, the rotation enqueued and its frame on the way: the operation still ends.
+    let from = a.persists.len();
+    a.feed(Event::Op { ticket: 10, op: Operation::Revoke { dev: d.dev(), replace: false } });
+    let i = a.fx.iter().position(|f| matches!(f, Effect::Admin { .. })).expect("the revoke");
+    let fx = a.fx.remove(i).expect("it");
+    net.answer(&mut a, fx);
+    assert_eq!(rotations(&a, from).len(), 1);
+    let calls = net.calls.len();
+    a.fx.clear();
+    a.restart(246);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 10), Some(Ok(())));
+    assert!(net.calls[calls..].iter().all(|x| x.1 != "admin:revoke"), "stage 1 is not run again");
+    assert_eq!(status_of(&b, &d), DeviceStatus::Revoked);
+    assert_eq!(status_of(&a, &d), DeviceStatus::Revoked);
+}

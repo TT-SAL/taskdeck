@@ -667,3 +667,71 @@ fn the_relays_times_decide_nothing() {
     assert_eq!(off.4.skew_ms.map(i64::abs), Some(315_360_000_000));
     assert!(!off.4.blocked);
 }
+
+fn upgrades(n: &Node, from: usize) -> Vec<(u32, crate::UpgradeMode)> {
+    let mut seen: Vec<[u8; 16]> = Vec::new();
+    let mut out = Vec::new();
+    for r in puts(n, from) {
+        if let Body::Ctl(crate::CtlIntent::RulesUpgrade { rules, mode }) = &r.body
+            && !seen.contains(&r.entry_id)
+        {
+            seen.push(r.entry_id);
+            out.push((*rules, *mode));
+        }
+    }
+    out
+}
+
+// spec: ENG-RULES-001 ENG-RULES-002
+#[test]
+fn the_status_names_who_blocks_a_newer_rules_version() {
+    let (mut a, f1) = creator(311);
+    let mut hub = Hub::with_genesis(&a, &f1);
+    let mut b = join(&mut hub, &mut a, 313, "Laptop");
+    hub.settle(&mut [&mut a, &mut b]);
+    // A gets a newer build; its next beat says so.
+    a.restart_with_rules2(312);
+    hub.settle(&mut [&mut a, &mut b]);
+    // A's build supports rules 2 and B's does not: at A, B blocks version 2. B's build knows no newer version.
+    let rules = a.e.status().rules;
+    assert_eq!((rules.active, rules.versions.len()), (1, 1));
+    assert_eq!(rules.versions[0].version, 2);
+    assert_eq!(rules.versions[0].blockers.iter().map(|x| x.dev).collect::<Vec<_>>(), vec![b.dev()]);
+    assert_eq!(rules.versions[0].blockers[0].rules, vec![1]);
+    assert_eq!(rules.versions[0].override_vote, None);
+    assert!(b.e.status().rules.versions.is_empty());
+    // A month passes: while B blocks, nobody composes an upgrade, least of all an override.
+    let (fa, fb) = (a.persists.len(), b.persists.len());
+    for _ in 0..30 {
+        a.advance(86_400_000);
+        b.advance(86_400_000);
+        hub.settle(&mut [&mut a, &mut b]);
+    }
+    assert!(upgrades(&a, fa).is_empty() && upgrades(&b, fb).is_empty());
+    // Only the user's operation composes one.
+    a.feed(Event::Op { ticket: 5, op: Operation::RulesOverride { version: 2 } });
+    hub.settle(&mut [&mut a, &mut b]);
+    assert_eq!(upgrades(&a, fa), vec![(2, crate::UpgradeMode::Override)]);
+    assert!(upgrades(&b, fb).is_empty());
+    assert_eq!(op_result(&a, 5), Some(Ok(())));
+    let rules = a.e.status().rules;
+    assert_eq!(rules.active, 1);
+    assert!(matches!(rules.versions[0].override_vote, Some((2, dev, _)) if dev == a.dev()));
+    assert_eq!(rules.versions[0].blockers.len(), 1);
+    // B gets the newer build too: nobody blocks, and the board moves to rules 2.
+    b.restart_with_rules2(314);
+    for _ in 0..3 {
+        hub.settle(&mut [&mut a, &mut b]);
+        a.advance(86_400_000);
+        b.advance(86_400_000);
+    }
+    hub.settle(&mut [&mut a, &mut b]);
+    for n in [&a, &b] {
+        let rules = n.e.status().rules;
+        assert_eq!(rules.active, 2);
+        assert!(rules.versions.is_empty());
+    }
+    let overrides = upgrades(&a, fa).into_iter().chain(upgrades(&b, fb)).filter(|u| u.1 == crate::UpgradeMode::Override).count();
+    assert_eq!(overrides, 1);
+    assert_eq!(a.board_bytes(), b.board_bytes());
+}
