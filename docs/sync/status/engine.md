@@ -51,42 +51,69 @@ in the order it happened; this file is the current truth and is rewritten, not a
 
 | # | Step | State |
 |---|---|---|
-| 0 | Skeleton brought to §37 as it is now; derives; `sim` for tests; module layout | done locally (see "Pull requests") |
-| 1 | start, records, enqueue, the pending view, the naming hold | next |
-| 2 | sessions, send, append results, reconcile, echoes | |
-| 3 | receive: pages, dry run, persist, commit, apply; classes, refusals, notices | |
-| 4 | poison pills, halts, Skip | |
-| 5 | checkpoints, bases, hashes, retention | |
-| 6 | beats, duties, snapshots, verdicts, compaction, the clock | |
-| 7 | evidence, stops, repairs (restore tail), divergence and adoption | |
-| 8 | epochs, re-sealing, revoked, missed roots, re-pair and resubmit | |
-| 9 | operations: restore, purge, move, follow, revoke, pairing, close board | |
-| 10 | status, pending, notices, restore targets, purge preview | |
+| 0 | Skeleton brought to §37 as it is now; derives; `sim` for tests; module layout | done |
+| 1 | start, records, enqueue, the pending view, the naming hold | written; tests in `core_tests.rs` not yet run (they wait for task A2) |
+| 2 | sessions, send, append results, reconcile, echoes | written, same |
+| 3 | receive: pages, dry run, persist, commit, apply; classes, refusals, notices | written, same |
+| 4 | poison pills, halts (written in board.rs); Skip: `Operation::Skip`, the Skip replay (replay.rs is a first version that faults) | partly |
+| 5 | checkpoints, bases, hashes, retention | written in board.rs, untested |
+| 6 | beats, snapshot duty, verdicts, compaction, the clock | written in duty.rs, untested; upgrade proposal, purge continuation, shred are empty hooks in ops.rs |
+| 7 | evidence stop and divergence stop (evid.rs written); restore tail (repair.rs is a hook only); adoption; rejoin and rebootstrap (boot.rs is a hook only) | partly |
+| 8 | epoch gate and re-sealing (send.rs, board.rs), revoked and missed roots (epoch.rs), export and resubmit (outbox.rs) | written, untested |
+| 9 | operations (ops.rs answers `engine/not_eligible` to every `Op` and `PairRegister` for now), move code, fence, purge | to do |
+| 10 | status, pending, notices (status.rs written); `restore_targets`, `purge_preview` | partly |
+
+Every file whose header says `STEP n` holds placeholders to replace: `grep -rn 'STEP' crates/taskdeck-sync/src/engine`.
 
 Numbers at the start (2026-11-24, day-planner `99b510e`): `spec-coverage.sh engine` 233 clauses
-owned, 2 cited, 1 citation of a withdrawn clause (SEAL-MEM-025 in `src/fake/tests.rs`);
-`unimplemented!()` in `crates/taskdeck-sync/src`: 16 (15 in `lib.rs`, 1 in `sim.rs`).
+owned, 2 cited, 1 citation of a withdrawn clause; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
+After task A and the first engine parts: `unimplemented!()` 3 (`lib.rs`: `restore_targets`,
+`purge_preview`; `sim.rs`: `run`); coverage not yet run again.
 
 ## Map of the code (`crates/taskdeck-sync/`)
 
-Types (the spec's §37, no logic; all `Clone, Debug, PartialEq, Eq`, small ones `Copy`):
-`src/model.rs` (the two traits and the sealer's types, §5, §6), `events.rs` (`Input`, `Event`,
-`Effect`, `AppendResult`, `LocalReadResult`, `NewDevice`, `RelayTarget`), `records.rs` (§7: every
-persisted record, `PersistOp`, `Loaded`, `Bootstrap`), `session.rs` (`Welcome`, `AdminRequest`,
-`AdminOk`, `RelayRefusal`, `SeedDevice`), `receive.rs` (`Page`, `PageEntry`), `snapshots.rs`
-(blobs), `ops.rs` (`Operation`, `OpRecord`), `ui.rs` (§30: `Status` and its parts, `Notification`,
-`UserAction`, banners, alarms, `Evidence`). `PersistOp` and `Effect` have a hand-written `Debug`
-that prints only the length of `WriteIdentity`, and `PartialEq` only under `cfg(any(test, feature =
-"sim"))` (ENG-GEN-010, ENG-GEN-011).
+Types (the spec's §37, no logic; all `Clone, Debug, PartialEq, Eq`, small ones `Copy`, a few
+`Default`): `src/model.rs` (the two traits and the sealer's types, §5, §6; `Sealer::membership_zero`
+is new, spec change pending), `events.rs`, `records.rs` (`Loaded.chains` is `(seq, chain, tau)`,
+spec change pending), `session.rs`, `receive.rs`, `snapshots.rs`, `ops.rs`, `ui.rs`. `PersistOp`
+and `Effect`: hand-written `Debug` (identity bytes never print), `PartialEq` only in test builds.
+`src/lib.rs`: module list, re-exports, `state_hash` (§18.3).
 
-Planned layout of the engine (filled in as it is written; `src/engine/` is the lead's, agents do
-not read it): `src/engine/mod.rs` (the struct, `handle`, the nine steps of §4.5), and one file per
-step of the table above. Unit tests in files named `*_tests.rs` (what `spec-coverage.sh` counts
-under `src/`), the scripted driver in `src/engine/driver_tests.rs`.
+The engine, `src/engine/` (the lead's; agents do not read it). One struct `Engine<SM, S>` in
+`mod.rs`; every other file is an `impl` block on it plus one small state struct held in a field.
+
+| File | Field | Holds | Spec |
+|---|---|---|---|
+| `mod.rs` | — | the struct; `handle` (dispatch); `steps()` = the nine steps of §4.5; ids; `persist()` (every Persist goes through it), `durable`, `after(pid, After)`; `flush_meta`/`touch_meta`; `notify`/`notify_durable`; `alarm`, `add_stop`/`end_stops`, `fault`, `protocol`, `halt`; `stopped()`, `no_apply()`; the chain index (`chain_at`, `tau_at`, `push_chain`, `trim_chains`); `Want` (why a ReadLog/ReadBase/Admin/Blob was emitted) with `want`/`take_want`/`want_lost`; `on_local_read`/`on_admin_result`/`on_blob_result`; `step_receive`; `step_tick`; `lim` (the limits of §34) | §4, §7.12 |
+| `start.rs` | — | `start(Loaded)`, `reset_process`, `load_checkpoint`, `genesis`, `join`, `install_snapshot` (also for a rejoin) | §7.10, §19.8, §16.1 clearing |
+| `outbox.rs` | `outbox: Vec<Rec>` | `Rec` (record + parsed command, `pid`, `held_at`, `doomed`, `prov`); `rebase`, `trial`, `on_enqueue`, `enqueue_cmd`, hold (`last_is_held`, `end_hold`, `merge_into_held`); `compose`/`enqueue_own` for ctl, beat, snap; `export_unsent`, `on_resubmit` | §7.4, §8, §9, §24.5 |
+| `send.rs` | `send` | `may_send`, `step_send` (the loop of §10.2), `next_ctr`, `seal_record`, `send_carried` (Register/Fence), `on_append_results`, `acknowledge`, `echo_entry`, `on_conflict`, `on_gap`, `on_frame_refused`, `restored_clear`, `carried_result`, `forget_request`, `intern` (relay codes as `&'static str`) | §10, §11.4, §11.5, §11.7, §24.2 |
+| `sess.rs` | `sess` | the session table (`step_session`), `step_reads` (reads, run end, Live), `on_welcome` (checks, reconcile), `recon_progress`, `on_page` (head checks, then `take_page`), `on_disconnected`, `drop_requests`, second/displaced, `on_relay_refused` | §11, §12.2 |
+| `recv.rs` | `pipe.flight`, `pipe.stash` | `Entry` (a classified entry), `take_page` (limits, contiguity), `run_stash`, `dry_run` (classification; the only caller of `Sealer::classify` besides genesis), `finish_page` (the page's Persist), `fetch_skip_frames`, `page_durable` (the commit), `commit_entry` (alarms of the class, `seen`, halts, membership effects, banners) | §12, §13.1, §14, §17.2 |
+| `board.rs` | `pipe` | `Pipe` (queue, batches, marker, `pre`/`redo`, records to write); `plan_tail`, `run_board`, `apply_next`, `on_apply_panic`, `crash_halt`, `settle_own` (the own record: drop, refusal record, re-seal), `reseal_from`, `apply_ctl`, `apply_beat`, `apply_snap`, `aligned` (hash, base), `checkpoint`, `write_base`, `write_checkpoint`, `step_checkpoint`, `on_shutdown`, `retention`, `truncate_log` | §12.4, §13, §15, §16, §18, §7.13, §24.3 |
+| `duty.rs` | `duty` | pure: `duty_order`, `rank_of`, `usable`, `beat_due`, `snapshot_due`, `clock_state`; `eligible`, `step_duties`, beats, the snapshot duty (`snapshot_due_at`, `snapshot_step`, `snapshot_base`, `snapshot_uploaded`), compaction | §19.2 to §19.5, §20, §23, §27, §29 |
+| `evid.rs` | `evid` | `raise_evidence`, `resolve_evidence`, `check_divergence`, `enter_divergence` | §21.1, §21.2, §22.1, §22.2 |
+| `epoch.rs` | `epochs` | `set_revoked`, `clear_revoked`, `relay_answered`, `revoked_recheck`, `on_missed_roots` | §24.4 |
+| `status.rs` | — | the public read accessors, `status()`, `pending()`, `notices()`, `on_user` | §30 |
+| `replay.rs`, `repair.rs`, `boot.rs`, `ops.rs` | `jobs`, `evid.tail`, `boot`, `opx` | first versions (see the steps) | §17.3, §21.3, §19.7, §28 |
+| `kit_tests.rs` | — | the lead's driver: `Store` (applies PersistOps, builds `Loaded`), `Node` (engine + store + clocks; `feed`, `persist_one`, `restart`, `enqueue`), `Hub` (a small relay: `append`, `welcome`, `page`, `serve`, `settle`), `creator(seed)`, `join(hub, a, seed, name)` | — |
+| `core_tests.rs` | — | tests of steps 1 to 3 | — |
+
+Rules between the parts (see also the header of each file):
+- `L >= K >= B`. `pipe.queue` holds the classified entries `B+1..=K`. `mk`/`vk` are `M_K` and its
+  cached view; `mb` is `M_B`; `no_b` this device's `device_no` in `M_B`.
+- A record's `seen` is set at the commit (recv.rs), it is dropped at the board apply (board.rs
+  `settle_own`); `ack` comes from append results (send.rs).
+- Nothing emits `Effect::Persist` except `Engine::persist`. A dependency of §7.12 is either a
+  remembered write id compared with `durable` on every call, or an `After`.
+- A stop is a `StopRecord` in `meta.stops`; every stop holds back sending (`stopped()`); only
+  Evidence, LocalFault, Stranded and Closed hold back reading (`no_apply()`); the board is held
+  by a crash or rules halt at its seq, a local fault, or `Rebootstrap` (`board_held()`).
 
 Agents' files: `src/fake.rs`, `src/fake/**`, `src/toy.rs`, `src/sim/splitmix.rs` (task A);
 `src/sim/relay*` (C); the other files under `src/sim/` (D); `tests/vectors/*.json`;
 `tests/simulator.rs`, `tests/regressions.rs`, `tests/regress/*.json` (D).
+`docs/sync/status/engine/api-fake-toy.md` is what to call on the fake and the toy.
 
 ## Commands
 
@@ -118,13 +145,18 @@ Agents' files: `src/fake.rs`, `src/fake/**`, `src/toy.rs`, `src/sim/splitmix.rs`
 
 | # | What | State |
 |---|---|---|
-| TT-SAL/taskdeck#27 | the dev-dependency on itself with `sim` (L1) | open, CI running |
+| TT-SAL/taskdeck#27 | the dev-dependency on itself with `sim` (L1) | open; CI green but two macOS jobs cancelled by the runner wait; failed jobs re-run once |
 
 ## Workflows (agents)
 
-| Id | Task | Brief | State | Result | Tokens |
+All run the script `engine-task` (write, check once, fix once; agents on `opus`), saved by the
+harness under the session directory; its args are `{id, brief, dir, target, paths, gate}`.
+
+| Run | Task | Brief | State | Result | Tokens |
 |---|---|---|---|---|---|
-| | A fake, toy, vectors splitmix/toy/fake | `engine/briefs/a-fake-toy.md` | about to start | | |
+| wf_75ec09fc-a39 | A fake, toy, vectors splitmix/toy/fake | `engine/briefs/a-fake-toy.md` | done, merged (346e849) | the fake follows seal.md as it is now (14 differences fixed), the toy unchanged, 3 vector files, `api-fake-toy.md`; check clean | 756,180 |
+| wf_3b93dd8a-626 | B seven vector families | `engine/briefs/b-vectors.md` | done on `wt/b` (221375f), not yet merged | 198 cases, generators under `engine/tools/vectors-b/`, 14 spec questions in `tests/vectors/README.md`; 1 high and 2 medium fixed, 1 low (a clock case's name) | 777,276 |
+| wf_4e7bb2da-24b | A2 fake follow-up | `engine/briefs/a2-fake-followup.md` | running, `wt/a2` | | |
 
 ## Open threads
 

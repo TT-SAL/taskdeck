@@ -41,6 +41,8 @@ mod start;
 mod status;
 
 #[cfg(test)]
+mod core_tests;
+#[cfg(test)]
 mod kit_tests;
 
 /// The limits of engine.md §34 that more than one file uses.
