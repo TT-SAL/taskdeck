@@ -52,23 +52,30 @@ in the order it happened; this file is the current truth and is rewritten, not a
 | # | Step | State |
 |---|---|---|
 | 0 | Skeleton brought to §37 as it is now; derives; `sim` for tests; module layout | done |
-| 1 | start, records, enqueue, the pending view, the naming hold | written; tests in `core_tests.rs` not yet run (they wait for task A2) |
-| 2 | sessions, send, append results, reconcile, echoes | written, same |
-| 3 | receive: pages, dry run, persist, commit, apply; classes, refusals, notices | written, same |
-| 4 | poison pills, halts (written in board.rs); Skip: `Operation::Skip`, the Skip replay (replay.rs is a first version that faults) | partly |
-| 5 | checkpoints, bases, hashes, retention | written in board.rs, untested |
-| 6 | beats, snapshot duty, verdicts, compaction, the clock | written in duty.rs, untested; upgrade proposal, purge continuation, shred are empty hooks in ops.rs |
-| 7 | evidence stop and divergence stop (evid.rs written); restore tail (repair.rs is a hook only); adoption; rejoin and rebootstrap (boot.rs is a hook only) | partly |
-| 8 | epoch gate and re-sealing (send.rs, board.rs), revoked and missed roots (epoch.rs), export and resubmit (outbox.rs) | written, untested |
-| 9 | operations (ops.rs answers `engine/not_eligible` to every `Op` and `PairRegister` for now), move code, fence, purge | to do |
-| 10 | status, pending, notices (status.rs written); `restore_targets`, `purge_preview` | partly |
+| 1 | start, records, enqueue, the pending view, the naming hold | written and tested (`core_tests.rs`, `engine-pending.json`) |
+| 2 | sessions, send, append results, reconcile, echoes | written; the plain path tested; conflicts, gaps, restored copy, refusals untested |
+| 3 | receive: pages, dry run, persist, commit, apply; classes, refusals, notices | written; the plain path tested; the receipt classes untested (`engine-receipts.json` waits for a scripted sealer in the tests) |
+| 4 | poison pills, halts, Skip (operation, frames, replay) | written, untested (`engine-poison.json` not yet loaded) |
+| 5 | checkpoints, bases, hashes, retention | written; `engine-hash.json` passes; cadence, bases, retention untested |
+| 6 | beats, snapshot duty, verdicts, compaction, the clock, upgrade proposal, purge duty | written; the pure decisions pass `engine-duties.json` and `engine-clock.json`; the flows untested |
+| 7 | evidence stop, divergence stop, restore tail (repair.rs), adoption (ops.rs) | written, untested; rejoin and rebootstrap (boot.rs) are still hooks |
+| 8 | epoch gate, re-sealing, revoked, missed roots, export and resubmit | written, untested |
+| 9 | operations, pairing (ops.rs), the move, the move code, follow address (movement.rs) | written, untested |
+| 10 | status, pending, notices, restore targets, purge preview | written; partly tested |
+
+Left to write in the engine: **boot.rs** (rejoin §19.7: `enter_rejoin` only sets the session;
+`confirm_rejoin` and the candidates are missing; rebootstrap §19.9: the stop is raised by
+replay.rs but nothing resumes from a snapshot yet). Left to test: nearly every clause beyond the
+plain path. The tests' own relay (`Hub` in `kit_tests.rs`) answers only Connect, Hello, Read and
+Append; tests of admin and blob flows should use the model relay (task C) once it is merged.
 
 Every file whose header says `STEP n` holds placeholders to replace: `grep -rn 'STEP' crates/taskdeck-sync/src/engine`.
 
 Numbers at the start (2026-11-24, day-planner `99b510e`): `spec-coverage.sh engine` 233 clauses
 owned, 2 cited, 1 citation of a withdrawn clause; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
-After task A and the first engine parts: `unimplemented!()` 3 (`lib.rs`: `restore_targets`,
-`purge_preview`; `sim.rs`: `run`); coverage not yet run again.
+After tasks A, A2, B and the engine as written so far: `unimplemented!()` 1 (`sim.rs`: `run`);
+`spec-coverage.sh engine`: 72 of 233 cited, 0 bad citations. 82 lib tests (12 the engine's), 4
+integration tests.
 
 ## Map of the code (`crates/taskdeck-sync/`)
 
@@ -95,7 +102,12 @@ The engine, `src/engine/` (the lead's; agents do not read it). One struct `Engin
 | `evid.rs` | `evid` | `raise_evidence`, `resolve_evidence`, `check_divergence`, `enter_divergence` | §21.1, §21.2, §22.1, §22.2 |
 | `epoch.rs` | `epochs` | `set_revoked`, `clear_revoked`, `relay_answered`, `revoked_recheck`, `on_missed_roots` | §24.4 |
 | `status.rs` | — | the public read accessors, `status()`, `pending()`, `notices()`, `on_user` | §30 |
-| `replay.rs`, `repair.rs`, `boot.rs`, `ops.rs` | `jobs`, `evid.tail`, `boot`, `opx` | first versions (see the steps) | §17.3, §21.3, §19.7, §28 |
+| `replay.rs` | `jobs` | `Job` (a replay from a base: `ReadBase`, `ReadLog` chunks, classify and apply again into its own state; `want_states` stashes states for `ResetTo` targets; `swap` for an adoption; `from_rec` collects records and hashes), `Purpose` (Skip, Reset, RestoreHash, AdoptBoard, Seed), `start_job`, `job_base`, `job_log`, `job_step`, `job_done`; `begin_skip_replay`/`skip_replayed`, `begin_reset`/`reset_replayed`, `replace_records_from` | §17.3, §28.1, §13.4 |
+| `ops.rs` | `opx` | `OpMem` (per operation: the stage's write, busy), `on_op` (checks, then per operation), `drive_ops`, `op_begin`/`op_stage`/`op_done`, Skip (`skip_allowed`, `skip_compose`), revoke (`revoke_compose`), purge (`purge_preview`, `local_purge`, `shred_step`, `purge_step`), restore (`restore_ok`, `restore_targets`, `restore_hash_ready`), adoption (`adopt_fetch`, `adopt_blob`, `adopt_board_ready`), `upgrade_step`, `own_entry_done` (an own record settled: moves its operation on), pairing (`on_pair_register`, `pair_uploaded`, `before_carried_seal`, `carried_done`, `pair_entry_done`), `host_ok`, `crockford` | §17.1, §22.3, §25, §28 |
+| `movement.rs` | `opx.mv` | the move in stages 1 to 6 (`move_drive`, `move_admin`, `move_seed`, `seed_replayed`, `move_tail`, `move_log`, `move_blob`, `move_report`), `fence_accepted`, `on_move_code`, `switch_relay`, follow address (`follow_begin`, `follow_welcome`, `follow_page`: a dry-run scan that persists nothing) | §28.3 |
+| `repair.rs` | `evid.tail` | restore tail: `repair_on_welcome`, `repair_step`, `restore_chunk`, `repairs_for`, `restore_result`, `repair_result` | §21.3 |
+| `boot.rs` | `boot` | hooks only so far | §19.7, §19.9 |
+| `vectors_tests.rs` | — | loads task B's families: hash, clock, duties, pending | §35 |
 | `kit_tests.rs` | — | the lead's driver: `Store` (applies PersistOps, builds `Loaded`), `Node` (engine + store + clocks; `feed`, `persist_one`, `restart`, `enqueue`), `Hub` (a small relay: `append`, `welcome`, `page`, `serve`, `settle`), `creator(seed)`, `join(hub, a, seed, name)` | — |
 | `core_tests.rs` | — | tests of steps 1 to 3 | — |
 
