@@ -93,6 +93,22 @@ same trace byte for byte (ENG-SIM-003).
    ENG-EFFECT-001 (the runtime's duties the simulator models), and each invariant's clauses
    where §31.7 leans on one.
 
+## Two things the spec leaves to you
+
+- **How a `Panic` reaches the log.** An honest `Enqueue` of the toy's `Panic` is refused by the
+  trial apply (ENG-ENQ-001), so in a poison configuration the workload itself must seal it with
+  a member's keys: for example a device the workload runs without an engine (a "faulty build":
+  paired through an engine device like any other, then a bare `FakeSealer` whose frames the
+  workload appends through the model relay). Say in your report what you chose; it becomes a
+  line of §31.5.
+- **The genesis keys the model relay's `create` needs.** `api-model-relay.md` tells you to read
+  `rsign_pk` and `salt` from `export_identity()` at fixed offsets because the fake has no
+  accessor. You may add one public accessor for them to `src/fake.rs` instead (nothing else
+  there changes); list it in your report.
+
+The model relay (task C) is merged: `src/sim/relay.rs` and `src/sim/relay/`, described in
+`docs/sync/status/engine/api-model-relay.md`.
+
 ## The engine is not finished
 
 The lead is still writing parts of the engine. When a seed fails, find out whether the
@@ -115,7 +131,7 @@ you chose.
 `crates/taskdeck-sync/tests/simulator.rs`, `tests/regressions.rs`, `tests/regress/**`,
 `docs/sync/status/engine/api-simulator.md` (at most 100 lines: how to run seeds, one seed with
 its trace, the named configurations, how to add a regression file, how to read a trace), and
-crate-private helpers in `src/fake.rs` as item 6 allows. If the model relay is wrong, report it
+in `src/fake.rs` only the crate-private helpers item 6 allows and the one accessor named above. If the model relay is wrong, report it
 (seed, trace line, the `relay.md` clause); do not edit it.
 
 ## Done means
