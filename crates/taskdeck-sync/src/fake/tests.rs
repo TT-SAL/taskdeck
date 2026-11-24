@@ -902,6 +902,8 @@ fn add_revoke_with_rotation_and_reinstate_with_missed_wraps() {
     assert_eq!(n1.fake.roots.keys().copied().collect::<Vec<_>>(), vec![5]);
 }
 
+/// A missed wrap (delivered outside an entry) that does not open halts on the rotation that sets its epoch.
+// spec: SEAL-WRAP-003
 #[test]
 fn a_missed_wrap_that_does_not_open_halts_on_the_rotation() {
     let (mut net, mut n1, mut n2) = two_devices();
@@ -919,6 +921,8 @@ fn a_missed_wrap_that_does_not_open_halts_on_the_rotation() {
     assert!(matches!(r.halt, Some(Halt::Commitment)));
 }
 
+/// A wrap inside a rotation whose root does not match `commit`: the commitment halt, for its recipient only.
+// spec: SEAL-WRAP-003
 #[test]
 fn an_own_wrap_that_does_not_match_the_commitment_halts_only_its_recipient() {
     let (mut net, mut n1, mut n2) = two_devices();
@@ -1432,6 +1436,38 @@ fn rules_upgrades_support_override_and_the_rules_halt() {
     assert_eq!(n1.m.rules, 2);
 }
 
+/// A fake that supports rules 2 treats version 2 as allowing exactly (1, 1)
+/// and state-hash version 1 (engine.md §6.3), where `seal.md` §14.3 allows
+/// no envelope above version 1.
+// spec: ENG-FAKE-003
+#[test]
+fn rules_above_1_allow_what_rules_1_allows() {
+    let (mut net, mut n1) = board();
+    n1.fake.set_supported_rules(&[1, 2]);
+    let f = n1.seal(&net, 1_000, Body::Beat(beat_info(vec![1, 2]))).frame;
+    assert_all(&submit(&mut net, &mut [&mut n1], f), ACCEPT);
+    let f = n1.seal(&net, 1_100, Body::Ctl(CtlIntent::RulesUpgrade { rules: 2, mode: UpgradeMode::Normal })).frame;
+    assert_all(&submit(&mut net, &mut [&mut n1], f), ACCEPT);
+    assert_eq!(n1.m.rules, 2);
+    // Under rules 2: a (1, 1) frame passes step 8 and is accepted; (2, 1) is `seal/bad_version`.
+    let f = cmd(&mut n1, &net, 1_200);
+    assert_all(&submit(&mut net, &mut [&mut n1], f), ACCEPT);
+    let (dev, pk) = (n1.dev(), n1.fake.sign_pk);
+    let mut raw = raw_cmd(&n1, &net);
+    raw.ver = 2;
+    let f = raw_frame(&n1, &dev, &pk, n1.ctr + 1, &raw);
+    assert_eq!(outcome(&n1.classify(&net, net.next_seq(), &f)), refused(code::BAD_VERSION));
+    // A device added under rules 2 records the envelopes and hash versions of rules 1.
+    let n2 = add_device(&mut net, &mut n1, &mut [], SEED2, 1_300);
+    let d2 = n1.m.device(&n2.dev()).expect("device 2");
+    assert_eq!((d2.rules.clone(), d2.envelopes.clone(), d2.hash_versions.clone()), (vec![2], vec![(1, 1)], vec![1]));
+    // A ResetTo with state-hash version 1 is allowed under rules 2, version 2 is not.
+    let f = raw_own(&mut n1, &net, 1_400, &[Item::ResetTo { seq: 5, state_hash: [0; 32], hash_version: 2 }]);
+    assert_all(&submit(&mut net, &mut [&mut n1], f), refused(code::CTL_TARGET));
+    let f = raw_own(&mut n1, &net, 1_500, &[Item::ResetTo { seq: 5, state_hash: [0; 32], hash_version: 1 }]);
+    assert_all(&submit(&mut net, &mut [&mut n1], f), ACCEPT);
+}
+
 #[test]
 fn skips_need_their_target_frames() {
     let (mut net, mut n1, mut n2) = two_devices();
@@ -1874,6 +1910,8 @@ fn the_identity_export_holds_keys_roots_pending_roots_and_anchor() {
     assert_eq!(n1.fake.chain_step(&net.chains[0], 1, &net.frames[0]), net.chains[1]);
     assert_eq!(n1.fake.frame_hash(&net.frames[0]), sha(&[&net.frames[0]]));
 }
+
+mod vector_tests;
 
 proptest! {
     #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
