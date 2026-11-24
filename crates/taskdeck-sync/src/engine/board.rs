@@ -212,12 +212,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.pipe.redo.clear();
             }
             let mut done = true;
+            let mut panicked = false;
             while self.b < last {
                 match self.apply_next() {
                     Step::Applied => {}
                     Step::Panicked => {
                         self.on_apply_panic(first, last);
                         done = false;
+                        panicked = true;
                         break;
                     }
                     Step::Blocked => {
@@ -226,12 +228,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     }
                 }
             }
-            if !done {
-                // Either the plan changed (a panic: single mode follows) or the board waits.
-                if self.board_held() || self.jobs.holds_board() {
-                    break;
+            if let Some(panicked) = done.then_some(()).map_or(Some(panicked), |()| None) {
+                // A panic changed the plan (single mode follows); anything else waits.
+                if panicked && !self.board_held() {
+                    continue;
                 }
-                continue;
+                break;
             }
             // ENG-RECV-006, ENG-POISON-005: the records, the drops and ClearMarker in one write.
             if first == last && self.meta.last_failed.is_some_and(|f| f.0 == first) {

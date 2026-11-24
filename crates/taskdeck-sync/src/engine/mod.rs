@@ -99,12 +99,16 @@ pub(crate) enum Want {
     SnapUpload,
     /// The daily `Compact` (§20.2).
     Compact,
+    /// A replay job's base, a chunk of its log, a frame a Skip in it needs (replay.rs).
+    JobBase,
+    JobLog,
+    JobFrame(u64),
 }
 
 impl Want {
     /// Is the answer a relay's (lost with the session), not the local store's?
     fn relay(&self) -> bool {
-        !matches!(self, Want::SkipFrame(_) | Want::SnapBase(_))
+        !matches!(self, Want::SkipFrame(_) | Want::SnapBase(_) | Want::JobBase | Want::JobLog | Want::JobFrame(_))
     }
 }
 
@@ -701,7 +705,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// owner may send it again. Returns the request's name for an alarm (§21.1).
     pub(crate) fn want_lost(&mut self, w: Want) -> &'static str {
         match w {
-            Want::SkipFrame(_) | Want::SnapBase(_) => "local",
+            Want::SkipFrame(_) | Want::SnapBase(_) | Want::JobBase | Want::JobLog | Want::JobFrame(_) => "local",
             Want::SnapUpload => {
                 self.snapshot_uploaded(false);
                 "blob"
@@ -730,6 +734,15 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 };
                 self.snapshot_base(s, base);
             }
+            Want::JobBase => {
+                let base = match result {
+                    LocalReadResult::Base(c) => Some(c),
+                    _ => None,
+                };
+                self.job_base(base);
+            }
+            Want::JobLog => self.job_log(result),
+            Want::JobFrame(t) => self.job_frame(t, result),
             Want::SnapUpload | Want::Compact => {}
         }
     }

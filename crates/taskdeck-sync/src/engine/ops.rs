@@ -58,6 +58,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     pub(crate) fn shred_step(&mut self) {}
     pub(crate) fn local_purge(&mut self, _r: u64, _p: u64, _epoch: u32, _e: &super::recv::Entry<S::Membership>) {}
 
+    pub(crate) fn restore_hash_ready(&mut self, _ticket: u64, _t: u64, _out: super::replay::Replayed<SM, S>) {}
+    pub(crate) fn adopt_membership_ready(&mut self, _ticket: u64, _s: u64, _out: super::replay::Replayed<SM, S>) {}
+    pub(crate) fn adopt_board_ready(&mut self, _ticket: u64, _s: u64, _out: super::replay::Replayed<SM, S>) {}
+    pub(crate) fn seed_replayed(&mut self, _ticket: u64, _out: super::replay::Replayed<SM, S>) {}
+
     /// §17.1: may this device compose a Skip of `t` (ENG-SKIP-004)?
     pub(crate) fn skip_allowed(&self, t: u64) -> Result<(), &'static str> {
         const NO: &str = "engine/skip_target";
