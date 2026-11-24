@@ -303,9 +303,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 );
             }
         }
-        if head.seq <= self.l {
-            if let Some(own) = self.chain_at(head.seq) {
-                if own != head.chain {
+        if head.seq <= self.l
+            && let Some(own) = self.chain_at(head.seq)
+                && own != head.chain {
                     found = true;
                     if !self.has_unresolved(AlarmKind::Fork) {
                         self.raise_evidence(
@@ -317,8 +317,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                         );
                     }
                 }
-            }
-        }
         found
     }
 
@@ -427,26 +425,24 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     /// A record matched, by `entry_id`, an own frame sequenced at a counter of the restored range.
     pub(crate) fn restored_match(&mut self, _seq: u64, ctr: u64) {
-        if let (Some((a, z)), Some(rc)) = (self.registry.restored, self.sess.recon.as_mut()) {
-            if a <= ctr && ctr <= z {
+        if let (Some((a, z)), Some(rc)) = (self.registry.restored, self.sess.recon.as_mut())
+            && a <= ctr && ctr <= z {
                 rc.matched = rc.matched.saturating_add(1);
             }
-        }
     }
 
     // ------------------------------------------------------------------ pages, as the session sees them
 
     pub(crate) fn on_page(&mut self, req: Option<u64>, page: Page) {
         if let Some(r) = req {
-            if let Some((nr, t, true)) = self.pipe.need_req {
-                if nr == r {
+            if let Some((nr, t, true)) = self.pipe.need_req
+                && nr == r {
                     // §17.2: the single-frame fetch; nothing else of the page is used.
                     self.sess.read = None;
                     let frame = page.entries.into_iter().find(|e| e.seq == t).map(|e| e.frame);
                     self.skip_frame_arrived(t, frame);
                     return;
                 }
-            }
             if self.sess.read != Some(r) {
                 return; // an id not issued, or already answered (ENG-EFFECT-002)
             }

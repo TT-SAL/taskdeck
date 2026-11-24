@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 
 use super::Engine;
-use crate::{AlarmKind, Dev, DeviceStatus, Evidence, Hash32, Head, Sealer, StateMachine, StopKind};
+use crate::{AlarmKind, Dev, DeviceStatus, Evidence, Hash32, Sealer, StateMachine, StopKind};
 
 #[derive(Default)]
 pub(crate) struct Evid {
@@ -100,8 +100,4 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.add_stop(StopKind::Divergence, Some(alarm));
     }
 
-    /// `(L, C_L)` against a relay head: is the relay a prefix of this device's log (§21.3)?
-    pub(crate) fn relay_is_prefix(&self, head: Head) -> bool {
-        head.seq <= self.l && self.chain_at(head.seq) == Some(head.chain)
-    }
 }

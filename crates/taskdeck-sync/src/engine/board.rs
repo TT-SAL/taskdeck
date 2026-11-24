@@ -58,7 +58,6 @@ pub(crate) struct Pipe<SM: StateMachine, S: Sealer> {
     pub tail: bool,
     /// The purge whose old roots wait for their thirty days: `(epoch, τ_r)` (§28.2 step 4).
     pub shred: Option<(u32, i64)>,
-    pub shred_req: Option<u64>,
     pub shred_checked: bool,
     /// A purge rotation is being applied: `(r, p, epoch, τ_r)`, run once `B = r` (§28.2).
     pub purge_after: Option<(u64, u64, u32, i64)>,
@@ -92,7 +91,6 @@ impl<SM: StateMachine, S: Sealer> Default for Pipe<SM, S> {
             view_stale: false,
             tail: false,
             shred: None,
-            shred_req: None,
             shred_checked: false,
             purge_after: None,
             _p: PhantomData,
@@ -112,8 +110,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// Plans the batches of a `Start`'s tail `first..=last` under the marker rules.
     pub(crate) fn plan_tail(&mut self, first: u64, last: u64) {
         let mut from = first.max(self.b + 1);
-        if let Some(m) = self.pipe.start_marker.take() {
-            if m.last > self.b {
+        if let Some(m) = self.pipe.start_marker.take()
+            && m.last > self.b {
                 if m.first == m.last {
                     // The previous attempt died while applying `x` alone.
                     let x = m.first;
@@ -132,7 +130,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 }
                 from = ml + 1;
             }
-        }
         self.plan_pages(from, last);
     }
 
@@ -248,12 +245,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.pipe.pre = None;
             self.pipe.redo.clear();
         }
-        if self.pipe.tail && self.pipe.stash.is_none() && self.pipe.flight.is_none() {
-            if self.pipe.batches.is_empty() || self.board_held() {
+        if self.pipe.tail && self.pipe.stash.is_none() && self.pipe.flight.is_none()
+            && (self.pipe.batches.is_empty() || self.board_held()) {
                 self.pipe.tail = false;
                 self.rebase_due = true;
             }
-        }
     }
 
     /// Writes the notice and refusal records and the outbox drops the applies
@@ -396,8 +392,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                                             return Step::Panicked;
                                         }
                                         Some(Ok(applied)) => {
-                                            if record_ok {
-                                                if let Some(no) = own_no {
+                                            if record_ok
+                                                && let Some(no) = own_no {
                                                     for n in &applied.notices {
                                                         if sm.notice_concerns(n, no) {
                                                             let record = sm.notice_bytes(n);
@@ -409,7 +405,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                                                         }
                                                     }
                                                 }
-                                            }
                                             self.pipe.redo.push((cmd, ctx));
                                         }
                                         Some(Err(r)) => refused = Some(r),
@@ -441,11 +436,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         // Step 4: the board head.
         self.b = s;
         self.cb = e.chain;
-        if accepted_kind.is_some() && !skipped {
-            if let Some(o) = &e.opened {
+        if accepted_kind.is_some() && !skipped
+            && let Some(o) = &e.opened {
                 self.note_last_entry(e.author, o.at_ms, s, o.based_on.seq);
             }
-        }
         if accepted_kind == Some(Kind::Ctl) || self.no_b.is_none() {
             let v = self.sealer.view(&e.m);
             self.no_b = v.devices.iter().find(|d| d.dev == self.own).map(|d| d.device_no);
@@ -488,11 +482,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         };
         let Some(idx) = idx else {
             // The record left earlier (a restart above an older checkpoint): only the refusal record is owed.
-            if let (Some(r), true, Some(no)) = (refused, record_ok && !resealable, own_no) {
-                if r.code != "seal/stale_epoch" && r.code != "seal/old_epoch" {
+            if let (Some(r), true, Some(no)) = (refused, record_ok && !resealable, own_no)
+                && r.code != "seal/stale_epoch" && r.code != "seal/old_epoch" {
                     self.add_refusal(e.seq, no, r);
                 }
-            }
             return;
         };
         let kind = self.outbox[idx].r.kind;
@@ -513,12 +506,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
         }
         if let Some(mut r) = final_refusal {
-            if kind == Kind::Cmd && r.op.is_none() {
-                if let Some(c) = self.outbox[idx].cmd.as_ref() {
+            if kind == Kind::Cmd && r.op.is_none()
+                && let Some(c) = self.outbox[idx].cmd.as_ref() {
                     r.op = Some(self.sm.op_name(c));
                     r.target = self.sm.target(c);
                 }
-            }
             // ENG-REF-001: one refusal record for every own entry refused for a reason that is
             // not re-sealable, commands and the engine's own entries alike.
             let resealable_code = r.code == "seal/stale_epoch" || r.code == "seal/old_epoch";
@@ -714,8 +706,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let mut rec =
             SnapRecord { entry_seq: s, author: e.author, info: info.clone(), entry_clock: e.tau, verdicts: Vec::new(), own: None };
         // §19.5: this device's verdict, when it holds its own hash at that seq.
-        if e.author != self.own {
-            if let Some(h) = self.hashes.get(&info.seq).filter(|h| h.hash_version == info.hash_version) {
+        if e.author != self.own
+            && let Some(h) = self.hashes.get(&info.seq).filter(|h| h.hash_version == info.hash_version) {
                 let verdict = if h.hash == info.hash { Verdict::Ack } else { Verdict::Mismatch };
                 rec.own = Some(verdict);
                 let own_hash = h.hash;
@@ -741,7 +733,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     self.check_divergence(info.seq);
                 }
             }
-        }
         let v = &mut self.registry.snapshots;
         v.retain(|r| r.entry_seq != s);
         v.push(rec);

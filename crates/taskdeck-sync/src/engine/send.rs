@@ -11,7 +11,7 @@
 use super::{Engine, Want, lim};
 use crate::{
     AdminOk, AdminRequest, AlarmKind, AppendResult, Body, CtlIntent, Effect, Evidence, Kind, OutboxOp, PersistOp,
-    PlainEntry, RelayRefusal, Sealer, SessionState, StateMachine, StopKind, Via,
+    PlainEntry, RelayRefusal, Sealer, SessionState, StateMachine, Via,
 };
 
 #[derive(Default)]
@@ -129,14 +129,13 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 if i == last && self.last_is_held() {
                     break; // ENG-HOLD-001
                 }
-                if let Body::Snap(info) = &self.outbox[i].r.body {
-                    if info.epoch != epoch_now {
+                if let Body::Snap(info) = &self.outbox[i].r.body
+                    && info.epoch != epoch_now {
                         // ENG-SNAP-004: an unsent `snap` record of another epoch is dropped; the duty stays.
                         dropped.push(i);
                         k += 1;
                         continue;
                     }
-                }
                 match self.seal_record(i) {
                     Ok(changed) => {
                         keys_changed |= changed;
@@ -304,8 +303,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         self.send.ack_puts.push(*id);
         self.status_dirty = true;
-        if seq <= self.l {
-            if let Some(c) = chain {
+        if seq <= self.l
+            && let Some(c) = chain {
                 // ENG-ECHO-001: the log already holds that seq.
                 let rec = &self.outbox[i].r;
                 let log_chain = self.chain_at(seq);
@@ -324,7 +323,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     );
                 }
             }
-        }
     }
 
     /// ENG-ECHO-001 at the commit of the entry at `seq`: every record acknowledged
@@ -601,10 +599,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
     }
 
-    /// A stop of the kind that ends sending only (§13.1 `own_dev_foreign`).
-    pub(crate) fn foreign_stop(&self) -> bool {
-        self.has_stop(|k| matches!(k, StopKind::ForeignSigner))
-    }
 
     pub(crate) fn want_refused(&mut self, w: Want) -> &'static str {
         self.want_lost(w)

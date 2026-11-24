@@ -94,8 +94,6 @@ pub(crate) enum After {
 /// Why a `ReadLog`, `ReadBase`, `Admin` or `Blob` effect was emitted: its answer goes there.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Want {
-    /// `ReadLog` of one frame a Skip needs (§17.2).
-    SkipFrame(u64),
     /// `ReadBase` at the snapshot duty's seq (§19.4 step 1).
     SnapBase(u64),
     /// The snapshot duty's blob upload (§19.4 step 3).
@@ -116,6 +114,10 @@ pub(crate) enum Want {
     PurgeDuty,
     PairUpload,
     PairRevoke,
+    /// Restore tail (repair.rs): the frames from the log, the request, a repair call.
+    RestoreChunk,
+    RestoreCall,
+    Repair,
 }
 
 impl Want {
@@ -123,8 +125,7 @@ impl Want {
     fn relay(&self) -> bool {
         !matches!(
             self,
-            Want::SkipFrame(_)
-                | Want::SnapBase(_)
+            Want::SnapBase(_)
                 | Want::JobBase
                 | Want::JobLog
                 | Want::JobFrame(_)
@@ -132,6 +133,7 @@ impl Want {
                 | Want::ShredBase(_)
                 | Want::MoveLog(_)
                 | Want::FenceFrame(_)
+                | Want::RestoreChunk
         )
     }
 }
@@ -740,20 +742,22 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.compact_lost();
                 "admin/compact"
             }
+            Want::RestoreCall | Want::Repair => {
+                self.repair_lost();
+                "admin/restore_tail"
+            }
             other => self.op_want_lost(&other),
         }
     }
 
     fn on_local_read(&mut self, req: u64, result: LocalReadResult) {
-        if let Some((r, t, false)) = self.pipe.need_req {
-            if r == req {
+        if let Some((r, t, false)) = self.pipe.need_req
+            && r == req {
                 self.skip_local_read(t, result);
                 return;
             }
-        }
         let Some(w) = self.take_want(req) else { return };
         match w {
-            Want::SkipFrame(t) => self.skip_local_read(t, result),
             Want::SnapBase(s) => {
                 let base = match result {
                     LocalReadResult::Base(c) => Some(c),
@@ -774,6 +778,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.opx.mv.fence_req = false;
                 self.fence_frame(seq, result);
             }
+            Want::RestoreChunk => self.restore_chunk(result),
             other => self.op_want_local(other, result),
         }
     }
@@ -788,6 +793,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 let refusal = result.as_ref().err().map(|r| (r.status, r.code.as_str()));
                 self.compact_result(refusal);
             }
+            Want::RestoreCall => self.restore_result(result),
+            Want::Repair => self.repair_result(result),
             other => self.op_want_admin(other, result),
         }
     }

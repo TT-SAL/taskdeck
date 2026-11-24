@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 use super::{Engine, Want, guard, lim};
 use crate::{
     AlarmKind, Checkpoint, Class, ClassifyInput, CtlItem, Ctx, Dev, Effect, Evidence, HashRecord, Hash32, Kind,
-    LocalReadResult, LogRecord, MembershipView, NoticeKind, NoticeOp, PersistOp, Sealer, SmRefusal, StateMachine,
+    LocalReadResult, LogRecord, MembershipView, NoticeKind, PersistOp, Sealer, SmRefusal, StateMachine,
     StopKind, state_hash,
 };
 
@@ -28,8 +28,6 @@ pub(crate) enum Purpose {
     Reset { r: u64, t: u64, hash: Hash32, author: Dev },
     /// §28.1 stage 1 of `Operation::RestoreTo`: the state hash at `t`.
     RestoreHash { ticket: u64, t: u64 },
-    /// §22.3 step 4: this device's own `M_{S'}` for an adoption.
-    AdoptMembership { ticket: u64, s: u64 },
     /// §22.3 step 5: the board from the adopted snapshot at `S'`, replayed to `K`.
     AdoptBoard { ticket: u64, s: u64 },
     /// §28.3 stage 3: `M_{first_seq - 1}` and the material at `S` for a move.
@@ -70,7 +68,6 @@ pub(crate) struct Job<SM: StateMachine, S: Sealer> {
 /// What a finished replay hands over.
 pub(crate) struct Replayed<SM: StateMachine, S: Sealer> {
     pub seq: u64,
-    pub chain: Hash32,
     pub state: SM::State,
     pub m: S::Membership,
     pub stash: Vec<(u64, SM::State, Vec<u8>)>,
@@ -368,12 +365,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let opened = r.opened.as_ref();
         if skipped {
             let mut x = plain("engine/skipped");
-            if let Some(o) = opened.filter(|o| o.kind == Kind::Cmd) {
-                if let Some(Ok(cmd)) = guard(|| sm.parse(&o.payload)) {
+            if let Some(o) = opened.filter(|o| o.kind == Kind::Cmd)
+                && let Some(Ok(cmd)) = guard(|| sm.parse(&o.payload)) {
                     x.op = Some(sm.op_name(&cmd));
                     x.target = sm.target(&cmd);
                 }
-            }
             refusal = Some(x);
         } else if r.class == Class::Refuse {
             let code = r.code.unwrap_or("seal/refused");
@@ -431,11 +427,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 Kind::Beat | Kind::Snap => {}
             }
         }
-        if let (Some(x), true, true, Some(no)) = (refusal.as_ref(), own, record, own_no) {
-            if let Some(bytes) = guard(|| sm.refusal_bytes(seq, no, x)) {
+        if let (Some(x), true, true, Some(no)) = (refusal.as_ref(), own, record, own_no)
+            && let Some(bytes) = guard(|| sm.refusal_bytes(seq, no, x)) {
                 job.recs.push((seq, NoticeKind::Refusal, bytes));
             }
-        }
         let is_ctl = r.class == Class::Accept && opened.is_some_and(|o| o.kind == Kind::Ctl);
         pos.seq = seq;
         pos.chain = c;
@@ -443,7 +438,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if is_ctl {
             pos.view = self.sealer.view(&pos.m);
         }
-        let aligned = seq >= lim::STRIDE && seq % lim::STRIDE == 0;
+        let aligned = seq >= lim::STRIDE && seq.is_multiple_of(lim::STRIDE);
         if (aligned && record) || job.want_states.contains(&seq) {
             let mbytes = self.sealer.membership_bytes(&pos.m);
             if aligned && record {
@@ -470,7 +465,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let Some(pos) = job.pos else { return };
         let out = Replayed {
             seq: pos.seq,
-            chain: pos.chain,
             state: pos.state,
             m: pos.m,
             stash: job.stash,
@@ -481,7 +475,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             Purpose::Skip { s, t } => self.skip_replayed(s, t, out),
             Purpose::Reset { r, t, hash, author } => self.reset_replayed(r, t, hash, author, out),
             Purpose::RestoreHash { ticket, t } => self.restore_hash_ready(ticket, t, out),
-            Purpose::AdoptMembership { ticket, s } => self.adopt_membership_ready(ticket, s, out),
             Purpose::AdoptBoard { ticket, s } => self.adopt_board_ready(ticket, s, out),
             Purpose::Seed { ticket } => self.seed_replayed(ticket, out),
         }

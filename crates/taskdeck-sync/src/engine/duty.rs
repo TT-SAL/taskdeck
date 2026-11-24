@@ -88,11 +88,10 @@ pub(crate) fn snapshot_due(
     if own_snap_in_outbox {
         return false;
     }
-    if let Some(newest_own) = snapshots.iter().filter(|r| &r.author == own).max_by_key(|r| r.entry_seq) {
-        if tau_s.saturating_sub(newest_own.entry_clock) < lim::DAY {
+    if let Some(newest_own) = snapshots.iter().filter(|r| &r.author == own).max_by_key(|r| r.entry_seq)
+        && tau_s.saturating_sub(newest_own.entry_clock) < lim::DAY {
             return false;
         }
-    }
     if owed_mismatch {
         return true;
     }
@@ -192,6 +191,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         self.shred_step();
         self.fence_lookup();
+        self.repair_step();
         if !self.eligible() {
             if self.eligible_but_stale() && self.duty_pending() {
                 // A duty waits only for a head newer than 600,000 ms: ask for one.
@@ -276,12 +276,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     /// An accepted `snap` entry clears the duty for its seq and below (§19.2).
     pub(crate) fn snap_accepted(&mut self, _entry_seq: u64, author: Dev, info: &SnapInfo) {
-        if let Some((s, _, _)) = self.meta.duties.snapshot {
-            if info.seq >= s {
+        if let Some((s, _, _)) = self.meta.duties.snapshot
+            && info.seq >= s {
                 self.meta.duties.snapshot = None;
                 self.touch_meta();
             }
-        }
         if author == self.own && self.duty.owed_mismatch > 0 {
             self.duty.owed_mismatch -= 1;
         }

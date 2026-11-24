@@ -492,7 +492,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         // 2: the log below p.
         if self.floor < p {
-            let floor_chain = if p - 1 >= self.retained { self.chain_at(p - 1) } else { None };
+            let floor_chain = if p > self.retained { self.chain_at(p - 1) } else { None };
             self.floor = p;
             self.retained = if floor_chain.is_some() { p - 1 } else { p };
             self.trim_chains(p);
@@ -695,9 +695,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.op_done(ticket, Err("engine/adopt_membership"));
     }
 
-    pub(crate) fn adopt_membership_ready(&mut self, ticket: u64, _s: u64, _out: Replayed<SM, S>) {
-        self.set_busy(ticket, false);
-    }
 
     /// §22.3 step 5: the adopted board, replayed to `B`.
     pub(crate) fn adopt_board_ready(&mut self, ticket: u64, s: u64, out: Replayed<SM, S>) {
@@ -710,11 +707,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         self.state = Some(out.state);
         let mut hashes = out.hashes;
-        if s >= lim::STRIDE && s % lim::STRIDE == 0 {
-            if let Some(info) = self.opx.mem.iter().find(|m| m.ticket == ticket).and_then(|m| m.snap.clone()) {
+        if s >= lim::STRIDE && s.is_multiple_of(lim::STRIDE)
+            && let Some(info) = self.opx.mem.iter().find(|m| m.ticket == ticket).and_then(|m| m.snap.clone()) {
                 hashes.insert(0, crate::HashRecord { seq: s, hash_version: info.hash_version, hash: info.hash });
             }
-        }
         self.replace_records_from(s + 1, out.recs, hashes);
         self.pipe.pre = self.state.clone();
         self.pipe.redo.clear();
@@ -798,9 +794,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let Some(op) = self.op_rec(ticket).map(|o| o.op.clone()) else { return };
         match (&op, code) {
             (Operation::Revoke { dev, .. }, None) => self.revoke_finish(ticket, *dev),
-            (Operation::Revoke { dev, .. }, Some(c))
-                if matches!(c, "seal/stale_epoch" | "seal/old_epoch" | "seal/ctl_epoch" | "seal/ctl_wraps") =>
-            {
+            (
+                Operation::Revoke { dev, .. },
+                Some("seal/stale_epoch" | "seal/old_epoch" | "seal/ctl_epoch" | "seal/ctl_wraps"),
+            ) => {
                 // ENG-OPS-002: composed again after every race, until the target is revoked.
                 self.revoke_compose(ticket, *dev);
             }

@@ -3,6 +3,9 @@
 //! a small relay (`Hub`) that sequences frames and serves pages. It is not the
 //! model relay of §31.3 (task C) and not the simulator: it only moves events.
 
+// A kit: not every helper is used by every test file.
+#![allow(dead_code)]
+
 use std::collections::{BTreeMap, VecDeque};
 
 use super::{Config, Engine};

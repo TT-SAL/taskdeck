@@ -43,6 +43,6 @@ pub struct Violation {
 pub struct SimStats {}
 
 /// Runs the simulator (engine.md §31.1).
-pub fn run(seed: u64, config: &SimConfig) -> SimReport {
+pub fn run(_seed: u64, _config: &SimConfig) -> SimReport {
     unimplemented!()
 }

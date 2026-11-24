@@ -18,7 +18,7 @@ use super::{Engine, Want, guard, lim};
 use crate::{
     AdminOk, AdminRequest, BlobOk, BlobRequest, Body, Class, CtlIntent, CtlItem, DeviceStatus, Effect, Hash32, Kind,
     LocalReadResult, Notification, Operation, Page, RelayRefusal, RelayTarget, SealedBlob, Sealer, SeedDevice,
-    SessionState, SnapInfo, SnapshotMaterial, StateMachine, StopKind, Verdict, Via, state_hash,
+    SessionState, SnapInfo, SnapshotMaterial, StateMachine, Verdict, Via, state_hash,
 };
 
 #[derive(Default)]
@@ -79,11 +79,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     }
 
     pub(crate) fn fence_frame(&mut self, seq: u64, result: LocalReadResult) {
-        if let LocalReadResult::Records(v) = result {
-            if let Some(r) = v.first().filter(|r| r.seq == seq) {
+        if let LocalReadResult::Records(v) = result
+            && let Some(r) = v.first().filter(|r| r.seq == seq) {
                 self.opx.mv.fence = Some((seq, self.sealer.frame_hash(&r.frame)));
             }
-        }
     }
 
     fn move_locked(&self) -> bool {
@@ -351,14 +350,13 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
             6 => {
                 // The snapshot of stage 3, once the session on the new relay is Live (ENG-MOVE-007).
-                if self.sess.state == SessionState::Live && !self.opx.mv.uploaded && self.opx.mv.upload_failures < 3 {
-                    if let Some(blob) = self.opx.mv.blob.clone() {
+                if self.sess.state == SessionState::Live && !self.opx.mv.uploaded && self.opx.mv.upload_failures < 3
+                    && let Some(blob) = self.opx.mv.blob.clone() {
                         self.mv_busy(ticket, true);
                         let req = self.want(Want::OpBlob(ticket));
                         let seq = self.opx.mv.s;
                         self.fx(Effect::Blob { req, op: BlobRequest::Upload { purpose: 1, seq, blob } });
                     }
-                }
                 self.move_report(ticket);
             }
             _ => {}
@@ -537,7 +535,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 });
             }
         }
-        devices.sort_by(|a, b| a.dev.cmp(&b.dev));
+        devices.sort_by_key(|a| a.dev);
         // A fresh snapshot of this device's own state at S, with itself as writer.
         let sm = &self.sm;
         let (Some(board), Some(bh)) = (guard(|| sm.canonical_bytes(&at_s.1)), guard(|| sm.board_hash(&at_s.1))) else {
@@ -624,8 +622,4 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let _ = ticket;
     }
 
-    /// Does a stop other than evidence hold the move back?
-    pub(crate) fn move_blocked(&self) -> bool {
-        self.has_stop(|k| !matches!(k, StopKind::Evidence))
-    }
 }

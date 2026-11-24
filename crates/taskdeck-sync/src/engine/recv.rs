@@ -19,6 +19,9 @@ use crate::{
     StateMachine, StopKind,
 };
 
+/// A banner's subject: its device, name and key fingerprint.
+type Subject = (Option<Dev>, Option<String>, Option<String>);
+
 /// A classified entry on its way to the board.
 pub(crate) struct Entry<M> {
     pub seq: u64,
@@ -181,8 +184,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         frames: &[(u64, Vec<u8>)],
     ) {
         // Step 7: the page's head chain.
-        if let (Some(head), Some(last)) = (head, entries.last()) {
-            if last.seq == head.seq && last.chain != head.chain {
+        if let (Some(head), Some(last)) = (head, entries.last())
+            && last.seq == head.seq && last.chain != head.chain {
                 self.raise_evidence(
                     AlarmKind::Fork,
                     Some(head.seq),
@@ -192,7 +195,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 );
                 entries.clear();
             }
-        }
         if entries.is_empty() {
             return;
         }
@@ -286,11 +288,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 // back from the device's own log, which was vetted when it was first
                 // classified (its record may be gone since).
                 let own_sealed = |ctr: u64| -> Option<Hash32> {
-                    if let Some(r) = outbox_ref.iter().find(|r| r.r.ctr == Some(ctr) && r.r.frame_hash.is_some()) {
-                        if !from_log || r.r.frame_hash == Some(fh) {
+                    if let Some(r) = outbox_ref.iter().find(|r| r.r.ctr == Some(ctr) && r.r.frame_hash.is_some())
+                        && (!from_log || r.r.frame_hash == Some(fh)) {
                             return r.r.frame_hash;
                         }
-                    }
                     if from_log || restored.is_some_and(|(a, z)| a <= ctr && ctr <= z) {
                         return Some(fh);
                     }
@@ -550,8 +551,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     Evidence::Frame { frame_hash: Some(e.frame_hash) },
                 );
             }
-            Class::Refuse => {
-                if e.code.is_some_and(names_author) {
+            Class::Refuse
+                if e.code.is_some_and(names_author) => {
                     self.alarm(
                         AlarmKind::RefusedFrame,
                         Some(seq),
@@ -560,7 +561,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                         Evidence::Frame { frame_hash: None },
                     );
                 }
-            }
             _ => {}
         }
         if e.foreign && !e.from_log {
@@ -575,8 +575,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.add_stop(StopKind::ForeignSigner, Some(id));
         }
         if e.own {
-            if let Some(o) = &e.opened {
-                if let Some(i) = self.rec_index(&o.entry_id) {
+            if let Some(o) = &e.opened
+                && let Some(i) = self.rec_index(&o.entry_id) {
                     let rec = &mut self.outbox[i];
                     if rec.r.seen.is_none() {
                         rec.r.seen = Some(seq);
@@ -584,7 +584,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     }
                     self.status_dirty = true;
                 }
-            }
             self.restored_clear(e);
         }
         if !e.from_log {
@@ -619,7 +618,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 (Some(*dev), d.map(|d| d.name.clone()), d.map(|d| d.key_fp.clone()))
             };
             let none = (None, None, None);
-            let mut banners: Vec<(BannerKind, (Option<Dev>, Option<String>, Option<String>), BannerDetail)> = Vec::new();
+            let mut banners: Vec<(BannerKind, Subject, BannerDetail)> = Vec::new();
             match item {
                 CtlItem::Genesis { .. } => {}
                 CtlItem::DeviceAdded { dev, .. } => banners.push((BannerKind::DeviceAdded, subject(dev), BannerDetail::None)),

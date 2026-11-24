@@ -3,7 +3,7 @@
 
 use super::{Engine, lim};
 use crate::{
-    AlarmKind, Blocker, ClockStatus, DeviceRow, DeviceStatus, HaltKind, HaltView, Head, Kind, MembershipView,
+    AlarmKind, Blocker, ClockStatus, DeviceRow, HaltKind, HaltView, Head, MembershipView,
     MovingView, NoticeEntry, NoticeKind, NoticeOp, OpStatus, PendingMark, PersistOp, RulesStatus, Sealer,
     SessionState, SkipOffer, StateMachine, Status, StatusWarning, StopAction, StopKind, StopView, UserAction,
     VersionStatus,
@@ -272,13 +272,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 }
             }
             UserAction::DismissNotice { seq, index } => {
-                if let Some(n) = self.notices.iter_mut().filter(|n| n.seq == seq).nth(index as usize) {
-                    if !n.dismissed {
+                if let Some(n) = self.notices.iter_mut().filter(|n| n.seq == seq).nth(index as usize)
+                    && !n.dismissed {
                         n.dismissed = true;
                         self.persist(vec![PersistOp::Notices(vec![NoticeOp::Dismiss { seq, index }])]);
                         self.status_dirty = true;
                     }
-                }
             }
             UserAction::DismissAlarm { id } => {
                 // ENG-UI-002: an alarm behind a stop is resolved only by its repair.
@@ -312,14 +311,5 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
     }
 
-    /// The devices whose word counts for a rules upgrade: the current ones
-    /// (the 30-day activity window of `seal.md` §13.10 is applied in duty.rs).
-    pub(crate) fn current_devices(&self) -> Vec<&crate::DeviceView> {
-        self.vk.devices.iter().filter(|d| d.status == DeviceStatus::Current).collect()
-    }
 
-    /// The outbox records of kind `cmd`, for tests and the facade's counts.
-    pub(crate) fn cmd_records(&self) -> usize {
-        self.outbox.iter().filter(|r| r.r.kind == Kind::Cmd).count()
-    }
 }
