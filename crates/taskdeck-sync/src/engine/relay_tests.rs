@@ -694,3 +694,121 @@ fn a_move_fences_seeds_and_is_followed_only_with_the_code() {
     assert!(net.relays[NEW].head().expect("a head").seq > f);
     assert_eq!(net.relays[&old].head().expect("a head").seq, f);
 }
+
+// spec: ENG-MOVE-004 ENG-MOVE-005 ENG-MOVE-009
+#[test]
+fn a_move_from_a_relay_that_is_gone_sends_its_fence_as_an_append() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(221);
+    let mut b = pair(&mut net, &mut a, 222, "Laptop", 1);
+    let mut k = 0u64;
+    while net.log_len() < 70 {
+        k += 1;
+        a.set(k, (k % 50) as u8, k as i64);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    for _ in 0..3 {
+        a.advance(86_400_000);
+        b.advance(86_400_000);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    net.add_relay(NEW);
+    let last = net.log_len();
+    // The old relay is gone; a copy of it without any Fence stands at a third address.
+    let gone = net.relays.remove(&old).expect("the old relay");
+    net.relays.insert("relay3.test".to_owned(), gone);
+    for n in [&mut a, &mut b] {
+        n.feed(Event::Disconnected { unreachable: true, paused_until_ms: None });
+    }
+    b.set(50, 50, 50);
+    let calls = net.calls.len();
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    net.settle(&mut [&mut a]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    let mine: Vec<&str> = net.calls[calls..].iter().filter(|c| c.0 == a.dev()).map(|c| c.1.as_str()).collect();
+    assert!(!mine.contains(&"admin:fence"), "{mine:?}");
+    let at = |name: &str| mine.iter().position(|c| *c == name).unwrap_or_else(|| panic!("{name} in {mine:?}"));
+    assert!(at("admin:door") < at("admin:seed") && at("admin:seed_tail") < at("append"));
+    // The Fence is the first entry the new relay sequenced itself.
+    let fence_seq = last + 1;
+    assert_eq!(a.e.membership().home_seq, fence_seq);
+    let reports = notes_of(&a, |x| match x {
+        crate::Notification::MoveReport { carried_through, old_relay_answered } => Some((*carried_through, *old_relay_answered)),
+        _ => None,
+    });
+    assert_eq!(reports, vec![(last, false)]);
+    let code = notes_of(&a, |x| match x {
+        crate::Notification::MoveCode { text } => Some(text.clone()),
+        _ => None,
+    })
+    .pop()
+    .expect("the move code");
+
+    // The other device holds no Fence. It follows the address its user typed only when the log
+    // there holds a Fence naming that address and the code fits; until then it sends nothing.
+    let door = net.relays[NEW].door();
+    let calls = net.calls.len();
+    b.feed(Event::Op { ticket: 30, op: Operation::FollowAddress { host: "relay3.test".into(), door: net.relays["relay3.test"].door(), code: code.clone() } });
+    net.settle(&mut [&mut b]);
+    assert_eq!(op_result(&b, 30), Some(Err("engine/move_no_fence")));
+    b.feed(Event::Op { ticket: 31, op: Operation::FollowAddress { host: NEW.into(), door, code: "0000-0000".into() } });
+    net.settle(&mut [&mut b]);
+    assert_eq!(op_result(&b, 31), Some(Err("seal/move_code")));
+    assert_eq!(b.e.status().relay_host, old);
+    assert_eq!(b.e.status().queued, 1);
+    assert!(net.calls[calls..].iter().all(|c| c.0 != b.dev() || c.1 == "connect" || c.1 == "hello"), "nothing but reads");
+    b.feed(Event::Op { ticket: 32, op: Operation::FollowAddress { host: NEW.into(), door, code } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&b, 32), Some(Ok(())));
+    assert_eq!(b.e.status().relay_host, NEW);
+    assert_eq!(b.e.status().queued, 0);
+    assert_eq!(a.board_bytes(), b.board_bytes());
+    assert_eq!(a.e.confirmed().0.keys[&50].0, 50);
+}
+
+// spec: ENG-OPS-010 ENG-SESS-007
+#[test]
+fn a_closed_board_is_fenced_to_nowhere_and_stops_who_follows() {
+    const NOWHERE: &str = "closed.test";
+    let (mut net, mut a) = board(231);
+    let mut b = pair(&mut net, &mut a, 232, "Laptop", 1);
+    net.settle(&mut [&mut a, &mut b]);
+    let (calls, from) = (net.calls.len(), a.persists.len());
+    let home_gen = a.e.membership().home_gen;
+    a.feed(Event::Op { ticket: 4, op: Operation::CloseBoard { host: NOWHERE.into(), door: [9; 5] } });
+    // Not done before the Fence is accepted in its log.
+    assert_eq!(op_result(&a, 4), None);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 4), Some(Ok(())));
+    let fences: Vec<_> = puts(&a, from).into_iter().filter(|r| matches!(r.body, Body::Ctl(CtlIntent::Fence { .. }))).collect();
+    assert!(fences.iter().all(|r| r.entry_id == fences[0].entry_id), "exactly one Fence");
+    assert_eq!(fences[0].body, Body::Ctl(CtlIntent::Fence { host: NOWHERE.into(), door: [9; 5], home_gen: home_gen + 1 }));
+    assert!(matches!(fences[0].via, Via::Fence { .. }));
+    // Nothing was sent to the relay it names: no door, no seed, no tail, no upload.
+    let mine: Vec<&str> = net.calls[calls..].iter().filter(|c| c.0 == a.dev()).map(|c| c.1.as_str()).collect();
+    assert!(mine.contains(&"admin:fence"));
+    assert!(mine.iter().all(|c| !matches!(*c, "admin:door" | "admin:seed" | "admin:seed_tail") && !c.starts_with("blob")), "{mine:?}");
+    assert_eq!(a.e.membership().home_gen, home_gen + 1);
+
+    // A device that follows the Fence there and is refused as unauthorized is at a closed board:
+    // it stops, connects no more, and is offered to re-pair.
+    let code = notes_of(&a, |x| match x {
+        crate::Notification::MoveCode { text } => Some(text.clone()),
+        _ => None,
+    })
+    .pop()
+    .expect("the move code");
+    assert_eq!(type_code(&mut b, &code), Ok(()));
+    let i = b.fx.iter().position(|f| matches!(f, Effect::Connect { relay } if relay.host == NOWHERE)).expect("a connect there");
+    b.fx.drain(..=i);
+    b.feed(Event::RelayRefused { req: None, refusal: refusal(401, "relay/unauthorized") });
+    let st = b.e.status();
+    let stop = st.stops.iter().find(|s| s.kind == crate::StopKind::Closed).expect("the stop Closed");
+    assert_eq!(stop.action, crate::StopAction::RePair);
+    b.fx.clear();
+    for _ in 0..48 {
+        b.tick(3_600_000);
+    }
+    assert!(b.fx.iter().all(|f| !matches!(f, Effect::Connect { .. })));
+}
