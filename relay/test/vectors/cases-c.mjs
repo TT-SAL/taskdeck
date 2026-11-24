@@ -1,4 +1,5 @@
 // Families: seed, restore, purge, compact, budget, socket, standby (relay.md §21).
+import { READS } from './reads.mjs';
 import { ALL, CORE, CREATE, DAY, DOOR, DUP, F, LOCAL, N, NOW, PUSHING, REF, RT, T, addDevice, admin, append, at, err, fillLog, gateErr, kase, login, range, req, step } from './dsl.mjs';
 
 const ID = (n) => n.toString(16).padStart(2, '0').repeat(16);
@@ -196,7 +197,7 @@ export const compactF = [
     refusedC({ snap_entry_seq: 30000 }, 409, 'relay/no_snapshot'), refusedC({ blob_id: ID(0x99) }, 409, 'relay/no_snapshot'), refusedC({ blob_id: GEN }, 409, 'relay/no_snapshot'),
     refusedC({ blob_id: ID(0x52) }, 409, 'relay/no_snapshot'), refusedC({ snap_entry_seq: 100 }, 409, 'relay/no_snapshot'), refusedC({ snap_entry_seq: 5120 }, 409, 'relay/no_snapshot'),
     refusedC({}, 403, 'relay/not_signer', 'alice'),
-    compact({ keep: [1, 7, 4999, 5000, 5050] }, { status: 200, x_td_relay: 'object', json: { deleted: 4996, floor: 5001, more: true }, rows_written: 5000,
+    compact({ keep: [1, 7, 4999, 5000, 5050] }, { status: 200, x_td_relay: 'object', json: { deleted: 4996, floor: 5001, more: true }, rows_written: 5000, rows_read_max: READS.compact(3, 4996, 1),
       storage: { board: { compact_floor: 5001, purge_floor: 1, compact_snap: SNAP, del_count: 4996, del_day: Math.floor(YEAR / DAY) }, blobs: [{ id: SNAP }, { id: ID(0x52), complete: 0 }] } }),
     step(req('read', T('bob'), { query: 'after=0&limit=6' }), { status: 200, page: { head_seq: 21503, floor: 5001, purge_floor: 1, truncated: true, more: true, seqs: [1, 7, 4999, 5000, 5001, 5002] } }),
     step(req('read', T('bob'), { query: 'after=5000&limit=2' }), { status: 200, page: { truncated: false, seqs: [5001, 5002] } }),
@@ -204,7 +205,7 @@ export const compactF = [
     compact({ keep: [5050] }, used(429, 'relay/delete_budget', { until: (Math.floor(YEAR / DAY) + 1) * DAY })),
     admin('purge', 'bob', T('bob'), { before_seq: 100, epoch: 2 }, { status: 200, json: { purge_floor: 100, done: 1 }, rows_written: 2 }),
     step(req('read', T('bob'), { query: 'after=0&limit=3' }), { status: 200, page: { floor: 5005, purge_floor: 100, truncated: true, seqs: [4999, 5000, 5005] } }),
-    at(YEAR + DAY, compact({ keep: [5050] }, { status: 200, json: { deleted: 94, floor: 5100, more: false }, rows_written: 96, storage: { board: { compact_floor: 5100, del_count: 94 } } })),
+    at(YEAR + DAY, compact({ keep: [5050] }, { status: 200, json: { deleted: 94, floor: 5100, more: false }, rows_written: 96, rows_read_max: READS.compact(2, 94, 0), storage: { board: { compact_floor: 5100, del_count: 94 } } })),
     admin('purge', 'bob', T('bob'), { before_seq: 100, epoch: 2 }, { status: 200, json: { purge_floor: 100, done: 100 }, rows_written: 4, storage: { board: { purge_done: 100, del_count: 96 } } }),
     step(req('read', T('bob'), { query: 'after=0&limit=4' }), { status: 200, page: { floor: 5100, truncated: true, seqs: [4999, 5000, 5050, 5100] } }),
     compact({ keep: [5050] }, used(409, 'relay/target')),

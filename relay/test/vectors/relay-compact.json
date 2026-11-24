@@ -1169,6 +1169,7 @@
        "more": true
       },
       "rows_written": 5000,
+      "rows_read_max": 5020,
       "storage": {
        "board": {
         "compact_floor": 5001,
@@ -1489,6 +1490,7 @@
        "more": false
       },
       "rows_written": 96,
+      "rows_read_max": 114,
       "storage": {
        "board": {
         "compact_floor": 5100,

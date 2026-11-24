@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import * as a from './cases-a.mjs';
 import * as b from './cases-b.mjs';
 import * as c from './cases-c.mjs';
+import * as d from './cases-d.mjs';
 
 const family = (spec, cases) => {
   const names = new Set();
@@ -30,6 +31,7 @@ export const families = {
   'relay-budget.json': family('relay.md §14', c.budgetF),
   'relay-socket.json': family('relay.md §11', c.socketF),
   'relay-standby.json': family('relay.md §15.2', c.standbyF),
+  'relay-rows.json': family('relay.md §16.1', d.rows),
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

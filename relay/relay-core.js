@@ -1802,9 +1802,10 @@ const ADMIN = {
       json: out,
       after: () => {
         c.push(stored, now);
-        const fenced = c.boardRow();
-        const msg = cat(u8(0x89), u8(2), u8(1), c.fencePart(fenced));
-        for (const s of c.ready()) c.send(s, msg);
+        const socks = c.ready();
+        if (!socks.length) return;
+        const msg = cat(u8(0x89), u8(2), u8(1), c.fencePart(c.boardRow()));
+        for (const s of socks) c.send(s, msg);
       },
     };
   },
