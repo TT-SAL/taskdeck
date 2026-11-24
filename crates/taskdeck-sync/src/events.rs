@@ -7,6 +7,7 @@ use crate::{
 };
 
 /// One input with the runtime's clocks (engine.md §4.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Input<C> {
     pub wall_ms: i64,
     pub mono_ms: u64,
@@ -16,6 +17,7 @@ pub struct Input<C> {
 /// An event the runtime sends (engine.md §4.2).
 // The spec fixes the variants; `Start` carries the whole `Loaded` by value.
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event<C> {
     Start(Loaded),
     Shutdown,
@@ -43,6 +45,7 @@ pub enum Event<C> {
 }
 
 /// The answer to a `ReadLog` or `ReadBase` (engine.md §4.3, §37).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LocalReadResult {
     Records(Vec<LogRecord>),
     Base(Checkpoint),
@@ -50,6 +53,7 @@ pub enum LocalReadResult {
 }
 
 /// The new device of a pairing (engine.md §4.2 `PairRegister`, §28.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewDevice {
     pub dev: Dev,
     pub sign_pk: Hash32,
@@ -59,6 +63,7 @@ pub struct NewDevice {
 }
 
 /// The relay's answer for one appended frame (engine.md §10.4, §37).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AppendResult {
     New { seq: u64, chain: Hash32 },
     Dup { seq: u64, chain: Hash32 },
@@ -69,6 +74,8 @@ pub enum AppendResult {
 }
 
 /// An effect the runtime performs (engine.md §4.3).
+#[derive(Clone, Debug)]
+#[cfg_attr(any(test, feature = "sim"), derive(PartialEq, Eq))]
 pub enum Effect {
     Persist { id: u64, ops: Vec<PersistOp> },
     ReadLog { req: u64, from: u64, to: u64 },
@@ -85,6 +92,7 @@ pub enum Effect {
 }
 
 /// Where a device syncs (engine.md §7.8 `relay`, §37).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelayTarget {
     pub host: String,
     pub door: [u8; 5],

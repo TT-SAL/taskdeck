@@ -4,6 +4,7 @@
 // ---------- the state machine (§5.1)
 
 /// The apply context of an entry (engine.md §5.1, ENG-SM-001).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ctx {
     pub seq: u64,
     pub device_no: u16,
@@ -12,12 +13,14 @@ pub struct Ctx {
 }
 
 /// A successful apply and the notices it produced (engine.md §5.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Applied<N> {
     pub benign: bool,
     pub notices: Vec<N>,
 }
 
 /// A state machine's refusal of a command (engine.md §5.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SmRefusal {
     pub code: &'static str,
     pub op: Option<&'static str>,
@@ -27,11 +30,13 @@ pub struct SmRefusal {
 }
 
 /// A state machine's error outside apply (engine.md §5.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SmError {
     pub code: &'static str,
 }
 
 /// The outcome of coalescing a held create with the next command (engine.md §5.1 `coalesce`).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Coalesce<C> {
     Merge(C),
     CancelBoth,
@@ -119,12 +124,14 @@ pub type Dev = [u8; 16];
 pub type Hash32 = [u8; 32];
 
 /// A log position and its chain value (engine.md §6.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Head {
     pub seq: u64,
     pub chain: Hash32,
 }
 
 /// An entry's kind (engine.md §6.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Cmd = 1,
     Ctl = 2,
@@ -133,6 +140,7 @@ pub enum Kind {
 }
 
 /// The sealer's classification of a frame (engine.md §6.1, `seal.md` §14.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Class {
     Skip,
     Tamper,
@@ -142,18 +150,21 @@ pub enum Class {
 }
 
 /// A halt the sealer reports (engine.md §6.1, §16).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Halt {
     Commitment,
     UnknownRules(u32),
 }
 
 /// A snapshot verdict (engine.md §6.1, §19.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
     Ack,
     Mismatch,
 }
 
 /// The fields of a beat (engine.md §6.1, §23.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BeatInfo {
     pub rules: Vec<u32>,
     pub envelopes: Vec<(u8, u8)>,
@@ -163,6 +174,7 @@ pub struct BeatInfo {
 }
 
 /// The fields of a `snap` entry (engine.md §6.1, §19.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SnapInfo {
     pub seq: u64,
     pub hash: Hash32,
@@ -175,28 +187,22 @@ pub struct SnapInfo {
     pub epoch: u32,
 }
 
-/// The mode of a recovery-key change (engine.md §6.1).
-pub enum RecoveryMode {
-    Direct,
-    Propose,
-    Confirm,
-    Cancel,
-}
-
 /// The mode of a rules upgrade (engine.md §6.1, §25).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpgradeMode {
     Normal,
     Override,
 }
 
 /// An opened control item (engine.md §6.1, `seal.md` §11).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CtlItem {
     Genesis { hash_version: u32, state_hash: Hash32 },
     DeviceAdded { dev: Dev, name: String, key_fp: String, bootstrap_seq: u64 },
     DeviceRevoked { dev: Dev },
     DeviceReinstated { dev: Dev },
     EpochRotated { epoch: u32, purge_before: Option<u64> },
-    RecoveryKeyChange { mode: RecoveryMode, key_fp: Option<String> },
+    RecoveryKeyChange { key_fp: String },
     Fence { host: String, door: [u8; 5], home_gen: u32 },
     ResetTo { seq: u64, state_hash: Hash32, hash_version: u32 },
     Skip { seq: u64, frame_hash: Hash32 },
@@ -204,6 +210,7 @@ pub enum CtlItem {
 }
 
 /// A control entry the engine asks the sealer to compose (engine.md §6.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CtlIntent {
     Rotate { revoke: Vec<Dev>, reinstate: Vec<Dev>, purge_before: Option<u64> },
     AddDevice {
@@ -214,7 +221,6 @@ pub enum CtlIntent {
         transcript: Hash32,
         bootstrap_seq: u64,
     },
-    RecoveryChange { mode: RecoveryMode, sign_pk: Option<Hash32>, hpke_pk: Option<Hash32> },
     Fence { host: String, door: [u8; 5], home_gen: u32 },
     ResetTo { seq: u64, state_hash: Hash32, hash_version: u32 },
     Skip { targets: Vec<(u64, Hash32)> },
@@ -222,6 +228,7 @@ pub enum CtlIntent {
 }
 
 /// The body of an entry to seal (engine.md §6.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Body {
     Cmd(Vec<u8>),
     Ctl(CtlIntent),
@@ -230,6 +237,7 @@ pub enum Body {
 }
 
 /// An entry before sealing (engine.md §6.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlainEntry {
     pub entry_id: [u8; 16],
     pub at_ms: i64,
@@ -238,6 +246,7 @@ pub struct PlainEntry {
 }
 
 /// The opened plaintext of an accepted frame (engine.md §6.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Opened {
     pub entry_id: [u8; 16],
     pub kind: Kind,
@@ -250,6 +259,7 @@ pub struct Opened {
 }
 
 /// The outcome of classifying one frame (engine.md §6.1, `seal.md` §14.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt<M> {
     pub class: Class,
     pub code: Option<&'static str>,
@@ -278,6 +288,7 @@ pub struct ClassifyInput<'a, M> {
 }
 
 /// A sealed frame (engine.md §6.1 `seal`).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sealed {
     pub frame: Vec<u8>,
     pub frame_hash: Hash32,
@@ -286,6 +297,7 @@ pub struct Sealed {
 }
 
 /// What a snapshot carries (engine.md §6.1, §19).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SnapshotMaterial {
     pub seq: u64,
     pub chain: Hash32,
@@ -296,6 +308,7 @@ pub struct SnapshotMaterial {
 }
 
 /// A sealed snapshot blob (engine.md §6.1 `seal_snapshot`).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SealedBlob {
     pub id: [u8; 16],
     pub bytes: Vec<u8>,
@@ -306,6 +319,7 @@ pub struct SealedBlob {
 }
 
 /// A sealer error (engine.md §6.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SealerError {
     pub code: &'static str,
 }
@@ -384,12 +398,14 @@ pub trait Sealer {
 // ---------- the membership view (§6.2)
 
 /// A device's status (engine.md §6.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeviceStatus {
     Current,
     Revoked,
 }
 
 /// One device of the membership view (engine.md §6.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceView {
     pub dev: Dev,
     pub sign_pk: Hash32,
@@ -410,6 +426,7 @@ pub struct DeviceView {
 }
 
 /// One recovery identity of the membership view (engine.md §6.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecoveryView {
     pub dev_r: Dev,
     pub sign_pk: Hash32,
@@ -419,17 +436,8 @@ pub struct RecoveryView {
     pub last_ctr: u64,
 }
 
-/// A pending recovery-key proposal (engine.md §6.2).
-pub struct PendingRecovery {
-    pub proposer: Dev,
-    pub sign_pk: Hash32,
-    pub hpke_pk: Hash32,
-    pub key_fp: String,
-    pub seq: u64,
-    pub start_ms: i64,
-}
-
 /// The read-only membership view (engine.md §6.2, `seal.md` §13.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MembershipView {
     pub board_id: [u8; 16],
     pub rules: u32,
@@ -446,7 +454,6 @@ pub struct MembershipView {
     pub recovery_dev: Dev,
     pub recovery_fp: String,
     pub recovery: Vec<RecoveryView>,
-    pub pending_recovery: Option<PendingRecovery>,
     pub pending_override: Option<(u32, Dev, u64)>,
     pub last_reset: Option<(u64, u64)>,
     pub skips: Vec<(u64, Hash32)>,

@@ -34,7 +34,7 @@ pub mod toy;
 pub use model::{Applied, Coalesce, Ctx, SmError, SmRefusal, StateMachine};
 pub use model::{
     BeatInfo, Body, Class, ClassifyInput, CtlIntent, CtlItem, Dev, DeviceStatus, DeviceView, Halt, Hash32, Head,
-    Kind, MembershipView, Opened, PendingRecovery, PlainEntry, Receipt, RecoveryMode, RecoveryView, Sealed,
+    Kind, MembershipView, Opened, PlainEntry, Receipt, RecoveryView, Sealed,
     SealedBlob, Sealer, SealerError, SnapInfo, SnapshotMaterial, UpgradeMode, Verdict,
 };
 
@@ -46,7 +46,7 @@ pub use session::{AdminOk, AdminRequest, RelayRefusal, SeedDevice, Welcome};
 pub use snapshots::{BlobMeta, BlobOk, BlobRequest};
 pub use ui::{
     AlarmKind, AlarmRecord, Banner, BannerDetail, BannerKind, Blocker, ClockStatus, DeviceRow, Evidence, ForkSource,
-    HaltView, MovingView, NoticeEntry, Notification, OpStatus, PendingMark, RecoveryChangeView, RulesStatus,
+    HaltView, MovingView, NoticeEntry, Notification, OpStatus, PendingMark, RulesStatus,
     SessionState, SkipOffer, Status, StatusWarning, StopAction, StopView, UserAction, VersionStatus,
 };
 

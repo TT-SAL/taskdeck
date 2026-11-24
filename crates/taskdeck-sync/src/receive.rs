@@ -3,6 +3,7 @@
 use crate::Head;
 
 /// One entry of a page (engine.md §12.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PageEntry {
     pub seq: u64,
     pub at: i64,
@@ -10,6 +11,7 @@ pub struct PageEntry {
 }
 
 /// A read answer or a push (engine.md §12.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Page {
     pub head: Head,
     pub relay_now: i64,

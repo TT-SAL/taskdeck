@@ -3,6 +3,7 @@
 use crate::{Dev, Hash32, Head};
 
 /// A socket welcome or a `hello` response (engine.md §11.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Welcome {
     pub head: Head,
     pub last_ctr: Option<u64>,
@@ -17,6 +18,7 @@ pub struct Welcome {
 }
 
 /// An admin request (engine.md §11.7).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AdminRequest {
     Register { frame: Vec<u8>, dev: Dev, sign_pk: Hash32 },
     RegisterSeq { seq: u64, dev: Dev, sign_pk: Hash32, frame_hash: Hash32 },
@@ -41,6 +43,7 @@ pub enum AdminRequest {
 }
 
 /// A device row of a `Seed` request (engine.md §11.7).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeedDevice {
     pub dev: Dev,
     pub sign_pk: Hash32,
@@ -50,6 +53,7 @@ pub struct SeedDevice {
 }
 
 /// A successful admin answer (engine.md §11.7).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdminOk {
     pub seq: Option<u64>,
     pub chain: Option<Hash32>,
@@ -64,6 +68,7 @@ pub struct AdminOk {
 }
 
 /// A relay refusal (engine.md §11.7, §11.9).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelayRefusal {
     pub status: u16,
     pub code: String,

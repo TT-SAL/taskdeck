@@ -3,6 +3,7 @@
 use crate::{Dev, Hash32, SealedBlob};
 
 /// A blob request (engine.md §19.6).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BlobRequest {
     Upload { purpose: u8, seq: u64, blob: SealedBlob },
     Fetch { id: [u8; 16], parts: u32 },
@@ -11,6 +12,7 @@ pub enum BlobRequest {
 }
 
 /// A blob's metadata (engine.md §19.6).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlobMeta {
     pub id: [u8; 16],
     pub purpose: u8,
@@ -23,6 +25,7 @@ pub struct BlobMeta {
 }
 
 /// A successful blob answer (engine.md §19.6).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BlobOk {
     Uploaded,
     Parts(Vec<Vec<u8>>),
