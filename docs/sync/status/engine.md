@@ -198,7 +198,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_4e7bb2da-24b | A2 fake follow-up | `engine/briefs/a2-fake-followup.md` | done, merged | `seal` no longer returns a stored frame for a reused counter unless entry and epoch are the same; `membership_zero`, `restore` | 341,974 |
 | wf_6790fa34-60e | C model relay, first attempt | `engine/briefs/c-model-relay.md` | lost: the owner's usage limit cut the writer off | nothing kept beyond commit 678fdc2 on `wt/c` | 265,340 |
 | wf_e736e661-ee0 | C model relay, second attempt | `engine/briefs/c-model-relay.md` | done, merged (the lead ran its gate: 16 conformance tests pass) | `src/sim/relay.rs` + `relay/{seq,admin,blobs,socket,util}.rs`, `tests/relay_conformance.rs` (11 families of `relay/test/vectors/`, about 575 steps; 7 families left out with reasons in the file header), `engine/api-model-relay.md`; check: no findings; 8 questions on relay.md; asks the fake for an accessor of the genesis `rsign_pk` and `salt` | 532,591 |
-| (not started) | D simulator | `engine/briefs/d-simulator.md` | to launch after C: `/home/user/wt/d`, target `/home/user/wt/target-d` | | |
+| wf_70e5dcc6-438 | D simulator | `engine/briefs/d-simulator.md` | running since 2026-11-24 20:50 UTC in `/home/user/wt/d` (branch `wt/d`, target `/home/user/wt/target-d`); task id wddgelgx0 | | |
 
 ## Open threads
 
