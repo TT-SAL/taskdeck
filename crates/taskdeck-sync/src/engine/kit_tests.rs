@@ -137,7 +137,11 @@ impl Node {
                 other => self.fx.push_back(other),
             }
         }
-        // Writes are confirmed one at a time, in the order they were emitted (ENG-PERSIST-001).
+        // What the runtime owes the engine, as this driver does it:
+        // spec: ENG-EFFECT-001 ENG-PERSIST-001 ENG-PERSIST-004
+        // Writes are confirmed one at a time, in the order they were emitted; the other effects
+        // are handed on in order without waiting for any write; a restart presents exactly the
+        // writes that were confirmed.
         if self.auto && !self.draining {
             self.draining = true;
             while let Some((id, ops)) = self.pq.pop_front() {
