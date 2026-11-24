@@ -195,10 +195,14 @@ re-sealing; absent when `identity_clone` is true), `alarm` (`RestoredCopy`, `Rel
    the entry opened" (seal.md §14.4), and `seal/old_epoch` (always) and `seal/stale_epoch` (at step
    9) refuse before the AEAD opens: how the engine finds the record to re-seal (§24.3) is not
    stated. The receipts vectors take `own` as given.
-3. ENG-REF-001 makes every own entry refused for a non-re-sealable reason leave a refusal record;
-   §24.3 only says an own `beat`/`snap` is dropped and a `ctl` fails its operation's stage, and
-   `core.md` §10.7 refusal records describe commands. The vectors follow ENG-REF-001; what
-   `op`/`target` such a record carries is not stated.
+3. ENG-REF-001 and §13.3 give a refusal record only to an own entry refused for a reason other
+   than a re-sealable code, but the §13.1 `Refuse` row ("unless re-sealable") and §24.3 (an own
+   `beat`/`snap` that is refused "is dropped"; a `ctl` "fails its operation's stage") speak of own
+   `beat`/`snap`/`ctl` entries refused with `seal/stale_epoch` or `seal/old_epoch` as if they
+   were not re-sealed, so whether such an entry leaves a refusal record is not decided: those
+   cases are left out (only `cmd` is re-sealed, §24.3). For a `beat`/`snap`/`ctl` refused with a
+   non-re-sealable code the vectors follow ENG-REF-001; `core.md` §10.7 refusal records describe
+   commands, and what `op`/`target` such a record carries is not stated.
 4. Whether `based_on_unchecked` counts an accepted entry whose `apply` is refused, or a `beat`,
    `snap` or `ctl` ("applied to the board"): left out.
 5. `seal/missing_root` on a revoked device: whether the frame of the paused seq is persisted, and
@@ -206,8 +210,10 @@ re-sealing; absent when `identity_clone` is true), `alarm` (`RestoredCopy`, `Rel
 6. §15.3 step 2: whether the rebuild "from the checkpoint and the log, page-wise" writes markers
    (and which), and how the rest of a page after `x` continues once `x` applied alone. Poison cases
    therefore panic only on the entry right after the checkpoint and at the end of a page.
-7. §15.2 step 2: the page size of the page-wise replay at `Start` (the vectors use ranges of at most
-   two entries, as one page), and, when the start halts on `x` above `B + 1`, whether `B + 1` to
+7. §15.2 steps 2 and 3: the page size of the page-wise replay at `Start` (no case replays more
+   than one entry page-wise at `Start`, so its marker covers that one entry whatever the page
+   size; a page that arrives in a `{"page": …}` step is one page), and, when the start halts on
+   `x` above `B + 1`, whether `B + 1` to
    `x − 1` are applied first.
 8. §27.1: whether a measurement exactly 86,400,000 ms of `mono_ms` old has expired ("after").
 9. §11.4: when `conflicts` reaches 3, whether `x`'s frame is still cleared ("instead of

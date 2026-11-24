@@ -182,7 +182,7 @@
       "halt": null
     },
     {
-      "name": "Start replays the tail above the checkpoint page-wise",
+      "name": "Start replays the entry above the checkpoint",
       "clauses": [
         "ENG-POISON-001",
         "§15",
@@ -194,14 +194,12 @@
         "last_failed": null,
         "marker": null,
         "checkpoint_seq": 4,
-        "log_head": 7
+        "log_head": 5
       },
       "script": [
         "start"
       ],
       "outcomes": [
-        "ok",
-        "ok",
         "ok"
       ],
       "events": [
@@ -214,22 +212,12 @@
         {
           "set_marker": [
             5,
-            7,
+            5,
             3
           ]
         },
         {
           "apply": 5,
-          "mode": "page",
-          "outcome": "ok"
-        },
-        {
-          "apply": 6,
-          "mode": "page",
-          "outcome": "ok"
-        },
-        {
-          "apply": 7,
           "mode": "page",
           "outcome": "ok"
         },
@@ -378,15 +366,14 @@
         "start",
         {
           "page": [
-            5,
-            6
+            5
           ]
         },
         {
           "page": [
+            6,
             7,
-            8,
-            9
+            8
           ]
         },
         "start"
@@ -394,9 +381,7 @@
       "outcomes": [
         "ok",
         "ok",
-        "ok",
         "kill",
-        "ok",
         "ok",
         "ok",
         "ok",
@@ -412,14 +397,13 @@
         {
           "step": "page",
           "seqs": [
-            5,
-            6
+            5
           ]
         },
         {
           "set_marker": [
             5,
-            6,
+            5,
             1
           ]
         },
@@ -429,35 +413,30 @@
           "outcome": "ok"
         },
         {
-          "apply": 6,
-          "mode": "page",
-          "outcome": "ok"
-        },
-        {
           "clear_marker": true
         },
         {
           "step": "page",
           "seqs": [
+            6,
             7,
-            8,
-            9
+            8
           ]
         },
         {
           "set_marker": [
-            7,
-            9,
+            6,
+            8,
             1
           ]
         },
         {
-          "apply": 7,
+          "apply": 6,
           "mode": "page",
           "outcome": "ok"
         },
         {
-          "apply": 8,
+          "apply": 7,
           "mode": "page",
           "outcome": "kill"
         },
@@ -470,7 +449,7 @@
         {
           "set_marker": [
             5,
-            6,
+            5,
             2
           ]
         },
@@ -480,8 +459,18 @@
           "outcome": "ok"
         },
         {
+          "clear_marker": true
+        },
+        {
+          "set_marker": [
+            6,
+            6,
+            2
+          ]
+        },
+        {
           "apply": 6,
-          "mode": "page",
+          "mode": "single",
           "outcome": "ok"
         },
         {
@@ -511,21 +500,6 @@
         },
         {
           "apply": 8,
-          "mode": "single",
-          "outcome": "ok"
-        },
-        {
-          "clear_marker": true
-        },
-        {
-          "set_marker": [
-            9,
-            9,
-            2
-          ]
-        },
-        {
-          "apply": 9,
           "mode": "single",
           "outcome": "ok"
         },
@@ -1130,13 +1104,12 @@
           4
         ],
         "checkpoint_seq": 4,
-        "log_head": 6
+        "log_head": 5
       },
       "script": [
         "start"
       ],
       "outcomes": [
-        "ok",
         "ok"
       ],
       "events": [
@@ -1149,17 +1122,12 @@
         {
           "set_marker": [
             5,
-            6,
+            5,
             5
           ]
         },
         {
           "apply": 5,
-          "mode": "page",
-          "outcome": "ok"
-        },
-        {
-          "apply": 6,
           "mode": "page",
           "outcome": "ok"
         },

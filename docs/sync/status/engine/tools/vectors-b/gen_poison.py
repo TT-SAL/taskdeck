@@ -96,6 +96,12 @@ class Model:
                 return
         self.clear_marker()
 
+    def replay(self, seqs):
+        """The page-wise replay of §15.2 at Start. §15.2 sets no page size for it (README
+        question 7), so a case may only replay at most one entry this way."""
+        assert len(seqs) <= 1, "the page size of the replay at Start is not decided"
+        self.page(seqs)
+
     def single(self, s):
         self.set_marker(s, s)
         if self.apply_one(s, "single"):
@@ -127,12 +133,12 @@ class Model:
                     assert self.ckpt == x - 1, "entries before the halting one: order not decided"
                     self.halt(x)
                 self.set_lf((x, matt))
-            self.page(list(range(self.ckpt + 1, first)))
+            self.replay(list(range(self.ckpt + 1, first)))
             for s in range(max(first, self.board + 1), last + 1):
                 self.single(s)
-            self.page(list(range(last + 1, self.L + 1)))
+            self.replay(list(range(last + 1, self.L + 1)))
         else:                                     # §15.2 step 3
-            self.page(list(range(self.ckpt + 1, self.L + 1)))
+            self.replay(list(range(self.ckpt + 1, self.L + 1)))
 
     def run(self, script):
         for step in script:
@@ -172,14 +178,14 @@ def main():
              ["§15.1", "ENG-POISON-005"]),
         case("two clean pages", st(attempt=7), ["start", {"page": [5, 6]}, {"page": [7, 8, 9]}],
              ["ok"] * 5, ["§15.1"]),
-        case("Start replays the tail above the checkpoint page-wise", st(attempt=2, L=7), ["start"],
-             ["ok"] * 3, ["§15.2 step 3", "ENG-STATE-002"]),
+        case("Start replays the entry above the checkpoint", st(attempt=2, L=5), ["start"],
+             ["ok"], ["§15.2 step 3", "ENG-STATE-002"]),
         case("an OS kill in a page: single mode on the next start, no last_failed, no halt",
              st(), ["start", {"page": [5, 6, 7]}, "start"], ["ok", "kill", "ok", "ok", "ok"],
              ["§15.2 step 2", "ENG-POISON-002", "ENG-POISON-003"]),
         case("an OS kill in the second page: the first is replayed page-wise, the second entry by entry",
-             st(), ["start", {"page": [5, 6]}, {"page": [7, 8, 9]}, "start"],
-             ["ok", "ok", "ok", "kill", "ok", "ok", "ok", "ok", "ok"],
+             st(), ["start", {"page": [5]}, {"page": [6, 7, 8]}, "start"],
+             ["ok", "ok", "kill", "ok", "ok", "ok", "ok"],
              ["§15.2 step 2", "ENG-POISON-002"]),
         case("an OS kill in a page, then a kill on the same entry in single mode, then it applies",
              st(), ["start", {"page": [5, 6, 7]}, "start", "start"],
@@ -201,7 +207,7 @@ def main():
              st(attempt=2, marker=[6, 6, 2], ckpt=5, L=7), ["start"], ["ok", "ok"],
              ["§15.2 step 2", "§15.3"]),
         case("a marker at or below the checkpoint is ignored",
-             st(attempt=4, marker=[3, 4, 4], ckpt=4, L=6), ["start"], ["ok", "ok"],
+             st(attempt=4, marker=[3, 4, 4], ckpt=4, L=5), ["start"], ["ok"],
              ["§15.2 step 3"]),
         case("a stale last_failed from a non-consecutive attempt does not halt",
              st(attempt=3, last_failed=[5, 1]), ["start", {"page": [5]}], ["panic", "ok"],

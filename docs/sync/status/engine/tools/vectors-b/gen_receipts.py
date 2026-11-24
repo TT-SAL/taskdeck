@@ -117,6 +117,11 @@ def act(r):
                     e["own_record"] = "kept_for_reseal"
                 cl += ["§24.3", "ENG-RESEAL-001", "ENG-RESEAL-002"]
             else:
+                # An own beat, snap or ctl refused with a re-sealable code: ENG-REF-001 and
+                # §13.3 exclude re-sealable codes from refusal records, while the §13.1 Refuse
+                # row and §24.3 ("dropped"; a ctl "fails its operation's stage") can be read
+                # otherwise. Not decided (README question 3): no case may reach it.
+                assert code not in RESEALABLE, "own beat/snap/ctl with a re-sealable code is not decided"
                 # §13.3 / ENG-REF-001: one refusal record per own entry refused for a
                 # reason other than a re-sealable code; §24.3 second paragraph for
                 # beat, snap and ctl.
@@ -220,12 +225,8 @@ def main():
     add("own cmd refused seal/bad_plaintext: alarm and a refusal record",
         receipt("Refuse", "seal/bad_plaintext", kind="cmd", own=True))
     # Refuse, own beat / snap / ctl.
-    add("own beat refused seal/stale_epoch: dropped with a refusal record, never re-sealed",
-        receipt("Refuse", "seal/stale_epoch", kind="beat", own=True))
-    add("own snap refused seal/stale_epoch: dropped with a refusal record, never re-sealed",
-        receipt("Refuse", "seal/stale_epoch", kind="snap", own=True))
-    add("own ctl refused seal/old_epoch: dropped with a refusal record, never re-sealed",
-        receipt("Refuse", "seal/old_epoch", kind="ctl", own=True))
+    # An own beat, snap or ctl refused with seal/stale_epoch or seal/old_epoch is left out
+    # (README question 3).
     add("own ctl refused seal/ctl_target: dropped with a refusal record",
         receipt("Refuse", "seal/ctl_target", kind="ctl", own=True))
     # Accept cmd.

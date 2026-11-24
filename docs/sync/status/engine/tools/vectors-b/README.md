@@ -8,3 +8,8 @@ spec alone (standard library only, no network, no clock, no randomness). From th
 Running them again gives the committed files byte for byte. `toy.py` is the toy state machine of
 `engine.md` §5.3 written from the spec (used by `gen_pending.py` and `gen_hash.py`); `common.py`
 writes the JSON. The meaning of every field is in `crates/taskdeck-sync/tests/vectors/README.md`.
+
+`check_left_out.py` (run from the repository root) exits non-zero when a vector asserts a value
+the spec leaves open: a refusal record for an own `beat`/`snap`/`ctl` refused with a re-sealable
+code (question 3 of the vectors README), or a multi-entry marker written by the page-wise replay
+at `Start` (question 7).
