@@ -28,6 +28,10 @@ step "suite on the core" bash relay/test/run.sh core
 step "suite on the standby" bash relay/test/run.sh standby
 step "suite on the Worker under wrangler dev" bash relay/test/run.sh worker
 step "no runtime dependencies" bash scripts/gate-lib.sh npm-no-deps relay/package.json
+step "every owned clause is cited by a test" bash scripts/spec-coverage.sh relay
+step "nothing unimplemented" bash scripts/gate-lib.sh no-unimplemented relay
+step "no skipped test" bash scripts/gate-lib.sh no-skipped-tests relay
+step "the shipped Worker bundles (dry run, nothing uploaded)" bash -c '. "${TASKDECK_TOOLS_HOME:-$HOME/.taskdeck-tools}/env.sh" && WRANGLER="$TASKDECK_WRANGLER" WRANGLER_SEND_METRICS=false bash relay/deploy.sh --dry-run'
 
 if [[ "${#failed[@]}" -gt 0 ]]; then
     echo "relay: failed: ${failed[*]}"

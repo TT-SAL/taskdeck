@@ -53,6 +53,12 @@ export const gate = [
     step(req('hello', T('alice'), { headers: { 'Content-Length': ['0', '0'] } }), gateErr(400, 'relay/unexpected_body')),
     step(req('hello', T('alice'), { headers: { 'Content-Length': 'x' } }), gateErr(400, 'relay/unexpected_body')),
   ], { targets: CORE }),
+  g('a body whose length is not the declared one', ['RELAY-GATE-007', 'RELAY-GATE-004'], [
+    step(req('append', T('alice'), { headers: { 'Content-Length': '700' }, body: { $batch: [F('alice', 1)] } }), gateErr(400, 'relay/bad_body')),
+    step(req('append', T('alice'), { headers: { 'Content-Length': '600' }, body: { $batch: [F('alice', 1)] } }), gateErr(400, 'relay/bad_body')),
+    step(req('blob-put', T('alice'), { params: { id: '00112233445566778899aabbccddeeff', part: 0 }, headers: { 'Content-Length': '0' }, body: { $hex: '00' } }), gateErr(400, 'relay/bad_body')),
+    step(req('append', T('alice'), { body: { $batch: [F('alice', 1)] } }), { status: 200, x_td_relay: 'object', object_called: true }),
+  ], { targets: CORE }),
   g('the socket route without an upgrade', ['RELAY-GATE-003'], [
     step(req('socket', T('alice')), gateErr(400, 'relay/bad_upgrade')),
     step(req('socket', T('alice'), { headers: { Upgrade: 'h2c' } }), gateErr(400, 'relay/bad_upgrade')),
