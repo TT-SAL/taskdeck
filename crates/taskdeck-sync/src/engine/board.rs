@@ -651,6 +651,45 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.rebase_due = true;
     }
 
+    /// §19.9: the board resumes from a snapshot at `s`. The entries up to `s` are not
+    /// applied to the state; the registry, the own records and the heads follow them.
+    pub(crate) fn board_jump_to(&mut self, s: u64) {
+        while self.pipe.queue.front().is_some_and(|e| e.seq <= s) {
+            let Some(e) = self.pipe.queue.pop_front() else { break };
+            if e.class == Class::Accept
+                && let Some(o) = e.opened.as_ref() {
+                    match o.kind {
+                        Kind::Beat => self.apply_beat(&e),
+                        Kind::Snap => self.apply_snap(&e),
+                        _ => {}
+                    }
+                    self.note_last_entry(e.author, o.at_ms, e.seq, o.based_on.seq);
+                }
+            if e.own {
+                let idx = e.opened.as_ref().and_then(|o| self.rec_index(&o.entry_id));
+                if let Some(i) = idx {
+                    let rec = self.outbox.remove(i);
+                    self.own_entry_done(&rec.r, e.seq, None);
+                    self.pipe.drops.push(OutboxOp::Drop(rec.r.entry_id));
+                }
+            }
+            self.b = e.seq;
+            self.cb = e.chain;
+            let v = self.sealer.view(&e.m);
+            self.no_b = v.devices.iter().find(|d| d.dev == self.own).map(|d| d.device_no);
+            self.mb = Some(e.m);
+        }
+        self.flush_batch_records(false);
+        while self.pipe.batches.front().is_some_and(|b| b.1 <= s) {
+            self.pipe.batches.pop_front();
+        }
+        if let Some(b) = self.pipe.batches.front_mut() {
+            b.0 = b.0.max(s + 1);
+        }
+        self.pipe.skipped.clear();
+        self.status_dirty = true;
+    }
+
     // ------------------------------------------------------------------ the registry (§7.3, §19.5, §23.3)
 
     fn note_last_entry(&mut self, dev: Dev, at_ms: i64, seq: u64, based_on_seq: u64) {

@@ -219,6 +219,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.set_session(SessionState::Live);
             }
             self.fenced_check();
+            self.rejoin_at_head();
         }
         if self.pipe.pages_since_rebase >= 16 && self.pipe.batches.is_empty() {
             // §8.4 case 2.

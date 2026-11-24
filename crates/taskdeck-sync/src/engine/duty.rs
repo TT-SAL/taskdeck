@@ -192,6 +192,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.shred_step();
         self.fence_lookup();
         self.repair_step();
+        self.reboot_step();
         if !self.eligible() {
             if self.eligible_but_stale() && self.duty_pending() {
                 // A duty waits only for a head newer than 600,000 ms: ask for one.

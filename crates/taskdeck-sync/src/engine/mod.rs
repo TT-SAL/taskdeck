@@ -120,6 +120,10 @@ pub(crate) enum Want {
     RestoreChunk,
     RestoreCall,
     Repair,
+    /// Rejoin and rebootstrap (boot.rs).
+    RejoinList,
+    RejoinFetch,
+    RebootFetch,
 }
 
 impl Want {
@@ -748,6 +752,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.repair_lost();
                 "admin/restore_tail"
             }
+            Want::RejoinList | Want::RejoinFetch => {
+                self.rejoin_lost();
+                "blob"
+            }
+            Want::RebootFetch => {
+                self.reboot_lost();
+                "blob"
+            }
             other => self.op_want_lost(&other),
         }
     }
@@ -805,6 +817,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let Some(w) = self.take_want(req) else { return };
         match w {
             Want::SnapUpload => self.snapshot_uploaded(matches!(result, Ok(BlobOk::Uploaded))),
+            Want::RejoinList | Want::RejoinFetch => self.rejoin_blob(w, result),
+            Want::RebootFetch => self.reboot_blob(result),
             other => self.op_want_blob(other, result),
         }
     }
