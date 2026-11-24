@@ -1175,7 +1175,7 @@ fn a_recovery_key_change_is_registered_by_the_engine_only_in_a_repair() {
     let e1 = entry(5, &a);
     let change = a.e.sealer.seal_recovery_key_change(&m_old, old.last_ctr + 1, &e1, (spk, hpk)).expect("sealed");
     let at = a.wall;
-    assert!(net.relay().append(at, &Cred::Door, &[change.frame.clone()]).result.is_ok());
+    assert!(net.relay().append(at, &Cred::Door, std::slice::from_ref(&change.frame)).result.is_ok());
     let k_seq = net.log_len();
     let admins = net.admins.len();
     net.settle(&mut [&mut a, &mut b]);
@@ -1187,7 +1187,7 @@ fn a_recovery_key_change_is_registered_by_the_engine_only_in_a_repair() {
     let (_, spk2, hpk2) = crate::fake::FakeSealer::join_keys(280);
     let e2 = entry(6, &a);
     let stale = a.e.sealer.seal_recovery_key_change(&m_old, old.last_ctr + 2, &e2, (spk2, hpk2)).expect("sealed");
-    assert!(net.relay().append(at, &Cred::Door, &[stale.frame.clone()]).result.is_ok());
+    assert!(net.relay().append(at, &Cred::Door, std::slice::from_ref(&stale.frame)).result.is_ok());
     let refused_seq = net.log_len();
     a.set(2, 2, 2);
     net.settle(&mut [&mut a, &mut b]);
