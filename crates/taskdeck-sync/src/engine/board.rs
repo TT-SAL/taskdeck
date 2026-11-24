@@ -886,7 +886,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// `Shutdown` (§18.1 case 3, ENG-CKPT-002).
     pub(crate) fn on_shutdown(&mut self) {
         self.exiting = true;
-        if self.state.is_some() && self.b != self.pipe.ckpt_b && !self.jobs.holds_board() {
+        // §18.1 case 3 has no condition: the registry can change while `B` stands still.
+        if self.state.is_some() && !self.jobs.holds_board() {
             self.write_checkpoint();
         }
         self.flush_meta();
