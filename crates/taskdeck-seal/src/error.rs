@@ -63,12 +63,6 @@ pub enum SealError {
     CtlWraps,
     /// `seal/ctl_last_device` (seal.md §22).
     CtlLastDevice,
-    /// `seal/ctl_pending` (seal.md §22).
-    CtlPending,
-    /// `seal/ctl_no_pending` (seal.md §22).
-    CtlNoPending,
-    /// `seal/ctl_window` (seal.md §22).
-    CtlWindow,
     /// `seal/ctl_home_gen` (seal.md §22).
     CtlHomeGen,
     /// `seal/ctl_support` (seal.md §22).
@@ -205,9 +199,6 @@ impl SealError {
             SealError::CtlEpoch => "seal/ctl_epoch",
             SealError::CtlWraps => "seal/ctl_wraps",
             SealError::CtlLastDevice => "seal/ctl_last_device",
-            SealError::CtlPending => "seal/ctl_pending",
-            SealError::CtlNoPending => "seal/ctl_no_pending",
-            SealError::CtlWindow => "seal/ctl_window",
             SealError::CtlHomeGen => "seal/ctl_home_gen",
             SealError::CtlSupport => "seal/ctl_support",
             SealError::Commitment => "seal/commitment",

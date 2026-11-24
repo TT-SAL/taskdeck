@@ -1144,7 +1144,7 @@ Each writer mints its own backup-read token (`relay.md` §12.11, V1-2): before a
 
 ### 15.5 The pinned recovery fingerprint
 
-The creating desktop pins the recovery key it created (§18.1). Another desktop pins it when the user types or compares the fingerprint printed on the recovery sheet (`pin_recovery_fingerprint(typed)`, §17.11): the typed text, normalised as `seal.md` §5.2, must equal the membership's current recovery key fingerprint (`device/fingerprint_mismatch` otherwise). On `Notify(RecoveryKeyChanged)` after a confirmed or direct change, `pin_needed` is set and backups stop with `device/backup_unpinned` until the user pins the new fingerprint on this device's own screen (SYNC.md §5.5, SEAL-BKP-006).
+The creating desktop pins the recovery key it created (§18.1). Another desktop pins it when the user types or compares the fingerprint printed on the recovery sheet (`pin_recovery_fingerprint(typed)`, §17.11): the typed text, normalised as `seal.md` §5.2, must equal the membership's current recovery key fingerprint (`device/fingerprint_mismatch` otherwise). On `Notify(RecoveryKeyChanged)` after a recovery-key change, `pin_needed` is set and backups stop with `device/backup_unpinned` until the user pins the new fingerprint on this device's own screen (SYNC.md §5.5, SEAL-BKP-006).
 
 - **DEV-BKP-007** (device, desktop) A desktop MUST pin a recovery fingerprint only from the user's own confirmation on its screen, compared with the membership's current recovery key, and MUST stop writing backups from a recovery-key change until the new fingerprint is pinned.
 
@@ -1452,8 +1452,8 @@ These are flows (§18). Their calls:
 | `join_sas(digits)` | D, A | `()`; `status().pairing` says "accepted" or "does not match" | `seal/sas_mismatch` after the third | — | short | all |
 | `re_pair(address, code, device_name)` | D, A | as `join`, for a revoked, halted, stranded or closed identity, with its unsent commands resubmitted after the join (§18.4) | as `join` | — | short | all |
 | `begin_recovery_change()` | D | `RecoveryChangeFlow` (§18.5) | `engine/op_busy` | auth | short | desktops |
-| `confirm_recovery_key()` | D | a ticket | `engine/op_busy`, the window rule (ENG-WINDOW-002) as `device/recovery_window` | auth | short | desktops |
-| `cancel_recovery_key()` | D | a ticket | | auth | short | desktops |
+| `RecoveryChangeFlow::confirm_current_sheet(typed)` | D | `()` | `seal/sheet_*` codes, `device/sheet_mismatch` | — | short | desktops |
+| `RecoveryChangeFlow::confirm_sheet(typed)`, `finish()` | D | `()`; `finish` returns the seq of the accepted entry | as `CreateFlow::confirm_sheet`; for `finish` the relay's codes of the append, and the code of a refused entry | — | long | desktops |
 | `reset_trust(request)` | D | `CreateFlow` with the current confirmed board as source (§18.6) | as `begin_create` | auth | long | desktops |
 
 The recovery sheet's data exists only inside a `CreateFlow` or `RecoveryChangeFlow` (`sheet()`), in zeroizing memory, never in a file: the desktop prints it through the operating system's print dialog from memory, or shows it full screen with capture excluded (V3-15). After the flow ends the seed is gone; the relay address and the fingerprints stay available in `status()`.
@@ -1573,7 +1573,7 @@ The machine aborts 600,000 ms after its start (SEAL-PAIR-013). A device that cra
 
 ### 18.5 The recovery-key change (desktop)
 
-`begin_recovery_change()` (auth) generates a new seed and returns a `RecoveryChangeFlow` with `sheet()` and `confirm_sheet(typed)` as in §18.1 steps 5 and 6 (the test backup is sealed to the new key). `finish()` sends `Op(ProposeRecoveryKey { sign_pk, hpke_pk })` with the new public keys and erases the seed (`engine.md` §26.1). The 72-hour window, its banner on every device and the confirmation on a different device (`confirm_recovery_key()`, offered when `status().engine.recovery_change.can_confirm`) or a cancellation (`cancel_recovery_key()`) are the engine's. The new sheet's relay address is the board's current one. After the change is confirmed, each backup writer pins the new fingerprint on its own screen (§15.5). The `direct` mode, which needs the current sheet, is the recovery tool's (`seal.md` §13.11).
+`begin_recovery_change()` (auth) returns a `RecoveryChangeFlow`. The recovery key changes only with the current sheet (`seal.md` §13.11): `confirm_current_sheet(typed)` takes the current sheet as typed (`RecoverySeed::from_sheet`, `seal.md` §18.2) and requires its recovery keys to be those of the membership's current recovery record (`device/sheet_mismatch`). Then the flow draws a new seed, with `sheet()` and `confirm_sheet(typed)` as in §18.1 steps 5 and 6 (the test backup is sealed to the new key); the new sheet's relay address is the board's current one. `finish()` seals the `K`-shape entry (`seal.md` §12.1) with the sealer adapter, signed by the current recovery identity: `RecoveryKeyChange` with the new public keys, then `EpochRotated` to `E + 1` with a fresh root wrapped to every current device and to the new recovery key, under epoch `E` with its root, `based_on` this device's head and `ctr` one above the current recovery record's `last_ctr`. It appends the frame with the door (`relay.md` §9.3, RELAY-SEQ-009), as the recovery tool appends its entries (§15.8 step 9, `RecoveryLink::append`, one re-seal on `gap`), and, once this device has classified the entry `Accept`, sends `recovery_register` for it (`relay.md` §12.12), and none for a refused entry (a lost rotation race), which fails the call with its code. It erases both seeds when it returns, and `RecoveryChangeFlow` erases them when dropped (DEV-SHEET-001). After the change, each backup writer pins the new fingerprint on its own screen (§15.5). A lost sheet does not change the recovery key: it is answered by Reset trust (§18.6).
 
 ### 18.6 Reset trust (desktop)
 
@@ -1635,7 +1635,8 @@ Request: `{"id": u53, "cmd": string, ...arguments}`. Answer: `{"id": u53, "ok": 
 | `pair_status`, `pair_confirm`, `pair_cancel` | | | `{"state": …, "sas"?: digits}` |
 | `join`, `re_pair` | `address`, `code`, `name` | | |
 | `join_sas` | `digits` | | |
-| `begin_recovery_change`, `finish_recovery_change`, `confirm_recovery_key`, `cancel_recovery_key` | | | |
+| `begin_recovery_change`, `finish_recovery_change` | | | `{"seq": …}` (finish) |
+| `confirm_current_sheet` | `text` | `RecoveryChangeFlow::confirm_current_sheet` | |
 | `reset_trust` | `relay`, `create_secret`, `name` | | |
 | `backup_now`, `backup_status`, `pin_fp` | `text` (pin) | | |
 | `set_destinations` | `destinations` | | |
@@ -1682,7 +1683,7 @@ Each of V2's fifteen scenarios (`engine.md` §32) is a test; the numbers are V2'
 | S14 compaction | desk, laptop, phone | 400 days of manual clock with daily activity, the phone away 380 days | the phone rejoins after `confirm_rejoin`, with `continuity_unchecked` |
 | S15 deletions | desk, laptop | `purge`, then `delete_backups_before` | every log and base truncated, the relay purged, backups deleted only after the call |
 
-Besides these: pairing both ways (desktop as E, phone as N; and the phone as E at `android:30`), revocation with replacement, restore to a point, move board with the move code, reset trust, the recovery-key change across 72 hours of manual clock, nightly backups and segments with retention over 400 days of manual clock, the recovery tool's top-up and fence against the standby, and "Export legacy" read back by `import_check`.
+Besides these: pairing both ways (desktop as E, phone as N; and the phone as E at `android:30`), revocation with replacement, restore to a point, move board with the move code, reset trust, the recovery-key change with the current sheet, nightly backups and segments with retention over 400 days of manual clock, the recovery tool's top-up and fence against the standby, and "Export legacy" read back by `import_check`.
 
 ### 20.3 The hostile relay must always raise an alarm
 
@@ -1765,8 +1766,7 @@ Codes the device returns from facade calls, puts in the open report, in statuses
 | `device/not_on_this_platform` | the call is not offered on this platform | DEV-FACADE-007 | hide the control |
 | `device/needs_api30` | Android below API 30 | DEV-FACADE-007 | use a desktop |
 | `device/restore_target` | the seq is not an offered restore target | §17.8 | choose from `restore_targets` |
-| `device/recovery_window` | the 72 hours have not passed, or this device proposed | §17.10 | wait, or confirm on another device |
-| `device/sheet_mismatch` | the retyped sheet is not the seed | §18.1 | retype |
+| `device/sheet_mismatch` | the retyped sheet is not the seed, or the current sheet typed for a recovery-key change is not the board's current recovery key | §18.1, §18.5 | retype |
 | `device/sheet_test_failed` | the test backup did not open | §18.1 | report the bug; do not finish |
 | `device/create_failed` | the relay refused `create`, or the genesis snapshot kept for it is damaged | §18.1 | show the relay code; for a damaged snapshot, abandon the create and start again |
 | `device/pair_state` | a pairing call out of order | §17.10 | follow the screen |
@@ -2000,8 +2000,6 @@ impl Device {
     pub fn join_sas(&self, digits: &str) -> Result<(), DeviceError>;
     pub fn re_pair(&self, address: &str, code: zeroize::Zeroizing<String>, device_name: &str) -> Result<(), DeviceError>;
     pub fn begin_recovery_change(&self) -> Result<RecoveryChangeFlow, DeviceError>;
-    pub fn confirm_recovery_key(&self) -> Result<u64, DeviceError>;
-    pub fn cancel_recovery_key(&self) -> Result<u64, DeviceError>;
 
     // ---------- backups (§17.11)
     pub fn backup_destinations(&self) -> Vec<Destination>;
@@ -2091,9 +2089,10 @@ pub struct SheetData { pub seed_groups: zeroize::Zeroizing<String>, pub relay_ad
 pub struct CreatedBoard { pub address: String }
 pub struct RecoveryChangeFlow { /* ZeroizeOnDrop */ }
 impl RecoveryChangeFlow {
+    pub fn confirm_current_sheet(&mut self, typed: &str) -> Result<(), DeviceError>;
     pub fn sheet(&self) -> SheetData;
     pub fn confirm_sheet(&mut self, typed: &str) -> Result<(), DeviceError>;
-    pub fn finish(self) -> Result<u64, DeviceError>;                                 // ticket of the proposal
+    pub fn finish(self) -> Result<u64, DeviceError>;                                 // seq of the accepted K-shape entry
 }
 pub struct PairSheet { pub address_display: String, pub code_display: zeroize::Zeroizing<String> }
 pub enum PairState { Idle, ShowingCode, ShowSas { digits: String }, Registering, AskSas, Accepted,

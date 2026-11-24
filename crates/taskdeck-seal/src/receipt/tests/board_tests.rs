@@ -272,6 +272,22 @@ impl Board {
         self.seal(who, &plain, ctr, epoch, &root)
     }
 
+    /// A control frame whose `items` value is `items` exactly as given (no
+    /// table or shape check), with a valid inner signature by the author
+    /// over its bytes.
+    pub fn ctl_json(&mut self, who: Who, items: serde_json::Value, sp: &Spec) -> Vec<u8> {
+        let (ctr, epoch, root, at_ms, based_on) = self.fill(who, sp);
+        let entry_id = EntryId(rand());
+        let bytes = crate::canon::encode(&items).unwrap();
+        let dev = self.dev(who);
+        let inner_bytes = crate::payloads::ctl_inner(&self.board, &dev, ctr, &entry_id, at_ms, &bytes);
+        let (_, sk) = signer_identity(&self.signer(who), &self.board).unwrap();
+        let sig = sign_with(sk, &[&inner_bytes]);
+        let payload = crate::canon::encode(&crate::payloads::ctl_value(items, &sig)).unwrap();
+        let plain = Plain { entry_id, kind: Kind::Ctl, at_ms, based_on, payload };
+        self.seal(who, &plain, ctr, epoch, &root)
+    }
+
     /// A frame with any `ver`, `suite` and padded plaintext, signed by `who`.
     #[allow(clippy::too_many_arguments)]
     pub fn raw(&self, who: Who, ctr: u64, ver: u8, suite: u8, epoch: u32, root: &EpochRoot, padded: &[u8]) -> Vec<u8> {
@@ -420,8 +436,8 @@ impl Board {
             }
         }
         let new_rec = prefix.iter().find_map(|i| match i {
-            CtlItem::RecoveryKeyChange(k) if matches!(k.mode, RecoveryKeyMode::Direct | RecoveryKeyMode::Confirm) => {
-                let p = RecoveryPublic { sign_pk: k.sign_pk.unwrap(), hpke_pk: k.hpke_pk.unwrap() };
+            CtlItem::RecoveryKeyChange(k) => {
+                let p = RecoveryPublic { sign_pk: k.sign_pk, hpke_pk: k.hpke_pk };
                 Some((p.dev(&self.board), p.hpke_pk))
             }
             _ => None,

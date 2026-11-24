@@ -42,8 +42,7 @@ pub use chain::{
 pub use encodings::relay_origin;
 pub use entries::{
     AckVerdict, Beat, BeatAck, BeatState, CtlItem, DeviceAdded, EpochRotated, Fence, FrameHeader,
-    Genesis, GenesisDevice, GenesisSnapshot, Kind, Plain, RecoveryKeyChange, RecoveryKeyMode,
-    ResetTo, RulesUpgrade, RulesUpgradeMode, SkipItem, SnapAnnounce, beat_payload, ctl_payload,
+    Genesis, GenesisDevice, GenesisSnapshot, Kind, Plain, RecoveryKeyChange, ResetTo, RulesUpgrade, RulesUpgradeMode, SkipItem, SnapAnnounce, beat_payload, ctl_payload,
     frame_hash, frame_header, new_entry_id, padded_len, seal_frame, snap_payload,
 };
 #[cfg(feature = "test-entropy")]
@@ -57,7 +56,7 @@ pub use keys::{
     RecoverySeed, Signer, SymKey, board_id, derive_epoch_key, unwrap_root, wrap_root,
 };
 pub use membership::{
-    DeviceRecord, DeviceStatus, GenesisAnchor, Membership, PendingRecovery, RecoveryRecord,
+    DeviceRecord, DeviceStatus, GenesisAnchor, Membership, RecoveryRecord,
 };
 pub use receipt::{Class, Halt, Opened, OwnIdentity, Receipt, ReceiptInput, classify};
 pub use signatures::{

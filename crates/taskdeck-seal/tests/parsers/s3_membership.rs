@@ -23,8 +23,9 @@ fn fixture() -> &'static Fixture {
         let items = s.rotate_items(vec![CtlItem::DeviceRevoked(s.dev(Who::D(2)))]);
         frames.push(s.ctl(Who::D(0), items, &Spec::default()));
         let k = s.new_recovery().public();
-        let p = CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode: RecoveryKeyMode::Propose, sign_pk: Some(k.sign_pk), hpke_pk: Some(k.hpke_pk) });
-        frames.push(s.ctl(Who::D(1), vec![p], &Spec::default()));
+        let p = CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: k.sign_pk, hpke_pk: k.hpke_pk });
+        let items = s.rotate_items(vec![p]);
+        frames.push(s.ctl(Who::R, items, &Spec::default()));
         let membership = s.m.to_canonical_bytes();
         Fixture { sim: s, membership, frames }
     })

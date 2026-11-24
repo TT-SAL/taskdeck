@@ -6,7 +6,7 @@
 
 This spec fixes everything the replica engine (`crates/taskdeck-sync/`) decides: which events it consumes, which effects it emits and in what order, what it persists and when, how it turns the receipt classes of `seal.md` §14 into actions, and every duty a device takes when no device is always on. It realises:
 
-- SYNC.md §4.3 (client rules 1 to 6), §4.5 (trial apply, rules upgrades, the halted view, the clock), §4.6 (Skip, the naming hold, the persistent refusal and notice lists), §4.7 (the view, catch-up, snapshots, compaction duty, bootstrap, purge), §4.8 (integrity checks, evidence, stop and show, restore tail, determinism mismatch), §4.2 (what the outcomes and the three halts mean for a replica), §5.3 (the engine's part of pairing: the bundle snapshot and the `DeviceAdded` entry), §5.4 (revocation, rotation, races, re-sealing, a returning revoked device, reset trust), §5.5 (the 72-hour recovery-key change window), §6.4 and §6.6 (restore to a point), §6.7 (move board, the move code, following a move), §9 (bootstrap from the genesis);
+- SYNC.md §4.3 (client rules 1 to 6), §4.5 (trial apply, rules upgrades, the halted view, the clock), §4.6 (Skip, the naming hold, the persistent refusal and notice lists), §4.7 (the view, catch-up, snapshots, compaction duty, bootstrap, purge), §4.8 (integrity checks, evidence, stop and show, restore tail, determinism mismatch), §4.2 (what the outcomes and the three halts mean for a replica), §5.3 (the engine's part of pairing: the bundle snapshot and the `DeviceAdded` entry), §5.4 (revocation, rotation, races, re-sealing, a returning revoked device, reset trust), §5.5 (what a device does with a recovery-key change), §6.4 and §6.6 (restore to a point), §6.7 (move board, the move code, following a move), §9 (bootstrap from the genesis);
 - the verifier findings V1-1, V1-10, V1-11, V1-16; V2-3, V2-5 (the `based_on` the engine carries), V2-6, V2-7, V2-8, V2-9, V2-10, V2-13 (purge), V2-14, V2-15, V2-16 (the persistent lists), V2-17, V2-20 as modified, V2-21; V3-2, V3-6 (the data behind the phone's sync line, refusals and marks), V3-14; the fifteen V2 scenarios S1 to S15 (§32);
 - SYNC_PLAN.md §2 (no hub, no always-on device, limited administration from the phone), §3.4 (security rules), §6.1 item 3, §6.5 (the `engine` stage, its simulator and its gate), §6.7 (what `device` wires in), §6.9 and §6.10 (what the two apps show);
 - the rulings S5 to S8, S10, S13 to S15, S24, S25 and S27 of `docs/sync/status/foundation.md`, and decision D6 (the traits live in this crate).
@@ -336,7 +336,6 @@ pub struct BeatInfo { pub rules: Vec<u32>, pub envelopes: Vec<(u8, u8)>, pub has
 pub struct SnapInfo { pub seq: u64, pub hash: Hash32, pub hash_version: u32, pub blob: [u8; 16],
                       pub sha256: Hash32, pub size: u64, pub parts: u32, pub inflated: u64, pub epoch: u32 }
 
-pub enum RecoveryMode { Direct, Propose, Confirm, Cancel }
 pub enum UpgradeMode { Normal, Override }
 pub enum CtlItem {
     Genesis { hash_version: u32, state_hash: Hash32 },
@@ -344,7 +343,7 @@ pub enum CtlItem {
     DeviceRevoked { dev: Dev },
     DeviceReinstated { dev: Dev },
     EpochRotated { epoch: u32, purge_before: Option<u64> },
-    RecoveryKeyChange { mode: RecoveryMode, key_fp: Option<String> },
+    RecoveryKeyChange { key_fp: String },
     Fence { host: String, door: [u8; 5], home_gen: u32 },
     ResetTo { seq: u64, state_hash: Hash32, hash_version: u32 },
     Skip { seq: u64, frame_hash: Hash32 },
@@ -353,7 +352,6 @@ pub enum CtlItem {
 pub enum CtlIntent {
     Rotate { revoke: Vec<Dev>, reinstate: Vec<Dev>, purge_before: Option<u64> },
     AddDevice { dev: Dev, sign_pk: Hash32, hpke_pk: Hash32, name: String, transcript: Hash32, bootstrap_seq: u64 },
-    RecoveryChange { mode: RecoveryMode, sign_pk: Option<Hash32>, hpke_pk: Option<Hash32> },
     Fence { host: String, door: [u8; 5], home_gen: u32 },
     ResetTo { seq: u64, state_hash: Hash32, hash_version: u32 },
     Skip { targets: Vec<(u64, Hash32)> },
@@ -462,21 +460,18 @@ pub struct DeviceView { pub dev: Dev, pub sign_pk: Hash32, pub device_no: u16, p
                         pub rules: Vec<u32>, pub envelopes: Vec<(u8, u8)>, pub hash_versions: Vec<u32> }
 pub struct RecoveryView { pub dev_r: Dev, pub sign_pk: Hash32, pub hpke_pk: Hash32, pub since_seq: u64,
                           pub until_seq: u64, pub last_ctr: u64 }
-pub struct PendingRecovery { pub proposer: Dev, pub sign_pk: Hash32, pub hpke_pk: Hash32, pub key_fp: String,
-                             pub seq: u64, pub start_ms: i64 }
 pub struct MembershipView {
     pub board_id: [u8; 16], pub rules: u32, pub epoch: u32, pub epoch_seq: u64, pub epoch_clock_ms: i64,
     pub clock_ms: i64, pub purge_seq: u64, pub home_gen: u32, pub home_seq: u64,
     pub home_host: String, pub home_door: [u8; 5], pub devices: Vec<DeviceView>,
     pub recovery_dev: Dev, pub recovery_fp: String, pub recovery: Vec<RecoveryView>,
-    pub pending_recovery: Option<PendingRecovery>,
     pub pending_override: Option<(u32, Dev, u64)>,             // rules, voter, seq
     pub last_reset: Option<(u64, u64)>,                        // at_seq, target
     pub skips: Vec<(u64, Hash32)>, pub ctl_seqs: Vec<u64>,
 }
 ```
 
-Each field is the field of the same name of `seal.md` §13.1 (`dev_r` is `dev_R`; `recovery` is its `recovery` list, `pending_recovery` its `pending_recovery` with the new key's fingerprint added); `key_fp`, `recovery_fp` and `PendingRecovery.key_fp` are `seal.md` §6.8's text. `recovery_dev` and `recovery_fp` are those of the current entry of `recovery` (`until_seq = 0`). `devices` is ascending by `dev`, `recovery` ascending by `since_seq`.
+Each field is the field of the same name of `seal.md` §13.1 (`dev_r` is `dev_R`; `recovery` is its `recovery` list); `key_fp` and `recovery_fp` are `seal.md` §6.8's text. `recovery_dev` and `recovery_fp` are those of the current entry of `recovery` (`until_seq = 0`). `devices` is ascending by `dev`, `recovery` ascending by `since_seq`.
 
 ### 6.3 The fake sealer
 
@@ -508,7 +503,7 @@ Each field is the field of the same name of `seal.md` §13.1 (`dev_r` is `dev_R`
 | 3 | `DeviceRevoked` | `dev[16]` |
 | 4 | `DeviceReinstated` | `dev[16]` |
 | 5 | `EpochRotated` | `u32 epoch ‖ commit[32] ‖ u8 n ‖ n × wrap[96] ‖ u64 purge_before` (0 means absent) |
-| 6 | `RecoveryKeyChange` | `u8 mode` (1 direct, 2 propose, 3 confirm, 4 cancel), then `sign_pk[32] ‖ hpke_pk[32]` unless the mode is cancel |
+| 6 | `RecoveryKeyChange` | `sign_pk[32] ‖ hpke_pk[32]` |
 | 7 | `Fence` | `vb8(host) ‖ door[5] ‖ u32 home_gen` |
 | 8 | `ResetTo` | `u64 seq ‖ state_hash[32] ‖ u32 hash_version` |
 | 9 | `Skip` | `u64 seq ‖ frame_hash[32]` |
@@ -1173,7 +1168,7 @@ Membership effects run when the entry's membership is committed (§12.3 step 9),
 | `DeviceRevoked` | banner; if the target is this device: §24.4 | none |
 | `DeviceReinstated` | banner; if the target is this device: §24.4 | none |
 | `EpochRotated` | `WriteIdentity` when this device learned the root (D4); the epoch gate of §24.2; banner `KeysRotated` when the entry has no revoke or reinstate item; with `purge_before`: banner `HistoryPurged` and §28.2 | with `purge_before`: §28.2's local purge |
-| `RecoveryKeyChange` | banners per mode (§26.1); the pinned recovery fingerprint prompt (`device.md`, SEAL-BKP-006) on a `direct` or `confirm` | none |
+| `RecoveryKeyChange` | banner `RecoveryChanged` (§26.1); the pinned recovery fingerprint prompt (`device.md`, SEAL-BKP-006) | none |
 | `Fence` | banner `Moved`; §28.3 | none |
 | `ResetTo` | banner `Reset` | §28.1 |
 | `Skip` | banner `Skipped`; if a target is this device's crash-halt entry: §16.2 | §17.3 |
@@ -1195,17 +1190,17 @@ pub struct Banner {
     pub detail: BannerDetail, pub acked: bool,
 }
 pub enum BannerKind { DeviceAdded, DeviceRevoked, DeviceReinstated, KeysRotated, HistoryPurged,
-                      RecoveryProposed, RecoveryConfirmed, RecoveryChanged, RecoveryCancelled,
+                      RecoveryChanged,
                       Moved, Reset, Skipped, RulesUpgraded, RulesVote }
-pub enum BannerDetail { None, Purge { before_seq: u64 }, Recovery { key_fp: String, confirm_after_ms: Option<i64> },
+pub enum BannerDetail { None, Purge { before_seq: u64 }, Recovery { key_fp: String },
                         Moved { host: String, home_gen: u32 }, Reset { target: u64 },
                         Skipped { target: u64, target_author: Dev }, Rules { version: u32 } }
 ```
 
-A banner is created on every device except the entry's author device. This includes the device that a `DeviceAdded` names: it applies that entry after its join (§19.8), so it shows a `DeviceAdded` banner about its own addition. There is one exception: `RecoveryProposed` is created on every device, the proposer's included. A banner stays until the user acknowledges it on that device (`UserAction::AckBanner`), except `RecoveryProposed`, which cannot be acknowledged while its proposal is pending and is marked acknowledged when the proposal is confirmed or cancelled (SYNC.md §5.3 step 6, §5.5; V1-2). Banners are persisted in `Meta` (at most 256; when full, the oldest acknowledged ones go first, then the oldest).
+A banner is created on every device except the entry's author device. This includes the device that a `DeviceAdded` names: it applies that entry after its join (§19.8), so it shows a `DeviceAdded` banner about its own addition. A banner stays until the user acknowledges it on that device (`UserAction::AckBanner`) (SYNC.md §5.3 step 6, §5.5; V1-2). Banners are persisted in `Meta` (at most 256; when full, the oldest acknowledged ones go first, then the oldest).
 
 - **ENG-BANNER-001** (engine) The engine MUST create a banner for every accepted control item of §14.1 that names one, on every device but the author's (the device a `DeviceAdded` names included), with the author's name and key fingerprint.
-- **ENG-BANNER-002** (engine) The engine MUST keep each banner until the user acknowledges it on that device, and MUST NOT let a `RecoveryProposed` banner be acknowledged while its proposal is pending.
+- **ENG-BANNER-002** (engine) The engine MUST keep each banner until the user acknowledges it on that device.
 
 ## 15. Poison pills
 
@@ -1296,7 +1291,7 @@ It then enqueues a `ctl` record with `CtlIntent::Skip { targets: [(t, H(frame))]
 
 ### 17.2 Frames a Skip needs
 
-When `classify` returns `NeedFrames`, for each `(t, hash)`: the engine reads the frame at `t` from its log when `t ≥ log_floor` (`ReadLog`), otherwise from the relay (`Read { after: t − 1, limit: 1 }`, whose entry must have seq `t`); the page answering this read is used only here, for that one entry, and is not processed by §12.3 (its head, floors and flags change nothing); it checks `H(frame) = hash` and classifies the entry again with the frame supplied. A frame that is held nowhere (below this device's log and the relay's floor) stops the engine with the local fault `engine/skip_unreachable` and shows it as an integrity problem without evidence (`seal.md` §27 item 12).
+When `classify` returns `NeedFrames`, for each `(t, hash)`: the engine reads the frame at `t` from its log when `t ≥ log_floor` (`ReadLog`), otherwise from the relay (`Read { after: t − 1, limit: 1 }`, whose entry must have seq `t`); the page answering this read is used only here, for that one entry, and is not processed by §12.3 (its head, floors and flags change nothing); it checks `H(frame) = hash` and classifies the entry again with the frame supplied. A frame that is held nowhere (below this device's log and the relay's floor) stops the engine with the local fault `engine/skip_unreachable` and shows it as an integrity problem without evidence (`seal.md` §27 item 11).
 
 - **ENG-SKIP-001** (engine) The engine MUST obtain every frame a `NeedFrames` names, from its own log or from the relay, check its hash, and classify the entry again before it processes any later entry.
 
@@ -1730,7 +1725,6 @@ On the accepted entry that activates `v`: `SM::upgrade(v)` (ENG-SM-002), a check
 
 | Window | Length | Decided from | What a local clock only prompts |
 |---|---|---|---|
-| recovery-key change (§26.1) | 259,200,000 ms | `start_ms` (log clock after the proposal) and the confirming entry's `at_ms` (`seal.md` §13.11) | when the confirm action is offered |
 | stale-epoch acceptance | 2,592,000,000 ms | the log clock (`seal.md` §13.9) | nothing |
 | active member for `RulesUpgrade` | 2,592,000,000 ms | beats' `at_ms` (`seal.md` §13.10) | nothing |
 | old roots kept after a purge | 2,592,000,000 ms | the log clock (§28.2) | nothing |
@@ -1744,22 +1738,19 @@ Every window that decides whether an entry is valid is decided by the sealer fro
 
 - **ENG-WINDOW-001** (engine) The engine MUST NOT accept, refuse, apply or skip any entry because of `wall_ms`, `mono_ms` or a relay time.
 
-### 26.1 The 72-hour recovery-key change
+### 26.1 The recovery-key change
 
-SYNC.md §5.5, V1-2, `seal.md` §13.11.
+SYNC.md §5.5, V1-2, `seal.md` §13.11. The recovery key changes only by a `K`-shape entry that the current recovery identity signs, which needs the current sheet: a desktop's recovery-key change (`device.md` §18.5) or the recovery tool seals and appends it. The engine holds no recovery key, so it never composes one, and no operation of §28 starts one. It is no timed window: it takes effect at the entry that installs the new key. A lost sheet is answered by "Reset trust" (§28.7), not by a recovery-key change.
 
 | Step | Who | Engine |
 |---|---|---|
-| propose | a current device, on `Operation::ProposeRecoveryKey { sign_pk, hpke_pk }` (the new sheet is made by `device.md`/`recovery`) | enqueues a `P`-shape entry (`RecoveryChange { Propose }`) |
-| the window | every device | on acceptance, a `RecoveryProposed` banner on every device, the proposer's too, with the new key's fingerprint and `confirm_after_ms = start_ms + 259,200,000`; it stays while the proposal is pending (ENG-BANNER-002) |
-| confirm | a current device other than the proposer, on `Operation::ConfirmRecoveryKey`, offered only when `wall_ms ≥ confirm_after_ms` | enqueues a `K`-shape entry (`RecoveryChange { Confirm }` with `pending_recovery.sign_pk` and `hpke_pk`, §6.2; the sealer adds the rotation that wraps to the new key) appended as an ordinary entry (`via: Append`); once this device classifies it `Accept`, it sends `RecoveryRegisterSeq { seq, dev_r, sign_pk, frame_hash }` for it (`relay.md` §12.12), with `dev_r` and `sign_pk` those of the `recovery` entry the confirmation installed (§6.2), again after a lost answer until it is answered, and sends none for a refused entry; a refusal with `seal/ctl_window` (its clock was early) fails the stage, and the action is offered again |
-| cancel | any current device on `Operation::CancelRecoveryKey`, or the recovery tool | enqueues a `P`-shape entry (`RecoveryChange { Cancel }`) |
-| `direct` | the recovery tool only | the engine only sees it: banner `RecoveryChanged` |
+| the change | the current recovery identity, with the current sheet (`device.md` §18.5, the recovery tool) | the engine classifies the entry as any other: on acceptance, banner `RecoveryChanged` with the new key's fingerprint, and `Notify(RecoveryKeyChanged)` |
+| `recovery_register` | the entry's sender, once it has classified the entry `Accept` (`relay.md` §12.12); the engine only in the repair of a restore tail (§21.3 step 2) | sends none for a refused entry (ENG-OPS-005) |
 
-If every device sleeps through the 72 hours, nothing happens on its own: the proposal stays pending, the banner stays on every device, and the change happens only when a user confirms on a device other than the proposer, or cancels. Revoking the proposer clears the proposal (SEAL-MEM-025). On a `confirm` or `direct`, a device that writes backups is told to confirm the new recovery fingerprint on its own screen before its next backup (`device.md`, SEAL-BKP-006).
+On a recovery-key change, a device that writes backups is told to confirm the new recovery fingerprint on its own screen before its next backup (`device.md`, SEAL-BKP-006).
 
-- **ENG-WINDOW-002** (engine) The engine MUST offer `ConfirmRecoveryKey` only on a current device other than the proposer and only when `wall_ms ≥ start_ms + 259,200,000`.
-- **ENG-WINDOW-003** (engine) The engine MUST NOT compose a recovery-key confirmation or cancellation without the user's operation.
+- **ENG-WINDOW-002** (withdrawn) The offer of a confirmation after 72 hours; the change without the sheet is removed (`seal.md` §13.11, `CHANGES.md` 2026-11-23).
+- **ENG-WINDOW-003** (withdrawn) A confirmation or cancellation only on the user's operation; the change without the sheet is removed (`seal.md` §13.11, `CHANGES.md` 2026-11-23).
 
 ## 27. The clock
 
@@ -1793,9 +1784,6 @@ pub enum Operation {
     FollowAddress { host: String, door: [u8; 5], code: String }, // follow a move when the old relay is gone; code: the typed move code
     Revoke { dev: Dev, replace: bool },
     Skip { seq: u64 },
-    ProposeRecoveryKey { sign_pk: Hash32, hpke_pk: Hash32 },
-    ConfirmRecoveryKey,
-    CancelRecoveryKey,
     RulesOverride { version: u32 },
     CloseBoard { host: String, door: [u8; 5] },      // reset trust: point the old board at the new one
     Adopt { dev: Dev, typed_fp: String },            // adopt another device's state by its fingerprint (§22.3)
@@ -1913,9 +1901,9 @@ SYNC.md §5.3, `seal.md` §17.1 step 9 and SEAL-PAIR-010.
 
 ### 28.6 Recovery-key changes
 
-§26.1. `ConfirmRecoveryKey` is offered only as ENG-WINDOW-002 states; the `K`-shape entry is appended as an ordinary entry (stage 2), and `RecoveryRegisterSeq` for it, once this device has classified it `Accept`, is stage 3. Keys rotate on a revocation (§28.5; a suspected compromise is "Replace device", the same operation), on a purge (§28.2) and on a new recovery key (the `K`-shape entry of §26.1, to which the sealer adds the rotation that wraps to the new key, `seal.md` §12.1), never on a schedule (SYNC.md §5.4).
+§26.1. No operation changes the recovery key: the `K`-shape entry is the current recovery identity's, sealed with the current sheet (`device.md` §18.5, the recovery tool). Keys rotate on a revocation (§28.5; a suspected compromise is "Replace device", the same operation), on a purge (§28.2) and on a new recovery key (the rotation of that `K`-shape entry, which wraps to the new key, `seal.md` §12.1), never on a schedule (SYNC.md §5.4).
 
-- **ENG-OPS-011** (engine) The engine MUST send every recovery-key confirmation as a `K`-shape entry carrying the rotation to the new key, and MUST compose an epoch rotation only within a `Revoke` operation (§28.5), a `Purge` (§28.2) or such a confirmation (§26.1), never on a timer, a schedule or the age of an epoch.
+- **ENG-OPS-011** (engine) The engine MUST compose an epoch rotation only within a `Revoke` operation (§28.5) or a `Purge` (§28.2), never on a timer, a schedule or the age of an epoch.
 
 ### 28.7 Reset trust
 
@@ -1928,7 +1916,7 @@ Reset trust starts a new board from this device's confirmed state: a new recover
 An operation's control entry that is refused fails its stage with the refusal's code, unless the operation's section says it composes again. `Notify(OpDone { ticket, result: Err(code) })` reports a failure. An operation whose stage cannot proceed for 30 days of `wall_ms` is ended with `engine/op_timeout`.
 
 - **ENG-OPS-003** (engine) The engine MUST persist each operation's stage before the relay call of that stage, and MUST resume every operation from its persisted stage after a `Start`.
-- **ENG-OPS-005** (engine) The engine MUST send `recovery_register` for a recovery-key confirmation only as `RecoveryRegisterSeq`, only after it has classified the `K`-shape entry `Accept`, and MUST NOT send it for a refused entry.
+- **ENG-OPS-005** (engine) The engine MUST send `recovery_register` for a `K`-shape entry only as `RecoveryRegisterSeq`, only after it has classified that entry `Accept`, and MUST NOT send it for a refused entry.
 
 ## 29. Duties without an always-on device
 
@@ -1974,7 +1962,7 @@ The current devices of the membership the duty names (`M_S` for a snapshot, `M_K
 | restore tail | the phone repairs a rollback with what it holds |
 | upgrade proposals | the phone proposes when no active member blocks |
 | backups | none: they wait for a desktop (ruling S8) |
-| purge, restore to a point, reset trust, recovery-key change | not started: desktop-only (SYNC_PLAN.md §2); a pending recovery-key proposal stays pending, with its banner on the phone, until a desktop confirms or cancels it |
+| purge, restore to a point, reset trust, recovery-key change | not started: desktop-only (SYNC_PLAN.md §2) |
 
 Nothing is lost and nothing blocks except backups.
 
@@ -2003,7 +1991,6 @@ The engine gives the data; `desktop` and `android` choose the words (SYNC_PLAN.m
 | `banners` | list of `Banner` | unacknowledged banners (§14.2) |
 | `devices` | list of `{ dev, name, key_fp, device_no, status, is_self, last_beat_ms, last_entry_ms, rules, bootstrap_seq }` | last seen, never an alarm (V2-10) |
 | `rules` | `{ active: u32, versions: Vec<VersionStatus> }` | §25.2 |
-| `recovery_change` | `Option<{ proposer, proposer_name, key_fp, start_ms, confirm_after_ms, can_confirm: bool }>` | §26.1 |
 | `moving` | `Option<{ host, home_gen, fence_seq, tries_left: u32, locked_until_ms: Option<i64> }>` | §28.3 |
 | `ops` | list of `{ ticket, kind, stage, started_ms }` | §28 |
 | `notices_unread`, `refusals_unread` | u32 | the badge (V2-16) |
@@ -2025,8 +2012,6 @@ pub struct DeviceRow { pub dev: Dev, pub name: String, pub key_fp: String, pub d
 pub struct Blocker { pub dev: Dev, pub name: String, pub key_fp: String, pub last_beat_ms: i64, pub rules: Vec<u32> }
 pub struct VersionStatus { pub version: u32, pub blockers: Vec<Blocker>, pub override_vote: Option<(u32, Dev, u64)> }
 pub struct RulesStatus { pub active: u32, pub versions: Vec<VersionStatus> }
-pub struct RecoveryChangeView { pub proposer: Dev, pub proposer_name: String, pub key_fp: String, pub start_ms: i64,
-                                pub confirm_after_ms: i64, pub can_confirm: bool }
 pub struct MovingView { pub host: String, pub home_gen: u32, pub fence_seq: u64, pub tries_left: u32,
                         pub locked_until_ms: Option<i64> }
 pub struct OpStatus { pub ticket: u64, pub kind: String, pub stage: u8, pub started_ms: i64 }  // kind: the Operation variant in snake_case
@@ -2037,7 +2022,7 @@ pub struct Status {
     pub oldest_queued_ms: Option<i64>, pub doomed: u32, pub queue_large: bool, pub head: Head, pub board_seq: u64,
     pub fingerprint: String, pub clock: ClockStatus, pub halt: Option<HaltView>, pub stops: Vec<StopView>,
     pub alarms: Vec<AlarmRecord>, pub banners: Vec<Banner>, pub devices: Vec<DeviceRow>, pub rules: RulesStatus,
-    pub recovery_change: Option<RecoveryChangeView>, pub moving: Option<MovingView>, pub ops: Vec<OpStatus>,
+    pub moving: Option<MovingView>, pub ops: Vec<OpStatus>,
     pub notices_unread: u32, pub refusals_unread: u32, pub warnings: Vec<StatusWarning>,
 }
 ```
@@ -2061,7 +2046,7 @@ pub struct Status {
 | "will be refused" marks | `pending()` |
 | the clock prompt | `clock` |
 | what blocks a rules upgrade | `rules.versions[].blockers` |
-| the recovery-key change | `recovery_change` |
+| the recovery-key change | `banners` (`RecoveryChanged`) |
 | following a move | `moving`, and the move code from `Notify(MoveCode)` on the moving device |
 
 ### 30.3 Notifications
@@ -2151,7 +2136,7 @@ Per device: a persist queue with a latency drawn per write; durable storage hold
 
 ### 31.5 Workload
 
-Each device draws its next action time (exponential, mean 10 minutes of virtual time while "awake"; devices sleep and wake on drawn schedules, one of them the phone pattern of §29.4) and its action: a toy command (`Set`, `Add`, `Del`, `Create` with a hold followed by `Name` or `Forget`, `Fail`; `Panic` only in poison configurations), or an operation from `OpSet` (revoke and re-pair, Skip when a device is halted, a rules upgrade with `rules2`, purge, move to the second model relay, restore to a point, a recovery-key proposal and confirmation).
+Each device draws its next action time (exponential, mean 10 minutes of virtual time while "awake"; devices sleep and wake on drawn schedules, one of them the phone pattern of §29.4) and its action: a toy command (`Set`, `Add`, `Del`, `Create` with a hold followed by `Name` or `Forget`, `Fail`; `Panic` only in poison configurations), or an operation from `OpSet` (revoke and re-pair, Skip when a device is halted, a rules upgrade with `rules2`, purge, move to the second model relay, restore to a point, a recovery-key change with the current sheet, which the workload seals as the recovery identity, as the recovery tool does).
 
 ### 31.6 Faults
 
@@ -2320,7 +2305,6 @@ Codes the engine returns in `EnqueueRefused`, `OpDone`, `PairFailed`, stops, ref
 | clock block | 3,600,000 | ms of skew | ENG-CLOCK-002 |
 | clock confirmation | 604,800,000, and 300,000 of drift | ms | ENG-CLOCK-002 |
 | skew measurement lifetime | 86,400,000 | ms of `mono_ms` | ENG-CLOCK-002 |
-| recovery-key confirm offer | 259,200,000 | ms after `start_ms` | ENG-WINDOW-002 |
 | old roots after a purge | 2,592,000,000 | ms of log clock | ENG-PURGE-003 |
 | move codes before a lockout; lockout | 5; 3,600,000 | tries; ms of `wall_ms` | ENG-MOVE-002 |
 | restore-tail request | 64 frames, 1,048,576 bytes | | ENG-EVID-004 |
@@ -2364,7 +2348,7 @@ Stage `engine` publishes these families under `crates/taskdeck-sync/tests/vector
 - Requires: the inputs of `seal.md` §14.1 are supplied as ENG-SEALER-001 to ENG-SEALER-003 state; `own_sealed` follows §11.3 for a restored folder (`seal.md` §14.7 leaves that choice to the engine).
 - Assumes: `seal.md` SEAL-ENV-003's "confirmed membership state" is the engine's `M_K`, the membership at the class head.
 - Assumes: the sealer returns `Accept` with `Halt::Commitment` for a rotation whose own wrap fails, and its classification of later seqs then needs a root it lacks (`seal/missing_root`).
-- Assumes: the move-code retry limit and the 72-hour prompt timing are this spec's (§28.3, §26.1), as `seal.md` §25 says.
+- Assumes: the move-code retry limit is this spec's (§28.3), as `seal.md` §25 says.
 - Requires (ruling S24, lead ruling L1): the `reinstate` operation's `args = dev[16] ‖ u32 first_epoch ‖ u16 n ‖ n × wrap[96]` (`seal.md` §16.2), signed by the recovery identity and never sent by the engine, and the opening of a wrap delivered outside an entry (`seal.md` §7, SEAL-WRAP-002, SEAL-WRAP-003), which the sealer implements in `take_missed_wraps` and `classify` (§6.1, §24.4).
 
 **`core.md`.**
@@ -2400,10 +2384,10 @@ The `taskdeck-sync` crate. `#![forbid(unsafe_code)]`. Types already given in §4
 ```rust
 // ---------- traits (§5, §6)
 pub use model::{Ctx, Applied, SmRefusal, SmError, Coalesce, StateMachine};
-pub use model::{Dev, Hash32, Head, Kind, Class, Halt, Verdict, BeatInfo, SnapInfo, RecoveryMode, UpgradeMode,
+pub use model::{Dev, Hash32, Head, Kind, Class, Halt, Verdict, BeatInfo, SnapInfo, UpgradeMode,
                 CtlItem, CtlIntent, Body, PlainEntry, Opened, Receipt, ClassifyInput, Sealed,
                 SnapshotMaterial, SealedBlob, SealerError, Sealer, DeviceStatus, DeviceView, RecoveryView,
-                PendingRecovery, MembershipView};
+                MembershipView};
 
 // ---------- the state hash (§18.3)
 pub fn state_hash(hash_version: u32, board_hash: &Hash32, membership_bytes: &[u8]) -> Hash32;
@@ -2451,7 +2435,7 @@ pub use receive::{PageEntry, Page};                                             
 pub use snapshots::{BlobRequest, BlobMeta, BlobOk};                                // §19.6
 pub use ops::{Operation, OpRecord};                                                // §28
 pub use ui::{Status, SessionState, ClockStatus, SkipOffer, HaltView, StopAction, StopView, DeviceRow, Blocker,
-             VersionStatus, RulesStatus, RecoveryChangeView, MovingView, OpStatus, StatusWarning,
+             VersionStatus, RulesStatus, MovingView, OpStatus, StatusWarning,
              PendingMark, NoticeEntry, Notification, UserAction, Banner, BannerKind, BannerDetail,
              AlarmRecord, AlarmKind, Evidence, ForkSource};                        // §14.2, §21.1, §30
 // PendingMark and NoticeEntry live in ui and are re-exported above; their fields:
