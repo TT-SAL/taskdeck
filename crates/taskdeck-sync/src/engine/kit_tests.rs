@@ -98,6 +98,10 @@ impl Store {
     }
 }
 
+/// A read not yet answered: its id, the range of a `ReadLog` (none for a
+/// `ReadBase`) and the seq of a `ReadBase`.
+pub(crate) type PendingRead = (u64, Option<(u64, u64)>, u64);
+
 /// One device: an engine, its store, its clocks, and everything it emitted.
 pub(crate) struct Node {
     pub e: E,
@@ -109,7 +113,7 @@ pub(crate) struct Node {
     pub auto: bool,
     draining: bool,
     /// `ReadLog` (a range) and `ReadBase` (a seq) effects not yet answered.
-    pub reads: VecDeque<(u64, Option<(u64, u64)>, u64)>,
+    pub reads: VecDeque<PendingRead>,
     /// Effects other than `Persist` and `Notify`, in order, until a test takes them.
     pub fx: VecDeque<Effect>,
     pub notes: Vec<Notification>,

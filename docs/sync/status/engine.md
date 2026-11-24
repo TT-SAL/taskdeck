@@ -53,29 +53,38 @@ in the order it happened; this file is the current truth and is rewritten, not a
 |---|---|---|
 | 0 | Skeleton brought to §37 as it is now; derives; `sim` for tests; module layout | done |
 | 1 | start, records, enqueue, the pending view, the naming hold | written and tested (`core_tests.rs`, `engine-pending.json`) |
-| 2 | sessions, send, append results, reconcile, echoes | written; the plain path tested; conflicts, gaps, restored copy, refusals untested |
-| 3 | receive: pages, dry run, persist, commit, apply; classes, refusals, notices | written; the plain path tested; the receipt classes untested (`engine-receipts.json` waits for a scripted sealer in the tests) |
-| 4 | poison pills, halts, Skip (operation, frames, replay) | written, untested (`engine-poison.json` not yet loaded) |
+| 2 | sessions, send, append results, reconcile, echoes | written; tested: `engine-reconcile.json` (welcomes, conflicts, gaps), `sess_tests.rs` (displaced, budget, echoes, tampered page, restored copy) |
+| 3 | receive: pages, dry run, persist, commit, apply; classes, refusals, notices | written; `engine-receipts.json` passes against `ScriptedSealer` (`script_tests.rs`) |
+| 4 | poison pills, halts, Skip (operation, frames, replay) | written; `engine-poison.json` passes (`poison_tests.rs`); read-ahead, Skip and Skip replay flows untested |
 | 5 | checkpoints, bases, hashes, retention | written; `engine-hash.json` passes; cadence, bases, retention untested |
 | 6 | beats, snapshot duty, verdicts, compaction, the clock, upgrade proposal, purge duty | written; the pure decisions pass `engine-duties.json` and `engine-clock.json`; the flows untested |
-| 7 | evidence stop, divergence stop, restore tail (repair.rs), adoption (ops.rs) | written, untested; rejoin and rebootstrap (boot.rs) are still hooks |
-| 8 | epoch gate, re-sealing, revoked, missed roots, export and resubmit | written, untested |
-| 9 | operations, pairing (ops.rs), the move, the move code, follow address (movement.rs) | written, untested |
+| 7 | evidence stop, divergence stop, restore tail (repair.rs), adoption (ops.rs), rejoin and rebootstrap (boot.rs) | written; evidence stop tested; the rest untested |
+| 8 | epoch gate, re-sealing, revoked, missed roots, export and resubmit | written; epoch gate and a revoked device tested (`sess_tests.rs`); resubmit untested |
+| 9 | operations, pairing (ops.rs), the move, the move code, follow address (movement.rs) | written, untested (needs the model relay, task C) |
 | 10 | status, pending, notices, restore targets, purge preview | written; partly tested |
+| 11 | rules for every implementation (§4, §36 source rules, limits, clocks, persist failure, no deletion) | tested (`rules_tests.rs`) |
 
-Left to write in the engine: **boot.rs** (rejoin §19.7: `enter_rejoin` only sets the session;
-`confirm_rejoin` and the candidates are missing; rebootstrap §19.9: the stop is raised by
-replay.rs but nothing resumes from a snapshot yet). Left to test: nearly every clause beyond the
-plain path. The tests' own relay (`Hub` in `kit_tests.rs`) answers only Connect, Hello, Read and
-Append; tests of admin and blob flows should use the model relay (task C) once it is merged.
+**Step in progress:** TT-SAL/taskdeck#28 to green and merged; then the spec-change pull request
+(the list is under "Spec changes to make"); then task C merged, task D launched, the engine under
+the simulator. Meanwhile: flow tests for the clauses not yet cited.
 
-Every file whose header says `STEP n` holds placeholders to replace: `grep -rn 'STEP' crates/taskdeck-sync/src/engine`.
+Every section of the spec has code. Left to test (83 clauses, `bash scripts/spec-coverage.sh engine`):
+- with `Node`/`Hub` (`kit_tests.rs`): crash halt + read-ahead + Skip + Skip replay (ENG-HALT-003/004/006/007,
+  ENG-SKIP-002/003/004, ENG-CTL-001/002, ENG-REF-004, ENG-BANNER-002); checkpoints, bases, shutdown
+  (ENG-CKPT-001/002/003, ENG-HASH-002); ENG-BEAT-002; ENG-SNAP-004/005; ENG-UI-001/003; ENG-EPOCH-003;
+  ENG-OPS-007/011; ENG-RULES-001/002; ENG-DIVERGE-001..004; ENG-SEALER-003; ENG-SESS-007.
+- with the model relay (task C): pairing (ENG-OPS-001/004/006/008), revoke (ENG-OPS-002/009), purge
+  (ENG-PURGE-*), restore (ENG-RESET-*), move (ENG-MOVE-*), compaction (ENG-COMPACT-*), restore tail
+  (ENG-EVID-004/007), rejoin (ENG-BOOT-*), ENG-OPS-003/005/010.
+- RELAY-* and ENG-SIM-* citations come with tasks C and D.
+
+The tests' own relay (`Hub` in `kit_tests.rs`) answers only Connect, Hello, Read and Append.
 
 Numbers at the start (2026-11-24, day-planner `99b510e`): `spec-coverage.sh engine` 233 clauses
-owned, 2 cited, 1 citation of a withdrawn clause; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
-After tasks A, A2, B and the engine as written so far: `unimplemented!()` 1 (`sim.rs`: `run`);
-`spec-coverage.sh engine`: 72 of 233 cited, 0 bad citations. 82 lib tests (12 the engine's), 4
-integration tests.
+owned, 2 cited; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
+Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **150 of 233
+cited, 83 uncovered, 0 bad**. 104 lib tests and 4 integration tests pass; all 197 cases of task
+B's seven families pass.
 
 ## Map of the code (`crates/taskdeck-sync/`)
 
@@ -157,7 +166,25 @@ Agents' files: `src/fake.rs`, `src/fake/**`, `src/toy.rs`, `src/sim/splitmix.rs`
 
 | # | What | State |
 |---|---|---|
-| TT-SAL/taskdeck#27 | the dev-dependency on itself with `sim` (L1) | open; CI green but two macOS jobs cancelled by the runner wait; failed jobs re-run once |
+| TT-SAL/taskdeck#27 | the dev-dependency on itself with `sim` (L1) | merged (squash `cb8ac72`); two macOS runner cancellations re-run |
+| TT-SAL/taskdeck#28 | the engine as written so far, the fake and the toy, the first vectors (stage in progress, not the exit) | draft, open. First CI run failed on Windows only: a test of task A reads `Cargo.toml` and `src/lib.rs` with `include_str!` and the checkout had CRLF; fixed with `crates/taskdeck-sync/.gitattributes` (`* -text`, as the seal crate does) |
+
+Order (L4, L5): #28 merges; the branch restarts from day-planner; the spec change is the branch's
+only commit in a pull request of its own; then work goes on.
+
+## Spec changes to make (one pull request, after #28)
+
+1. `Loaded.chains` carries τ: `Vec<(u64, Hash32, i64)>` (the code is ahead of §37).
+2. `Sealer::membership_zero(&self) -> Self::Membership` (the code is ahead of §37).
+3. `classify` may be called again for a seq and answers the same.
+4. A `Hello` on a push session when a duty waits only for a fresh head (§29.1's 600,000 ms).
+5. Fields of `FaultSet`, `OpSet`, `SimStats` (proposed by task D's writer).
+6. Code `engine/restore_target` for a refused `RestoreTo` (§33 has none).
+7. Wording: `registry.restored` ("persisted in the next WriteMeta" but Registry lives in the
+   checkpoint); `meta.prev_session`; §6.1 history against the rows of `export_identity`;
+   SEAL-FRAME-005 against re-sealing a freed counter; ENG-REF-001 for an own beat, snap or ctl.
+8. The 14 questions of `tests/vectors/README.md` and those of `api-fake-toy.md`.
+Still to decide: E2 (may need a change under `relay/`, a pull request of its own), T21, Q79.
 
 ## Workflows (agents)
 
@@ -166,9 +193,12 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 
 | Run | Task | Brief | State | Result | Tokens |
 |---|---|---|---|---|---|
-| wf_75ec09fc-a39 | A fake, toy, vectors splitmix/toy/fake | `engine/briefs/a-fake-toy.md` | done, merged (346e849) | the fake follows seal.md as it is now (14 differences fixed), the toy unchanged, 3 vector files, `api-fake-toy.md`; check clean | 756,180 |
-| wf_3b93dd8a-626 | B seven vector families | `engine/briefs/b-vectors.md` | done on `wt/b` (221375f), not yet merged | 198 cases, generators under `engine/tools/vectors-b/`, 14 spec questions in `tests/vectors/README.md`; 1 high and 2 medium fixed, 1 low (a clock case's name) | 777,276 |
-| wf_4e7bb2da-24b | A2 fake follow-up | `engine/briefs/a2-fake-followup.md` | running, `wt/a2` | | |
+| wf_75ec09fc-a39 | A fake, toy, vectors splitmix/toy/fake | `engine/briefs/a-fake-toy.md` | done, merged | the fake follows seal.md as it is now (14 differences fixed), the toy unchanged, 3 vector files, `api-fake-toy.md`; check clean | 756,180 |
+| wf_3b93dd8a-626 | B seven vector families | `engine/briefs/b-vectors.md` | done, merged | 197 cases, generators under `engine/tools/vectors-b/`, 14 spec questions in `tests/vectors/README.md`; 1 high and 2 medium fixed, 1 low (a clock case's name) | 777,276 |
+| wf_4e7bb2da-24b | A2 fake follow-up | `engine/briefs/a2-fake-followup.md` | done, merged | `seal` no longer returns a stored frame for a reused counter unless entry and epoch are the same; `membership_zero`, `restore` | 341,974 |
+| wf_6790fa34-60e | C model relay, first attempt | `engine/briefs/c-model-relay.md` | lost: the owner's usage limit cut the writer off | nothing kept beyond commit 678fdc2 on `wt/c` | 265,340 |
+| wf_e736e661-ee0 | C model relay, second attempt | `engine/briefs/c-model-relay.md` | running in `/home/user/wt/c` (branch `wt/c`, target `/home/user/wt/target-c`) | | |
+| (not started) | D simulator | `engine/briefs/d-simulator.md` | to launch after C: `/home/user/wt/d`, target `/home/user/wt/target-d` | | |
 
 ## Open threads
 
