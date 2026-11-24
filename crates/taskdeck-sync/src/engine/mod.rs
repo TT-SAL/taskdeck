@@ -54,6 +54,8 @@ mod rules_tests;
 #[cfg(test)]
 mod script_tests;
 #[cfg(test)]
+mod sess_tests;
+#[cfg(test)]
 mod vectors_tests;
 
 /// The limits of engine.md §34 that more than one file uses.

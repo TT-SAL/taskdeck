@@ -47,6 +47,8 @@ pub(crate) struct Plan {
     pub unchecked: bool,
     pub halt: Option<Halt>,
     pub need: Vec<(u64, Hash32)>,
+    /// An accepted entry that rotates the epoch.
+    pub rotate: bool,
 }
 
 impl Plan {
@@ -69,6 +71,7 @@ impl Plan {
             unchecked: false,
             halt: None,
             need: Vec::new(),
+            rotate: false,
         }
     }
 }
@@ -82,12 +85,13 @@ pub(crate) struct ScriptM {
     pub other_ctr: u64,
     pub revoked: bool,
     pub rules: u32,
+    pub epoch: u32,
     pub skips: Vec<u64>,
 }
 
 impl Default for ScriptM {
     fn default() -> Self {
-        ScriptM { changes: 0, clock: 0, my_ctr: 0, other_ctr: 0, revoked: false, rules: 1, skips: Vec::new() }
+        ScriptM { changes: 0, clock: 0, my_ctr: 0, other_ctr: 0, revoked: false, rules: 1, epoch: 1, skips: Vec::new() }
     }
 }
 
@@ -96,6 +100,20 @@ pub(crate) struct Script {
     pub plans: Vec<(Vec<u8>, Plan)>,
     pub next_id: u8,
     pub frames: u64,
+    /// What each `classify` was given: the seq, `own_sealed(ctr)`, `retained_from`, and whether
+    /// `chain_at` answered for `seq - 1` and for `retained_from - 1`.
+    pub probes: Vec<Probe>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Probe {
+    pub seq: u64,
+    pub ctr: u64,
+    pub own_sealed: Option<Hash32>,
+    pub retained_from: u64,
+    pub chain_prev: Option<Hash32>,
+    pub chain_below: Option<Hash32>,
+    pub prev_chain: Hash32,
 }
 
 #[derive(Clone)]
@@ -160,7 +178,7 @@ impl Sealer for ScriptedSealer {
         MembershipView {
             board_id: [7; 16],
             rules: m.rules,
-            epoch: 1,
+            epoch: m.epoch,
             clock_ms: m.clock,
             home_gen: 1,
             devices: vec![dev(ME, 1, me, m.my_ctr), dev(OTHER, 2, DeviceStatus::Current, m.other_ctr)],
@@ -170,7 +188,7 @@ impl Sealer for ScriptedSealer {
     }
     fn membership_bytes(&self, m: &ScriptM) -> Vec<u8> {
         let mut v = Vec::new();
-        for x in [m.changes, m.clock as u64, m.my_ctr, m.other_ctr, m.revoked as u64, m.rules as u64] {
+        for x in [m.changes, m.clock as u64, m.my_ctr, m.other_ctr, m.revoked as u64, m.rules as u64, m.epoch as u64] {
             v.extend_from_slice(&x.to_be_bytes());
         }
         for s in &m.skips {
@@ -190,7 +208,8 @@ impl Sealer for ScriptedSealer {
             other_ctr: w(3),
             revoked: w(4) != 0,
             rules: w(5) as u32,
-            skips: (6..b.len() / 8).map(w).collect(),
+            epoch: w(6) as u32,
+            skips: (7..b.len() / 8).map(w).collect(),
         })
     }
     fn supported_envelopes(&self) -> Vec<(u8, u8)> {
@@ -217,6 +236,15 @@ impl Sealer for ScriptedSealer {
     }
     fn classify(&mut self, input: &ClassifyInput<'_, ScriptM>) -> Result<Receipt<ScriptM>, SealerError> {
         let plan = self.plan_of(input.frame).expect("every frame of a scripted test has a plan");
+        self.0.borrow_mut().probes.push(Probe {
+            seq: input.seq,
+            ctr: plan.ctr,
+            own_sealed: (input.own_sealed)(plan.ctr),
+            retained_from: input.retained_from,
+            chain_prev: (input.chain_at)(input.seq - 1),
+            chain_below: input.retained_from.checked_sub(1).and_then(|b| (input.chain_at)(b)),
+            prev_chain: input.prev_chain,
+        });
         if let Some(code) = plan.error {
             return Err(SealerError { code });
         }
@@ -233,6 +261,9 @@ impl Sealer for ScriptedSealer {
             }
             if class == Class::Accept {
                 m.clock = m.clock.max(plan.at_ms);
+                if plan.rotate {
+                    m.epoch += 1;
+                }
             }
         }
         let opened = plan.kind.map(|kind| Opened {
@@ -265,7 +296,7 @@ impl Sealer for ScriptedSealer {
         s.next_id += 1;
         Ok([s.next_id; 16])
     }
-    fn seal(&mut self, _m: &ScriptM, ctr: u64, entry: &PlainEntry) -> Result<Sealed, SealerError> {
+    fn seal(&mut self, m: &ScriptM, ctr: u64, entry: &PlainEntry) -> Result<Sealed, SealerError> {
         let frame = self.frame(ME, ctr);
         let mut plan = Plan::accept_cmd(ME, ctr, Vec::new());
         plan.entry_id = entry.entry_id;
@@ -284,7 +315,7 @@ impl Sealer for ScriptedSealer {
             }
         }
         self.plan(&frame, plan);
-        Ok(Sealed { frame_hash: sha(&frame), frame, epoch: 1, keys_changed: false })
+        Ok(Sealed { frame_hash: sha(&frame), frame, epoch: m.epoch, keys_changed: false })
     }
     fn open_own(&self, _m: &ScriptM, frame: &[u8]) -> Result<[u8; 16], SealerError> {
         match self.plan_of(frame) {
@@ -461,8 +492,13 @@ impl SNode {
         }
     }
 
-    /// A page of frames from `first` on, whose head is its last entry.
+    /// A page of frames from `first` on, whose head is its last entry, as a push.
     pub(crate) fn page(&mut self, first: u64, frames: &[Vec<u8>]) {
+        self.page_for(None, first, frames);
+    }
+
+    /// The same page as the answer to the read `req`.
+    pub(crate) fn page_for(&mut self, req: Option<u64>, first: u64, frames: &[Vec<u8>]) {
         let mut chain = self.e.chain_at(first - 1).unwrap_or(self.chain_b);
         let mut entries = Vec::new();
         for (i, f) in frames.iter().enumerate() {
@@ -481,7 +517,7 @@ impl SNode {
             fenced: false,
             entries,
         };
-        self.feed(Event::Page { req: None, page });
+        self.feed(Event::Page { req, page });
     }
 
     pub(crate) fn appended(&mut self) -> Option<(u64, Vec<Vec<u8>>)> {

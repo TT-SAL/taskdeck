@@ -108,6 +108,8 @@ pub(crate) struct Node {
     pub pq: VecDeque<(u64, Vec<PersistOp>)>,
     pub auto: bool,
     draining: bool,
+    /// `ReadLog` (a range) and `ReadBase` (a seq) effects not yet answered.
+    pub reads: VecDeque<(u64, Option<(u64, u64)>, u64)>,
     /// Effects other than `Persist` and `Notify`, in order, until a test takes them.
     pub fx: VecDeque<Effect>,
     pub notes: Vec<Notification>,
@@ -134,6 +136,8 @@ impl Node {
                     self.pq.push_back((id, ops));
                 }
                 Effect::Notify(n) => self.notes.push(n),
+                Effect::ReadLog { req, from, to } => self.reads.push_back((req, Some((from, to)), 0)),
+                Effect::ReadBase { req, seq } => self.reads.push_back((req, None, seq)),
                 other => self.fx.push_back(other),
             }
         }
@@ -149,6 +153,24 @@ impl Node {
                     self.store.apply(op);
                 }
                 self.feed(Event::Persisted { id });
+            }
+            // Local reads see the durable store.
+            while let Some((req, range, seq)) = self.reads.pop_front() {
+                let result = match range {
+                    Some((from, to)) => {
+                        let v: Vec<LogRecord> = (from..=to).filter_map(|s| self.store.log.get(&s).cloned()).collect();
+                        if v.len() as u64 == to - from + 1 {
+                            crate::LocalReadResult::Records(v)
+                        } else {
+                            crate::LocalReadResult::Missing { code: "device/missing" }
+                        }
+                    }
+                    None => match self.store.bases.get(&seq) {
+                        Some(c) => crate::LocalReadResult::Base(c.clone()),
+                        None => crate::LocalReadResult::Missing { code: "device/missing" },
+                    },
+                };
+                self.feed(Event::LocalRead { req, result });
             }
             self.draining = false;
         }
@@ -240,6 +262,7 @@ pub(crate) fn creator(seed: u64) -> (Node, Vec<u8>) {
         pq: VecDeque::new(),
         auto: true,
         draining: false,
+        reads: VecDeque::new(),
         fx: VecDeque::new(),
         notes: Vec::new(),
         persists: Vec::new(),
@@ -466,6 +489,7 @@ pub(crate) fn join(hub: &mut Hub, a: &mut Node, seed: u64, name: &str) -> Node {
         pq: VecDeque::new(),
         auto: true,
         draining: false,
+        reads: VecDeque::new(),
         fx: VecDeque::new(),
         notes: Vec::new(),
         persists: Vec::new(),
