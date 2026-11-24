@@ -35,9 +35,9 @@
 //!   another board, a wrong create secret, no or a raw credential;
 //! - a step whose expectation says the gate answered (`x_td_relay: "gate"`
 //!   with a refusal, or `object_called: false`);
-//! - an admin request whose signature or nonce is what the step tests (a
-//!   flipped signature, another signing key, context, op or args; codes
-//!   `relay/no_nonce`, `relay/bad_admin_sig`), and a login whose nonce,
+//! - an admin request whose nonce or signature is what the step tests (it
+//!   expects `relay/no_nonce` or `relay/bad_admin_sig`; a step with a damaged
+//!   signature that expects the code of an earlier check runs), a login whose nonce,
 //!   generation or signature it tests (`relay/no_nonce`, `relay/bad_gen`,
 //!   `relay/bad_login_sig`); a login that succeeds is run (its effect on the
 //!   generation and on sockets is modelled);
@@ -873,12 +873,11 @@ impl World {
     fn admin_step(&mut self, rq: &Value, bn: &str, cred: &Cred, e: &Value) -> Step<Resp> {
         let op = rq["params"]["op"].as_str().expect("an op").to_string();
         let Some(a) = rq["body"].get("$admin") else { return Err(Skip("a body that does not parse by its layout")) };
-        if ["sig", "sign_key", "context", "sign_op", "sign_args"].iter().any(|k| a.get(*k).is_some()) {
-            return Err(Skip("an admin signature that is tested (not modelled)"));
-        }
         if ["args_len", "extra_len", "tail"].iter().any(|k| a.get(*k).is_some()) || a["op"].as_str() != Some(&op) {
             return Err(Skip("a body that does not parse by its layout"));
         }
+        // A damaged signature (`sig`, `sign_key`, `context`, `sign_op`, `sign_args`) matters at A6
+        // only: a step that expects an earlier check's code runs.
         if e["json"]["error"].as_str().is_some_and(|c| c == "relay/no_nonce" || c == "relay/bad_admin_sig") {
             return Err(Skip("an admin nonce or signature that is tested (not modelled)"));
         }
