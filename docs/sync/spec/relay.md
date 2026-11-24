@@ -122,6 +122,8 @@ Step 3 also refuses every non-canonical encoding of `A` and `R`, which honest si
 
 A path is matched exactly: no trailing slash, no empty segment, no percent-encoding, no `.` or `..` segment. Uppercase hex is not accepted. A query is allowed only on `GET /v1/b/{board}/log`; there each of `after` and `limit` appears at most once, in any order, and no other parameter, no empty value and no fragment is allowed.
 
+The front matches the request target it receives. The standby receives it as the client sent it. The Worker does not: the platform rewrites the target before the Worker's code runs, resolving `.` and `..` segments (also written `%2e`), turning `\` into `/` and dropping a fragment (measured by stage `relay` under `wrangler dev`: `request.url` arrives rewritten; Cloudflare's edge normalises incoming URLs likewise), and nothing in a Worker shows the target as sent. So a target such as `/v1/b/{board}/x/../caps` is answered by the Worker as `/v1/b/{board}/caps` and by the standby with `404 relay/not_found` (§15.2). Every check of the gate, the credential's board among them, is made on the path the front received, so the rewriting gives a client nothing that the canonical request would not give it. What the platform leaves as sent (percent-encoded letters, empty segments, a trailing slash, another letter case) the Worker refuses as the standby does.
+
 - **RELAY-ENC-001** (relay) The front MUST accept a path only if it matches a route of §10.1 exactly as §4.1 states, and MUST answer any other path or method with `404 relay/not_found`.
 - **RELAY-ENC-002** (relay) The front MUST refuse a query on any route other than `GET …/log`, and on that route any parameter other than `after` and `limit`, a repeated parameter, or a value not in the text form of §4.1, with `400 relay/bad_query`.
 
@@ -1415,6 +1417,7 @@ A client learns whether this relay pushes from `push` in `caps` (§10.9), in the
 | rows counters | the platform's `rowsRead` and `rowsWritten` | none; the suite counts with its counting storage (§18) |
 | platform quotas | Cloudflare's daily limits | none; the relay's own budgets and caps are the same |
 | an exception escaping the core | the object call throws: `503 relay/object_unavailable` | caught by the front: `503 relay/object_unavailable` |
+| a request target with a `.` or `..` segment, a `\`, or a fragment | rewritten by the platform before the Worker runs, and answered as the path it becomes (§4.1) | `404 relay/not_found` |
 | `X-TD-Relay`, statuses, codes, layouts | §4 to §14 | identical |
 
 - **RELAY-STBY-001** (relay) The standby MUST answer the `socket` route with `501 relay/no_push` from the gate, after the credential checks, and MUST send no push.
