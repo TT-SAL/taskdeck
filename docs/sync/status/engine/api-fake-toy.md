@@ -1,4 +1,4 @@
-# The fake sealer and the toy: what to call (task A)
+# The fake sealer and the toy: what to call (tasks A, A2)
 
 For the engine's author and the simulator's author; no need to read `src/fake.rs` or `src/toy.rs`. Both are compiled only
 with the feature `sim` (ENG-TOY-002). Vectors: `crates/taskdeck-sync/tests/vectors/engine-{splitmix,toy,fake}.json`.
@@ -14,7 +14,7 @@ ppm`). A fake owns one generator. Drawing `N` bytes takes `ceil(N/8)` outputs as
 
 | Item | What it does; draws |
 |---|---|
-| `pub struct FakeSealer` | implements `Sealer` (engine.md §6.1) with `Membership = FakeMembership`. Holds keys, roots, pending roots, the anchor (creator only), missed wraps, the control history, its sealed frames by counter, its supported rules |
+| `pub struct FakeSealer` | implements `Sealer` (engine.md §6.1) with `Membership = FakeMembership`. Holds keys, roots, pending roots, the anchor (creator only), missed wraps, the control history, its supported rules, and per counter its own last sealing (entry, epoch, frame) for SEAL-FRAME-005 |
 | `pub struct FakeMembership` (`Clone, Debug, Default, PartialEq, Eq`) | `seal.md` §13.1; fields private: read it through `Sealer::view`. `default()` is `M_0`, whose bytes parse |
 | `pub struct FakeBundle { pub roots: Vec<(u32, [u8; 32])>, pub material: SnapshotMaterial, pub history: Vec<Vec<u8>>, pub added_seq: u64 }` | what a pairing hands over: roots, the snapshot material, its history records (`seal.md` §21.5 layout) |
 | `pub fn create(seed: u64, name: &str) -> (FakeSealer, Vec<u8>, Vec<u8>)` | the board's genesis at `at_ms = 0`: (the fake, frame of seq 1, the toy's empty board, 16 bytes). Draws salt 16, recovery key 32, device key 32, `dev` 16, `R_1` 32, entry id 16, 2 × 32 (wraps, ascending recipient id), nonce 24 |
@@ -22,6 +22,8 @@ ppm`). A fake owns one generator. Drawing `N` bytes takes `ceil(N/8)` outputs as
 | `pub fn join(seed: u64, name: &str, bundle: FakeBundle) -> FakeSealer` | a new device: draws key 32, `dev` 16 (the generator continues from there); keeps the bundle's roots whose commitment the snapshot membership records, and its history records. `name` is not used (the `DeviceAdded` names it) |
 | `pub(crate) fn join_keys(seed: u64) -> (Dev, Hash32, Hash32)` | `(dev, sign_pk, hpke_pk)` that `join(seed, ..)` will have; draws from its own copy only. Also a fresh key pair for a recovery-key change |
 | `pub(crate) fn bundle(&self, material: SnapshotMaterial, added_seq: u64) -> FakeBundle` | every root this fake holds, the material, its history records up to `material.seq` |
+| `pub(crate) fn history(&self) -> Vec<Vec<u8>>` | its control history records (`seal.md` §21.5 layout), in seq order: what the model runtime persists beside the identity (`device.md` §15.7). Draws nothing |
+| `pub(crate) fn restore(identity: &[u8], history: Vec<Vec<u8>>, reseed: u64, supported_rules: &[u32]) -> Result<FakeSealer, SealerError>` | the fake of a new process (engine.md §31.4): keys, board id, anchor, roots and pending roots from `export_identity()` bytes, the given history, a generator seeded with `reseed` (never the old one: it would draw the same entry ids again), the build's rules. Missed wraps and the SEAL-FRAME-005 frames start empty (memory only). `seal/file_corrupt` for identity bytes that do not parse exactly (magic, version 1, exact length), keys that do not belong together, an anchor of another board, roots or pending roots not strictly ascending, a history record that does not parse or repeats a seq |
 | `pub(crate) fn set_supported_rules(&mut self, rules: &[u32])` | the build's rules (default `[1]`); the rules halt fires for a version outside it. Versions above 1 allow `(1, 1)` and hash version 1 (ENG-FAKE-003) |
 | `pub(crate) fn seal_as_recovery(&mut self, m: &FakeMembership, ctr: u64, entry: &PlainEntry) -> Result<Sealed, SealerError>` | seals `entry` as `m`'s current recovery identity, counter `ctr` = its `last_ctr + 1` (`view(m).recovery`, last record). `Body::Ctl(Rotate{revoke, reinstate, purge_before: None})`, `Fence`, `Skip` give shapes R, F, S; anything else is sealed and refused by receivers. Draws as `seal`; keeps no frame, no pending root (`keys_changed` false). `seal/bad_payload` without a current recovery record |
 | `pub(crate) fn seal_recovery_key_change(&mut self, m, ctr, entry: &PlainEntry, new_key: (Hash32, Hash32)) -> Result<Sealed, SealerError>` | a K-shape entry by the recovery identity: `RecoveryKeyChange{sign_pk, hpke_pk}`, then `EpochRotated` wrapping to the current devices and the new key. `entry.body` unread. Draws root, wraps, nonce |
@@ -29,22 +31,33 @@ ppm`). A fake owns one generator. Drawing `N` bytes takes `ceil(N/8)` outputs as
 | `pub(crate) fn plaintext_bytes(entry_id: &[u8; 16], kind: u8, at_ms: i64, based_on: &Head, payload: &[u8]) -> Option<Vec<u8>>` | the padded plaintext of `seal.md` §10.1, any field values; `None` over the cap. Draws nothing |
 | `pub(crate) fn forge_frame(&self, dev: &Dev, sign_pk: &Hash32, ctr: u64, ver: u8, epoch: u32, root: Option<[u8; 32]>, plaintext: &[u8]) -> Vec<u8>` | a signed frame with every envelope field chosen (suite 1, zero nonce), AEAD under `root` or this fake's root of `epoch` (zeros if none). Draws nothing |
 
-`Sealer` methods, as engine.md §6.1 states them, with these fake specifics: `seal` returns the stored frame for a counter it
-already sealed (no draw); refuses `ctr = 0` (`seal/frame_format`), `based_on.seq = 0` off `C_0` or `at_ms` out of range
+`Sealer` methods, as engine.md §6.1 states them, with these fake specifics: `membership_zero()` is `M_0` (`seal.md` §13.3),
+`FakeMembership::default()`, the input for seq 1 (any membership works there). `seal` returns its stored frame (no draw,
+`keys_changed` false) only when asked again under a counter for the same entry (id, `at_ms`, `based_on`, body, hence kind)
+with `m.epoch` equal to the stored epoch (SEAL-FRAME-005); another entry, or a newer epoch, under a counter it sealed before
+(a frame cleared for re-sealing, engine.md §11.3 step 3, §11.4) is sealed anew and replaces the stored one. That store is the
+only `own_sealed`-related state the fake keeps; it is memory only (not in the identity), so after `restore` every counter
+seals anew, and `classify` reads own frames only through `own_sealed`. A stored rotation whose pending root was discarded
+comes back without it; accepting it gives the root by the own wrap. `seal` refuses `ctr = 0` (`seal/frame_format`), `based_on.seq = 0` off `C_0` or `at_ms` out of range
 (`seal/bad_plaintext`), a missing root of `m.epoch` (`seal/missing_root`), a bad name (`seal/bad_payload`) or host
 (`seal/host_format`). A rotation's root is pending under the entry id until `classify` accepts the entry (removed with
-`keys_changed`) or `discard_pending`. `classify` never draws and never panics. `take_missed_wraps(m, first, wraps)` opens
+`keys_changed`) or `discard_pending`. `classify` never draws and never panics. Called again for a seq it classified before with the same inputs (a restart
+above the checkpoint, a replay after a Skip or a `ResetTo`), in any order of seqs, it returns the same receipt but
+`keys_changed` (false once nothing is new), keeps one history record per seq (replaced by the same bytes), and does not
+fail for a pending root already gone or a root already known; a root forgotten by `forget_roots_below` stays
+`seal/missing_root`. `take_missed_wraps(m, first, wraps)` opens
 at once those whose commitment `m` records, keeps the rest for the rotations that set them. `seal_snapshot` puts the history
 of `material.seq` in the body, uncompressed, and draws blob id 16 then nonce 24, after its refusals. `open_snapshot` with
 `exact` recomputes the state hash from the body (engine.md §18.3). `sync_fingerprint` is `"<seq> <hex of x[0..6]>"`,
 `move_code` the 10 hex characters of `mc` (typed input compared without spaces and hyphens, lowercased).
 `export_identity` is `"FKID" ‖ u32 1 ‖ dev ‖ sk[32] ‖ sign_pk ‖ hpke_pk ‖ board_id ‖ u8 anchor (1: rsign_pk ‖ salt ‖ R_1) ‖
-u32 n ‖ n × (u32 e ‖ R_e) ‖ u32 n ‖ n × (entry_id ‖ u32 e ‖ root)`.
+u32 n ‖ n × (u32 e ‖ R_e) ‖ u32 n ‖ n × (entry_id ‖ u32 e ‖ root)`, roots by epoch and pending roots by entry id, ascending
+(vector case `identity`); the history is not in it (`history()`).
 
 ## Recipes
 
-- **A board.** `let (mut a, f1, board) = FakeSealer::create(seed, "Desk");` classify `f1` at seq 1 with any membership
-  (seq 1 is classified from `M_0` and the anchor), `prev_chain = a.chain_zero()`; keep `receipt.membership` as `M_1`.
+- **A board.** `let (mut a, f1, board) = FakeSealer::create(seed, "Desk");` classify `f1` at seq 1 with
+  `a.membership_zero()` (any membership gives the same: seq 1 is classified from `M_0` and the anchor), `prev_chain = a.chain_zero()`; keep `receipt.membership` as `M_1`.
 - **A second device.** `let (dev, sign_pk, hpke_pk) = FakeSealer::join_keys(seed2);` E seals
   `Body::Ctl(CtlIntent::AddDevice { dev, sign_pk, hpke_pk, name, transcript, bootstrap_seq: h })` with `based_on` the head
   `h` of its snapshot material at `h`; once it is sequenced at `s`: `let b = FakeSealer::join(seed2, "Laptop",
@@ -53,6 +66,9 @@ u32 n ‖ n × (u32 e ‖ R_e) ‖ u32 n ‖ n × (entry_id ‖ u32 e ‖ root)`
 - **A recovery-signed entry.** `a.seal_as_recovery(&m, rec.last_ctr + 1, &entry)` with `rec` the last of `view(&m).recovery`;
   a key change: `a.seal_recovery_key_change(&m, ctr, &entry, (spk, hpk))` with `(_, spk, hpk) = join_keys(fresh_seed)`.
   The new identity's first counter is 1; the old one is refused from the next seq (`seal/revoked_author`).
+- **A restart (§31.4).** Persist `export_identity()` at every `WriteIdentity` and `history()` with it; the new process
+  runs `FakeSealer::restore(&id, history, fresh_seed, &rules)`, then the engine classifies the tail above its checkpoint
+  again (same receipts; an own rotation still pending in `id` loses its pending root as it is accepted).
 - **Reinstating a device revoked by a device.** `let (first, wraps) = a.reinstate_wraps(&m, &dev)?;` (the relay's
   `reinstate`), then the recovery identity seals `Rotate { reinstate: vec![dev], .. }`; the target calls
   `take_missed_wraps(&its_m, first, &wraps)` and classifies the rotations in seq order.

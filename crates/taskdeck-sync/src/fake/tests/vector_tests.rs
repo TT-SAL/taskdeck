@@ -563,6 +563,9 @@ fn build() -> Value {
     let snap_case = snapshot_case(&sc.log);
     cases.push(snap_case);
 
+    // ---------- the identity layout, with a pending root and without.
+    cases.push(identity_case());
+
     json!({
         "spec": "engine.md §6.3",
         "notes": NOTES,
@@ -580,7 +583,11 @@ Values checked by an independent script written from the spec text (not the crat
 `genesis` (frame bytes included), `primitives`, `item`, `beat` and `snap`; for the log, every frame's layout, signature \
 (fake) and AEAD tag under the epoch roots its rotations wrap, its frame hash and the chain values. Recorded from the crate's \
 own output: the bytes of the later log frames and of the case frames (built by the crate; their `step` and expected class and \
-code were chosen by hand from seal.md §14.2), the membership bytes after each receipt, and the snapshot blob.";
+code were chosen by hand from seal.md §14.2), the membership bytes after each receipt, and the snapshot blob. The `identity` \
+case is recorded from the crate's own output too: export_identity (the layout of docs/sync/status/engine/api-fake-toy.md) of \
+a fresh FakeSealer::create(seed, device_name) after it classified its genesis frame at seq 1 from membership_zero(), after it \
+sealed `Rotate` (no revoke, no reinstate, no purge) at counter 1 with at_ms `at_ms`, based_on the head at seq 1 and the entry id \
+of new_entry_id() (a pending root), and after it classified that frame at seq 2.";
 
 fn fp_text(board_id: &[u8; 16], seq: u64, chain: &Hash32) -> String {
     let x = h(&[&ctx("fingerprint"), board_id, &seq.to_be_bytes(), chain]);
@@ -662,4 +669,40 @@ fn the_vectors_cover_every_step_of_14_2() {
         assert!(receipts.iter().any(|c| c["step"] == step), "no case for step {step}");
     }
     assert!(receipts.iter().any(|c| c["expect"]["class"] == "accept" && c["expect"]["code"].is_null()));
+}
+
+/// The identity layout (api-fake-toy.md): Desk after its genesis, after sealing
+/// a rotation (one pending root), and after accepting it (two roots). A fake
+/// restored from each export writes the same bytes again (engine.md §31.4).
+fn identity_case() -> Value {
+    let (fake, frame, _) = FakeSealer::create(DESK, "Desk");
+    let mut net = Net::new(&fake.board_id);
+    let mut n = Node::new(fake);
+    n.m = n.fake.membership_zero();
+    let s = net.push(frame);
+    assert!(matches!(n.deliver(&net, s).class, Class::Accept));
+    let at_genesis = n.fake.export_identity().to_vec();
+    let rotate = Body::Ctl(CtlIntent::Rotate { revoke: vec![], reinstate: vec![], purge_before: None });
+    let sealed = n.seal(&net, 1_000, rotate);
+    let entry_id = ok(n.fake.open_own(&n.m, &sealed.frame));
+    let pending = n.fake.export_identity().to_vec();
+    let s = net.push(sealed.frame.clone());
+    let r = n.deliver(&net, s);
+    assert!(matches!(r.class, Class::Accept) && r.keys_changed && n.fake.pending.is_empty());
+    let accepted = n.fake.export_identity().to_vec();
+    for id in [&at_genesis, &pending, &accepted] {
+        let restored = ok(FakeSealer::restore(id, n.fake.history(), 7, &[1]));
+        assert_eq!(restored.export_identity().to_vec(), *id);
+    }
+    json!({
+        "name": "identity: export_identity of Desk after its genesis, after sealing a rotation (a pending root), after accepting it",
+        "kind": "identity",
+        "seed": u64x(DESK),
+        "device_name": "Desk",
+        "at_ms": 1_000,
+        "expect": {
+            "genesis": hx(&at_genesis), "entry_id": hx(&entry_id), "frame": hx(&sealed.frame),
+            "sealed": hx(&pending), "accepted": hx(&accepted),
+        },
+    })
 }

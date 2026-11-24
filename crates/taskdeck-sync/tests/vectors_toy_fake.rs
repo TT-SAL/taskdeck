@@ -14,8 +14,8 @@ use taskdeck_sync::fake::{FakeBundle, FakeMembership, FakeSealer};
 use taskdeck_sync::sim::SplitMix64;
 use taskdeck_sync::toy::{ToyCommand, ToyMachine, ToyNotice, ToyState};
 use taskdeck_sync::{
-    Applied, Class, ClassifyInput, Coalesce, Ctx, Dev, Hash32, Receipt, Sealer, SmRefusal, SnapInfo, SnapshotMaterial,
-    StateMachine,
+    Applied, Body, Class, ClassifyInput, Coalesce, CtlIntent, Ctx, Dev, Hash32, Head, PlainEntry, Receipt, Sealer, SmRefusal,
+    SnapInfo, SnapshotMaterial, StateMachine,
 };
 
 const SPLITMIX: &str = include_str!("vectors/engine-splitmix.json");
@@ -647,12 +647,77 @@ fn fake_vectors() {
                 let (opened, epoch, inflated) = fake.open_snapshot(&[&blob.bytes], &info, &writer, true).expect("opens");
                 assert_eq!((opened, epoch, inflated), (material, blob.epoch, blob.inflated));
             }
+            "identity" => check_identity_case(case),
             other => panic!("unknown kind {other}"),
         }
     }
-    for k in ["keys", "genesis", "primitives", "item", "beat", "snap", "log", "receipt", "snapshot"] {
+    for k in ["keys", "genesis", "primitives", "item", "beat", "snap", "log", "receipt", "snapshot", "identity"] {
         assert!(kinds.contains_key(k), "no {k} case");
     }
+}
+
+/// Classifies `frame` at `seq` on `fake` with every chain value of `chains`.
+fn classify_at(
+    fake: &mut FakeSealer,
+    m: &FakeMembership,
+    chains: &[Hash32],
+    seq: u64,
+    frame: &[u8],
+    own: Option<(u64, Hash32)>,
+) -> Receipt<FakeMembership> {
+    let chain_at = |b: u64| if b < seq { chains.get(b as usize).copied() } else { None };
+    let own_sealed = |c: u64| own.filter(|(ctr, _)| *ctr == c).map(|(_, h)| h);
+    let skip_targets = |_: u64| None;
+    fake.classify(&ClassifyInput {
+        seq,
+        frame,
+        prev_chain: chains[(seq - 1) as usize],
+        membership: m,
+        chain_at: &chain_at,
+        retained_from: 1,
+        own_sealed: &own_sealed,
+        skip_targets: &skip_targets,
+    })
+    .expect("no local fault")
+}
+
+/// The `identity` case: the layout of `export_identity` after the genesis
+/// (classified from `membership_zero()`), after sealing a rotation (one pending
+/// root) and after accepting it (two roots, none pending).
+// spec: ENG-SEALER-009
+fn check_identity_case(case: &Value) {
+    let expect = &case["expect"];
+    let (mut fake, f1, _) = FakeSealer::create(u64_hex(&case["seed"]), case["device_name"].as_str().expect("name"));
+    let m0 = fake.membership_zero();
+    assert_eq!(m0, FakeMembership::default());
+    let mut chains = vec![fake.chain_zero()];
+    let r1 = classify_at(&mut fake, &m0, &chains, 1, &f1, None);
+    assert_eq!(class_name(&r1.class), "accept");
+    chains.push(r1.chain);
+    assert_eq!(hex(&fake.export_identity()), expect["genesis"].as_str().expect("genesis"));
+
+    let entry_id = fake.new_entry_id().expect("an entry id");
+    assert_eq!(hex(&entry_id), expect["entry_id"].as_str().expect("entry_id"));
+    let at_ms = i64::try_from(int(&case["at_ms"])).expect("at_ms");
+    let body = Body::Ctl(CtlIntent::Rotate { revoke: vec![], reinstate: vec![], purge_before: None });
+    let entry = PlainEntry { entry_id, at_ms, based_on: Head { seq: 1, chain: chains[1] }, body };
+    let sealed = fake.seal(&r1.membership, 1, &entry).expect("seals");
+    assert_eq!(hex(&sealed.frame), expect["frame"].as_str().expect("frame"));
+    assert!(sealed.keys_changed && sealed.epoch == 1);
+    let pending = fake.export_identity().to_vec();
+    assert_eq!(hex(&pending), expect["sealed"].as_str().expect("sealed"));
+    // The pending roots close the layout: u32 1, then entry_id ‖ u32 2 ‖ root.
+    let tail = &pending[pending.len() - 56..];
+    assert_eq!((&tail[..4], &tail[4..20], &tail[20..24]), (&[0, 0, 0, 1][..], &entry_id[..], &[0, 0, 0, 2][..]));
+    assert_eq!(identity(&fake).roots.len(), 1);
+
+    let r2 = classify_at(&mut fake, &r1.membership, &chains, 2, &sealed.frame, Some((1, sealed.frame_hash)));
+    assert_eq!(class_name(&r2.class), "accept");
+    assert!(r2.keys_changed && !r2.own_dev_foreign);
+    let accepted = fake.export_identity().to_vec();
+    assert_eq!(hex(&accepted), expect["accepted"].as_str().expect("accepted"));
+    assert_eq!(identity(&fake).roots.iter().map(|(e, _)| *e).collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(&accepted[accepted.len() - 4..], &[0, 0, 0, 0]);
 }
 
 fn sha2_of(b: &[u8]) -> [u8; 32] {

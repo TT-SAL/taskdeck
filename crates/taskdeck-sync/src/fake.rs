@@ -26,10 +26,14 @@
 //!   another time. A fake made by `create` or `join` supports rules `[1]`
 //!   unless the simulator sets another list (`set_supported_rules`); both
 //!   setters are crate-private (engine.md §6.3).
-//! - `M_0` (`seal.md` §13.3) is `FakeMembership::default()`.
+//! - `M_0` (`seal.md` §13.3) is `FakeMembership::default()`, which
+//!   `Sealer::membership_zero` returns.
 //! - `seal` refuses `ctr = 0` with `seal/frame_format`, the code
 //!   SEAL-FRAME-004 names, and an unencodable item (a device name outside
 //!   §5.5) with `seal/bad_payload`.
+//! - `seal` keeps per counter its own last sealing in memory and returns it
+//!   only for the same entry under the same epoch (SEAL-FRAME-005); a
+//!   restored fake starts without it.
 //! - `join` keeps the bundle's roots whose commitment the snapshot's
 //!   membership records (SEAL-KEY-013).
 //! - The fake signature needs only the signer's public key, so any fake of a
@@ -38,7 +42,8 @@
 //!   simulator's workload (engine.md §31.5); such frames keep no pending root.
 //! - The simulator reaches the fake also through the crate-private
 //!   `create_at`, `join_keys`, `bundle`, `set_supported_rules`,
-//!   `seal_as_recovery`, `seal_recovery_key_change` and `reinstate_wraps`,
+//!   `seal_as_recovery`, `seal_recovery_key_change`, `reinstate_wraps`, and
+//!   after a restart `history` and `restore` (engine.md §31.4),
 //!   and tests forge frames with `plaintext_bytes` and `forge_frame`, so the
 //!   public surface stays engine.md §37's.
 
@@ -101,6 +106,7 @@ mod code {
     pub const BLOB_OPEN: &str = "seal/blob_open";
     pub const SNAPSHOT_LARGE: &str = "seal/snapshot_large";
     pub const INFLATE: &str = "seal/inflate";
+    pub const FILE_CORRUPT: &str = "seal/file_corrupt";
 }
 
 // ---------- limits (`seal.md` §23)
@@ -1718,6 +1724,15 @@ enum Content<'a> {
     KeyChange(Hash32, Hash32),
 }
 
+/// The last frame this device sealed under one counter, with what it sealed:
+/// the entry (id, `at_ms`, `based_on`, body, so the kind too) and the epoch.
+struct OwnSealed {
+    entry: PlainEntry,
+    epoch: u32,
+    frame: Vec<u8>,
+    frame_hash: Hash32,
+}
+
 /// A snapshot body's material and its history records by seq.
 type OpenedBody = (SnapshotMaterial, Vec<(u64, Vec<u8>)>);
 
@@ -1738,8 +1753,9 @@ pub struct FakeSealer {
     missed: BTreeMap<u32, [u8; 96]>,
     /// One history record per accepted control entry, by seq (§6.3 "Control history").
     history: RefCell<BTreeMap<u64, Vec<u8>>>,
-    /// The frames it sealed, by counter (SEAL-FRAME-005): `(frame, hash, epoch)`.
-    sealed: BTreeMap<u64, (Vec<u8>, Hash32, u32)>,
+    /// Its own last sealing per counter (SEAL-FRAME-005), in memory only: asked
+    /// again for the same entry under the same epoch, `seal` returns these bytes.
+    sealed: BTreeMap<u64, OwnSealed>,
     /// The rules versions this build supports (`seal.md` §14.5).
     supported_rules: Vec<u32>,
 }
@@ -1845,7 +1861,7 @@ impl FakeSealer {
     /// The pairing helper (engine.md §6.3), standing in for `seal.md` §17:
     /// the new device's keys from `seed`, and the roots the bundle hands over
     /// that match the snapshot membership's commitments (SEAL-KEY-013).
-    pub fn join(seed: u64, name: &str, bundle: FakeBundle) -> Self {
+    pub fn join(seed: u64, _name: &str, bundle: FakeBundle) -> Self {
         let mut rng = SplitMix64 { state: seed };
         let (sk, dev) = device_keys(&mut rng);
         let m = FakeMembership::from_bytes(&bundle.material.membership).unwrap_or_default();
@@ -1888,6 +1904,90 @@ impl FakeSealer {
     #[allow(dead_code)]
     pub(crate) fn set_supported_rules(&mut self, rules: &[u32]) {
         self.supported_rules = rules.to_vec();
+    }
+
+    /// Its control history records (§6.3 "Control history", the layout of
+    /// `seal.md` §21.5), in seq order: what the model runtime persists beside
+    /// the identity, as `device.md` §15.7 does for the real sealer (§31.4).
+    // Used by the simulator stage `engine` writes, and by the tests.
+    #[allow(dead_code)]
+    pub(crate) fn history(&self) -> Vec<Vec<u8>> {
+        self.history.borrow().values().cloned().collect()
+    }
+
+    /// The fake a new process builds after a restart (engine.md §31.4): keys,
+    /// board id, anchor, roots and pending roots from `identity` (the bytes of
+    /// `export_identity`), the control history `history` (from `history()`),
+    /// a generator seeded with `reseed` (a restart must not draw the old
+    /// generator's values again) and the build's `supported_rules`. Missed
+    /// wraps and the frames kept for SEAL-FRAME-005 are memory only and start
+    /// empty (§6.1 `take_missed_wraps`). `seal/file_corrupt` for identity bytes
+    /// that do not parse exactly, keys that do not belong together, an anchor
+    /// of another board, roots or pending roots out of order, or a history
+    /// record that does not parse or repeats a seq.
+    // Used by the simulator stage `engine` writes, and by the tests.
+    #[allow(dead_code)]
+    pub(crate) fn restore(
+        identity: &[u8],
+        history: Vec<Vec<u8>>,
+        reseed: u64,
+        supported_rules: &[u32],
+    ) -> Result<FakeSealer, SealerError> {
+        let corrupt = SealerError { code: code::FILE_CORRUPT };
+        let mut fake = Self::parse_identity(identity, SplitMix64 { state: reseed }).ok_or(corrupt.clone())?;
+        let mut held = fake.history.borrow_mut();
+        for bytes in history {
+            let mut r = Reader::new(&bytes);
+            let seq = read_hist(&mut r).filter(|_| r.is_empty()).ok_or(corrupt.clone())?.seq;
+            if held.insert(seq, bytes).is_some() {
+                return Err(corrupt);
+            }
+        }
+        drop(held);
+        fake.supported_rules = supported_rules.to_vec();
+        Ok(fake)
+    }
+
+    /// The strict parser of the identity layout `export_identity` writes.
+    fn parse_identity(bytes: &[u8], rng: SplitMix64) -> Option<FakeSealer> {
+        let mut r = Reader::new(bytes);
+        if &r.take::<4>()? != IDENTITY_MAGIC || r.u32()? != 1 {
+            return None;
+        }
+        let dev: Dev = r.take()?;
+        let sk: [u8; 32] = r.take()?;
+        let (sign_pk, hpke_pk): (Hash32, Hash32) = (r.take()?, r.take()?);
+        let board_id: [u8; 16] = r.take()?;
+        let mut fake = Self::blank(rng, sk, dev, board_id);
+        if (fake.sign_pk, fake.hpke_pk) != (sign_pk, hpke_pk) {
+            return None;
+        }
+        fake.anchor = match r.u8()? {
+            0 => None,
+            1 => {
+                let a = Anchor { rsign_pk: r.take()?, salt: r.take()?, root: r.take()? };
+                if board_id_of(&a.rsign_pk, &a.salt) != board_id {
+                    return None;
+                }
+                Some(a)
+            }
+            _ => return None,
+        };
+        for _ in 0..r.u32()? {
+            let (e, root) = (r.u32()?, r.take::<32>()?);
+            if fake.roots.last_key_value().is_some_and(|(last, _)| *last >= e) {
+                return None;
+            }
+            fake.roots.insert(e, root);
+        }
+        for _ in 0..r.u32()? {
+            let (id, e, root) = (r.take::<16>()?, r.u32()?, r.take::<32>()?);
+            if fake.pending.last_key_value().is_some_and(|(last, _)| *last >= id) {
+                return None;
+            }
+            fake.pending.insert(id, (e, root));
+        }
+        r.is_empty().then_some(fake)
     }
 
     /// Composes, seals and signs a `ctl` frame by any author (the genesis helper, the tests).
@@ -2064,8 +2164,12 @@ impl FakeSealer {
             return Err(SealerError { code: code::FRAME_FORMAT });
         }
         let own = *author == self.dev;
-        if let Some((frame, frame_hash, epoch)) = self.sealed.get(&ctr).filter(|_| own) {
-            return Ok(Sealed { frame: frame.clone(), frame_hash: *frame_hash, epoch: *epoch, keys_changed: false });
+        // SEAL-FRAME-005: the same entry under the same epoch gets the stored
+        // bytes; another entry, or a newer epoch, under a counter sealed before
+        // (a frame cleared for re-sealing, engine.md §11.3 step 3, §11.4) is sealed anew.
+        let stored = self.sealed.get(&ctr).filter(|x| own && x.entry == *entry && x.epoch == m.epoch);
+        if let Some(x) = stored {
+            return Ok(Sealed { frame: x.frame.clone(), frame_hash: x.frame_hash, epoch: x.epoch, keys_changed: false });
         }
         let based_on_ok = entry.based_on.seq != 0 || entry.based_on.chain == chain_zero_of(&self.board_id);
         if !based_on_ok || !(0..=AT_MS_MAX).contains(&entry.at_ms) {
@@ -2095,7 +2199,8 @@ impl FakeSealer {
                 self.pending.insert(entry.entry_id, pending);
                 keys_changed = true;
             }
-            self.sealed.insert(ctr, (frame.clone(), frame_hash, epoch));
+            let stored = OwnSealed { entry: entry.clone(), epoch, frame: frame.clone(), frame_hash };
+            self.sealed.insert(ctr, stored);
         }
         Ok(Sealed { frame, frame_hash, epoch, keys_changed })
     }
@@ -2841,6 +2946,10 @@ fn blob_ad(board_id: &[u8; 16], header27: &[u8], s: u64, writer: &Dev) -> Vec<u8
 impl Sealer for FakeSealer {
     type Membership = FakeMembership;
 
+    fn membership_zero(&self) -> FakeMembership {
+        FakeMembership::default()
+    }
+
     fn own_dev(&self) -> Dev {
         self.dev
     }
@@ -2893,7 +3002,7 @@ impl Sealer for FakeSealer {
         self.seal_as(&dev, &sign_pk, m, ctr, entry, Content::Body(&entry.body))
     }
 
-    fn open_own(&self, m: &FakeMembership, frame: &[u8]) -> Result<[u8; 16], SealerError> {
+    fn open_own(&self, _m: &FakeMembership, frame: &[u8]) -> Result<[u8; 16], SealerError> {
         let err = |c| Err(SealerError { code: c });
         let Some(f) = parse_frame(frame) else { return err(code::FRAME_FORMAT) };
         if f.dev != self.dev || f.board_id != self.board_id {
