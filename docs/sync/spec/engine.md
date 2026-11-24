@@ -389,6 +389,7 @@ pub trait Sealer {
     fn view(&self, m: &Self::Membership) -> MembershipView;          // §6.2
     fn membership_bytes(&self, m: &Self::Membership) -> Vec<u8>;
     fn membership_from_bytes(&self, bytes: &[u8]) -> Result<Self::Membership, SealerError>;
+    fn membership_zero(&self) -> Self::Membership;                    // M_0 (seal.md §13.3)
     fn supported_envelopes(&self) -> Vec<(u8, u8)>;
 
     fn chain_zero(&self) -> Hash32;
@@ -425,11 +426,12 @@ pub trait Sealer {
 |---|---|
 | `own_dev` | this device's `dev` |
 | `view` | the read-only view of §6.2, computed from the membership value alone |
+| `membership_zero` | `M_0`, the state before seq 1 (`seal.md` §13.3): what the engine passes to `classify` as `input.membership` for `seq = 1` (§19.8) and holds as `M_K` before it has a log |
 | `membership_bytes`, `membership_from_bytes` | the canonical membership bytes of `seal.md` §13.2 and their strict parser (SEAL-MEM-001, SEAL-MEM-002) |
 | `supported_envelopes` | the (`ver`, `suite`) pairs this build opens, ascending; `[(1, 1)]` in this build |
 | `chain_zero`, `chain_step`, `frame_hash` | `seal.md` §15.1 and §8.2 |
 | `frame_author` | the header's `dev` and `ctr` after `seal.md` §14.2 step 1, for the 409 and own-dev paths; an error when step 1 fails |
-| `classify` | `seal.md` §14 over the inputs of §14.1, with `M_{s−1} = input.membership`, the sealer's own roots, its own X25519 key, its build's supported rules and, for `seq = 1`, its genesis anchor; returns `seal.md` §14.4's outcome; while it holds a missed wrap of epoch `n` (`take_missed_wraps`), an accepted `EpochRotated{n}` that does not wrap to this device has that wrap opened against the rotation's `commit` (`seal.md` §7) as SEAL-RCPT-007 opens an own wrap, returning the commitment halt when it does not open or does not match; when it accepts an `EpochRotated{n}` in an entry of this device whose `entry_id` holds a pending root, it opens its own wrap as every recipient does (SEAL-RCPT-007), keeps the opened root as the root of epoch `n`, and removes that pending root in the same call; `keys_changed` is true when it learned a root or removed a pending one; it never panics (SEAL-GEN-011) |
+| `classify` | `seal.md` §14 over the inputs of §14.1, with `M_{s−1} = input.membership`, the sealer's own roots, its own X25519 key, its build's supported rules and, for `seq = 1`, its genesis anchor; returns `seal.md` §14.4's outcome; while it holds a missed wrap of epoch `n` (`take_missed_wraps`), an accepted `EpochRotated{n}` that does not wrap to this device has that wrap opened against the rotation's `commit` (`seal.md` §7) as SEAL-RCPT-007 opens an own wrap, returning the commitment halt when it does not open or does not match; when it accepts an `EpochRotated{n}` in an entry of this device whose `entry_id` holds a pending root, it opens its own wrap as every recipient does (SEAL-RCPT-007), keeps the opened root as the root of epoch `n`, and removes that pending root in the same call; `keys_changed` is true when it learned a root or removed a pending one; it never panics (SEAL-GEN-011). The engine calls it again for a seq it has classified before (the tail at `Start`, a replay of §17.3 or §28): for the same inputs it answers the same, and a repeat changes nothing the sealer holds |
 | `new_entry_id` | 16 fresh random bytes (SEAL-PLAIN-002) |
 | `seal` | builds the plaintext of `seal.md` §10.1 with the entry's id, kind, `at_ms`, `based_on` and the body's payload; for `Body::Ctl` it composes the items from the intent and `m` at this moment; for a rotation it draws a fresh root, kept as pending under the entry id, computes its commitment, and wraps the root to each current device and to the current recovery identity of the working copy `W` of `seal.md` §13.6, that is `m` as the entry's earlier items leave it (a device the entry revokes gets no wrap, one it reinstates gets one, and after a `RecoveryKeyChange` the new recovery key gets it), once each, ascending by recipient id; then the inner signature; seals under `m`'s current epoch (SEAL-ENV-003) with counter `ctr`; draws its random values in this order: the root (`EpochRoot::generate`), then the wraps in ascending recipient-id order (`wrap_root`, 32 bytes each, `seal.md` SEAL-WRAP-004), then the frame's nonce (`seal_frame`, SEAL-GEN-012); returns the frame, its hash, the epoch and whether its secrets changed |
 | `open_own` | opens a frame this device signed, under any root it holds, and returns its `entry_id`; an error for any other frame |
@@ -670,7 +672,7 @@ What `Start` carries, read by the runtime from the files:
 |---|---|
 | `checkpoint` | the newest checkpoint, or absent before the first |
 | `bases` | the seq and `board_chain` of every base, ascending |
-| `chains` | `(seq, chain)` of every log record, ascending |
+| `chains` | `(seq, chain, τ)` of every log record, ascending: its `seq`, `chain` and `tau` (§7.2). The log clock of a seq at or below the checkpoint is known from nowhere else, and the bases of §18.2, the retention of §7.13, the restore targets and the purge reach of §28 and the compaction bound of §20.2 read it |
 | `log_floor` | the runtime's durable log floor: the `seq` of the latest `TruncateLogBelow` it completed, 1 before any |
 | `floor_chain` | the `floor_chain` that `TruncateLogBelow` handed it with that floor, or absent |
 | `tail` | every log record above `checkpoint.board_seq` |
@@ -910,6 +912,7 @@ pub struct Welcome { pub head: Head, pub last_ctr: Option<u64>, pub last_seq: Op
 | `Reconciling` | `Page` | §12 | as §12 | `Reconciling`, or `Live` when `L` reaches the latest known relay head and the reconcile is complete |
 | `Live` | `Page` (push or read) | §12 | as §12 | `Live` |
 | `Live` | `Tick` | `push` is false and 30,000 ms of `mono_ms` have passed since the last `Hello` | `Hello` | `Live` |
+| `Live` | any call | a duty waits only for a fresh head (§29.1) and 30,000 ms of `mono_ms` have passed since the last `Hello` | `Hello` | `Live` |
 | any | `Welcome` | a check of §11.2 fails | the stop of §21 | unchanged |
 | any | `Disconnected` | | none; outstanding requests are unanswered (ENG-SEND-007) | `Offline` |
 
@@ -942,7 +945,7 @@ SYNC.md §4.3 rule 3, V1-16, V2-3. Let `a` be this device's `last_ctr` in `M_K` 
 
 1. `r < a`: the relay lacks counters this device has classified: evidence `relay_behind`.
 2. `a ≤ r ≤ h`: normal. The frames `a + 1` to `r` are stored; the engine reads up to at least `q` before it seals anything new.
-3. `r > h`: frames under this device's `dev` exist that this folder never sealed: a restored copy (a backup, a VM snapshot, Time Machine) or another holder of the key. The engine sets `registry.restored = (h + 1, r)` (persisted in the next `WriteMeta`), seals nothing until the log reaches `q`, and during that catch-up:
+3. `r > h`: frames under this device's `dev` exist that this folder never sealed: a restored copy (a backup, a VM snapshot, Time Machine) or another holder of the key. The engine sets `registry.restored = (h + 1, r)` (the registry is part of the checkpoint, §7.3, so it is durable with the next checkpoint; a restart before that finds `r > h` again at its next welcome and starts the catch-up over), seals nothing until the log reaches `q`, and during that catch-up:
    - supplies to `own_sealed`, for every counter in `h + 1..=r`, the hash of the frame being classified, so those frames are classified as its own;
    - for every such accepted frame, looks up its `entry_id` among the records: a match is the same entry sent by the earlier copy, and is treated as this device's own entry from then on (seen, then applied and dropped);
    - every record that holds a frame at a counter `≤ r` whose hash differs from the relay's frame at that counter has its frame cleared for re-sealing (D9);
@@ -995,7 +998,7 @@ The folder lock and the refusal of cloud-synced folders are `device.md`'s (SYNC.
 | `Second` otherwise | stop with `identity_clone`: another process with this identity is running |
 | `Displaced { session }` | stop with `identity_clone`; no `Connect` until the user chooses `UseThisCopy` (§30.4) |
 
-At `Start` the runtime passes its new session id in `Loaded`; the engine stores the previous one as `prev_session` in the next `WriteMeta`.
+At `Start` the runtime passes its new session id in `Loaded`. The `prev_session` that `Loaded`'s `Meta` carries is the id of the previous process, which the engine keeps in memory for the row above; in its next `WriteMeta` the engine writes this process's id there, for the process after it.
 
 - **ENG-SESS-003** (engine) The engine MUST stop with `identity_clone` on a `Displaced`, and on a `Second` whose session is not the previous process's.
 - **ENG-SESS-004** (engine) After `identity_clone`, the engine MUST NOT emit `Connect` until the user chooses `UseThisCopy`.
@@ -1321,7 +1324,7 @@ A Skip at seq `s` may target only `t ≥ F(s) = max(M_{s−1}.purge_seq, s − 1
 
 The engine writes a checkpoint (§7.3) of the confirmed state at `B` (SYNC.md §4.1):
 
-1. when 200 entries have been applied since the last checkpoint;
+1. when 200 entries have been applied since the last checkpoint (looked at in step 7 of §4.5, so the checkpoint follows the call in which the count was reached: a page applied in one call can carry it past 200);
 2. when 600,000 ms of `mono_ms` have passed since the last checkpoint and `B` has changed;
 3. on `Shutdown`, after which, once the `Persisted` arrives, it emits `Notify(ReadyToExit)`;
 4. after a bootstrap, an adoption, a reset, a Skip replay, a purge and a rules upgrade, before the next entry is applied.
@@ -1801,6 +1804,8 @@ SYNC.md §6.6, V1-10.
 
 **Offered targets.** `t` such that: `t < B`; `t ≥ M_K.purge_seq`; `t` greater than the `bootstrap_seq` of every current device (`seal.md` §13.6); this device holds a base at or below `t` and the log from it to `t`; `τ_t ≥ τ_B − 31,536,000,000` (365 days, so every active device still holds it, ruling of SYNC.md §6.6).
 
+A `RestoreTo` whose `seq` is not an offered target, or whose replay of stage 1 cannot be made, ends with `engine/restore_target`.
+
 **Stages.** 1: replay from the newest base at or below `t` to `t`, with the current skip set, and compute the state hash `h_t` (§18.3) with `M_t`. 2: enqueue `ResetTo { seq: t, state_hash: h_t, hash_version: 1 }`. 3: done when it is accepted and applied.
 
 **Every device**, at the board apply of an accepted `ResetTo` at seq `r` for `t`:
@@ -1907,7 +1912,7 @@ SYNC.md §5.3, `seal.md` §17.1 step 9 and SEAL-PAIR-010.
 
 ### 28.7 Reset trust
 
-Reset trust starts a new board from this device's confirmed state: a new recovery seed and sheet, new device keys, a new `board_id`, and a genesis carrying the current confirmed board bytes unchanged; the old board is then pointed at the new one by one `Fence` (`CloseBoard`), and its devices re-pair into the new board (SYNC.md §5.4). The runtime creates the new board from this device's confirmed state (a new recovery seed and sheet, and a genesis carrying the current board bytes as an imported board; `device.md`). Then `Operation::CloseBoard { host, door }` on the old board's engine enqueues `CtlIntent::Fence { host, door, home_gen: M_K.home_gen + 1 }` with `via: Fence`. A device that follows it (§28.3) finds it is no member of the board there (`relay/unauthorized` at login), enters the stop `Closed` (§11.9, ENG-SESS-007), and the engine offers re-pair and resubmit into the new board (§24.5).
+Reset trust starts a new board from this device's confirmed state: a new recovery seed and sheet, new device keys, a new `board_id`, and a genesis carrying the current confirmed board bytes unchanged; the old board is then pointed at the new one by one `Fence` (`CloseBoard`), and its devices re-pair into the new board (SYNC.md §5.4). The runtime creates the new board from this device's confirmed state (a new recovery seed and sheet, and a genesis carrying the current board bytes as an imported board; `device.md`). Then `Operation::CloseBoard { host, door }` on the old board's engine enqueues `CtlIntent::Fence { host, door, home_gen: M_K.home_gen + 1 }` with `via: Fence`. When that `Fence` is accepted in its log at `f`, the engine emits `Notify(MoveCode { text: Sealer::move_code(f, H(Fence frame)) })`, as stage 7 of §28.3 does for a move and without a `MoveReport`: the old board's devices follow the `Fence` only with that code (§28.3 "On every other device" step 2). A device that follows it (§28.3) finds it is no member of the board there (`relay/unauthorized` at login), enters the stop `Closed` (§11.9, ENG-SESS-007), and the engine offers re-pair and resubmit into the new board (§24.5).
 
 - **ENG-OPS-010** (engine) On `Operation::CloseBoard { host, door }`, the engine MUST enqueue exactly one `CtlIntent::Fence { host, door, home_gen: M_K.home_gen + 1 }` with `via: Fence`, MUST end the operation with `OpDone` `Ok` only once that `Fence` is accepted in its log, and MUST NOT seed, append to or upload to the relay it names.
 
@@ -1928,12 +1933,15 @@ A device is **eligible** for a duty (ruling S8: "any current, unhalted device") 
 2. **unhalted**: no halt (§16) and no stop (§21, §22, §24.4);
 3. composing is not blocked by the clock (§27.2).
 
+**A fresh head.** On a session over which nothing arrives (a push session of a quiet board), the head of item 1 grows older than 600,000 ms, and no device would ever take the duty that ends the quiet. So when a duty of this section is due and the device is eligible but for the age of that head, the engine emits `Hello` (§11.1), at most once per 30,000 ms of `mono_ms`; the welcome gives it a head to be caught up with.
+
 ### 29.2 The duty order
 
 The current devices of the membership the duty names (`M_S` for a snapshot, `M_K` otherwise), sorted by `beat_ms` descending, then by `dev` ascending as unsigned bytes. A device's rank is its 0-based position. The order rests on the log, so every device computes the same ranks; the device that beat most recently, and so is most likely awake, goes first.
 
 - **ENG-DUTY-001** (engine) The engine MUST compute ranks exactly by the order of §29.2.
 - **ENG-DUTY-002** (engine) The engine MUST take a duty only while it is eligible as §29.1 defines it, except restore tail, which needs only §29.1 item 2 apart from the evidence stop being repaired, and a joined, current record.
+- **ENG-DUTY-003** (engine) When a duty is due and the device fails §29.1 only because the relay head it knows is older than 600,000 ms, the engine MUST emit `Hello`, and MUST NOT emit it for that reason more than once per 30,000 ms of `mono_ms`.
 
 ### 29.3 The duties
 
@@ -2231,6 +2239,7 @@ Codes the engine returns in `EnqueueRefused`, `OpDone`, `PairFailed`, stops, ref
 | `engine/missing_root` | the sealer lacks a root for an accepted epoch, and this device is not revoked | §13.1 | stop; re-pair and resubmit |
 | `engine/own_frame_refused` | the relay refused this device's frame for its format, board, author or signature | §10.4 | stop; replace the device if it repeats |
 | `engine/skip_target` | the Skip's target is not allowed | §17.1 | the UI explains which rule |
+| `engine/restore_target` | the seq of a `RestoreTo` is not an offered target | §28.1 | the UI offers the targets of `restore_targets` |
 | `engine/skip_unreachable` | a Skip's target frame is held nowhere | §17.2 | stop; an integrity problem without evidence: ask the user |
 | `engine/skipped` | an own entry was skipped by a Skip | §17.3 | a refusal record |
 | `engine/crash_halt` | an entry failed to apply in two consecutive attempts | §15 | show the halted view and the Skip offer |
@@ -2487,7 +2496,7 @@ pub enum PersistOp { AppendLog(Vec<LogRecord>), SetMarker(Marker), ClearMarker, 
                      WriteIdentity(zeroize::Zeroizing<Vec<u8>>) }
 pub enum Bootstrap { Genesis { board: Vec<u8>, frame_1: Vec<u8>, relay: RelayTarget },
                      Join { material: SnapshotMaterial, added_seq: u64, relay: RelayTarget } }
-pub struct Loaded { pub checkpoint: Option<Checkpoint>, pub bases: Vec<(u64, Hash32)>, pub chains: Vec<(u64, Hash32)>,
+pub struct Loaded { pub checkpoint: Option<Checkpoint>, pub bases: Vec<(u64, Hash32)>, pub chains: Vec<(u64, Hash32, i64)>,
                     pub log_floor: u64, pub floor_chain: Option<Hash32>,
                     pub tail: Vec<LogRecord>, pub hashes: Vec<HashRecord>, pub outbox: Vec<OutboxOp>,
                     pub notices: Vec<NoticeOp>, pub meta: Option<Meta>, pub marker: Option<Marker>,
