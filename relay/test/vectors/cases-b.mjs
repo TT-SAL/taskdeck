@@ -314,6 +314,7 @@ export const adminF = [
     admin('mint_read_token', 'alice', T('alice'), { dev: 'alice', epoch: 1 }, { status: 200 }),
     admin('reinstate', 'rec', DOOR, { dev: 'mallory', first_epoch: 2, wraps: 1 }, used(409, 'relay/target')),
     admin('reinstate', 'rec', DOOR, { dev: 'bob', first_epoch: 0, wraps: 1 }, used(400, 'relay/bad_args')),
+    admin('reinstate', 'rec', DOOR, { dev: 'bob', first_epoch: 1, wraps: 1 }, { ...used(400, 'relay/bad_args'), storage: { devices: { bob: { state: 2, wraps: null } } } }),
     admin('reinstate', 'rec', DOOR, { dev: 'bob', first_epoch: 2, wraps: 2 }, { status: 200, x_td_relay: 'object', json: {}, rows_written: 3,
       storage: { devices: { bob: { state: 1, gen: 2, wraps: { $cat: [{ $u32: 2 }, { $u16: 2 }, W] } } }, read_tokens: [{ state: 2 }] } }),
     step(req('hello', T('bob', 1)), err(401, 'relay/token_stale')),

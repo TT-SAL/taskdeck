@@ -1770,7 +1770,7 @@ const ADMIN = {
 
   // §12.5
   reinstate(c, { p }) {
-    if (p.a.first < 1) fail('relay/bad_args');
+    if (p.a.first < 2) fail('relay/bad_args'); // the epoch a rotation set up: seal signs no lower one
     const devs = c.all(SQL.devAll);
     const t = devs.find((d) => ctEqual(d.dev, p.a.dev));
     if (!t || t.role !== 1 || t.state !== 2) fail('relay/target');

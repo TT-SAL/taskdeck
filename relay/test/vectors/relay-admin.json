@@ -6957,6 +6957,66 @@
         "signer": "rec",
         "args": {
          "dev": "bob",
+         "first_epoch": 1,
+         "wraps": 1
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1,
+      "storage": {
+       "devices": {
+        "bob": {
+         "state": 2,
+         "wraps": null
+        }
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "rec"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "params": {
+       "op": "reinstate"
+      },
+      "body": {
+       "$admin": {
+        "op": "reinstate",
+        "signer": "rec",
+        "args": {
+         "dev": "bob",
          "first_epoch": 2,
          "wraps": 2
         }
