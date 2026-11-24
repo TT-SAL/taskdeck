@@ -818,6 +818,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.op_done(ticket, Ok(()));
             }
             (Operation::Move { .. }, _) => self.move_entry_done(ticket, seq, code),
+            (Operation::CloseBoard { .. }, None) => {
+                // The devices of the closed board follow its Fence with this code (§28.3 step 2).
+                if let Some(hash) = r.frame_hash {
+                    let text = self.sealer.move_code(seq, &hash);
+                    self.notify_durable(Notification::MoveCode { text });
+                }
+                self.op_done(ticket, Ok(()));
+            }
             (_, None) => self.op_done(ticket, Ok(())),
             (_, Some(c)) => self.op_done(ticket, Err(c)),
         }

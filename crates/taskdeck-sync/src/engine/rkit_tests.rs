@@ -79,10 +79,8 @@ impl Net {
                 self.at.insert(dev, relay.host.clone());
                 self.calls.push((dev, "connect".into()));
                 let cred = self.cred(&relay.host, &dev);
-                let Some(r) = self.relays.get_mut(&relay.host) else {
-                    n.feed(Event::Disconnected { unreachable: true, paused_until_ms: None });
-                    return true;
-                };
+                // Nobody answers at that address: the attempt hangs (the runtime's backoff is its own).
+                let Some(r) = self.relays.get_mut(&relay.host) else { return true };
                 match r.login(now, &cred, &dev).result {
                     Ok(login) => {
                         self.gens.insert((relay.host.clone(), dev), login.generation);
