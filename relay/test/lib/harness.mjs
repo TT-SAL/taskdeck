@@ -128,6 +128,9 @@ export class World {
       case '$hash': return sha(await B(a));
       case '$key': return this.key(a).pk;
       case '$dev': return this.dev(a.board || bn, a.key || a);
+      case '$dev_r': return devR(this.board(bn).id, this.key(a).pk);
+      case '$slice': return (await B(a.of)).slice(a.from, a.to);
+      case '$chain_from': { let c = await B(a.before), seq = a.first; for (const f of a.frames) c = chainNext(c, seq++, sha(await B(f))); return c; }
       case '$board': return this.board(a).id;
       case '$tid': return tidOf(unhex(a));
       case '$door': return hex(core.door(unhex(this.setup.token_key), this.board(a === true ? bn : a).id));
@@ -251,6 +254,8 @@ export class World {
     try {
       if (s.clock_ms !== undefined) { this.clock = s.clock_ms; await this.target.setClock(this, this.clock); }
       if (s.socket) return await this.socketStep(s);
+      if (s.fill_log) return await this.fillLog(s.fill_log);
+      if (s.storage_fault !== undefined) { this.target.fault = s.storage_fault; return undefined; }
       const rq = s.request, b = this.board(rq.board), e = s.expect || {};
       const stats = e.object_called !== undefined || e.rows_written !== undefined || e.rows_read_max !== undefined;
       const before = stats ? await this.target.stats(b.hex) : null;
@@ -266,6 +271,19 @@ export class World {
     } catch (err) {
       err.message = `${where}: ${JSON.stringify(s).slice(0, 300)}\n${err.message}`;
       throw err;
+    }
+  }
+  // Many new frames of one author, sixteen to a batch, every one expected to be stored.
+  async fillLog(f) {
+    for (let done = 0; done < f.count;) {
+      const n = Math.min(16, f.count - done), frames = [];
+      for (let i = 0; i < n; i++) frames.push({ $frame: { author: f.author, ctr: f.from_ctr + done + i, ...(f.frame || {}) } });
+      const r = await this.http({ route: 'append', board: f.board, cred: f.cred, body: { $batch: frames } });
+      assert.equal(r.status, 200, `fill_log at counter ${f.from_ctr + done}: ${Buffer.from(r.body).toString().slice(0, 200)}`);
+      const results = decodeResults(r.body);
+      assert.ok(results.every((x) => x.status === 'new'), 'fill_log: every frame is new');
+      noteResults(this.sent.board, results, await Promise.all(frames.map((x) => this.bytes(x, f.board))));
+      done += n;
     }
   }
   // The harness's own model of the log: which frame hash sits at which seq.
@@ -498,7 +516,10 @@ export class CoreTarget {
     let b = this.boards.get(boardHex);
     if (!b) {
       const db = new DatabaseSync(':memory:'), stats = { calls: 0, rowsRead: 0, rowsWritten: 0 }, sockets = new FakeSockets();
-      const storage = countingStorage(core.sqliteStorage(db), stats);
+      // A step may name a statement prefix whose statements throw, as a platform quota does (RELAY-BUDGET-003).
+      const inner = core.sqliteStorage(db);
+      const faulty = { ...inner, run: (sql, ...p) => { if (this.fault && sql.startsWith(this.fault)) throw new Error('storage full'); return inner.run(sql, ...p); } };
+      const storage = countingStorage(faulty, stats);
       const world = this.world;
       const c = new core.BoardCore({ storage, sockets, now: () => world.clock, random: this.random, config: this.cfg, board: unhex(boardHex) });
       c.migrate();

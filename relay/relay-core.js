@@ -688,7 +688,7 @@ export const SQL = Object.freeze({
   rtUpdate: 'UPDATE read_tokens SET gen = ?, epoch = ?, state = 1 WHERE dev = ?',
   rtRevoke: 'UPDATE read_tokens SET state = 2 WHERE dev = ?',
   rtRevokeAll: 'UPDATE read_tokens SET state = 2 WHERE state = 1',
-  rtRevokeBelow: 'UPDATE read_tokens SET state = 2 WHERE state = 1 AND epoch < ?',
+  rtRevokeBelow: 'UPDATE read_tokens SET state = 2 WHERE state = 1 AND epoch < ? AND dev <> ?',
   wipe: Object.freeze(['DELETE FROM board', 'DELETE FROM devices', 'DELETE FROM log', 'DELETE FROM blobs', 'DELETE FROM parts', 'DELETE FROM tickets', 'DELETE FROM read_tokens']),
 });
 
@@ -1908,7 +1908,7 @@ const ADMIN = {
     const row = c.one(SQL.rtGet, dev);
     if (row && row.gen >= MAXGEN) fail('relay/gen_exhausted');
     if (epoch > board.read_epoch) {
-      c.run(SQL.rtRevokeBelow, epoch);
+      c.run(SQL.rtRevokeBelow, epoch, dev); // the writer's own row is written once, below
       c.run(SQL.boardReadEpoch, epoch);
     }
     const gen = row ? row.gen + 1 : 1;

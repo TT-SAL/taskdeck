@@ -21,10 +21,11 @@ for this stage; agents on model `opus` only check the finished work). Branch
 |---|---|---|
 | 1 | `relay-core.js`: encodings, credentials, strict Ed25519, the gate, every route and admin operation, sockets | written; tested on the core target for the families below |
 | 2 | harness (`relay/test/lib/harness.mjs`), runner, vector generator | written |
-| 3 | families gate, token, address, create, login, append, read | 82 cases green on `core` |
-| 4 | `standby.js` and the standby target | next |
-| 5 | `worker.js`, `wrangler.toml`, the harness Worker and the worker target | |
-| 6 | families blobs, pairing, admin, seed, compact, restore, purge, budget, socket, standby, rows, day | |
+| 3 | families gate, token, address, create, login, append, read | done: green on all three targets |
+| 4 | `standby.js` and the standby target | done |
+| 5 | `worker.js`, `wrangler.toml`, the harness Worker (`relay/test/worker/`) and the worker target | done; `bash relay/test/run.sh worker` starts `wrangler dev` itself |
+| 6a | families blobs, pairing, admin | done: 107 cases on `core`, 68 on `standby`, 62 on `worker` |
+| 6b | families seed, compact, restore, purge, budget, socket, standby, rows, day | next |
 | 7 | Wycheproof and seal's vectors; source scans; `ci.sh`, `deploy.sh`, README | |
 | 8 | gate green, the checks by agents (spec, works, security x2, hygiene), fixes, exit | |
 
@@ -44,6 +45,20 @@ for this stage; agents on model `opus` only check the finished work). Branch
 - **D4. The vector files are generated** from `relay/test/vectors/cases-*.mjs`, so that one case
   is a few lines; the JSON is what is published (relay.md §21). The builders beyond those §21
   names are listed in `relay/test/vectors/README.md`.
+
+- **D5. A token that was never issued can name the stored generation.** `revoke` raises the
+  generation without issuing a token and `reinstate` leaves it there (§5.2), so after a
+  reinstatement the stored generation is one no token carries; only the relay can mint a token, so
+  nothing follows from it, and the device logs in for the next generation.
+- **D6. `mint_read_token` writes the writer's own row once.** When it raises `read_epoch` it marks
+  the rows of lower epochs revoked except the writer's, which the same request then rewrites; the
+  rows written are then the `3 + r` of §16.1.
+- **D7. A `register` whose carried frame is already stored, for a device that is not registered**
+  (the frame went in by a plain append first) is refused with `409 relay/conflict` and the author's
+  `last_ctr` and `last_seq`. §12.3 names no code for a `dup` outcome there; the client uses the seq
+  mode. Low; for the spec-change pull request.
+- **D8. Rows read on the platform count the rows a write touches too** (measured under
+  `wrangler dev`: an `UPDATE` of one row reads one row). Rows written agree exactly with §16.1.
 
 ## For the spec-change pull request (collected, not yet opened)
 

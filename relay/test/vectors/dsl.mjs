@@ -8,7 +8,7 @@ export const ALL = ['core', 'standby', 'worker'];
 export const LOCAL = ['core', 'standby']; // time-dependent, or a request shape `wrangler dev` does not pass on
 export const CORE = ['core'];
 export const PUSHING = ['core', 'worker']; // needs sockets
-export const KEYS = Object.fromEntries(['rec', 'rec2', 'alice', 'bob', 'carol', 'dave', 'mallory'].map((n) => [n, { seed: sha(`taskdeck relay test key ${n}`) }]));
+export const KEYS = Object.fromEntries(['rec', 'rec2', 'alice', 'bob', 'carol', 'dave', 'mallory', ...Array.from({ length: 16 }, (_, i) => `x${String(i + 1).padStart(2, '0')}`)].map((n) => [n, { seed: sha(`taskdeck relay test key ${n}`) }]));
 export const NOW = 1795000000000;
 export const DAY = 86400000;
 
@@ -29,7 +29,7 @@ export const DOOR = { door: true };
 export const CREATE = { create: true };
 export const req = (route, cred, extra = {}) => ({ route, board: 'main', cred, ...extra });
 export const step = (request, expect = { status: 200 }, more = {}) => ({ request, expect, ...more });
-export const at = (clock_ms, s) => ({ clock_ms, ...s });
+export const at = (clock_ms, s) => (Array.isArray(s) ? [{ clock_ms, ...s[0] }, ...s.slice(1)] : { clock_ms, ...s });
 export const err = (status, code, by = 'object', extra = {}) => ({ status, x_td_relay: by, json: { error: code, ...extra } });
 export const gateErr = (status, code) => ({ ...err(status, code, 'gate'), object_called: false });
 export const F = (author, ctr, extra = {}) => ({ $frame: { author, ctr, ...extra } });
@@ -47,6 +47,7 @@ export function admin(op, signer, cred, args, expect = { status: 200 }, o = {}) 
   ];
 }
 // Registers `key` with a DeviceAdded frame by `by` (its counter `ctr`), stored at `seq`.
+export const fillLog = (author, cred, from_ctr, count) => ({ fill_log: { board: 'main', cred, author, from_ctr, count } });
 export const addDevice = (key, seq, by = 'alice', ctr = 1) =>
   admin('register', by, T(by), { dev: key, sign_pk: key, frame_hash: { $hash: F(by, ctr) } },
     { status: 200, json: { seq, chain: { $chain: seq }, token: { $token: { key } } } }, { extra: F(by, ctr) });
