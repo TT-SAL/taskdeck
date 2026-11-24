@@ -4,7 +4,9 @@
 import { DurableObject } from 'cloudflare:workers';
 import { BoardCore, checkBody, gate, hex, makeConfig, refusal, unhex } from './relay-core.js';
 
-const configs = new WeakMap(); // decoded once per isolate (RELAY-GEN-006)
+// TOKEN_KEY and CREATE_SECRET are decoded once per isolate (RELAY-GEN-006): the Worker
+// and every board object of the isolate take the same Config from here.
+const configs = new WeakMap();
 function configOf(env) {
   let c = configs.get(env);
   if (c === undefined) {
@@ -80,8 +82,7 @@ export class Board extends DurableObject {
       send: (ws, bytes) => ws.send(bytes),
       close: (ws, code, reason) => ws.close(code, reason),
     };
-    const config = makeConfig({ tokenKey: env.TOKEN_KEY, createSecret: env.CREATE_SECRET, origin: env.RELAY_ORIGIN, push: true });
-    this.core = new BoardCore({ storage, sockets, now: () => this.now(), config, board: null });
+    this.core = new BoardCore({ storage, sockets, now: () => this.now(), config: configOf(env), board: null });
     ctx.blockConcurrencyWhile(async () => this.core.migrate());
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
   }

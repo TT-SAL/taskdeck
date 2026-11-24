@@ -27,10 +27,16 @@ fi
 
 work="$(mktemp -d)"
 port="${TD_WORKER_PORT:-$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')}"
-# No account, no network: a local runtime only (SYNC_PLAN.md §3.4: agents never deploy).
-WRANGLER_SEND_METRICS=false CI=true HOME="$work/home" XDG_CONFIG_HOME="$work/config" \
-    "$TASKDECK_WRANGLER" dev --config test/worker/wrangler.toml --ip 127.0.0.1 --port "$port" \
-    --inspector-port 0 --persist-to "$work/state" --show-interactive-dev-session=false \
+# wrangler runs on a copy of the sources in the temporary directory, so that what it writes
+# while it runs (.wrangler/) never lands in the repository.
+mkdir -p "$work/relay/test/worker"
+cp relay-core.js worker.js "$work/relay/"
+cp test/worker/harness.js test/worker/wrangler.toml "$work/relay/test/worker/"
+# The local runtime only: no account, no deploy (SYNC_PLAN.md §3.4: agents never deploy), no
+# metrics, and no fetch of Cloudflare's description of this machine (cf.json).
+(cd "$work/relay" && WRANGLER_SEND_METRICS=false CLOUDFLARE_CF_FETCH_ENABLED=false CI=true HOME="$work/home" XDG_CONFIG_HOME="$work/config" \
+    exec "$TASKDECK_WRANGLER" dev --config test/worker/wrangler.toml --ip 127.0.0.1 --port "$port" \
+    --inspector-port 0 --persist-to "$work/state" --show-interactive-dev-session=false) \
     >"$work/wrangler.log" 2>&1 &
 wrangler_pid=$!
 stop() {

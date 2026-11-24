@@ -2,6 +2,7 @@
 // (relay.md §3.2, §3.3, §7.1, §18 item 7), and a few properties of the core
 // that no request shows. The same on every target.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
@@ -67,6 +68,20 @@ test('no log, no timer, no alarm, no eval, no outbound fetch, hibernating socket
   assert.match(toml, /new_sqlite_classes = \["Board"\]/);
   assert.match(toml, /preview_urls = false/);
   assert.doesNotMatch(toml, /^\s*(TOKEN_KEY|CREATE_SECRET|RELAY_ORIGIN)\s*=/m, 'no secret and no relay address in the repository');
+});
+
+test('nothing that wrangler writes while it runs is tracked, and the suite does not let it ask Cloudflare about this machine', () => {
+  const root = new URL('../../', import.meta.url);
+  const ls = spawnSync('git', ['ls-files', '--', 'relay'], { cwd: root, encoding: 'utf8' });
+  assert.equal(ls.status, 0, 'the suite runs in a checkout');
+  const tracked = ls.stdout.split('\n').filter(Boolean);
+  assert.ok(tracked.includes('relay/relay-core.js'));
+  assert.deepEqual(tracked.filter((f) => /(^|\/)\.wrangler(\/|$)|node_modules|\.sqlite|\.log$/.test(f)), []);
+  assert.match(read('.gitignore'), /^\.wrangler\/$/m);
+  const run = read('test/run.sh');
+  assert.match(run, /CLOUDFLARE_CF_FETCH_ENABLED=false/);
+  assert.match(run, /WRANGLER_SEND_METRICS=false/);
+  assert.match(run, /cd "\$work\/relay"/, 'wrangler runs on a copy outside the repository');
 });
 
 // spec: RELAY-SHAPE-001

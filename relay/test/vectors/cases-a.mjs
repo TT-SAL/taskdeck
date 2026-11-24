@@ -16,6 +16,25 @@ export const gate = [
       'GET /v1/b/{board}/pair/00112233445566778899aabbccddeeff/e', 'GET /', 'GET /v1/b/{board}', 'DELETE /v1/b/{board}/log', 'PUT /v1/b/{board}/blobs',
     ].map((s) => step(raw(...s.split(' '), T('alice')), gateErr(404, 'relay/not_found'))),
   ]),
+  g('a path that is not written as the route table writes it', ['RELAY-ENC-001', 'RELAY-GATE-004'], [
+    ['/v1/b/{board}/x/../caps', '/v1/b/{board}/./caps', '/v1/b/{board}/%2e/caps', '/v1/x/../b/{board}/caps', '/v1\\b\\{board}\\caps', '/v1/b/{board}/caps#frag',
+      '/v1/b/{board}/c%61ps', '/v1//b/{board}/caps', '/v1/b/{board}/caps%3Fx=1', '/v1/b/{board}/caps;x', '/V1/b/{board}/caps', '/v1/b/{board}/Caps',
+    ].map((path) => step(raw('GET', path, DOOR), gateErr(404, 'relay/not_found'))),
+    step(req('caps', DOOR), { status: 200, x_td_relay: 'gate' }),
+  ], { targets: LOCAL }),
+  // The platform rewrites the request target before the Worker's code runs (relay.md §4.1, §15.2):
+  // the Worker matches the path it receives, and checks the credential against that path's board.
+  g('what the platform makes of a path before the Worker sees it', ['RELAY-ENC-001', 'RELAY-SHAPE-011'], [
+    step(raw('GET', '/v1/b/{board}/x/../caps', DOOR), { status: 200, x_td_relay: 'gate', object_called: false }),
+    step(raw('GET', '/v1/b/{board}/./caps', DOOR), { status: 200, x_td_relay: 'gate' }),
+    step(raw('GET', '/v1\\b\\{board}\\caps', DOOR), { status: 200, x_td_relay: 'gate' }),
+    step(raw('GET', '/v1/b/{board}/hello#frag', T('alice')), { status: 200, x_td_relay: 'object' }),
+    step(raw('GET', '/v1/b/{board}/x/../caps', {}), gateErr(401, 'relay/unauthorized')),
+    step(raw('GET', '/v1/b/{board}/x/../caps', { door: 'other' }), gateErr(401, 'relay/unauthorized')),
+    step(raw('GET', '/v1/b/{board}/x/../hello', DOOR), gateErr(401, 'relay/unauthorized')),
+    // What it leaves alone is refused as on the standby.
+    ['/v1/b/{board}/c%61ps', '/v1//b/{board}/caps', '/v1/b/{board}/caps%3Fx=1', '/v1/b/{board}/caps;x', '/V1/b/{board}/caps', '/v1/b/{board}/caps/'].map((path) => step(raw('GET', path, DOOR), gateErr(404, 'relay/not_found'))),
+  ], { targets: ['worker'], boards: { main: {}, other: { create: false } } }),
   g('a query that is not allowed', ['RELAY-ENC-002', 'RELAY-GATE-003'], [
     step(raw('GET', '/v1/b/{board}/caps?x=1', T('alice')), gateErr(400, 'relay/bad_query')),
     step(raw('GET', '/v1/b/{board}/hello?', T('alice')), gateErr(400, 'relay/bad_query')),
