@@ -9,6 +9,9 @@
 mod splitmix;
 pub use splitmix::SplitMix64;
 
+/// The model relay (engine.md §31.3).
+pub mod relay;
+
 /// A simulator run's configuration (engine.md §31.1).
 pub struct SimConfig {
     pub devices: u8,
