@@ -54,6 +54,9 @@ pub(crate) struct Job<SM: StateMachine, S: Sealer> {
     pub from_rec: u64,
     /// A state to start from instead of the base's board (an adoption).
     pub seed_state: Option<SM::State>,
+    /// An adoption (§22.3 steps 4 and 5): at this seq the replay's membership bytes must equal
+    /// these, its rules this version, and the board is replaced by this state.
+    pub swap: Option<(u64, SM::State, Vec<u8>, u32)>,
     stash: Vec<(u64, SM::State, Vec<u8>)>,
     pos: Option<Pos<SM, S>>,
     recs: Vec<(u64, NoticeKind, Vec<u8>)>,
@@ -128,6 +131,7 @@ impl<SM: StateMachine, S: Sealer> Job<SM, S> {
             want_states: Vec::new(),
             from_rec: 0,
             seed_state: None,
+            swap: None,
             stash: Vec::new(),
             pos: None,
             recs: Vec::new(),
@@ -184,6 +188,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         job.pos = Some(Pos { seq: c.board_seq, chain: c.board_chain, state, m, view });
         self.jobs.cur = Some(job);
+        if !self.job_swap() {
+            return;
+        }
         self.job_read();
     }
 
@@ -278,7 +285,31 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 }
                 JobStep::Fault => return self.job_fault(),
             }
+            if !self.job_swap() {
+                return;
+            }
         }
+    }
+
+    /// An adoption's swap at `S'` (ENG-DIVERGE-004). False: the job ended.
+    fn job_swap(&mut self) -> bool {
+        let Some(job) = self.jobs.cur.as_mut() else { return false };
+        let Some(pos) = job.pos.as_mut() else { return true };
+        if job.swap.as_ref().is_none_or(|s| s.0 != pos.seq) {
+            return true;
+        }
+        let Some((_, state, membership, rules)) = job.swap.take() else { return true };
+        if self.sealer.membership_bytes(&pos.m) != membership || pos.view.rules != rules {
+            let ticket = match job.purpose {
+                Purpose::AdoptBoard { ticket, .. } => ticket,
+                _ => 0,
+            };
+            self.jobs.cur = None;
+            self.adopt_refused(ticket);
+            return false;
+        }
+        pos.state = state;
+        true
     }
 
     /// One log record of a replay: classify it again and apply it to the job's state.

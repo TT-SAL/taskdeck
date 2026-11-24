@@ -104,6 +104,7 @@ pub(crate) struct Node {
     /// Persist effects not yet confirmed (only when `auto` is off).
     pub pq: VecDeque<(u64, Vec<PersistOp>)>,
     pub auto: bool,
+    draining: bool,
     /// Effects other than `Persist` and `Notify`, in order, until a test takes them.
     pub fx: VecDeque<Effect>,
     pub notes: Vec<Notification>,
@@ -122,27 +123,27 @@ impl Node {
         self.absorb(out);
     }
 
-    fn absorb(&mut self, out: Vec<Effect>) {
-        let mut acks = Vec::new();
+    pub(crate) fn absorb(&mut self, out: Vec<Effect>) {
         for fx in out {
             match fx {
                 Effect::Persist { id, ops } => {
                     self.persists.push(ops.clone());
-                    if self.auto {
-                        for op in &ops {
-                            self.store.apply(op);
-                        }
-                        acks.push(id);
-                    } else {
-                        self.pq.push_back((id, ops));
-                    }
+                    self.pq.push_back((id, ops));
                 }
                 Effect::Notify(n) => self.notes.push(n),
                 other => self.fx.push_back(other),
             }
         }
-        for id in acks {
-            self.feed(Event::Persisted { id });
+        // Writes are confirmed one at a time, in the order they were emitted (ENG-PERSIST-001).
+        if self.auto && !self.draining {
+            self.draining = true;
+            while let Some((id, ops)) = self.pq.pop_front() {
+                for op in &ops {
+                    self.store.apply(op);
+                }
+                self.feed(Event::Persisted { id });
+            }
+            self.draining = false;
         }
     }
 
@@ -227,10 +228,11 @@ pub(crate) fn creator(seed: u64) -> (Node, Vec<u8>) {
     let mut n = Node {
         e,
         store: Store::default(),
-        wall: 1_000_000,
+        wall: 1_700_000_000_000,
         mono: 1_000,
         pq: VecDeque::new(),
         auto: true,
+        draining: false,
         fx: VecDeque::new(),
         notes: Vec::new(),
         persists: Vec::new(),
@@ -391,7 +393,24 @@ impl Hub {
                 return;
             }
         }
-        panic!("the nodes did not settle");
+        let d: Vec<String> = nodes
+            .iter()
+            .map(|n| {
+                let st = n.e.status();
+                format!(
+                    "head {} board {} session {:?} queued {} stops {:?} halt {:?} alarms {:?} no {:?}",
+                    st.head.seq,
+                    st.board_seq,
+                    st.session,
+                    st.queued,
+                    st.stops,
+                    st.halt.map(|h| h.code),
+                    st.alarms.iter().map(|a| (a.kind, a.seq, a.code.clone())).collect::<Vec<_>>(),
+                    n.e.device_no()
+                )
+            })
+            .collect();
+        panic!("the nodes did not settle: hub {} {:#?}", self.log.len(), d);
     }
 }
 
@@ -422,8 +441,10 @@ pub(crate) fn join(hub: &mut Hub, a: &mut Node, seed: u64, name: &str) -> Node {
         bootstrap_seq: head.seq,
     };
     a.e.enqueue_own(Kind::Ctl, Body::Ctl(intent), Via::Append, None).expect("an entry id");
-    let out = a.e.handle(Input { wall_ms: a.wall, mono_ms: a.mono, event: Event::Tick });
+    // The call above is not an input: its Persist effect is taken by hand, then a tick sends.
+    let out = std::mem::take(&mut a.e.out);
     a.absorb(out);
+    a.feed(Event::Tick);
     hub.settle(&mut [a]);
     let added_seq = hub.log.len() as u64;
     let bundle = a.e.sealer().bundle(material.clone(), added_seq);
@@ -437,6 +458,7 @@ pub(crate) fn join(hub: &mut Hub, a: &mut Node, seed: u64, name: &str) -> Node {
         mono: 5_000,
         pq: VecDeque::new(),
         auto: true,
+        draining: false,
         fx: VecDeque::new(),
         notes: Vec::new(),
         persists: Vec::new(),
@@ -449,4 +471,21 @@ pub(crate) fn join(hub: &mut Hub, a: &mut Node, seed: u64, name: &str) -> Node {
     n.start();
     hub.settle(&mut [a, &mut n]);
     n
+}
+
+pub(crate) fn fx_name(f: &Effect) -> &'static str {
+    match f {
+        Effect::Persist { .. } => "Persist",
+        Effect::ReadLog { .. } => "ReadLog",
+        Effect::ReadBase { .. } => "ReadBase",
+        Effect::Connect { .. } => "Connect",
+        Effect::Disconnect => "Disconnect",
+        Effect::Hello => "Hello",
+        Effect::Read { .. } => "Read",
+        Effect::Append { .. } => "Append",
+        Effect::Admin { .. } => "Admin",
+        Effect::Blob { .. } => "Blob",
+        Effect::ScheduleTick { .. } => "ScheduleTick",
+        Effect::Notify(_) => "Notify",
+    }
 }

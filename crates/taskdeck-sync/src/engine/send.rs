@@ -57,6 +57,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             && !self.stopped()
             && !self.sess.fenced
             && !self.fence_pending()
+            && !self.following()
             && !self.pipe.tail
             && self.recon_done()
             && !self.send.await_welcome

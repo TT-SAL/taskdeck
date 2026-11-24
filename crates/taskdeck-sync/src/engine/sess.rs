@@ -356,6 +356,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 );
             }
         }
+        if self.follow_welcome(w.head.seq) {
+            return;
+        }
         if evidence || self.evidence_stop() {
             // ENG-SESS-008: only step 1; nothing is read, no `restored`, no `w`.
             self.repair_on_welcome(w.head);

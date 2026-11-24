@@ -30,6 +30,7 @@ mod boot;
 mod duty;
 mod epoch;
 mod evid;
+mod movement;
 mod ops;
 mod outbox;
 mod recv;
@@ -86,6 +87,8 @@ pub(crate) enum After {
     Truncate { below: u64, floor_chain: Option<Hash32> },
     /// The final checkpoint, outbox and meta are durable (ENG-CKPT-002).
     ReadyToExit,
+    /// The base of a purge is durable (D7): the older bases go.
+    DeleteBases(Vec<u64>),
 }
 
 /// Why a `ReadLog`, `ReadBase`, `Admin` or `Blob` effect was emitted: its answer goes there.
@@ -103,12 +106,33 @@ pub(crate) enum Want {
     JobBase,
     JobLog,
     JobFrame(u64),
+    /// Operations and pairing (ops.rs, movement.rs): the ticket names the operation.
+    OpFrame(u64),
+    OpAdmin(u64),
+    OpBlob(u64),
+    ShredBase(u64),
+    MoveLog(u64),
+    FenceFrame(u64),
+    PurgeDuty,
+    PairUpload,
+    PairRevoke,
 }
 
 impl Want {
     /// Is the answer a relay's (lost with the session), not the local store's?
     fn relay(&self) -> bool {
-        !matches!(self, Want::SkipFrame(_) | Want::SnapBase(_) | Want::JobBase | Want::JobLog | Want::JobFrame(_))
+        !matches!(
+            self,
+            Want::SkipFrame(_)
+                | Want::SnapBase(_)
+                | Want::JobBase
+                | Want::JobLog
+                | Want::JobFrame(_)
+                | Want::OpFrame(_)
+                | Want::ShredBase(_)
+                | Want::MoveLog(_)
+                | Want::FenceFrame(_)
+        )
     }
 }
 
@@ -422,6 +446,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.persist(vec![PersistOp::TruncateLogBelow(below, floor_chain)]);
             }
             After::ReadyToExit => self.notes.push(Notification::ReadyToExit),
+            After::DeleteBases(seqs) => {
+                self.persist(vec![PersistOp::DeleteBases(seqs)]);
+            }
         }
     }
 
@@ -705,7 +732,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// owner may send it again. Returns the request's name for an alarm (§21.1).
     pub(crate) fn want_lost(&mut self, w: Want) -> &'static str {
         match w {
-            Want::SkipFrame(_) | Want::SnapBase(_) | Want::JobBase | Want::JobLog | Want::JobFrame(_) => "local",
             Want::SnapUpload => {
                 self.snapshot_uploaded(false);
                 "blob"
@@ -714,6 +740,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.compact_lost();
                 "admin/compact"
             }
+            other => self.op_want_lost(&other),
         }
     }
 
@@ -743,7 +770,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
             Want::JobLog => self.job_log(result),
             Want::JobFrame(t) => self.job_frame(t, result),
-            Want::SnapUpload | Want::Compact => {}
+            Want::FenceFrame(seq) => {
+                self.opx.mv.fence_req = false;
+                self.fence_frame(seq, result);
+            }
+            other => self.op_want_local(other, result),
         }
     }
 
@@ -757,7 +788,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 let refusal = result.as_ref().err().map(|r| (r.status, r.code.as_str()));
                 self.compact_result(refusal);
             }
-            _ => {}
+            other => self.op_want_admin(other, result),
         }
     }
 
@@ -765,7 +796,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let Some(w) = self.take_want(req) else { return };
         match w {
             Want::SnapUpload => self.snapshot_uploaded(matches!(result, Ok(BlobOk::Uploaded))),
-            _ => {}
+            other => self.op_want_blob(other, result),
         }
     }
 

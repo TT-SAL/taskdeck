@@ -56,6 +56,8 @@ pub(crate) struct Stash {
     pub head: Option<crate::Head>,
     pub from_log: bool,
     pub keys_changed: bool,
+    /// A candidate relay's page (§28.3 step 4): evidence is not raised, nothing is taken.
+    pub quiet: bool,
 }
 
 enum Dry<M> {
@@ -140,7 +142,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if entries.is_empty() {
             return;
         }
-        self.pipe.stash = Some(Stash { entries, head: Some(page.head), from_log: false, keys_changed: false });
+        self.pipe.stash =
+            Some(Stash { entries, head: Some(page.head), from_log: false, keys_changed: false, quiet: false });
         self.run_stash();
     }
 
@@ -331,6 +334,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 Class::Tamper => {
                     // ENG-CLASS-003: evidence; this entry is the cut.
                     let code = r.code.unwrap_or("seal/tamper");
+                    if stash.quiet {
+                        break;
+                    }
                     if stash.from_log {
                         return Dry::Fault("engine/local_fault");
                     }
@@ -412,6 +418,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
         }
         Dry::Done { entries: out, keys_changed }
+    }
+
+    /// The entries a dry run of `stash` classifies, for a scan that takes nothing (movement.rs).
+    pub(crate) fn dry_entries(&mut self, stash: &Stash) -> Vec<Entry<S::Membership>> {
+        match self.dry_run(stash) {
+            Dry::Done { entries, .. } => entries,
+            _ => Vec::new(),
+        }
     }
 
     // ------------------------------------------------------------------ frames a Skip needs (§17.2)

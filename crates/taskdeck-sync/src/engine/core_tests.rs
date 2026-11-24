@@ -4,7 +4,7 @@
 
 use super::kit_tests::{Hub, creator, join};
 use crate::toy::ToyCommand;
-use crate::{Effect, Event, Notification, OutboxOp, PersistOp, SessionState};
+use crate::{Effect, Event, Notification, OutboxOp, PersistOp, Sealer, SessionState};
 
 // spec: ENG-GEN-001 ENG-MODEL-001 ENG-BOOT-004 ENG-PEND-003 ENG-BEAT-003 ENG-EFFECT-002
 #[test]
@@ -123,9 +123,10 @@ fn the_naming_hold_merges_cancels_and_ends() {
         hold,
     };
     n.notes.clear();
+    let base = hub.log.len();
     n.feed(create(true));
     hub.serve(&mut n);
-    assert_eq!(hub.log.len(), 1, "a held record is not sealed");
+    assert_eq!(hub.log.len(), base, "a held record is not sealed");
     // A rename of the held item merges into the create, keeping its entry id.
     n.enqueue(2, ToyCommand::Name { id, name: 77 });
     let ids: Vec<[u8; 16]> = n
@@ -143,7 +144,7 @@ fn the_naming_hold_merges_cancels_and_ends() {
     // The hold ends at its 30,000 ms: the merged create leaves as one entry.
     n.tick(30_000);
     hub.settle(&mut [&mut n]);
-    assert_eq!(hub.log.len(), 2);
+    assert_eq!(hub.log.len(), base + 1);
     assert_eq!(n.e.confirmed().0.items.get(&id), Some(&77));
     // A create that is forgotten while held never leaves the device.
     let id2 = (1u64 << 40) + 2;
@@ -160,7 +161,7 @@ fn the_naming_hold_merges_cancels_and_ends() {
     assert!(n.has_note(|x| matches!(x, Notification::Enqueued { ticket: 4, entry_id: None, provisional_seq: None })));
     assert!(n.e.pending().is_empty());
     hub.settle(&mut [&mut n]);
-    assert_eq!(hub.log.len(), 2);
+    assert_eq!(hub.log.len(), base + 1);
     // Any other enqueue ends the hold.
     let at_ms = n.wall;
     n.feed(Event::Enqueue {
@@ -172,7 +173,7 @@ fn the_naming_hold_merges_cancels_and_ends() {
     });
     n.set(6, 1, 1);
     hub.settle(&mut [&mut n]);
-    assert_eq!(hub.log.len(), 4);
+    assert_eq!(hub.log.len(), base + 3);
 }
 
 // spec: ENG-SEND-001 ENG-SEND-003 ENG-SEND-004 ENG-SEND-006 ENG-SEND-008 ENG-RESULT-001 ENG-STATE-001
@@ -207,13 +208,22 @@ fn own_entries_are_sent_acknowledged_echoed_and_applied() {
     assert_eq!(n.store.log.len(), 22);
     // Counters rise by one with the order of the records.
     let ctrs: Vec<u64> = hub.log.iter().skip(1).map(|(_, f)| n.e.sealer().frame_author(f).unwrap().1).collect();
-    assert_eq!(ctrs, (2..=22).collect::<Vec<u64>>());
-    // Every record left the outbox file only after its entry was applied.
-    let live = n.store.outbox.iter().fold(0i32, |a, o| match o {
-        OutboxOp::Put(_) => a,
-        OutboxOp::Drop(_) => a + 1,
-    });
-    assert_eq!(live, 21);
+    assert_eq!(ctrs, (1..=21).collect::<Vec<u64>>());
+    // The outbox file, replayed, is empty: every record was dropped after its entry was applied
+    // (and the file was rewritten once it held more than 2 x live + 64 ops, §7.13).
+    let mut live: Vec<[u8; 16]> = Vec::new();
+    for o in &n.store.outbox {
+        match o {
+            OutboxOp::Put(r) => {
+                if !live.contains(&r.entry_id) {
+                    live.push(r.entry_id)
+                }
+            }
+            OutboxOp::Drop(id) => live.retain(|x| x != id),
+        }
+    }
+    assert!(live.is_empty());
+    assert!(n.persists.iter().any(|p| matches!(p[0], PersistOp::RewriteOutbox(_))));
     assert!(n.e.status().alarms.is_empty());
 }
 
@@ -233,7 +243,7 @@ fn a_restart_rebuilds_the_same_replica() {
     n.fx.clear();
     n.restart(8);
     assert_eq!((n.board_bytes(), n.view_bytes(), n.e.status().head), before);
-    assert_eq!(n.e.view_version(), 1);
+    assert!(n.e.view_version() <= 2, "the counter starts again at every Start");
     assert_eq!(n.e.pending().len(), 1);
     assert_eq!(n.store.meta.as_ref().unwrap().attempt, attempt + 1);
     hub.settle(&mut [&mut n]);

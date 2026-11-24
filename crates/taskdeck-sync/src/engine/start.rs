@@ -286,7 +286,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if !entries.is_empty() {
             self.pipe.tail = true;
             self.pipe.start_marker = marker;
-            self.pipe.stash = Some(Stash { entries, head: None, from_log: true, keys_changed: false });
+            self.pipe.stash = Some(Stash { entries, head: None, from_log: true, keys_changed: false, quiet: false });
         }
         Ok(())
     }

@@ -60,6 +60,8 @@ pub(crate) struct Pipe<SM: StateMachine, S: Sealer> {
     pub shred: Option<(u32, i64)>,
     pub shred_req: Option<u64>,
     pub shred_checked: bool,
+    /// A purge rotation is being applied: `(r, p, epoch, τ_r)`, run once `B = r` (§28.2).
+    pub purge_after: Option<(u64, u64, u32, i64)>,
     _p: PhantomData<SM>,
 }
 
@@ -92,6 +94,7 @@ impl<SM: StateMachine, S: Sealer> Default for Pipe<SM, S> {
             shred: None,
             shred_req: None,
             shred_checked: false,
+            purge_after: None,
             _p: PhantomData,
         }
     }
@@ -447,6 +450,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             let v = self.sealer.view(&e.m);
             self.no_b = v.devices.iter().find(|d| d.dev == self.own).map(|d| d.device_no);
         }
+        let tau = e.tau;
         self.mb = Some(e.m);
         self.pipe.since_ckpt += 1;
         self.pipe.view_stale = true;
@@ -460,7 +464,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.notices_through = s;
         }
         if s >= lim::STRIDE && s % lim::STRIDE == 0 {
-            self.aligned(s, e.tau);
+            self.aligned(s, tau);
+        }
+        if let Some((r, p, epoch, tau_r)) = self.pipe.purge_after.take() {
+            self.local_purge(r, p, epoch, tau_r);
         }
         Step::Applied
     }
@@ -612,7 +619,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     }
                     return self.begin_skip_replay(s, t);
                 }
-                CtlItem::EpochRotated { epoch, purge_before: Some(p) } => self.local_purge(s, *p, *epoch, e),
+                CtlItem::EpochRotated { epoch, purge_before: Some(p) } => {
+                    self.pipe.purge_after = Some((s, *p, *epoch, e.tau))
+                }
                 _ => {}
             }
         }
