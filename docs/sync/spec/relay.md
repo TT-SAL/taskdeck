@@ -441,7 +441,7 @@ CREATE TABLE IF NOT EXISTS read_tokens (
 
 SYNC.md §4.1 named the tables `log`, `devices`, `snapshots`, `blobs`, `tickets` and `meta`. Here `meta(k, v)` becomes the single `board` row (one row read instead of one per key), `snapshots` and the blob metadata become `blobs`, and the part bytes are `parts`, keyed by an integer so that a part write is one row (a composite primary key on a rowid table would add an index row). `nonces` and `read_tokens` are new. The door is not stored (ruling S4).
 
-Every table except `log` and `parts` is `WITHOUT ROWID` with no secondary index, so writing one of its rows writes one row; a `log` row writes two (the row and `log_dev_ctr`); a `parts` row writes one (R3 §2.1: every index entry counts as a row written).
+Every table except `log` and `parts` is `WITHOUT ROWID` with no secondary index, so writing one of its rows writes one row; a `log` row writes two (the row and `log_dev_ctr`); a `parts` row writes one (R3 §2.1: every index entry counts as a row written). A deleted row counts once, a `log` row too: the platform does not count its index entry again (measured by stage `relay` under `wrangler dev`; R3 §2.1 says only that deletes count).
 
 - **RELAY-STORE-001** (relay) The object's database MUST have exactly the tables, columns, keys and index of §7.1, and no other.
 - **RELAY-STORE-002** (relay) The core MUST run `SQL.schema` before it handles the first event of an object instance (in the Worker inside `ctx.blockConcurrencyWhile` in the constructor), and running it on a database that already has the schema MUST write no row.
@@ -497,7 +497,7 @@ The gate has checked the MAC; the object checks state, in one read of the creden
 | token, role 2 | a `read_tokens` row with `dev` exists, `state = 1`, `gen` equals the token's | `401 relay/token_stale` (no row: `401 relay/unauthorized`) |
 | door, create secret | always (the gate checked it); each route then limits what it does with it | |
 
-The object checks the conditions of a row in the order the row lists them and answers with the code of the first that fails. So a role-1 token whose row has `state = 2` is answered `403 relay/revoked` whatever its `gen`, on every route, `login-nonce` and `login` included; `401 relay/token_stale` is answered only for a row with `state = 1`.
+The object checks the conditions of a row in the order the row lists them and answers with the code of the first that fails. So a role-1 token whose row has `state = 2` is answered `403 relay/revoked` whatever its `gen`, on every route, `login-nonce` and `login` included; `401 relay/token_stale` is answered only for a row with `state = 1`. The token's row is checked before the board state of §8.1: a token whose MAC verifies but whose device has no row, on a board that does not exist here, is answered `401 relay/unauthorized`, and `404 relay/no_board` is what a request with the door meets there.
 
 - **RELAY-OBJ-003** (relay) For every request with a token, the object MUST check the token's row as the table of §8.2 states before any other check of the route, and MUST answer with the code the table gives when it fails.
 - **RELAY-OBJ-010** (relay) When more than one condition of a §8.2 row fails, the object MUST answer with the code of the first failing condition in the order the row lists them, so that a token of a device whose row has `state = 2` is answered `403 relay/revoked` whatever its generation.
@@ -1125,7 +1125,7 @@ Checks, in order:
 
 1. `dev_N` is not the `dev` of any row and `sign_pk_N` not the `sign_pk` of any row; else see "Repeat", or `409 relay/duplicate_key`.
 2. fewer than 16 role-1 rows with `state = 1`, and fewer than 256 role-1 rows; else `409 relay/device_cap`.
-3. frame mode: `H(frame) = frame_hash` (else `400 relay/frame_mismatch`); the frame's `dev` is the signer (else `403 relay/not_author`); the frame passes §9.3 and its §9.4 outcome is `new` (otherwise the operation fails with that outcome's code: `409 relay/conflict` or `409 relay/gap`, whose error body carries the author row's `last_ctr` and `last_seq` (§4.2, RELAY-ADMIN-005), or the refusal's).
+3. frame mode: `H(frame) = frame_hash` (else `400 relay/frame_mismatch`); the frame's `dev` is the signer (else `403 relay/not_author`); the frame passes §9.3 and its §9.4 outcome is `new` (otherwise the operation fails with that outcome's code: `409 relay/conflict` or `409 relay/gap`, whose error body carries the author row's `last_ctr` and `last_seq` (§4.2, RELAY-ADMIN-005), or the refusal's; an outcome `dup` for a device that is not registered, because the frame was stored by a plain append first, is `409 relay/conflict` with the same two fields, and the device is then registered in seq mode).
 4. seq mode: a `log` row at `seq` with `seq ≥ purge_floor` and `hash = frame_hash` exists; else `400 relay/frame_mismatch`.
 
 Effects, in one transaction: (frame mode) the append of §9.4 T5; then insert the devices row (`dev_N`, `sign_pk_N`, `role = 1`, `state = 1`, `gen = 1`, `last_ctr = 0`, `last_seq = 0`, counters 0, `added_at = now`). After commit, push (frame mode). The new device's key is accepted for frames sequenced after this one (SEAL-MEM-007 holds by construction: N cannot append before it has its token).
@@ -1153,7 +1153,7 @@ Effects, in one transaction: the target's `state = 2`, `gen` + 1 and `wraps` NUL
 
 ### 12.5 `reinstate`
 
-`args = dev[16] ‖ u32 first_epoch ‖ u16 n ‖ n × wrap[96]` (`seal.md` §16.2; ruling S24, lead ruling L1): the wraps of the roots of epochs `first_epoch` to `first_epoch + n − 1` to the target, which the relay stores and returns at the target's login without interpreting them. Signer: the current recovery identity only (`seal.md` §13.6). Checks: `first_epoch ≥ 1` and `n` from 1 to 256 (else `400 relay/bad_args`); a role-1 row for `dev` with `state = 2` (else `409 relay/target`); fewer than 16 current role-1 rows (else `409 relay/device_cap`). Effects: `state = 1`, `gen` unchanged, `wraps = u32 first_epoch ‖ u16 n ‖ the n wraps` from `args`, replacing any stored; every `read_tokens` row `state = 2`. The device logs in for a new token, and the login answer carries the wraps (§10.3). Response (200): `{}`.
+`args = dev[16] ‖ u32 first_epoch ‖ u16 n ‖ n × wrap[96]` (`seal.md` §16.2; ruling S24, lead ruling L1): the wraps of the roots of epochs `first_epoch` to `first_epoch + n − 1` to the target, which the relay stores and returns at the target's login without interpreting them. Signer: the current recovery identity only (`seal.md` §13.6). Checks: `first_epoch ≥ 2` (it is the epoch a rotation set up, and `seal.md` §16.2 signs no lower one) and `n` from 1 to 256 (else `400 relay/bad_args`); a role-1 row for `dev` with `state = 2` (else `409 relay/target`); fewer than 16 current role-1 rows (else `409 relay/device_cap`). Effects: `state = 1`, `gen` unchanged, `wraps = u32 first_epoch ‖ u16 n ‖ the n wraps` from `args`, replacing any stored; every `read_tokens` row `state = 2`. The device logs in for a new token, and the login answer carries the wraps (§10.3). Response (200): `{}`.
 
 - **RELAY-REVOKE-004** (relay) `reinstate` MUST be accepted only from the current recovery identity, MUST set the target's state to current without changing its generation, and MUST mark every backup-read token revoked.
 - **RELAY-REVOKE-005** (relay) `reinstate` MUST store the `first_epoch` and wraps of its arguments on the target's devices row, replacing any stored, and `revoke` MUST set that row's `wraps` to NULL in its transaction.
@@ -1348,7 +1348,7 @@ Each role-1 author may store at most 3,000 new frames per UTC day of the relay c
 
 ### 14.2 The delete budget
 
-Compaction and purge together delete at most 5,000 `log` rows per board per UTC day (§12.8, RELAY-COMPACT-005): deletes count as rows written (R3 §2.1), and 5,000 deletes cost 10,000 rows written, 10% of the daily limit, on a day with a backlog. The count is `del_day` and `del_count` of the board row.
+Compaction and purge together delete at most 5,000 `log` rows per board per UTC day (§12.8, RELAY-COMPACT-005): deletes count as rows written (R3 §2.1), one for each deleted row (§7.1), so 5,000 deletes cost 5,000 rows written, 5% of the daily limit, on a day with a backlog. The count is `del_day` and `del_count` of the board row.
 
 ### 14.3 The client's request budget
 
@@ -1425,45 +1425,49 @@ A client learns whether this relay pushes from `push` in `caps` (§10.9), in the
 
 ### 16.1 Rows written and read
 
-Rows written are exact; rows read are upper bounds (the platform counts rows scanned, which depends on the query plan). `f` is the number of frames stored, `a` the number of distinct authors among them, `x` the number of rows a lazy cleanup deletes, `r` the `read_tokens` rows whose `state` changes, `d` the `log` rows deleted, `P` the parts of a deleted blob, `B` the `blobs` rows, `k` the entries returned.
+Rows written are exact. Rows read are upper bounds on the platform's counter, which counts every row a statement touches, the rows a write changes included, and depends on the query plan (measured by stage `relay` under `wrangler dev`). `f` is the number of frames stored, `a` the number of distinct authors among them (in a bound on rows read: among the frames of the request), `x` the number of rows a lazy cleanup deletes, `r` the `read_tokens` rows whose `state` changes, `d` the `log` rows deleted, `P` the parts of a deleted blob, `k` the entries returned, `e` the entries of a seed. `n`, `D`, `B`, `t` and `RT` are the rows in `nonces` (at most 64), `devices`, `blobs`, `tickets` (at most 4) and `read_tokens` when the request arrives. `A = 8 + 2n` is what every admin request reads before its own checks: the token's row three times, the board row twice, the signer's row twice, the nonces twice, and the nonce it deletes.
 
 | Operation | Rows written | Rows read, at most |
 |---|---|---|
 | any gate refusal; `caps`; `door` | 0 (no object call) | 0 |
 | `create` | 5 (board, 2 devices, log row and its index) | 3 |
-| `create` repeat | 1 | 3 |
-| `login-nonce`, `admin-nonce` | 1 + `x` | 2 + 64 |
-| `login` (success) | 2 (nonce, device) | 3 |
-| `login` (refused after the nonce was found) | 1 | 3 |
+| `create` repeat | 1 | 4 |
+| `login-nonce`, `admin-nonce` | 1 + `x` | 3 + 3`n` |
+| `login` (success) | 2 (nonce, device) | 8 + 2`n` |
+| `login` (refused after the nonce was found) | 1 | 8 + 2`n` |
 | `hello`; socket upgrade; socket hello | 0 | 3 |
 | `read`, socket read of `k` entries | 0 | 4 + `k` |
-| append with `f` new frames by `a` authors (the rest `dup` or stopped) | `2f + a` | 3 + 3 × frames in the batch |
-| append whose frames are all `dup`, `conflict`, `gap` or refused | 0 | 3 + 3 × frames in the batch |
-| `blob-begin` | 1 + Σ(1 + `P`) over blobs cleaned up | 2 + `B` |
-| `blob-begin` repeat | Σ(1 + `P`) over blobs cleaned up | 2 + `B` |
-| `blob-put` (part already stored, identical) | 0 | 3 |
-| `blob-put` | 2 (part, blob row) + Σ(1 + `P`) over blobs deleted on completion | 3 + `B` |
-| `blob-list`, `blob-meta`, `blob-get` | 0 | 2 + `B` |
-| `pair-open` | 1 + `x` | 2 + 4 |
-| `pair-open` repeat | `x` | 2 + 4 |
-| `slot-post`, `pair-close`, fifth try | 1 | 3 |
-| `slot-post` repeat of a stored slot | 1 for label `b` (the try); 0 for `c` and `d` | 3 |
-| `slot-get` | 0 (1 if it deletes an expired ticket) | 3 |
-| `register` (frame mode) | 5 (nonce, log row and index, signer row, new device) | 8 |
-| `register` (seq mode) | 2 | 6 |
-| `register` repeat | 2 | 8 |
-| `revoke`, `reinstate` | 2 + `r` | 4 + 64 |
-| `fence` | 2 (nonce, board); 5 with a stored frame | 8 |
-| `seed` | 2 + `n` (nonce, board, devices); plus every row deleted on a re-seed | 3 + 2`n` |
-| `seed-tail` | `2f + a`; + 1 (board) when it completes | 3 + 3`f` |
-| `compact` | 2 + 2`d` + Σ(1 + `P`) over genesis blobs | 8 + `B` + `d` + (`hi − lo`) |
-| `restore_tail` | 1 + `2f + a` | 5 + 3`f` |
-| `purge` | 2 + `r` + 2`d` + Σ(1 + `P`) over deleted blobs | 5 + `B` + 256 + `d` |
-| `mint_read_token` | 2 + `r` (nonce, the writer's row); 3 + `r` when it raises `read_epoch` (the board row too) | 4 + 256 |
-| `revoke_read_token` | 2 | 4 |
-| `recovery_register` | 3 + `r` (nonce, old and new recovery rows) | 8 + 64 |
-| `recovery_register` repeat | 1 (the nonce) | 10 + 64 |
-| any admin request refused after A4 | 1 (the nonce) | 4 |
+| append with `f` new frames by `a` authors (the rest `dup` or stopped) | `2f + a` | 5 + 3`a` + 2 × frames in the batch |
+| append whose frames are all `dup`, `conflict`, `gap` or refused | 0 | 5 + 3`a` + 2 × frames in the batch |
+| `blob-begin` | 1 + Σ(1 + `P`) over blobs cleaned up | 4 + `B` + Σ(2 + `P`) |
+| `blob-begin` repeat | Σ(1 + `P`) over blobs cleaned up | 4 + `B` + Σ(2 + `P`) |
+| `blob-put` (part already stored, identical) | 0 | 4 |
+| `blob-put` | 2 (part, blob row) + Σ(1 + `P`) over blobs deleted on completion | 7 + `B` + Σ(2 + `P`) |
+| `blob-list` | 0 | 2 + `B` |
+| `blob-meta` | 0 | 3 |
+| `blob-get` | 0 | 4 |
+| `pair-open` | 1 + `x` | 3 + `t` |
+| `pair-open` repeat | `x` | 3 + `t` |
+| `slot-post`, `pair-close`, fifth try | 1 | 4 |
+| `slot-post` repeat of a stored slot | 1 for label `b` (the try); 0 for `c` and `d` | 4 |
+| `slot-get` | 0 (1 if it deletes an expired ticket) | 3 (4 if it deletes an expired ticket) |
+| `register` (frame mode) | 5 (nonce, log row and index, signer row, new device) | `A` + `D` + 6 |
+| `register` (seq mode) | 2 | `A` + `D` + 3 |
+| `register` repeat | 2 | `A` + `D` + 5 |
+| `revoke`, `reinstate` | 2 + `r` | `A` + `D` + 1 + `RT` |
+| `fence` | 2 (nonce, board); 5 with a stored frame | `A` + 1; `A` + 6 with a frame |
+| `seed` | 2 + `e` (nonce, board, devices); plus every row deleted on a re-seed | 4 + 2`n` + `e`; plus every row deleted on a re-seed |
+| `seed-tail` | `2f + a`; + 1 (board) when it completes | 5 + 3`a` + 2`f` |
+| `compact` | 2 + `d` + Σ(1 + `P`) over genesis blobs | `A` + 8 + `B` + `d` + Σ(2 + `P`) |
+| `restore_tail` | 1 + `2f + a` | `A` + 1 + 3`a` + `f` |
+| `purge` | 2 + `r` + `d` + Σ(1 + `P`) over deleted blobs | `A` + 6 + `B` + `RT` + 3`d` + Σ(2 + `P`) |
+| `mint_read_token` | 2 + `r` (nonce, the writer's row); 3 + `r` when it raises `read_epoch` (the board row too) | `A` + 3 + `RT` |
+| `revoke_read_token` | 2 | `A` + 2 |
+| `recovery_register` | 3 + `r` (nonce, old and new recovery rows) | `A` + 2`D` + 3 |
+| `recovery_register` repeat | 1 (the nonce) | `A` + `D` + 2 |
+| any admin request refused after A4 | 1 (the nonce) | what the operation reads when it succeeds |
+
+A request that stores entries while a socket has completed its hello reads two rows more for the push (the board row and the head), and a `fence` one more for the state notice. A request made with the door reads the token's row not at all, so its bound is lower by one for each read of that row.
 
 A seed tail is outside the append budget (§14.1); covering the Skip window, one re-home can store up to 16,384 frames this way, `2f + a` rows written once.
 
@@ -1477,16 +1481,18 @@ SYNC.md §6.2's day, recomputed from §16.1: 3 devices (two desktops, one phone)
 |---|---|---|---|---|---|
 | socket upgrades (phone opens, desktop reconnects) | 70 | 70 | 70 | 0 | 210 |
 | socket hellos | 70 | 0 | 3.5 (70 ÷ 20) | 0 | 210 |
-| socket appends (edits and beats) | 283 | 0 | 14.2 | 849 | 1,698 |
+| socket appends (edits and beats), each pushed to its own socket | 283 | 0 | 14.2 | 849 | 2,547 |
 | socket catch-up reads (6 entries each) | 70 | 0 | 3.5 | 0 | 700 |
-| background `hello` and `read` | 96 | 96 | 96 | 0 | 576 |
-| background appends | 20 | 20 | 20 | 60 | 120 |
-| compaction (`admin-nonce`, `compact` deleting 305) | 2 | 2 | 2 | 1 + 612 | 66 + 620 |
-| snapshot every 3.3 days (begin, 3 parts, one older snapshot deleted), per day | 4 ÷ 3.3 | 1.2 | 1.2 | 11 ÷ 3.3 = 3.3 | 4 |
+| background `hello` and `read` | 96 | 96 | 96 | 0 | 336 |
+| background appends | 20 | 20 | 20 | 60 | 140 |
+| compaction (`admin-nonce`, `compact` deleting 305) | 2 | 2 | 2 | 1 + 307 | 3 + 324 |
+| snapshot every 3.3 days (begin, 3 parts, one older snapshot deleted), per day | 4 ÷ 3.3 | 1.2 | 1.2 | 11 ÷ 3.3 = 3.3 | 46 ÷ 3.3 = 14 |
 | retries and `caps` | 10 | 10 | 5 | 0 | 15 |
-| **total** | | **≈ 199** | **≈ 215** | **≈ 1,525** | **≈ 4,219** |
+| **total** | | **≈ 199** | **≈ 215** | **≈ 1,220** | **≈ 4,499** |
 | free-plan daily limit | | 100,000 | 100,000 | 100,000 | 5,000,000 |
-| **share** | | **0.20%** | **0.22%** | **1.53%** | **0.08%** |
+| **share** | | **0.20%** | **0.22%** | **1.22%** | **0.09%** |
+
+Measured by the suite under `wrangler dev` on 2026-11-24, with the day's snapshot counted whole: 202 Worker requests, 218 object requests, 1,226 rows written and 4,376 rows read.
 
 Duration, on R3 §6's model (each event 50 ms at 128 MB): about 610 events × 0.05 s × 0.125 GB ≈ 3.8 GB-s of 13,000 (0.03%); the real figure is among SYNC.md §11's measurements, taken in the owner's rehearsal. Storage is not a daily limit: after a year, with compaction, about 0.15 GB of 5 GB (SYNC.md §6.2).
 
@@ -1496,11 +1502,13 @@ SYNC.md §6.2's import: 5,000 commands of another board brought in as ordinary c
 
 | Item | Count | Worker requests | Object requests | Rows written | Rows read |
 |---|---|---|---|---|---|
-| `login-nonce` and `login`, each day | 4 | 4 | 4 | 6 | 138 |
-| appends (188 on the first day, 125 on the second) | 313 | 313 | 313 | 2 × 5,000 + 313 = 10,313 | 3 × 313 + 3 × 5,000 = 15,939 |
-| **total** | | **317** | **317** | **10,319** | **16,077** |
+| `login-nonce` and `login`, each day | 4 | 4 | 4 | 6 | 26 |
+| appends (188 on the first day, 125 on the second) | 313 | 313 | 313 | 2 × 5,000 + 313 = 10,313 | 313 × (5 + 3 + 2 × 16) = 12,520 |
+| **total** | | **317** | **317** | **10,319** | **12,546** |
 | free-plan daily limit | | 100,000 | 100,000 | 100,000 | 5,000,000 |
-| **share** | | **0.32%** | **0.32%** | **10.32%** | **0.32%** |
+| **share** | | **0.32%** | **0.32%** | **10.32%** | **0.25%** |
+
+Measured by the suite under `wrangler dev` on 2026-11-24: 317 Worker requests, 317 object requests, 10,319 rows written and 6,900 rows read.
 
 - **RELAY-ROWS-003** (relay) The conformance suite MUST store the import of §16.2 (5,000 new frames of one role-1 author, 16 per `append`, over two UTC days of the relay clock as the append budget allows) against the Worker target and MUST fail unless the Worker requests, object requests, rows written and rows read it measures, summed over both days, each stay below 20% of the daily limit of the table.
 
@@ -1539,17 +1547,17 @@ When `TOKEN_KEY` is not 64 lowercase hex characters, or `RELAY_ORIGIN` is not a 
 
 ## 18. The conformance suite
 
-`relay/test/` holds one `node --test` suite with three targets, chosen by `TD_TARGET`: `core` (the core in process over `node:sqlite`, with a counting storage and an injected clock), `standby` (the standby over HTTP on loopback, started in process with an injected clock) and `worker` (`wrangler dev` with the pinned `wrangler`, real clock). It signs its own frames, login and admin messages from `seal.md`'s layouts with WebCrypto in test-only helpers; stage `device` later adds `seal`'s published vectors (SYNC_PLAN.md §6.4).
+`relay/test/` holds one `node --test` suite with three targets, chosen by `TD_TARGET`: `core` (the core in process over `node:sqlite`, with a counting storage and an injected clock), `standby` (the standby over HTTP on loopback, started in process with an injected clock) and `worker` (`wrangler dev` with the pinned `wrangler`; the object's clock is real time plus an offset that the suite's harness Worker keeps for each board, so that a case's clock and the two UTC days of RELAY-ROWS-003 can be set there too). It signs its own frames, login and admin messages from `seal.md`'s layouts with WebCrypto in test-only helpers, and it runs `seal`'s published vectors as well (item 5 below). Node 22 takes the argument of `node --test` as a file or a glob, not a directory: the suite's files are `relay/test/*.test.mjs`, and its helpers lie in subdirectories that the glob does not match.
 
-**The counting storage** wraps `Storage` and counts rows written as the platform does: for each statement of `SQL` (§23), the number of rows it changed times one plus the number of indexes on its table (2 for `log`, 1 for every other table). The suite checks on the Worker target that the platform's counters agree with it for every operation that target can run.
+**The counting storage** wraps `Storage` and counts rows written as the platform does: for each statement of `SQL` (§23), the number of rows it changed, times two for an inserted `log` row (the row and its index entry) and times one for everything else, a deleted `log` row included (§7.1). The suite checks on the Worker target that the platform's counters agree with it for every operation that target can run.
 
-**What it must cover**, each item as at least one case on every target that can run it (time-dependent cases on `core` and `standby` only):
+**What it must cover**, each item as at least one case on every target that can run it (cases whose expectations turn on an exact instant on `core` and `standby` only):
 
 1. every route of §10.1 and every socket message of §11, with each success and each error of their sections;
 2. the gate: unauthenticated, wrong-credential, oversized and slow requests refused with `X-TD-Relay: gate` and no object call (on the Worker, the object is observed through a test-only route of the suite's own harness Worker that wraps `Board` and counts calls; the shipped `worker.js` has no such route);
 3. sequencing: new, dup, conflict, gap, stop rules, recovery frames from a token and from the door, the budget; a replay writes no row;
 4. every admin operation, its signer rules and its repeat;
-5. strict Ed25519: every Wycheproof `ed25519_test.json` case and every case of `seal-signatures.json` and `seal-frame.json`, through append and login (RELAY-GEN-010);
+5. strict Ed25519: every Wycheproof `ed25519_test.json` case through `verifyStrict` where each target runs it, and every case of `seal-signatures.json`, `seal-frame.json` and `seal-chain.json`: seal's Genesis frame through `create`, its device frames through `seed-tail` (the suite does not hold their keys, and `seed-tail` takes a frame of any registered author through the same checks as an append), its login signatures through `login` on the core target, where the relay's nonce can be the vector's (RELAY-GEN-010);
 6. the rows of §16.1 for every operation, and the day of §16.2;
 7. `relay/package.json` has no runtime dependency; no relay source file contains `console.`, `eval(`, `new Function`, `setTimeout`, `setInterval` or `setAlarm` (a source scan).
 
@@ -1677,14 +1685,14 @@ HTTP refusals carry the JSON body of §4.2; per-frame refusals are results of §
 
 ## 21. Test vectors
 
-Stage `relay` publishes these families under `relay/test/vectors/`, one JSON file each, in the format of README §7. They are the conformance suite's fixtures (§18); `seal`'s published vectors are added by stage `device` (SYNC_PLAN.md §6.7).
+Stage `relay` publishes these families under `relay/test/vectors/`, one JSON file each, in the format of README §7. They are the conformance suite's fixtures (§18), generated from `relay/test/vectors/cases-*.mjs`; the suite runs `seal`'s published vectors as well (§18 item 5).
 
 **Case format.**
 
 | Field | Type | Meaning |
 |---|---|---|
 | `name` | string | unique within the file |
-| `targets` | array of `"core"`, `"standby"`, `"worker"` | where the case runs; time-dependent cases omit `"worker"` |
+| `targets` | array of `"core"`, `"standby"`, `"worker"` | where the case runs; cases whose expectations turn on an exact instant omit `"worker"` |
 | `setup` | object | `token_key` (hex32), `create_secret` (hex32, optional), `origin`, `clock_ms`; `keys`: name → `{"seed": hex32}` (an Ed25519 seed, RFC 8032, so signatures are deterministic); `boards`: name → `{"salt": hex16, "recovery": key name, "first": key name}`, created by a `create` the harness performs; `state`: further steps run before the case, in the step format |
 | `steps` | array | run in order |
 
@@ -1692,7 +1700,7 @@ Stage `relay` publishes these families under `relay/test/vectors/`, one JSON fil
 
 `request`: `{"route": name of §10.1, "board": board name, "params": {…}, "query": {…}, "cred": {"token": key name} | {"read_token": key name} | {"door": board name} | {"create": true} | {"raw": header value} | {}, "proof": hex32?, "body": builder, "slow": {"declare": integer, "send": integer}?}`.
 
-**Builders** (expanded by the harness, never sent as JSON): `{"$hex": "…"}`; `{"$batch": [builder…]}`; `{"$frame": {"board", "author", "ctr", "body_len", "fill", "sig": "good" | "flip" | "zero-s" | "high-s"}}`, whose body is `ver 1 ‖ suite 1 ‖ epoch u32 1 ‖ 24 zero bytes ‖` filler bytes `H(fill ‖ u32 0) ‖ H(fill ‖ u32 1) ‖ …` cut to `body_len`, signed as SEAL-FRAME-002 (the relay never opens the body); `{"$login": {"dev", "gen", "nonce": "$last.nonce" | hex32, "client_nonce", "origin"}}`; `{"$admin": {"op", "signer", "nonce", "args": {…named fields of the seal.md §16.2 registry…}, "extra": builder}}`; `{"$slot": {"label", "body_len"}}`; `{"$blob_begin": {…}}`; `{"$part": {"blob", "index", "fill"}}`. `"$last.<field>"` refers to the previous step's JSON response.
+**Builders** (expanded by the harness, never sent as JSON): `{"$hex": "…"}`; `{"$batch": [builder…]}`; `{"$frame": {"board", "author", "ctr", "body_len", "fill", "sig": "good" | "flip" | "zero-s" | "high-s"}}`, whose body is `ver 1 ‖ suite 1 ‖ epoch u32 1 ‖ 24 zero bytes ‖` filler bytes `H(fill ‖ u32 0) ‖ H(fill ‖ u32 1) ‖ …` cut to `body_len`, signed as SEAL-FRAME-002 (the relay never opens the body); `{"$login": {"dev", "gen", "nonce": "$last.nonce" | hex32, "client_nonce", "origin"}}`; `{"$admin": {"op", "signer", "nonce", "args": {…named fields of the seal.md §16.2 registry…}, "extra": builder}}`; `{"$slot": {"label", "body_len"}}`; `{"$blob_begin": {…}}`; `{"$part": {"blob", "index", "fill"}}`. `"$last.<field>"` refers to the previous step's JSON response. The harness has more builders, step kinds and expectations than this section names; `relay/test/vectors/README.md` lists them all.
 
 `expect`: `{"status", "x_td_relay": "gate" | "object", "object_called": boolean, "json": {…} (exact, `"$any"` for a random or token field), "results": [{"status": "new", "seq", "chain": "$chain"}…], "page": {…}, "message": {…}, "rows_written": integer, "rows_read_max": integer, "storage": {"board": {…}, "devices": {…}, "log": [{"seq", "dev", "ctr"}…], "blobs": […], "tickets": […]} (each a partial match on the named rows), "elapsed_ms": [min, max]}`. `"$chain"` means the value the harness computes with SEAL-CHAIN-001.
 
@@ -1720,7 +1728,7 @@ Stage `relay` publishes these families under `relay/test/vectors/`, one JSON fil
 | `relay-day.json` | §16.2 | the typical day as a script |
 | `relay-standby.json` | §15.2 | the standby's differences |
 
-Wycheproof `ed25519_test.json` and `seal`'s `seal-signatures.json`, `seal-frame.json` and `seal-chain.json` are run as they are, through append and login (RELAY-GEN-010).
+Wycheproof `ed25519_test.json` and `seal`'s `seal-signatures.json`, `seal-frame.json` and `seal-chain.json` are run as they are, as §18 item 5 states (RELAY-GEN-010).
 
 ## 22. Interfaces
 
@@ -1820,6 +1828,15 @@ export class BoardCore {
  */
 export function sqliteStorage(db);        // over node:sqlite DatabaseSync (standby, tests)
 export const noSockets;                   // Sockets with no socket (standby)
+
+// ---------- what the fronts and the suite also use
+export const ERRORS;                                               // frozen object: the status of §19 for each code
+export function configError({ tokenKey, createSecret, origin });   // -> the first invalid field's name, or null (§17)
+export function makeConfig({ tokenKey, createSecret, origin, push });   // -> Config, or null when a value is invalid (step 0)
+export async function gate(request, config);                       // steps 0 to 8 of §6.2: { reply } or { route, params, query, cred, contentLength, deadlineMs }
+export function checkBody(contentLength, received);                // step 9: null, or the refusal (`received` null: the deadline passed)
+export function errorReply(error, by);                             // the JSON error body of §4.2 for a RelayError
+export function refusal(code, by);                                 // the same for one code of §19
 ```
 
 `worker.js`:
@@ -1841,11 +1858,12 @@ export class Board extends DurableObject {
 
 ```js
 export async function startStandby({ tokenKey, createSecret, origin, dataDir, listen, tlsCert, tlsKey, now });
-  // -> { url: string, close: () => Promise<void> }; `now` is for tests only and defaults to Date.now
+  // -> { url: string, server, close: () => Promise<void> }; `now` is for tests only and defaults to Date.now;
+  //    `server` is the node:http or node:https server, for the suite (§15.2's timeouts)
 // `node standby.js` reads TD_TOKEN_KEY, TD_CREATE_SECRET, TD_RELAY_ORIGIN, TD_DATA_DIR, TD_LISTEN, TD_TLS_CERT, TD_TLS_KEY (§17.2)
 ```
 
-Other files of `relay/`: `wrangler.toml` (§17.1), `package.json` (no dependencies; `wrangler` pinned as the only devDependency; `"type": "module"`; `"test": "node --test test/"`), `test/` (§18, §21), `README.md`, and `deploy.sh` (stage `release`).
+Other files of `relay/`: `wrangler.toml` (§17.1), `package.json` (no dependencies; `wrangler` pinned as the only devDependency; `"type": "module"`; `"test": "node --test test/*.test.mjs"`), `test/` (§18, §21), `README.md`, and `deploy.sh` (stage `release`).
 
 ## 24. Open questions
 
