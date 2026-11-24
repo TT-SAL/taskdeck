@@ -216,7 +216,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             || self.meta.duties.snapshot.is_some()
             || self.meta.duties.purge.is_some()
             || self.meta.duties.upgrade.is_some()
-            || self.compact_day_open()
+            // A compaction is a duty only on a day on which there is something to compact.
+            || (self.compact_day_open() && self.compact_bound().is_some())
     }
 
     // ------------------------------------------------------------------ beats (§23)
@@ -404,32 +405,33 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     }
 
     /// §20.2 (ENG-COMPACT-001 to ENG-COMPACT-004).
-    fn compact_step(&mut self) {
-        if !self.compact_day_open() {
-            return;
-        }
+    /// Steps 1 and 2 of §20.2: the snapshot relied on (its seq is the first bound, then its
+    /// entry's seq and its blob) and the bound `b`. None: no compaction today.
+    fn compact_bound(&self) -> Option<(u64, [u8; 16], u64)> {
         // Step 1: the newest usable snapshot by another writer that this device acknowledged.
-        let Some(rec) = self
+        let rec = self
             .registry
             .snapshots
             .iter()
             .filter(|r| r.author != self.own && r.own == Some(Verdict::Ack) && usable(r, &self.own))
-            .max_by_key(|r| r.entry_seq)
-        else {
-            return;
-        };
+            .max_by_key(|r| r.entry_seq)?;
         let (s, x, blob_id) = (rec.info.seq, rec.entry_seq, rec.info.blob);
         // Step 2: the bound.
         if self.l <= lim::SKIP_WINDOW {
-            return;
+            return None;
         }
         let cutoff = self.wall.saturating_sub(31_622_400_000);
-        let Some(y) = self.last_seq_at_or_before(cutoff) else { return };
-        let mut b = s.min(self.l - lim::SKIP_WINDOW).min(y + 1);
-        let floor = self.sess.floor;
-        if b <= floor {
+        let y = self.last_seq_at_or_before(cutoff)?;
+        let b = s.min(self.l - lim::SKIP_WINDOW).min(y + 1);
+        (b > self.sess.floor).then_some((x, blob_id, b))
+    }
+
+    fn compact_step(&mut self) {
+        if !self.compact_day_open() {
             return;
         }
+        let Some((x, blob_id, mut b)) = self.compact_bound() else { return };
+        let floor = self.sess.floor;
         // Step 3: the keep list.
         let mut keep: Vec<u64> = self
             .vk
