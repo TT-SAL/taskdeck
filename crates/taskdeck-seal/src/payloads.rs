@@ -12,7 +12,7 @@ use crate::canon::{self, Fields, INT_MAX, JsonError, array, hex, hex_value, int,
 use crate::encodings::{device_name_is_valid, host_is_valid};
 use crate::entries::{
     AckVerdict, Beat, BeatAck, BeatState, CtlItem, DeviceAdded, EpochRotated, Fence, Genesis, GenesisDevice,
-    GenesisSnapshot, RecoveryKeyChange, RecoveryKeyMode, ResetTo, RulesUpgrade, RulesUpgradeMode, SkipItem,
+    GenesisSnapshot, RecoveryKeyChange, ResetTo, RulesUpgrade, RulesUpgradeMode, SkipItem,
     SnapAnnounce,
 };
 use crate::prim::{h, take};
@@ -120,19 +120,8 @@ fn item_value(item: &CtlItem) -> Result<Value, JsonError> {
             }
         }
         CtlItem::RecoveryKeyChange(k) => {
-            let mode = match k.mode {
-                RecoveryKeyMode::Direct => "direct",
-                RecoveryKeyMode::Propose => "propose",
-                RecoveryKeyMode::Confirm => "confirm",
-                RecoveryKeyMode::Cancel => "cancel",
-            };
-            m.insert("mode".into(), Value::String(mode.into()));
-            if let Some(pk) = &k.sign_pk {
-                m.insert("sign_pk".into(), hex_value(pk));
-            }
-            if let Some(pk) = &k.hpke_pk {
-                m.insert("hpke_pk".into(), hex_value(pk));
-            }
+            m.insert("sign_pk".into(), hex_value(&k.sign_pk));
+            m.insert("hpke_pk".into(), hex_value(&k.hpke_pk));
         }
         CtlItem::Fence(f) => {
             m.insert("host".into(), Value::String(f.host.clone()));
@@ -272,21 +261,12 @@ pub(crate) fn item_from_value(v: &Value) -> Result<CtlItem, JsonError> {
             wraps: wraps(f.req("wraps")?, ROTATION_WRAPS_MIN, ROTATION_WRAPS_MAX)?,
             purge_before: f.opt("purge_before").map(|p| int(p, 1, INT_MAX)).transpose()?,
         }),
-        "RecoveryKeyChange" => {
-            let mode = match string(f.req("mode")?)? {
-                "direct" => RecoveryKeyMode::Direct,
-                "propose" => RecoveryKeyMode::Propose,
-                "confirm" => RecoveryKeyMode::Confirm,
-                "cancel" => RecoveryKeyMode::Cancel,
-                _ => return Err(JsonError::Constraint),
-            };
-            let (sign_pk, hpke_pk) = match mode {
-                // Absent for `cancel`: present, they are fields its row does not list.
-                RecoveryKeyMode::Cancel => (None, None),
-                _ => (Some(hex::<32>(f.req("sign_pk")?)?), Some(hex::<32>(f.req("hpke_pk")?)?)),
-            };
-            CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode, sign_pk, hpke_pk })
-        }
+        // Both keys required; any other key, `mode` included, is unknown
+        // and refused by `finish` (SEAL-ENC-004).
+        "RecoveryKeyChange" => CtlItem::RecoveryKeyChange(RecoveryKeyChange {
+            sign_pk: hex::<32>(f.req("sign_pk")?)?,
+            hpke_pk: hex::<32>(f.req("hpke_pk")?)?,
+        }),
         "Fence" => {
             let host = string(f.req("host")?)?;
             if !host_is_valid(host) {
@@ -339,10 +319,8 @@ pub(crate) enum Shape {
     A,
     /// 0 to 15 `Revoke`/`Reinstate`, then `EpochRotated`.
     R,
-    /// `RecoveryKeyChange` `direct`/`confirm`, then `EpochRotated`.
+    /// `RecoveryKeyChange`, then `EpochRotated`.
     K,
-    /// `RecoveryKeyChange` `propose`/`cancel`.
-    P,
     /// `Fence`.
     F,
     /// `ResetTo`.
@@ -362,21 +340,13 @@ pub(crate) enum Shape {
 /// pairwise distinct target seqs.
 pub(crate) fn ctl_shape(items: &[CtlItem]) -> Result<Shape, SealError> {
     let bad = SealError::CtlShape;
-    let rkc_mode = |i: &CtlItem| match i {
-        CtlItem::RecoveryKeyChange(k) => Some(match k.mode {
-            RecoveryKeyMode::Direct | RecoveryKeyMode::Confirm => Shape::K,
-            RecoveryKeyMode::Propose | RecoveryKeyMode::Cancel => Shape::P,
-        }),
-        _ => None,
-    };
     match items {
         [CtlItem::Genesis(_)] => return Ok(Shape::G),
         [CtlItem::DeviceAdded(_)] => return Ok(Shape::A),
         [CtlItem::Fence(_)] => return Ok(Shape::F),
         [CtlItem::ResetTo(_)] => return Ok(Shape::T),
         [CtlItem::RulesUpgrade(_)] => return Ok(Shape::U),
-        [k] if rkc_mode(k) == Some(Shape::P) => return Ok(Shape::P),
-        [k, CtlItem::EpochRotated(_)] if rkc_mode(k) == Some(Shape::K) => return Ok(Shape::K),
+        [CtlItem::RecoveryKeyChange(_), CtlItem::EpochRotated(_)] => return Ok(Shape::K),
         _ => {}
     }
     if items.iter().all(|i| matches!(i, CtlItem::Skip(_))) {

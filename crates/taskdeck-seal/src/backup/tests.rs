@@ -88,11 +88,7 @@ impl Hist {
     pub fn change_recovery(&mut self) {
         let nk = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
         let p = nk.public();
-        let k = CtlItem::RecoveryKeyChange(crate::RecoveryKeyChange {
-            mode: crate::RecoveryKeyMode::Direct,
-            sign_pk: Some(p.sign_pk),
-            hpke_pk: Some(p.hpke_pk),
-        });
+        let k = CtlItem::RecoveryKeyChange(crate::RecoveryKeyChange { sign_pk: p.sign_pk, hpke_pk: p.hpke_pk });
         let items = self.b.rotate_items(vec![k]);
         self.ctl(Who::R, items);
         self.b.rec.push(nk);
@@ -834,7 +830,7 @@ fn step9_history() {
 fn step9_history_forged_by_a_stranger() {
     use crate::membership::transitions::{self, Auth, EntryCx};
     use crate::payloads::items_bytes;
-    use crate::{EpochRotated, Signer, Genesis, GenesisDevice, RecoveryKeyChange, RecoveryKeyMode, wrap_root};
+    use crate::{EpochRotated, Signer, Genesis, GenesisDevice, RecoveryKeyChange, wrap_root};
 
     let victim = Hist::new(2);
     let bv = victim.b.board;
@@ -869,7 +865,7 @@ fn step9_history_forged_by_a_stranger() {
     assert_ne!(crate::board_id(&xp.sign_pk, &g.salt), bv);
     let r2 = EpochRoot::from_bytes(rand());
     let (c2, w2) = wraps(&r2, 2, &mut vec![(ap.dev, ap.hpke_pk), (rv.dev(&bv), rv.hpke_pk)]);
-    let change = RecoveryKeyChange { mode: RecoveryKeyMode::Direct, sign_pk: Some(rv.sign_pk), hpke_pk: Some(rv.hpke_pk) };
+    let change = RecoveryKeyChange { sign_pk: rv.sign_pk, hpke_pk: rv.hpke_pk };
     let rot = EpochRotated { epoch: 2, commit: c2, wraps: w2, purge_before: None };
     let (_, sk) = signer_identity(&Signer::Recovery(&xk, bv), &bv).unwrap();
     let record = |seq: u64, items: &[CtlItem]| {
@@ -887,7 +883,7 @@ fn step9_history_forged_by_a_stranger() {
     m.set_last_ctr(&dev_x, 1);
     let none = |_: u64| -> Option<&[u8]> { None };
     let cx = EntryCx { s: 2, at_ms, tau: at_ms, author: Auth::Recovery(dev_x), board: bv, skip_targets: &none };
-    transitions::recovery_key_change(&mut m, &change, &cx, false).unwrap();
+    transitions::recovery_key_change(&mut m, &change, &cx).unwrap();
     transitions::rotate(&mut m, &rot, &cx).unwrap();
     m.set_last_ctr(&dev_x, 2);
     m.ctl_seqs.push(2);
@@ -1236,25 +1232,23 @@ fn verify_backup_file_steps() {
 
 // --------------------------------------------- task S5: carried rulings
 
-// Step 10 compares the keys, not only `dev_R` (ruling Q45): two devices
-// propose and confirm a recovery key made of a new sheet's signing key and
-// a third party's HPKE key; a current device seals a file to the new
+// Step 10 compares the keys, not only `dev_R` (ruling Q45): the current
+// recovery identity installs a recovery key made of a new sheet's signing
+// key and a third party's HPKE key; a current device seals a file to the new
 // sheet's real HPKE key. Every step up to 9 passes and the projection's
 // current `dev_R` is the recipient, but its HPKE key is not the sheet's:
 // reading with the new sheet's seed is `seal/backup_writer`.
 // spec: SEAL-BKP-004
 #[test]
 fn step10_compares_the_recovery_keys() {
-    use crate::{RecoveryKeyChange, RecoveryKeyMode};
+    use crate::RecoveryKeyChange;
     let mut x = Hist::new(2);
     let sheet = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
     let third = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
     let mixed = RecoveryPublic { sign_pk: sheet.public().sign_pk, hpke_pk: third.public().hpke_pk };
-    let change = |mode| CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode, sign_pk: Some(mixed.sign_pk), hpke_pk: Some(mixed.hpke_pk) });
-    x.ctl(Who::D(0), vec![change(RecoveryKeyMode::Propose)]);
-    x.b.now += 259_200_000;
-    let items = x.b.rotate_items(vec![change(RecoveryKeyMode::Confirm)]);
-    x.ctl(Who::D(1), items);
+    let change = CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: mixed.sign_pk, hpke_pk: mixed.hpke_pk });
+    let items = x.b.rotate_items(vec![change]);
+    x.ctl(Who::R, items);
     let cur = x.b.m.current_recovery();
     assert_eq!((cur.sign_pk, cur.hpke_pk), (mixed.sign_pk, mixed.hpke_pk));
     // Sealed by device 0 to the sheet's own keys.

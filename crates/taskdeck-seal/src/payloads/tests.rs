@@ -73,13 +73,8 @@ fn rotated(ids: &[u8]) -> CtlItem {
     })
 }
 
-fn rkc(mode: RecoveryKeyMode) -> CtlItem {
-    let keys = !matches!(mode, RecoveryKeyMode::Cancel);
-    CtlItem::RecoveryKeyChange(RecoveryKeyChange {
-        mode,
-        sign_pk: keys.then_some([0x31; 32]),
-        hpke_pk: keys.then_some([0x32; 32]),
-    })
+fn rkc() -> CtlItem {
+    CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: [0x31; 32], hpke_pk: [0x32; 32] })
 }
 
 fn fence() -> CtlItem {
@@ -105,10 +100,7 @@ fn every_item() -> Vec<CtlItem> {
         CtlItem::DeviceRevoked(DevId([0x15; 16])),
         CtlItem::DeviceReinstated(DevId([0x16; 16])),
         rotated(&[1, 2, 3]),
-        rkc(RecoveryKeyMode::Direct),
-        rkc(RecoveryKeyMode::Propose),
-        rkc(RecoveryKeyMode::Confirm),
-        rkc(RecoveryKeyMode::Cancel),
+        rkc(),
         fence(),
         reset(),
         skip(7),
@@ -147,8 +139,11 @@ fn every_item_round_trips() {
         String::from_utf8(canon::encode(&v).unwrap()).unwrap(),
         format!(r#"{{"frame_hash":"{}","seq":7,"type":"Skip"}}"#, "61".repeat(32))
     );
-    let v = item_value(&rkc(RecoveryKeyMode::Cancel)).unwrap();
-    assert_eq!(canon::encode(&v).unwrap(), br#"{"mode":"cancel","type":"RecoveryKeyChange"}"#);
+    let v = item_value(&rkc()).unwrap();
+    assert_eq!(
+        String::from_utf8(canon::encode(&v).unwrap()).unwrap(),
+        format!(r#"{{"hpke_pk":"{}","sign_pk":"{}","type":"RecoveryKeyChange"}}"#, "32".repeat(32), "31".repeat(32))
+    );
     let v = item_value(&CtlItem::DeviceRevoked(DevId([0xab; 16]))).unwrap();
     assert_eq!(
         String::from_utf8(canon::encode(&v).unwrap()).unwrap(),
@@ -294,24 +289,24 @@ fn the_other_item_tables() {
     assert_eq!(item_err(&set(&r, "/wraps", Value::Array(many[..17].to_vec()))), None);
     assert_eq!(item_err(&set(&r, "/epoch", json!(u32::MAX))), None);
 
-    let k = item_value(&rkc(RecoveryKeyMode::Propose)).unwrap();
-    let c = item_value(&rkc(RecoveryKeyMode::Cancel)).unwrap();
+    // §12.6 has no `mode`: the field of the removed propose path is an
+    // unknown field, whatever its value.
+    let k = item_value(&rkc()).unwrap();
     check_table(
         &k,
         vec![
-            ("mode unknown", set(&k, "/mode", json!("Propose")), Constraint),
-            ("no mode", del(&k, "/mode"), MissingField),
-            ("propose without sign_pk", del(&k, "/sign_pk"), MissingField),
-            ("propose without hpke_pk", del(&k, "/hpke_pk"), MissingField),
-            ("direct without sign_pk", set(&del(&k, "/sign_pk"), "/mode", json!("direct")), MissingField),
-            ("confirm without hpke_pk", set(&del(&k, "/hpke_pk"), "/mode", json!("confirm")), MissingField),
+            ("mode direct", set(&k, "/mode", json!("direct")), UnknownField),
+            ("mode propose", set(&k, "/mode", json!("propose")), UnknownField),
+            ("mode cancel without keys", set(&del(&del(&k, "/sign_pk"), "/hpke_pk"), "/mode", json!("cancel")), MissingField),
+            ("no sign_pk", del(&k, "/sign_pk"), MissingField),
+            ("no hpke_pk", del(&k, "/hpke_pk"), MissingField),
             ("sign_pk bad", set(&k, "/sign_pk", hx(&[0; 33])), BadHex),
-            ("cancel with keys", set(&k, "/mode", json!("cancel")), UnknownField),
-            ("cancel with sign_pk", set(&c, "/sign_pk", hx(&[0; 32])), UnknownField),
+            ("hpke_pk bad", set(&k, "/hpke_pk", hx(&[0; 31])), BadHex),
+            ("sign_pk a number", set(&k, "/sign_pk", json!(1)), WrongType),
+            ("unknown field", set(&k, "/x", json!(1)), UnknownField),
         ],
         item_err,
     );
-    assert_eq!(item_err(&c), None);
 
     let f = item_value(&fence()).unwrap();
     check_table(
@@ -399,10 +394,6 @@ fn ctl_payload_refuses_invalid_items() {
         x.bootstrap_seq = 1 << 53;
     }
     assert_eq!(call(&[a]), Some(SealError::BadPayload));
-    let half = CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode: RecoveryKeyMode::Direct, sign_pk: Some([1; 32]), hpke_pk: None });
-    assert_eq!(call(&[half, rotated(&[1, 2])]), Some(SealError::BadPayload));
-    let cancel_keys = CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode: RecoveryKeyMode::Cancel, sign_pk: Some([1; 32]), hpke_pk: None });
-    assert_eq!(call(&[cancel_keys]), Some(SealError::BadPayload));
     assert_eq!(call(&[rotated(&[2, 1])]), Some(SealError::BadPayload));
     assert_eq!(call(&[]), Some(SealError::BadPayload));
     let seventeen: Vec<CtlItem> = (1..=17).map(skip).collect();
@@ -425,10 +416,7 @@ fn the_shapes_of_12_1() {
         (vec![rev(1), rotated(&[2, 3])], Shape::R),
         (vec![rev(1), rei(2), rev(3), rotated(&[2, 3])], Shape::R),
         ((1..=15).map(rev).chain([rotated(&[1, 2])]).collect(), Shape::R),
-        (vec![rkc(RecoveryKeyMode::Direct), rotated(&[1, 2])], Shape::K),
-        (vec![rkc(RecoveryKeyMode::Confirm), rotated(&[1, 2])], Shape::K),
-        (vec![rkc(RecoveryKeyMode::Propose)], Shape::P),
-        (vec![rkc(RecoveryKeyMode::Cancel)], Shape::P),
+        (vec![rkc(), rotated(&[1, 2])], Shape::K),
         (vec![fence()], Shape::F),
         (vec![reset()], Shape::T),
         (vec![skip(1)], Shape::S),
@@ -451,12 +439,12 @@ fn the_shapes_of_12_1() {
         (1..=16).map(rev).chain([rotated(&[1, 2])]).collect(),
         vec![rotated(&[1, 2]), rotated(&[1, 2])],
         vec![rev(1), fence(), rotated(&[1, 2])],
-        vec![rkc(RecoveryKeyMode::Direct)],
-        vec![rkc(RecoveryKeyMode::Confirm)],
-        vec![rkc(RecoveryKeyMode::Propose), rotated(&[1, 2])],
-        vec![rkc(RecoveryKeyMode::Cancel), rotated(&[1, 2])],
-        vec![rev(1), rkc(RecoveryKeyMode::Direct), rotated(&[1, 2])],
-        vec![rkc(RecoveryKeyMode::Direct), rotated(&[1, 2]), rev(1)],
+        vec![rkc()],
+        vec![rotated(&[1, 2]), rkc()],
+        vec![rkc(), fence()],
+        vec![rkc(), rkc(), rotated(&[1, 2])],
+        vec![rev(1), rkc(), rotated(&[1, 2])],
+        vec![rkc(), rotated(&[1, 2]), rev(1)],
         vec![fence(), fence()],
         vec![reset(), skip(1)],
         vec![skip(1), skip(1)],

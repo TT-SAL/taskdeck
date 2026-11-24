@@ -10,12 +10,13 @@ The stage is finished: every task below is `done`, the stage gate passes, and no
 resumed.
 
 1. What other stages need from this one is the last section, "What the next stages need to know".
-   One question waits for the owner ("Open questions for the owner", O1).
+   No question waits for the owner: O1 is decided ("Open questions for the owner").
 2. A later stage that needs a change in this stage's paths (`crates/taskdeck-seal`,
    `docs/sync/vectors/seal-*`) makes it through a small pull request of its own and notes it in
    both status files (SYNC_PLAN.md §3.2).
-3. Work that may still come to this crate: the owner's choice in O1 (options A and C change items
-   and transitions), and `engine`'s choice about the pairing bundle (Q79). Each is one small task.
+3. One task was done after the exit: S10, the owner's decision on O1 ("Task S10: what happened").
+   Work that may still come to this crate: `engine`'s choice about the pairing bundle (Q79), one
+   small task.
    "How this stage was run" says how a task was launched; the brief every agent read first is
    `docs/sync/status/seal/briefs/common.md`, the workflow script `docs/sync/status/seal/workflows/task.js`.
 4. `docs/sync/spec/seal.md` is the contract; R4 and V1 (`docs/sync/research/`) are the reasons
@@ -74,6 +75,7 @@ Sections and line ranges are those of `docs/sync/spec/seal.md` at the stage's st
 | S7b | The last small code changes: rulings the spec states and the code does not yet do (Q57, Q60, Q56, Q18, Q15), and `write_backup` proving its stream before it seals, with a property test | `blob`, `pair`, `signatures`, `backup`, `prim` | §16, §17.10, §20.4, §20.5, §21.3 | `seal-blob`, `seal-signatures` | **done**, merged with S7 (TT-SAL/taskdeck#20, 2026-11-23 21:00 UTC): S7's verify pass and both its security passes covered it; no finding in the library |
 | S7 | Gate completion: tamper matrix and context confusion over everything, parser property tests, fuzz targets, the budget job, every clause cited by a test that proves it | tests, `fuzz/`, `examples/`, `ci.sh` | §3, §24 | all present | **done**, merged (TT-SAL/taskdeck#20, 2026-11-23 21:00 UTC): one medium finding of its security passes fixed (six fuzz targets could not run); the stage gate passes in the lead's run, 164 of 164 clauses cited |
 | S8 | Hygiene pass, stage exit review, exit pull request | | | | **done**: the exit review and the hygiene pass ("The exit review" and "The hygiene pass" below); the exit pull request is TT-SAL/taskdeck#21 |
+| S10 | After the exit, the owner's decision on O1: the recovery key changes only with the current sheet. The path without it (`propose`, `confirm`, `cancel`, the 72 hours) is removed from the specs, the crate and the vectors | `entries`, `payloads`, `membership`, `receipt`, `backup/projection`, `error` | §11 to §13, §21.6, §22, §23, §26; `engine.md`, `device.md`, three sentences of `relay.md` | `seal-membership`, `seal-receipt`, `seal-commit`, `seal-backup`, `seal-blob`, `seal-pairing` | **done** (the pull request "seal: spec change: the recovery key changes only with the current sheet"; brief `briefs/s10.md`, workflow run `wf_cc43ca30-14f`) |
 | S9 | The exit review's two findings in code: the five fuzz targets that do not reach the parsers their rows name; SEAL-GEN-007 proven for pairing's comparisons | `fuzz/`, tests | §3, §17 | | **done** (TT-SAL/taskdeck#21; workflow run `wf_c7e0a075-ba6`, brief `briefs/s9.md`): no change to the library and no defect found in it; one medium finding of its verify pass fixed; its security passes found nothing above low |
 
 The briefs of S4, S5 and S6 name line ranges of `seal.md` as it stood on 2026-11-23 02:30 UTC; after
@@ -330,6 +332,40 @@ The exit review's two findings in code ("The exit review" below), run with the s
   which comparisons of `pair.rs` it leaves out because their values are public; both snapshot
   targets reach the refusal of the padding, with a test for each.
 - The lead's checks: both gates on each step's result; by mutation, with the padding check of a blob weakened the new property test and the three padding reach tests fail, and with the commitment comparison of §17.9 step 5 written as `!=` the source scan fails. Each change was restored and compared byte for byte.
+
+## Task S10: what happened
+
+After the exit, on 2026-11-23, the owner decided O1: option A, for the recovery key only. Rules
+upgrades keep every rule (the owner wants a device that was off for more than 30 days to stay in
+the mesh and not to hold back the others; the 30-day rule does that). Offline mode on today's files
+and "Export legacy" stay as planned.
+
+- Implementer (0.49 million tokens): the specs, the crate and the vectors in one task. The item
+  `RecoveryKeyChange` has no mode; shape P is gone and shape K is signed by the current recovery
+  identity; `pending_recovery` left the membership and its canonical bytes; three error codes
+  left (`seal/ctl_pending`, `seal/ctl_no_pending`, `seal/ctl_window`); the clauses SEAL-MEM-023 to
+  -025 and ENG-WINDOW-002 and -003 are withdrawn (their ids stay, marked, and are not used again);
+  six vector families were written again. The tests of the removed path went with it (listed in
+  the workflow's report); four tests are new (a device as author is refused; the change needs its
+  rotation; a payload with `mode` is refused; membership bytes with the old flag byte do not
+  parse). §13.10 now states its limit: a device that controls two current devices can make the
+  others look inactive and activate a version no build knows; the owner accepted it.
+- One design point came with it. The desktop had only the removed path; the change with the current
+  sheet was the recovery tool's and had no flow in `device.md`. The implementer wrote one into
+  §18.5 (`RecoveryChangeFlow::confirm_current_sheet`: the user types the current sheet, the
+  desktop seals the entry as the recovery identity). The lead kept it, because the owner was told
+  the change with the current sheet is made in the app, and marked it in `CHANGES.md` as new text
+  for stage `device` to confirm or reshape.
+- Verify pass (0.24 million tokens) and the two security passes (0.21 and 0.22 million): nothing
+  above low, in the crate nothing at all. Their low findings are leftovers of the removed path in
+  spec text: an intent of `engine.md` that nothing could enqueue any more, a missing row for the
+  new step in two tables of `device.md`, and three sentences of `relay.md`. The lead put these
+  right in the same change (wording only, as after every check of a spec change).
+- The lead's checks: the task gate, the stage gate and the scripts' own tests on the result
+  (23:50 UTC): 264 unit tests, 153 tests in nine integration targets and one doc test with `test-entropy` (418 in all); 161 of 161 clauses cited; with the author check of the change switched off, the new test of a device as author fails.
+- Left for `engine`: its crate `taskdeck-sync`, as `foundation` left it, still holds the removed
+  path in its fake (the mode, the pending proposal, three operations, a test that cites the
+  withdrawn SEAL-MEM-025). That crate is `engine`'s; the row of `CHANGES.md` names it.
 
 ## The exit review
 
@@ -827,8 +863,9 @@ output); the higher is booked. Limit: 3.5 million per window.
 | | the hygiene pass | 1 | 0.14 M | 0.15 M | 0.15 M |
 | | S9, the verifier and its fix pass | 2 | 0.28 M | 0.31 M | 0.31 M |
 | | S9, security passes and the fix pass | 3 | 0.55 M | 0.59 M | 0.59 M |
-| | **window total** | | | | **1.40 M** |
-| **The stage in all** | five usage windows, 53 agents | | | | **14.41 M** |
+| | S10, after the exit (implementer, verifier, two security passes; no fix pass was needed) | 4 | 1.09 M | 1.17 M | 1.17 M |
+| | **window total** | | | | **2.57 M** |
+| **The stage in all** | five usage windows, 57 agents | | | | **15.58 M** |
 
 ## Low findings left as they are
 
@@ -955,6 +992,12 @@ output); the higher is booked. Limit: 3.5 million per window.
 
 ## Open questions for the owner
 
+**O1 is decided (the owner, 2026-11-23): option A, for the recovery key only.** The recovery key
+changes only with the current sheet; the path without it is removed (task S10). A lost sheet means
+"Reset trust". Rules upgrades are unchanged, and the limit that stays is written into `seal.md`
+§13.10: a compromised device can still make the live board unusable, and the recovery sheet or
+"Reset trust" repairs that. The question as it stood when it was asked follows, for the record.
+
 **O1. One compromised device defeats every "second device" rule and every time window of the
 membership design** (found by task S3's security pass, 2026-11-23; each consequence reproduced by a
 test against the crate; the code does what `seal.md` says, so this is the design's). Two facts:
@@ -1041,6 +1084,12 @@ after a spec change). The stage gate is `bash scripts/gate.sh seal`; the crate's
 
 **For `engine`.**
 
+- The owner's decision on O1 (task S10): no `propose`, `confirm` or `cancel` of a recovery key, no
+  72-hour window, no banners for them. `crates/taskdeck-sync`, as `foundation` left it, still has
+  that path in its fake and one test that cites the withdrawn SEAL-MEM-025: remove them first.
+  The engine composes no recovery-key change; it classifies the `K`-shape entry, shows
+  `RecoveryChanged` and notifies the device (`engine.md` §26.1).
+
 - Spec change E1: a rotation or revocation that lost a race is refused with `seal/stale_epoch` or
   `seal/old_epoch` (Q21); `engine.md` §28.5 step 4 names all four codes it retries on.
 - `Sealer::open_snapshot` with `exact = true` is `seal.md` §20.5 with every expected value: the crate
@@ -1066,6 +1115,12 @@ after a spec change). The stage gate is `bash scripts/gate.sh seal`; the crate's
   compare `taskdeck_sync::state_hash` with this crate's on the vectors.
 
 **For `device`.**
+
+- The owner's decision on O1 (task S10): `device.md` §18.5 is new text. The desktop changes the
+  recovery key with the current sheet (`RecoveryChangeFlow::confirm_current_sheet`, then the new
+  sheet, then `finish()` seals and appends the entry as the recovery identity). Confirm it or
+  reshape it when you build it. `crates/taskdeck-device/src/lib.rs` still documents `finish()` as
+  a proposal.
 
 - The duties of the crate's caller, which its pure functions cannot violate, are `device`'s
   (`seal.md` §25, `device.md` §24): SEAL-FRAME-005 (a frame for one counter is sealed once),

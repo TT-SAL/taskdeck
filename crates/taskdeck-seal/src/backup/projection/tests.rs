@@ -5,12 +5,12 @@
 use super::*;
 use crate::backup::tests::{Hist, dup};
 use crate::payloads::items_bytes;
-use crate::receipt::tests::board_tests::{Spec, Who, rand};
+use crate::receipt::tests::board_tests::{Who, rand};
 use crate::receipt::tests::scalar;
 use crate::signatures::{sign_with, signer_identity};
 use crate::{
-    DeviceKeys, EntryId, Fence, FrameHash, OsEntropy, RecoveryKeyChange, RecoveryKeyMode, RecoverySeed, ResetTo,
-    RulesUpgrade, RulesUpgradeMode, SkipItem,
+    DeviceKeys, EntryId, Fence, FrameHash, OsEntropy, RecoveryKeyChange, RecoverySeed, ResetTo, RulesUpgrade,
+    RulesUpgradeMode, SkipItem,
 };
 
 fn project_ok(x: &Hist, recs: &[HistoryRecord]) -> Membership {
@@ -28,10 +28,10 @@ fn with(recs: Vec<HistoryRecord>, more: HistoryRecord) -> Vec<HistoryRecord> {
     v
 }
 
-fn new_keys_item(mode: RecoveryKeyMode) -> (CtlItem, crate::RecoveryKeys) {
+fn new_keys_item() -> (CtlItem, crate::RecoveryKeys) {
     let nk = RecoverySeed::generate(&mut OsEntropy).unwrap().keys();
     let p = nk.public();
-    (CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode, sign_pk: Some(p.sign_pk), hpke_pk: Some(p.hpke_pk) }), nk)
+    (CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: p.sign_pk, hpke_pk: p.hpke_pk }), nk)
 }
 
 /// A log with every kind of control entry, and the history it leaves.
@@ -39,9 +39,6 @@ fn busy_log() -> Hist {
     let mut x = Hist::new(3);
     x.cmd(Who::D(1));
     x.revoke(Who::D(0), 2);
-    let (p, _) = new_keys_item(RecoveryKeyMode::Propose);
-    x.ctl(Who::D(1), vec![p]);
-    x.ctl(Who::R, vec![CtlItem::RecoveryKeyChange(RecoveryKeyChange { mode: RecoveryKeyMode::Cancel, sign_pk: None, hpke_pk: None })]);
     x.ctl(Who::D(0), vec![CtlItem::Fence(Fence { host: "relay.example.org".into(), door: [1; 5], home_gen: 2 })]);
     x.ctl(Who::D(0), vec![CtlItem::RulesUpgrade(RulesUpgrade { rules: 2, mode: RulesUpgradeMode::Override })]);
     let t = x.b.seq();
@@ -58,8 +55,7 @@ fn busy_log() -> Hist {
 }
 
 // A real log's history projects to a membership with the same devices,
-// keys, statuses, recovery records, epochs, commitments, pending proposal,
-// purge_seq, next_device_no and ctl_seqs; each author's counter is that of
+// keys, statuses, recovery records, epochs, commitments, purge_seq, next_device_no and ctl_seqs; each author's counter is that of
 // its last control entry, the clock the largest control `at_ms`.
 // spec: SEAL-BKP-008
 #[test]
@@ -82,7 +78,6 @@ fn a_log_projects_to_its_membership() {
         let last = x.recs.iter().filter(|r| r.dev == a.dev).map(|r| r.ctr).max().unwrap_or(0);
         assert_eq!(a.last_ctr, last);
     }
-    assert!(p.pending_recovery.is_none() && m.pending_recovery.is_none());
     assert_eq!(p.clock_ms, x.recs.iter().map(|r| r.at_ms).max().unwrap());
     // The reduced rules leave Fence, RulesUpgrade, ResetTo and Skip without
     // effect.
@@ -255,9 +250,10 @@ fn step5_items() {
 // Step 6, the reduced rules: a DeviceAdded with a recorded key, a rotation
 // to an epoch other than the next or with wraps to the wrong recipients, a
 // revocation of the author itself, a reinstatement by a device, ResetTo and
-// RulesUpgrade by the recovery identity, a confirm by its proposer are
-// rejected; Fence and Skip by the recovery identity pass, and a confirm
-// before 72 hours passes (the time check is not repeated).
+// RulesUpgrade by the recovery identity, a recovery-key change by a device
+// or with a recorded key are rejected; Fence and Skip by the recovery
+// identity pass, and so does its recovery-key change, which installs the
+// new key.
 // spec: SEAL-BKP-008
 #[test]
 fn step6_reduced_rules() {
@@ -307,24 +303,23 @@ fn step6_reduced_rules() {
     let p = project_ok(&x, &with(x.recs(), x.signed(Who::R, s, x.b.next_ctr(Who::R), &back)));
     assert!(p.device(&x.b.dev(Who::D(1))).unwrap().is_current());
 
-    // Propose, then confirm at once: refused by `classify` (72 hours),
-    // accepted by the projection; a confirm by the proposer is rejected.
+    // A recovery-key change with its rotation: by a device, rejected; with
+    // a key already recorded, rejected; by the recovery identity, the
+    // projection installs the new key.
     let mut y = Hist::new(2);
-    let (prop, nk) = new_keys_item(RecoveryKeyMode::Propose);
-    y.ctl(Who::D(0), vec![prop]);
+    let (change, nk) = new_keys_item();
     let p = nk.public();
-    let confirm = CtlItem::RecoveryKeyChange(RecoveryKeyChange {
-        mode: RecoveryKeyMode::Confirm,
-        sign_pk: Some(p.sign_pk),
-        hpke_pk: Some(p.hpke_pk),
-    });
-    let items = y.b.rotate_items(vec![confirm]);
-    let f = y.b.ctl(Who::D(1), items.clone(), &Spec::default());
-    assert_eq!(y.b.classify(&f).code, Some("seal/ctl_window"));
+    let items = y.b.rotate_items(vec![change]);
     let s = y.b.seq() + 1;
-    let pm = project_ok(&y, &with(y.recs(), y.signed(Who::D(1), s, y.b.next_ctr(Who::D(1)), &items)));
-    assert_eq!(pm.current_recovery().sign_pk, p.sign_pk);
-    rejected(&y, &with(y.recs(), y.signed(Who::D(0), s, y.b.next_ctr(Who::D(0)), &items)));
+    for who in [Who::D(0), Who::D(1)] {
+        rejected(&y, &with(y.recs(), y.signed(who, s, y.b.next_ctr(who), &items)));
+    }
+    let recorded = CtlItem::RecoveryKeyChange(RecoveryKeyChange { sign_pk: y.b.dev_pub(1).sign_pk, hpke_pk: p.hpke_pk });
+    let dup_items = y.b.rotate_items(vec![recorded]);
+    rejected(&y, &with(y.recs(), y.signed(Who::R, s, y.b.next_ctr(Who::R), &dup_items)));
+    let pm = project_ok(&y, &with(y.recs(), y.signed(Who::R, s, y.b.next_ctr(Who::R), &items)));
+    assert_eq!((pm.current_recovery().sign_pk, pm.current_recovery().hpke_pk), (p.sign_pk, p.hpke_pk));
+    assert_eq!(pm.recovery.len(), 2);
 }
 
 /// A Genesis record for `board`, `dev_R` of `board`, signed by the board's

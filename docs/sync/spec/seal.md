@@ -526,8 +526,7 @@ Each control item is a JSON object with a field `"type"` naming it, and the fiel
 | G | `Genesis` | only at seq 1, and seq 1 holds only this shape |
 | A | `DeviceAdded` | one device per entry |
 | R | 0 to 15 items each `Revoke` or `Reinstate`, then `EpochRotated` | targets pairwise distinct; revocation and reinstatement always rotate (SYNC.md §5.4) |
-| K | `RecoveryKeyChange` with mode `direct` or `confirm`, then `EpochRotated` | a new recovery key always rotates, and the rotation wraps to the new key |
-| P | `RecoveryKeyChange` with mode `propose` or `cancel` | |
+| K | `RecoveryKeyChange`, then `EpochRotated` | authored by the current recovery identity (§13.11); a new recovery key always rotates, and the rotation wraps to the new key |
 | F | `Fence` | |
 | T | `ResetTo` | |
 | S | 1 to 16 `Skip` items | targets pairwise distinct |
@@ -592,9 +591,8 @@ The `dev`, `sign_pk`, `hpke_pk` and `name` are exactly the ones in slot B of the
 | Field | Type | Required | Constraints | Meaning |
 |---|---|---|---|---|
 | `type` | string | required | `"RecoveryKeyChange"` | |
-| `mode` | string | required | `"direct"`, `"propose"`, `"confirm"` or `"cancel"` | which step (§13.11) |
-| `sign_pk` | hex, 32 | required for `direct`, `propose`, `confirm`; absent for `cancel` | | the new recovery signing key |
-| `hpke_pk` | hex, 32 | required for `direct`, `propose`, `confirm`; absent for `cancel` | | the new recovery HPKE key |
+| `sign_pk` | hex, 32 | required | | the new recovery signing key |
+| `hpke_pk` | hex, 32 | required | | the new recovery HPKE key |
 
 ### 12.7 `Fence`
 
@@ -658,7 +656,6 @@ The membership state `M` is derived from the log in seq order. It holds no secre
 | `commitments` | list | `(e, seq, c_e)` for every epoch, ascending by `e` |
 | `recovery` | list | every recovery key: `dev_R`, `sign_pk`, `hpke_pk`, `since_seq`, `until_seq` (0 while current), `last_ctr`; ascending by `since_seq`; exactly one has `until_seq = 0` |
 | `devices` | list | every device ever added, ascending by `dev`: `dev`, `sign_pk`, `hpke_pk`, `device_no`, `status` (`current` or `revoked`), `added_seq`, `added_by`, `bootstrap_seq`, `status_seq` and `status_by` (seq and author of the last status change; `added_seq` and `added_by` at first), `last_ctr`, `beat_ms`, the supported `rules`, `envelopes` and `hash_versions` from its latest beat, `name` |
-| `pending_recovery` | optional | a proposed recovery-key change: proposer, `sign_pk`, `hpke_pk`, `seq`, `start_ms` |
 | `pending_override` | optional | one RulesUpgrade override vote: `rules`, voter, `seq` |
 | `last_reset` | optional | the latest accepted ResetTo: its own seq, `seq` target, `hash_version`, `state_hash` |
 | `skips` | list | `(t, frame_hash)` of every accepted Skip target, ascending by `t` |
@@ -688,7 +685,6 @@ These bytes feed the state hash (ruling S7), snapshot bodies (§20.4), among the
 | `n_commit` | 4 | u32 | then `n_commit` × 44 bytes: `u32 e ‖ u64 seq ‖ c_e[32]`, ascending by `e` |
 | `n_recovery` | 2 | u16 | then `n_recovery` × 104 bytes: `dev_R[16] ‖ sign_pk[32] ‖ hpke_pk[32] ‖ u64 since_seq ‖ u64 until_seq ‖ u64 last_ctr`, ascending by `since_seq` |
 | `n_dev` | 2 | u16 | then `n_dev` device records (below), ascending by `dev` as unsigned bytes |
-| `pending_recovery` | 1 + 0 or 96 | u8 flag | 0, or 1 followed by `proposer[16] ‖ sign_pk[32] ‖ hpke_pk[32] ‖ u64 seq ‖ i64 start_ms` |
 | `pending_override` | 1 + 0 or 28 | u8 flag | 0, or 1 followed by `u32 rules ‖ voter[16] ‖ u64 seq` |
 | `last_reset` | 1 + 0 or 52 | u8 flag | 0, or 1 followed by `u64 at_seq ‖ u64 target ‖ u32 hash_version ‖ state_hash[32]` |
 | `n_skip` | 4 | u32 | then `n_skip` × 40 bytes: `u64 t ‖ frame_hash[32]`, ascending by `t` |
@@ -773,20 +769,17 @@ The items of an accepted-so-far control entry are applied in order to a working 
 |---|---|---|---|
 | `Genesis` | the anchor's `dev_R` | §13.3 (`seal/ctl_genesis`) | §13.3 |
 | `DeviceAdded` | D | new `dev` differs from every device `dev` and every `dev_R` ever recorded; `sign_pk` differs from every recorded `sign_pk`; `hpke_pk` differs from every recorded `hpke_pk` (`seal/ctl_duplicate_key`); fewer than 16 current devices and fewer than 256 device records, and `next_device_no ≤ 8191` (`seal/ctl_device_cap`); `bootstrap_seq ≥ purge_seq` and `bootstrap_seq < s` (`seal/ctl_target`) | adds a record: `device_no = next_device_no`, `status = current`, `added_seq = status_seq = s`, `added_by = status_by = A`, `bootstrap_seq` from the item, `last_ctr = 0`, `beat_ms = at_ms`, `rules = [W.rules]`, `envelopes` = those rules version `W.rules` allows (§14.3), `hash_versions = [1]`, `name`; then `next_device_no += 1` |
-| `DeviceRevoked` | D other than the target, or R | target is a current device (`seal/ctl_target`); after the whole entry at least one current device remains (`seal/ctl_last_device`) | target `status = revoked`, `status_seq = s`, `status_by = A`; clears `pending_recovery` if the target proposed it; clears `pending_override` if the target cast it |
+| `DeviceRevoked` | D other than the target, or R | target is a current device (`seal/ctl_target`); after the whole entry at least one current device remains (`seal/ctl_last_device`) | target `status = revoked`, `status_seq = s`, `status_by = A`; clears `pending_override` if the target cast it |
 | `DeviceReinstated` | R | target is a revoked device whose `status_by` is a device, not a recovery identity (`seal/ctl_target`); fewer than 16 current devices (`seal/ctl_device_cap`) | target `status = current`, `status_seq = s`, `status_by = A`, `beat_ms = at_ms`; `last_ctr` unchanged |
 | `EpochRotated` | D or R | `epoch = W.epoch + 1` (`seal/ctl_epoch`); `wraps` name exactly the current devices of `W` and `W`'s current recovery identity, once each, ascending (`seal/ctl_wraps`); `purge_before` is present only when `A` is a device (`seal/ctl_author`); if `purge_before` is present, `W.purge_seq < purge_before ≤ s` (`seal/ctl_target`) | `epoch = n`, `epoch_seq = s`, `epoch_clock_ms = τ'`; appends `(n, s, commit)`; `purge_seq = purge_before` if present |
-| `RecoveryKeyChange` `direct` | R | the new keys are fresh as for `DeviceAdded`, and the new `dev_R` (§6.3) differs from every recorded `dev` and `dev_R` (`seal/ctl_duplicate_key`) | the current recovery record gets `until_seq = s`; a record `(new dev_R, sign_pk, hpke_pk, since_seq = s, until_seq = 0, last_ctr = 0)` is appended; `pending_recovery` cleared |
-| `RecoveryKeyChange` `propose` | D | no `pending_recovery` (`seal/ctl_pending`); keys fresh as for `direct` (`seal/ctl_duplicate_key`) | `pending_recovery = (A, sign_pk, hpke_pk, s, τ')` |
-| `RecoveryKeyChange` `confirm` | D other than the proposer | a `pending_recovery` exists (`seal/ctl_no_pending`); its keys equal the item's (`seal/ctl_target`); `at_ms ≥ start_ms + 259,200,000` (72 hours; `seal/ctl_window`); keys still fresh (`seal/ctl_duplicate_key`) | as `direct` |
-| `RecoveryKeyChange` `cancel` | D or R | a `pending_recovery` exists (`seal/ctl_no_pending`) | `pending_recovery` cleared |
+| `RecoveryKeyChange` | R | the new keys are fresh as for `DeviceAdded`, and the new `dev_R` (§6.3) differs from every recorded `dev` and `dev_R` (`seal/ctl_duplicate_key`) | the current recovery record gets `until_seq = s`; a record `(new dev_R, sign_pk, hpke_pk, since_seq = s, until_seq = 0, last_ctr = 0)` is appended |
 | `Fence` | D or R | `home_gen = W.home_gen + 1` (`seal/ctl_home_gen`) | `home_gen`, `home_seq = s`, `home_host`, `home_door` from the item |
 | `ResetTo` | D | `t < s`, `t ≥ W.purge_seq`, `t` greater than the `bootstrap_seq` of every current device, `hash_version` allowed by `W.rules` (§14.3) (`seal/ctl_target`) | `last_reset = (s, t, hash_version, state_hash)` |
 | `Skip` | D, or R | `t < s` and `t ≥ max(W.purge_seq, s − 16,384)`, with `s − 16,384` taken as 0 when `s ≤ 16,384` (the Skip window, ruling S15); `t` not in `ctl_seqs` and not in `skips` (`seal/ctl_target`); the frame at `t` is supplied and `H(frame) = frame_hash` (`seal/ctl_target`; `NeedFrames` when not supplied, §14.6); when `A` is a device, the target frame's `dev` differs from `A` (`seal/ctl_author`) | appends `(t, frame_hash)` to `skips` |
 | `RulesUpgrade` `normal` | D | `v > W.rules` (`seal/ctl_target`); every active member of §13.10 lists `v` in its `rules` (`seal/ctl_support`) | `rules = v`; `pending_override` cleared |
 | `RulesUpgrade` `override` | D | `v > W.rules` (`seal/ctl_target`); not a second vote by the same voter for the same `v` (`seal/ctl_duplicate`) | if `pending_override = (v, B, ·)` with `B ≠ A` and `B` current: `rules = v` and `pending_override` cleared; otherwise `pending_override = (v, A, s)` |
 
-An item whose author does not match its Author column is refused with `seal/ctl_author`. An item whose effect would make a list of the membership state exceed its limit in §23 is refused with `seal/ctl_cap`; for `DeviceAdded` and `DeviceReinstated` the device limits use `seal/ctl_device_cap` as the table says. A control entry that would take `ctl_seqs` over its limit is refused with `seal/ctl_cap` after its items passed. "Every recorded" key or id means every device record and every recovery record, current or retired; a pending proposal is not a record. Whether a revocation leaves a current device is judged over the whole entry, with its later revocations and reinstatements taken as applied: when none would be left, the refusal is the first revocation's (`seal/ctl_last_device`); a later item that then fails its own row refuses the entry with its own code.
+An item whose author does not match its Author column is refused with `seal/ctl_author`. An item whose effect would make a list of the membership state exceed its limit in §23 is refused with `seal/ctl_cap`; for `DeviceAdded` and `DeviceReinstated` the device limits use `seal/ctl_device_cap` as the table says. A control entry that would take `ctl_seqs` over its limit is refused with `seal/ctl_cap` after its items passed. "Every recorded" key or id means every device record and every recovery record, current or retired. Whether a revocation leaves a current device is judged over the whole entry, with its later revocations and reinstatements taken as applied: when none would be left, the refusal is the first revocation's (`seal/ctl_last_device`); a later item that then fails its own row refuses the entry with its own code.
 
 - **SEAL-MEM-010** (seal) A receiver MUST apply the items of a control entry in order to a working copy and MUST either accept every item or refuse the entry as a whole, leaving the membership state as §13.6 states.
 - **SEAL-MEM-011** (seal) Each control item MUST be accepted only when its author matches the Author column and every precondition of its row in §13.6 holds, and MUST then change the working copy exactly as the Effects column states.
@@ -832,7 +825,7 @@ An accepted `beat` by device `d` sets `d.beat_ms = max(d.beat_ms, at_ms)` and re
 1. Let `ref` be the largest `beat_ms` among the current devices of `W` other than `A`. If there is no other current device, `A` alone is active.
 2. A current device `d` is active if `d = A` or `d.beat_ms ≥ ref − 2,592,000,000` (30 days).
 
-The reference excludes the author, so no single device can push the log clock forward and make the others look inactive (decided here; SYNC.md requires "a beat within 30 days" and ruling S6 requires the decision to rest on `at_ms` in the log).
+The reference excludes the author (decided here; SYNC.md requires "a beat within 30 days" and ruling S6 requires the decision to rest on `at_ms` in the log). That does not stop a device that controls two current devices: a current device can add a second device by itself (`DeviceAdded`), and with the two it can make the others look inactive and activate, with `normal` or with the two votes of `override`, a rules version that no build knows. The board is then repaired only by "Reset trust" (`device.md` §18.6). The owner accepted this limit (decision O1, 2026-11-23).
 
 `normal` activates `v` only if every active member, the author included, lists `v` in its latest beat. `override` is the two-member path of SYNC.md §4.5: two votes for the same `v` by two different current devices, in two entries; the second vote activates `v`. A vote is cleared when its voter is revoked or when any upgrade activates. The new rules version applies to entries at seqs above the activating entry.
 
@@ -845,22 +838,17 @@ A device whose build does not support the activated version halts (§14.5). Unde
 
 ### 13.11 The recovery-key change
 
-Two paths change the recovery key (SYNC.md §5.5, V1-2):
+The recovery key changes only by an entry that the current recovery identity signs, which needs the current sheet (SYNC.md §5.5, V1-2; the owner's decision O1, 2026-11-23): a `K`-shape entry, the `RecoveryKeyChange` and a rotation whose wraps go to the new key. It takes effect at once. A lost sheet is answered by "Reset trust" (`device.md` §18.6), not by a change of the recovery key. There is no path without the sheet, because a current device can add another device by itself and a waiting time could only be measured on the `at_ms` that authors write. One compromised device could then propose and confirm alone, at once, and hold the recovery key.
 
-1. **With the current sheet** (`direct`): the current recovery identity signs a `K`-shape entry: the change and a rotation whose wraps go to the new key. It takes effect at once.
-2. **Without it**: a current device appends `propose` (a `P`-shape entry). Every device shows a banner from then (`engine.md`). After 72 hours, a different current device appends `confirm` with the same keys and a rotation to the new key (a `K`-shape entry). Any current device or the current recovery identity can append `cancel` before that. Revoking the proposer cancels the proposal.
+A recovery identity is new from the entry that installs it: its frames are accepted from the next seq, with counter 1. The relay learns its key from the admin operation `recovery_register` (§16.2), which the entry's sender sends only after it has classified that entry `Accept`, because a `K`-shape entry can be refused everywhere (a lost rotation race) and the relay cannot see it. Until then the relay still accepts the old recovery identity, whose frames clients refuse from the installing entry on (`seal/revoked_author`).
 
-The 72 hours run from `start_ms`, the log clock after the proposal (`τ'`, §13.5), to the `at_ms` of the confirming entry, which the confirming device's own clock sets. A proposer that back-dates its `at_ms` therefore cannot shorten the window, and only an honest confirmer's clock matters; local clocks only decide when a device offers the confirm button (ruling S6).
-
-A recovery identity is new from the entry that installs it: its frames are accepted from the next seq, with counter 1. The relay learns its key from the admin operation `recovery_register` (§16.2), which the entry's sender sends only after it has classified that entry `Accept`, because a `K`-shape entry can be refused everywhere (a lost rotation race, a confirm after a cancel) and the relay cannot see it. Until then the relay still accepts the old recovery identity, whose frames clients refuse from the installing entry on (`seal/revoked_author`).
-
-- **SEAL-MEM-023** (seal) A `confirm` MUST be refused with `seal/ctl_window` unless its entry's `at_ms` is at least `start_ms + 259,200,000`.
-- **SEAL-MEM-024** (seal) A `confirm` MUST be refused with `seal/ctl_author` when its author is the device that proposed the change.
-- **SEAL-MEM-025** (seal) Revoking the device that proposed a pending recovery-key change MUST clear that proposal.
+- **SEAL-MEM-023** (withdrawn) The 72-hour window of a `confirm`; the change without the sheet is removed (decision O1, `CHANGES.md` 2026-11-23).
+- **SEAL-MEM-024** (withdrawn) A `confirm` by the proposer; the change without the sheet is removed (decision O1, `CHANGES.md` 2026-11-23).
+- **SEAL-MEM-025** (withdrawn) The proposal of a revoked proposer; the change without the sheet is removed (decision O1, `CHANGES.md` 2026-11-23).
 
 ### 13.12 The recovery identity's powers and limits
 
-The recovery identity may author only control entries, and among them only `Genesis` (at seq 1), `DeviceRevoked`, `DeviceReinstated`, `EpochRotated`, `RecoveryKeyChange` (`direct` and `cancel`), `Fence` and `Skip` (SYNC.md §5.5, V1-5). It never enrols a device, never proposes or confirms a recovery-key change, never resets or upgrades rules, never sets `purge_before` (a purge is a device's action, `relay.md` §12.10), and never authors `cmd`, `beat` or `snap`. It reinstates only a device that a device revoked, which lets it overrule a hostile revocation; it cannot revoke the last current device.
+The recovery identity may author only control entries, and among them only `Genesis` (at seq 1), `DeviceRevoked`, `DeviceReinstated`, `EpochRotated`, `RecoveryKeyChange`, `Fence` and `Skip` (SYNC.md §5.5, V1-5). It never enrols a device, never resets or upgrades rules, never sets `purge_before` (a purge is a device's action, `relay.md` §12.10), and never authors `cmd`, `beat` or `snap`. It reinstates only a device that a device revoked, which lets it overrule a hostile revocation; it cannot revoke the last current device.
 
 - **SEAL-MEM-026** (seal) A receiver MUST refuse every entry authored by a recovery identity that is not a control entry, and every control item by a recovery identity outside the list of §13.12.
 
@@ -1627,9 +1615,9 @@ The reader has, from the sheet and never from the file, the seed (hence the reco
 3. its `ctr` is above the previous record's `ctr` for the same `dev` (gaps are normal: other entries are not in the history), and the first record's `ctr` is 1 (SEAL-MEM-004);
 4. its `sig` verifies (strict) under that author's `sign_pk` over the inner message of §11.3, with the record's `dev`, `ctr`, `entry_id`, `at_ms` and `H(items)`;
 5. its items parse (§12) and form a shape (§12.1);
-6. the items change the projection by the reduced rules: Genesis (first record only) sets the board, checks `board_id` against the sheet as §6.2 and that its wraps name exactly the first device and `dev_R`, and adds the first device and the recovery key; `DeviceAdded`, `DeviceRevoked`, `DeviceReinstated` and `EpochRotated` run their rows of §13.6 whole, because control entries alone decide every precondition of those rows (fresh keys and ids, the caps, the authors, the targets' statuses, the last current device, the next epoch number, the wraps' recipients, `purge_before`); `RecoveryKeyChange` runs its row of §13.6 without the time check; `Fence`, `ResetTo`, `Skip` and `RulesUpgrade` only check their Author column.
+6. the items change the projection by the reduced rules: Genesis (first record only) sets the board, checks `board_id` against the sheet as §6.2 and that its wraps name exactly the first device and `dev_R`, and adds the first device and the recovery key; `DeviceAdded`, `DeviceRevoked`, `DeviceReinstated`, `EpochRotated` and `RecoveryKeyChange` run their rows of §13.6 whole, because control entries alone decide every precondition of those rows (fresh keys and ids, the caps, the authors, the targets' statuses, the last current device, the next epoch number, the wraps' recipients, `purge_before`); `Fence`, `ResetTo`, `Skip` and `RulesUpgrade` only check their Author column.
 
-The checks that need non-control entries (counters of other kinds, beats, the log clock, the 72-hour window) cannot be repeated from the history; a backup is trusted for them because its writer was a member, which steps 9 and 10 prove. They prove that the writer was a current device at the last control entry of the file's history, and nothing later. No field says at which seq a membership was taken, so a device revoked at seq `k` can still write a file that claims any `seq`, before or after `k`, with its history cut before `k` and any board content. No check inside a file can tell such a file from an authentic one written before the revocation, and its `seq` and `written_ms` are the writer's own claims. The recovery tool therefore shows the writer, `written_ms` and the seq of the last control entry (`VerifiedBackup`'s `writer`, `written_ms` and the last record of its `history`, §26), and trusts no file over another for its `seq` or its date alone. A relay copy can show more: a control entry at or below the file's `seq` that the history lacks, or a frame whose hash differs from a record's `frame_hash`. Whether the recovery tool makes that comparison is `device.md`'s to state (§15.8; an open point in `CHANGES.md`).
+The checks that need non-control entries (counters of other kinds, beats, the log clock) cannot be repeated from the history; a backup is trusted for them because its writer was a member, which steps 9 and 10 prove. They prove that the writer was a current device at the last control entry of the file's history, and nothing later. No field says at which seq a membership was taken, so a device revoked at seq `k` can still write a file that claims any `seq`, before or after `k`, with its history cut before `k` and any board content. No check inside a file can tell such a file from an authentic one written before the revocation, and its `seq` and `written_ms` are the writer's own claims. The recovery tool therefore shows the writer, `written_ms` and the seq of the last control entry (`VerifiedBackup`'s `writer`, `written_ms` and the last record of its `history`, §26), and trusts no file over another for its `seq` or its date alone. A relay copy can show more: a control entry at or below the file's `seq` that the history lacks, or a frame whose hash differs from a record's `frame_hash`. Whether the recovery tool makes that comparison is `device.md`'s to state (§15.8; an open point in `CHANGES.md`).
 
 **Checking a file one wrote.** `verify_backup_file` (§26) runs steps 1, 2 and 5 only, under the writer's own signing key, so that a writer checks the file it wrote without the recovery key (`device.md` §15.3.2). It also requires the header's `writer_sign_pk` to equal that key (`seal/backup_signature`; compared after steps 1 and 2 and before step 5), returns the header fields, and opens nothing.
 
@@ -1680,9 +1668,6 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 | `seal/ctl_epoch` | a rotation sealed under the current epoch names an epoch other than the next | §13.6, §13.8 | `Refuse`; its author discards its root (a rotation that lost a race is refused with `seal/stale_epoch` or `seal/old_epoch`, §13.8) |
 | `seal/ctl_wraps` | rotation wraps do not match the recipients | §13.6 | `Refuse` |
 | `seal/ctl_last_device` | a revocation would leave no current device | §13.6 | `Refuse` |
-| `seal/ctl_pending` | a recovery-key change is already proposed | §13.6 | `Refuse` |
-| `seal/ctl_no_pending` | confirm or cancel without a proposal | §13.6 | `Refuse` |
-| `seal/ctl_window` | confirm before 72 hours of log time | §13.6, §13.11 | `Refuse` |
 | `seal/ctl_home_gen` | Fence's home generation is not the next | §13.6 | `Refuse` |
 | `seal/ctl_support` | an active member does not support the version | §13.6, §13.10 | `Refuse`; the UI names the blocker (`engine.md`) |
 | `seal/commitment` | own wrap fails or mismatches its commitment | §14.5; every failure of `unwrap_root` (§7) | `Accept` with the commitment halt; from `unwrap_root`, the caller treats it as that halt (SEAL-WRAP-003) |
@@ -1766,7 +1751,6 @@ The checks that need non-control entries (counters of other kinds, beats, the lo
 | beat `acks` | 64 | objects | SEAL-KIND-005 |
 | stale-epoch window | 2,592,000,000 | ms of log clock (30 days) | SEAL-MEM-018 |
 | active-member window | 2,592,000,000 | ms (30 days) | SEAL-MEM-019 |
-| recovery-key change delay | 259,200,000 | ms (72 hours) | SEAL-MEM-023 |
 | pairing secret | 80 | bits | SEAL-CODE-001 |
 | pairing code check | 10 | bits | SEAL-CODE-001 |
 | pairing lifetime | 600,000 | ms | SEAL-PAIR-013 |
@@ -1829,7 +1813,7 @@ Stage `seal` publishes these families under `docs/sync/vectors/`, one JSON file 
 - Requires: the sealer trait wraps §14's classification and §13's membership machine; the engine supplies the inputs of §14.1, including each own frame's hash for the own-dev check, the chain lookup and `retained_from`, and the Skip target frames after `NeedFrames`.
 - Requires: the engine maps the classes of §14.4 to its actions (skip with alarm, stop on `Tamper`, refuse everywhere, apply, halt), and maps a `core` strict-parse failure of a `cmd` to the `Refuse` outcome.
 - Requires: the state hash of ENG-HASH-001 (`engine.md` §18.3), over §13.2's membership bytes. Seal computes it with its own `state_hash` (§26), which reproduces `taskdeck_sync::state_hash` byte for byte and is tested against `engine-hash.json` (`engine.md` §35), for the checks of §17.9, §20.5 and §21.6.
-- Requires: when to beat and snapshot, how to re-seal refused entries (keeping `entry_id`, SEAL-PLAIN-002), the banners for every accepted control item, the move-code prompt and its retry limit, the 72-hour prompt timing, and what a device does on `seal/missing_root`, on `ResetTo` and `Skip` (replay or re-bootstrap) and on `purge_before`.
+- Requires: when to beat and snapshot, how to re-seal refused entries (keeping `entry_id`, SEAL-PLAIN-002), the banners for every accepted control item, the move-code prompt and its retry limit, and what a device does on `seal/missing_root`, on `ResetTo` and `Skip` (replay or re-bootstrap) and on `purge_before`.
 - Requires: that a device composing `DeviceAdded` does so at the head of the bundle's snapshot (SEAL-PAIR-010), and that a halted device never pairs.
 - Provides: §11 to §15 as pure functions, the pairing machines of §17.10.
 
@@ -1970,12 +1954,10 @@ impl Membership {
     pub fn rules(&self) -> u32;
     pub fn devices(&self) -> &[DeviceRecord];
     pub fn current_recovery(&self) -> &RecoveryRecord;
-    pub fn pending_recovery(&self) -> Option<&PendingRecovery>;
     pub fn device_no(&self, dev: &DevId) -> Option<u16>;
 }
 pub struct DeviceRecord { /* §13.2 device record, public fields */ }
 pub struct RecoveryRecord { /* §13.2 */ }
-pub struct PendingRecovery { /* §13.2 */ }
 pub struct GenesisAnchor { pub rsign_pk: [u8; 32], pub salt: [u8; 16], pub root1: EpochRoot }
 
 // ---------- receipt (§14)
@@ -2141,16 +2123,15 @@ Non-normative. Each states the default this spec takes.
 3. **Home generation** (§12.7). SYNC.md's `Fence{new relay, g+1}` is read as a board-level counter of relays, seal's own, unrelated to the token `gen`. Decided here.
 4. **Move code from the Fence's seq and frame hash** (§15.4). Decided here (SYNC.md gives only the length).
 5. **Pairing code and sheet checks are hash-based** (`pair-code`, `sheet-check`), not an error-correcting code: random errors are caught with probability `1 − 2^−10` and `1 − 2^−20`, single-character errors are not guaranteed to be located. Decided here (SYNC.md fixes only the character counts).
-6. **Active members exclude the upgrade's author from the reference time** (§13.10), so one device cannot push the log clock forward to make others inactive. Decided here (SYNC.md is silent).
-7. **The 72-hour window runs from the log clock at the proposal to the confirmer's `at_ms`** (§13.11). Decided here (SYNC.md is silent on whose clock).
-8. **Revocations, reinstatements and recovery-key changes always rotate in the same entry** (§12.1 shapes R and K), and only the recovery identity reinstates. Decided here; SYNC.md lets the recovery key "reinstate one another device revoked" and says rotation follows revocation.
-9. **A revocation that would leave no current device is refused** (`seal/ctl_last_device`), even from the recovery identity; total compromise is handled by "Reset trust" or a restore. Decided here.
-10. **Control and `snap` entries are never accepted under the previous epoch** (§11.1), which settles V2-8(b): a DeviceAdded raced by a rotation is refused and the pairing is repeated. Decided here.
-11. **Skip of a `beat` or `snap` entry** is valid and changes nothing (§13.13). Decided here.
-12. **Skip needs the target frame** (§14.6). The target is always at or above `F(s) = max(purge_seq, s − 16,384)` (ruling S15), and the relay never compacts the newest 16,384 seqs (`relay.md` RELAY-COMPACT-007), so a device that lacks the frame fetches it from the relay. Only a frame lost with a relay that no longer answers can be missing; the engine then reports an integrity problem without evidence (`engine.md` §17.2). Decided here.
-13. **ResetTo's target must be after every current device's `bootstrap_seq`** (§13.6), so every current device holds the log it must replay; the 365-day reach of bases is enforced only by the offering device (`engine.md`). Decided here.
-14. **The recovery key's wrap in a rotation cannot be checked by devices** (§13.8): a malicious rotator could give the recovery key a bad root; the recovery tool detects it on use. Accepted residual.
-15. **Purge keeps every root inside backups?** Default: no. Backups carry the roots the writer holds (§21.5); after a purge those are only the new ones, and the history stays verifiable through inner signatures.
-16. **Backup `meta`, the sync metadata,** is opaque here and defined by `device.md`. Decided here.
-17. **Rules version 1 allows only envelope (1, 1) and state-hash version 1** (§14.3). A later version extends the table through this spec and `core.md`.
-18. **A device the recovery key reinstates reads what was sealed while it was revoked** (ruling S24, lead rulings L1 and L20). The wraps of the roots it missed travel in the recovery-signed `reinstate` operation (§16.2), outside the reinstating entry, which the device cannot open; the relay returns them at the device's login, and the device opens each by §7 once its membership records that epoch's commitment. More than 256 missed epochs: the recovery tool does not offer reinstatement, and the owner restores to a new board. A device whose revoking entry lies below `purge_seq` is not offered reinstatement either: it pairs again, or the owner restores to a new board. Decided there.
+6. **Active members exclude the upgrade's author from the reference time** (§13.10). Decided here (SYNC.md is silent). A device that controls two current devices can still make the others look inactive (§13.10); the owner accepted that limit (decision O1).
+7. **Revocations, reinstatements and recovery-key changes always rotate in the same entry** (§12.1 shapes R and K), and only the recovery identity reinstates. Decided here; SYNC.md lets the recovery key "reinstate one another device revoked" and says rotation follows revocation.
+8. **A revocation that would leave no current device is refused** (`seal/ctl_last_device`), even from the recovery identity; total compromise is handled by "Reset trust" or a restore. Decided here.
+9. **Control and `snap` entries are never accepted under the previous epoch** (§11.1), which settles V2-8(b): a DeviceAdded raced by a rotation is refused and the pairing is repeated. Decided here.
+10. **Skip of a `beat` or `snap` entry** is valid and changes nothing (§13.13). Decided here.
+11. **Skip needs the target frame** (§14.6). The target is always at or above `F(s) = max(purge_seq, s − 16,384)` (ruling S15), and the relay never compacts the newest 16,384 seqs (`relay.md` RELAY-COMPACT-007), so a device that lacks the frame fetches it from the relay. Only a frame lost with a relay that no longer answers can be missing; the engine then reports an integrity problem without evidence (`engine.md` §17.2). Decided here.
+12. **ResetTo's target must be after every current device's `bootstrap_seq`** (§13.6), so every current device holds the log it must replay; the 365-day reach of bases is enforced only by the offering device (`engine.md`). Decided here.
+13. **The recovery key's wrap in a rotation cannot be checked by devices** (§13.8): a malicious rotator could give the recovery key a bad root; the recovery tool detects it on use. Accepted residual.
+14. **Purge keeps every root inside backups?** Default: no. Backups carry the roots the writer holds (§21.5); after a purge those are only the new ones, and the history stays verifiable through inner signatures.
+15. **Backup `meta`, the sync metadata,** is opaque here and defined by `device.md`. Decided here.
+16. **Rules version 1 allows only envelope (1, 1) and state-hash version 1** (§14.3). A later version extends the table through this spec and `core.md`.
+17. **A device the recovery key reinstates reads what was sealed while it was revoked** (ruling S24, lead rulings L1 and L20). The wraps of the roots it missed travel in the recovery-signed `reinstate` operation (§16.2), outside the reinstating entry, which the device cannot open; the relay returns them at the device's login, and the device opens each by §7 once its membership records that epoch's commitment. More than 256 missed epochs: the recovery tool does not offer reinstatement, and the owner restores to a new board. A device whose revoking entry lies below `purge_seq` is not offered reinstatement either: it pairs again, or the owner restores to a new board. Decided there.
