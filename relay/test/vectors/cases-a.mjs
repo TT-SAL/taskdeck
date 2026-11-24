@@ -215,7 +215,7 @@ const parsed = (host) => ({ expect: { host, origin: 'https://' + host, board: AB
 const bad = { error: 'relay/address' };
 const a = (name, text, out) => fn(name, ['RELAY-ADDR-002'], 'parseAddress', { text }, out);
 export const address = [
-  fn('the canonical text', ['RELAY-ADDR-001'], 'formatAddress', { host: 'relay-x7k2.example.workers.dev', board: AB, door: AD }, { expect: 'relay-x7k2.example.workers.dev/' + B34 }),
+  fn('the canonical text', ['RELAY-ADDR-001'], 'formatAddress', { host: 'relay-x7k2.example.org', board: AB, door: AD }, { expect: 'relay-x7k2.example.org/' + B34 }),
   fn('the display form: groups of four, the last of two', ['RELAY-ADDR-001'], 'displayAddress', { host: 'relay.example.org:8443', board: AB, door: AD }, { expect: 'relay.example.org:8443/' + B34.match(/.{1,4}/g).join('-') }),
   fn('the display form of the largest values', ['RELAY-ADDR-001'], 'displayAddress', { host: 'a.b', board: 'ff'.repeat(16), door: 'ff'.repeat(5) }, { expect: 'a.b/' + 'ZZZZ-'.repeat(8) + 'ZW' }),
   a('canonical text', 'relay.example.org/' + B34, parsed('relay.example.org')),
