@@ -1,0 +1,1436 @@
+{
+  "spec": "engine.md §29.1, §29.2, §19.2, §19.3, §23.1",
+  "cases": [
+    {
+      "name": "sorted by beat_ms descending",
+      "kind": "rank",
+      "clauses": [
+        "ENG-DUTY-001",
+        "§29.2"
+      ],
+      "devices": [
+        {
+          "dev": "01a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 1000
+        },
+        {
+          "dev": "02a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 3000
+        },
+        {
+          "dev": "03a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 2000
+        }
+      ],
+      "order": [
+        "02a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+        "03a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+        "01a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+      ],
+      "ranks": [
+        {
+          "dev": "02a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 0
+        },
+        {
+          "dev": "03a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 1
+        },
+        {
+          "dev": "01a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 2
+        }
+      ]
+    },
+    {
+      "name": "ties on beat_ms by dev ascending as unsigned bytes",
+      "kind": "rank",
+      "clauses": [
+        "ENG-DUTY-001",
+        "§29.2"
+      ],
+      "devices": [
+        {
+          "dev": "80a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 5000
+        },
+        {
+          "dev": "7fa5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 5000
+        },
+        {
+          "dev": "ffa5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 5000
+        },
+        {
+          "dev": "00a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 4999
+        }
+      ],
+      "order": [
+        "7fa5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+        "80a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+        "ffa5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+        "00a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+      ],
+      "ranks": [
+        {
+          "dev": "7fa5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 0
+        },
+        {
+          "dev": "80a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 1
+        },
+        {
+          "dev": "ffa5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 2
+        },
+        {
+          "dev": "00a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 3
+        }
+      ]
+    },
+    {
+      "name": "revoked devices are left out",
+      "kind": "rank",
+      "clauses": [
+        "ENG-DUTY-001",
+        "§29.2"
+      ],
+      "devices": [
+        {
+          "dev": "10a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "revoked",
+          "beat_ms": 9000
+        },
+        {
+          "dev": "11a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 8000
+        },
+        {
+          "dev": "12a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 0
+        }
+      ],
+      "order": [
+        "11a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+        "12a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+      ],
+      "ranks": [
+        {
+          "dev": "11a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 0
+        },
+        {
+          "dev": "12a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 1
+        }
+      ]
+    },
+    {
+      "name": "devs that differ only in the last byte",
+      "kind": "rank",
+      "clauses": [
+        "ENG-DUTY-001",
+        "§29.2"
+      ],
+      "devices": [
+        {
+          "dev": "00000000000000000000000000000002",
+          "status": "current",
+          "beat_ms": 7
+        },
+        {
+          "dev": "00000000000000000000000000000001",
+          "status": "current",
+          "beat_ms": 7
+        },
+        {
+          "dev": "000000000000000000000000000000fe",
+          "status": "current",
+          "beat_ms": 8
+        }
+      ],
+      "order": [
+        "000000000000000000000000000000fe",
+        "00000000000000000000000000000001",
+        "00000000000000000000000000000002"
+      ],
+      "ranks": [
+        {
+          "dev": "000000000000000000000000000000fe",
+          "rank": 0
+        },
+        {
+          "dev": "00000000000000000000000000000001",
+          "rank": 1
+        },
+        {
+          "dev": "00000000000000000000000000000002",
+          "rank": 2
+        }
+      ]
+    },
+    {
+      "name": "one current device",
+      "kind": "rank",
+      "clauses": [
+        "ENG-DUTY-001",
+        "§29.2"
+      ],
+      "devices": [
+        {
+          "dev": "42a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "current",
+          "beat_ms": 0
+        },
+        {
+          "dev": "43a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "status": "revoked",
+          "beat_ms": 0
+        }
+      ],
+      "order": [
+        "42a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+      ],
+      "ranks": [
+        {
+          "dev": "42a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "rank": 0
+        }
+      ]
+    },
+    {
+      "name": "a day since the last beat: due",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799913600000,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 0,
+      "conditions": [
+        1
+      ],
+      "due": true
+    },
+    {
+      "name": "one ms short of a day: not due",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799913600001,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 0,
+      "conditions": [],
+      "due": false
+    },
+    {
+      "name": "first beat of a new replica (last_beat_ms 0)",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 0,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 0,
+      "conditions": [
+        1
+      ],
+      "due": true
+    },
+    {
+      "name": "an update changed the build's rules: due at once",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799999999999,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1,
+          2
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 0,
+      "conditions": [
+        2
+      ],
+      "due": true
+    },
+    {
+      "name": "an update changed the build's envelopes",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799999999999,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ],
+          [
+            2,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 0,
+      "conditions": [
+        2
+      ],
+      "due": true
+    },
+    {
+      "name": "an update changed the build's hash versions",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799999999999,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1,
+          2
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 0,
+      "conditions": [
+        2
+      ],
+      "due": true
+    },
+    {
+      "name": "a pending verdict and an hour since the last beat: due",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799996400000,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 1,
+      "conditions": [
+        3
+      ],
+      "due": true
+    },
+    {
+      "name": "a pending verdict one ms short of an hour: not due",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799996400001,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 2,
+      "conditions": [],
+      "due": false
+    },
+    {
+      "name": "an hour but no pending verdict: not due",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799996400000,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 0,
+      "conditions": [],
+      "due": false
+    },
+    {
+      "name": "not eligible: not due though a day has passed",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799827200000,
+      "eligible": false,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 3,
+      "conditions": [
+        1,
+        3
+      ],
+      "due": false
+    },
+    {
+      "name": "an unsent beat record: not due",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799827200000,
+      "eligible": true,
+      "unsent_beat": true,
+      "build": {
+        "rules": [
+          1,
+          2
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 3,
+      "conditions": [
+        1,
+        2,
+        3
+      ],
+      "due": false
+    },
+    {
+      "name": "all three conditions",
+      "kind": "beat",
+      "clauses": [
+        "ENG-BEAT-001",
+        "§23.1",
+        "§29.1"
+      ],
+      "wall_ms": 1800000000000,
+      "last_beat_ms": 1799913599995,
+      "eligible": true,
+      "unsent_beat": false,
+      "build": {
+        "rules": [
+          1,
+          2
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "record": {
+        "rules": [
+          1
+        ],
+        "envelopes": [
+          [
+            1,
+            1
+          ]
+        ],
+        "hash_versions": [
+          1
+        ]
+      },
+      "pending_verdicts": 4,
+      "conditions": [
+        1,
+        2,
+        3
+      ],
+      "due": true
+    },
+    {
+      "name": "no snapshot known: due (condition 1)",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3",
+        "ENG-SNAP-002"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ],
+      "write": {
+        "wall_ms": 1700000000000,
+        "rank": 0,
+        "eligible": true,
+        "snap_accepted_at_or_above_S": false,
+        "earliest_wall_ms": 1700000000000,
+        "writes_now": true
+      }
+    },
+    {
+      "name": "rank 2 waits two hours: one ms early",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3",
+        "ENG-SNAP-002"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ],
+      "write": {
+        "wall_ms": 1700007199999,
+        "rank": 2,
+        "eligible": true,
+        "snap_accepted_at_or_above_S": false,
+        "earliest_wall_ms": 1700007200000,
+        "writes_now": false
+      }
+    },
+    {
+      "name": "rank 2 waits two hours: on time",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3",
+        "ENG-SNAP-002"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ],
+      "write": {
+        "wall_ms": 1700007200000,
+        "rank": 2,
+        "eligible": true,
+        "snap_accepted_at_or_above_S": false,
+        "earliest_wall_ms": 1700007200000,
+        "writes_now": true
+      }
+    },
+    {
+      "name": "due but not eligible: does not write",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3",
+        "§29.1",
+        "ENG-SNAP-002"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ],
+      "write": {
+        "wall_ms": 1700018000000,
+        "rank": 1,
+        "eligible": false,
+        "snap_accepted_at_or_above_S": false,
+        "earliest_wall_ms": 1700003600000,
+        "writes_now": false
+      }
+    },
+    {
+      "name": "due but a snap entry at or above S was accepted since: does not write",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3",
+        "ENG-SNAP-002"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ],
+      "write": {
+        "wall_ms": 1700018000000,
+        "rank": 0,
+        "eligible": true,
+        "snap_accepted_at_or_above_S": true,
+        "earliest_wall_ms": 1700000000000,
+        "writes_now": false
+      }
+    },
+    {
+      "name": "a usable snapshot 7 days old minus 1 ms: not due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699395200001,
+          "verdicts": [
+            {
+              "dev": "90a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+              "verdict": "Ack",
+              "beat_seq": 2540
+            }
+          ],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": false,
+      "reasons": [
+        "recent_usable_snapshot"
+      ]
+    },
+    {
+      "name": "a usable snapshot exactly 7 days old: due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3",
+        "ENG-SNAP-002"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699395200000,
+          "verdicts": [
+            {
+              "dev": "90a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+              "verdict": "Ack",
+              "beat_seq": 2540
+            }
+          ],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ],
+      "write": {
+        "wall_ms": 1700000000000,
+        "rank": 0,
+        "eligible": true,
+        "snap_accepted_at_or_above_S": false,
+        "earliest_wall_ms": 1700000000000,
+        "writes_now": true
+      }
+    },
+    {
+      "name": "a usable snapshot 999 entries back: not due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 1561,
+          "entry_clock": 1699996400000,
+          "verdicts": [
+            {
+              "dev": "90a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+              "verdict": "Ack",
+              "beat_seq": 2540
+            }
+          ],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": false,
+      "reasons": [
+        "recent_usable_snapshot"
+      ]
+    },
+    {
+      "name": "a usable snapshot 1,000 entries back: due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 1560,
+          "entry_clock": 1699996400000,
+          "verdicts": [
+            {
+              "dev": "90a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+              "verdict": "Ack",
+              "beat_seq": 2540
+            }
+          ],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ]
+    },
+    {
+      "name": "own verdict Ack makes another writer's snapshot usable: not due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699913600000,
+          "verdicts": [],
+          "own": "Ack"
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": false,
+      "reasons": [
+        "recent_usable_snapshot"
+      ]
+    },
+    {
+      "name": "an Ack only from its writer is not usable; it has a verdict, so it is not waiting: due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699913600000,
+          "verdicts": [
+            {
+              "dev": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+              "verdict": "Ack",
+              "beat_seq": 2555
+            }
+          ],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ]
+    },
+    {
+      "name": "a Mismatch makes a snapshot not usable: due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699913600000,
+          "verdicts": [
+            {
+              "dev": "90a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+              "verdict": "Ack",
+              "beat_seq": 2555
+            },
+            {
+              "dev": "31a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+              "verdict": "Mismatch",
+              "beat_seq": 2556
+            }
+          ],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ]
+    },
+    {
+      "name": "a snapshot waiting for verdicts, 2 days minus 1 ms old: not due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699827200001,
+          "verdicts": [],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": false,
+      "reasons": [
+        "recent_snapshot_waiting_for_verdicts"
+      ]
+    },
+    {
+      "name": "a snapshot waiting for verdicts, exactly 2 days old: due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699827200000,
+          "verdicts": [],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": true,
+      "reasons": [
+        "condition_1"
+      ]
+    },
+    {
+      "name": "own snapshot 24 hours minus 1 ms of log clock ago: not due (24-hour limit)",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699913600001,
+          "verdicts": [],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": true,
+      "due": false,
+      "reasons": [
+        "within_24_hours",
+        "recent_snapshot_waiting_for_verdicts",
+        "condition_2"
+      ]
+    },
+    {
+      "name": "own snapshot exactly 24 hours ago, waiting for verdicts: not due (condition 1 fails)",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699913600000,
+          "verdicts": [],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": false,
+      "due": false,
+      "reasons": [
+        "recent_snapshot_waiting_for_verdicts"
+      ]
+    },
+    {
+      "name": "own snapshot exactly 24 hours ago and an owed mismatch: due (condition 2)",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3",
+        "ENG-SNAP-002"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699913600000,
+          "verdicts": [],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": true,
+      "due": true,
+      "reasons": [
+        "recent_snapshot_waiting_for_verdicts",
+        "condition_2"
+      ],
+      "write": {
+        "wall_ms": 1700003600000,
+        "rank": 1,
+        "eligible": true,
+        "snap_accepted_at_or_above_S": false,
+        "earliest_wall_ms": 1700003600000,
+        "writes_now": true
+      }
+    },
+    {
+      "name": "the newest own snapshot decides the 24-hour limit",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2260,
+          "author": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2240,
+          "entry_clock": 1699740800000,
+          "verdicts": [],
+          "own": null
+        },
+        {
+          "entry_seq": 2550,
+          "author": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699996400000,
+          "verdicts": [],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": true,
+      "due": false,
+      "reasons": [
+        "within_24_hours",
+        "recent_snapshot_waiting_for_verdicts",
+        "condition_2"
+      ]
+    },
+    {
+      "name": "an own snap record in the outbox: not due",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [],
+      "own_snap_in_outbox": true,
+      "owed_mismatch": true,
+      "due": false,
+      "reasons": [
+        "own_snap_in_outbox",
+        "condition_1",
+        "condition_2"
+      ]
+    },
+    {
+      "name": "an owed mismatch with a recent usable snapshot: due (condition 2)",
+      "kind": "snapshot",
+      "clauses": [
+        "ENG-SNAP-001",
+        "ENG-SNAP-006",
+        "§19.2",
+        "§19.3",
+        "ENG-SNAP-002"
+      ],
+      "self": "20a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+      "S": 2560,
+      "tau_S": 1700000000000,
+      "snaps": [
+        {
+          "entry_seq": 2550,
+          "author": "30a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+          "info_seq": 2496,
+          "entry_clock": 1699996400000,
+          "verdicts": [
+            {
+              "dev": "90a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+              "verdict": "Ack",
+              "beat_seq": 2555
+            }
+          ],
+          "own": null
+        }
+      ],
+      "own_snap_in_outbox": false,
+      "owed_mismatch": true,
+      "due": true,
+      "reasons": [
+        "recent_usable_snapshot",
+        "condition_2"
+      ],
+      "write": {
+        "wall_ms": 1700000000000,
+        "rank": 0,
+        "eligible": true,
+        "snap_accepted_at_or_above_S": false,
+        "earliest_wall_ms": 1700000000000,
+        "writes_now": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,1166 @@
+{
+  "spec": "engine.md §10.3, §11.2, §11.3, §11.4",
+  "cases": [
+    {
+      "name": "normal: a <= r <= h",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [
+        {
+          "ctr": 6,
+          "frame": true,
+          "ack": [
+            22,
+            "1616161616161616161616161616161616161616161616161616161616161616"
+          ]
+        },
+        {
+          "ctr": 7,
+          "frame": true,
+          "ack": null
+        },
+        {
+          "ctr": null,
+          "frame": false,
+          "ack": null
+        }
+      ],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 25,
+          "chain": "1919191919191919191919191919191919191919191919191919191919191919"
+        },
+        "last_ctr": 7,
+        "last_seq": 25
+      },
+      "unresolved_alarms": [],
+      "h": 7,
+      "evidence_found": [],
+      "alarms": [],
+      "step": 2,
+      "reconcile": "full",
+      "seal_before_q": false,
+      "restored": null,
+      "a_after": 7,
+      "withheld": false,
+      "next_ctr": 8
+    },
+    {
+      "name": "normal: r = a and no record holds a frame",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3",
+        "ENG-RECON-008"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [
+        {
+          "ctr": null,
+          "frame": false,
+          "ack": null
+        }
+      ],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 20,
+          "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+        },
+        "last_ctr": 5,
+        "last_seq": 20
+      },
+      "unresolved_alarms": [],
+      "h": 5,
+      "evidence_found": [],
+      "alarms": [],
+      "step": 2,
+      "reconcile": "full",
+      "seal_before_q": false,
+      "restored": null,
+      "a_after": 5,
+      "withheld": false,
+      "next_ctr": 6
+    },
+    {
+      "name": "normal: r between a and h; frames above r are resent",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [
+        {
+          "ctr": 6,
+          "frame": true,
+          "ack": null
+        },
+        {
+          "ctr": 7,
+          "frame": true,
+          "ack": null
+        },
+        {
+          "ctr": 8,
+          "frame": true,
+          "ack": null
+        }
+      ],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 20,
+          "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+        },
+        "last_ctr": 6,
+        "last_seq": 20
+      },
+      "unresolved_alarms": [],
+      "h": 8,
+      "evidence_found": [],
+      "alarms": [],
+      "step": 2,
+      "reconcile": "full",
+      "seal_before_q": false,
+      "restored": null,
+      "a_after": 6,
+      "withheld": false,
+      "next_ctr": 9
+    },
+    {
+      "name": "relay head above L: a read follows",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [
+        {
+          "ctr": 6,
+          "frame": true,
+          "ack": null
+        }
+      ],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 25,
+          "chain": "1919191919191919191919191919191919191919191919191919191919191919"
+        },
+        "last_ctr": 6,
+        "last_seq": 25
+      },
+      "unresolved_alarms": [],
+      "h": 6,
+      "evidence_found": [],
+      "alarms": [],
+      "step": 2,
+      "reconcile": "full",
+      "seal_before_q": false,
+      "restored": null,
+      "a_after": 6,
+      "withheld": false,
+      "next_ctr": 7
+    },
+    {
+      "name": "r < a: relay_behind (§11.3 step 1)",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 9,
+      "has_record": true,
+      "records": [],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 20,
+          "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+        },
+        "last_ctr": 8,
+        "last_seq": 20
+      },
+      "unresolved_alarms": [],
+      "h": 9,
+      "evidence_found": [
+        "RelayBehind"
+      ],
+      "alarms": [
+        {
+          "kind": "RelayBehind",
+          "evidence": {
+            "relay_head": {
+              "seq": 20,
+              "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+            },
+            "relay_last_ctr": 8,
+            "local_head": {
+              "seq": 20,
+              "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+            },
+            "ack": null
+          }
+        }
+      ],
+      "step": 1,
+      "reconcile": "step_1_only",
+      "restored": null
+    },
+    {
+      "name": "head below L: relay_behind; the chain at head.seq is compared too",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414",
+        "18": "1212121212121212121212121212121212121212121212121212121212121212"
+      },
+      "welcome": {
+        "head": {
+          "seq": 18,
+          "chain": "1212121212121212121212121212121212121212121212121212121212121212"
+        },
+        "last_ctr": 5,
+        "last_seq": 18
+      },
+      "unresolved_alarms": [],
+      "h": 5,
+      "evidence_found": [
+        "RelayBehind"
+      ],
+      "alarms": [
+        {
+          "kind": "RelayBehind",
+          "evidence": {
+            "relay_head": {
+              "seq": 18,
+              "chain": "1212121212121212121212121212121212121212121212121212121212121212"
+            },
+            "relay_last_ctr": 5,
+            "local_head": {
+              "seq": 20,
+              "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+            },
+            "ack": null
+          }
+        }
+      ],
+      "step": null,
+      "reconcile": "step_1_only",
+      "restored": null
+    },
+    {
+      "name": "head below L and a different chain there: relay_behind and fork",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414",
+        "18": "1212121212121212121212121212121212121212121212121212121212121212"
+      },
+      "welcome": {
+        "head": {
+          "seq": 18,
+          "chain": "6363636363636363636363636363636363636363636363636363636363636363"
+        },
+        "last_ctr": 5,
+        "last_seq": 18
+      },
+      "unresolved_alarms": [],
+      "h": 5,
+      "evidence_found": [
+        "Fork",
+        "RelayBehind"
+      ],
+      "alarms": [
+        {
+          "kind": "RelayBehind",
+          "evidence": {
+            "relay_head": {
+              "seq": 18,
+              "chain": "6363636363636363636363636363636363636363636363636363636363636363"
+            },
+            "relay_last_ctr": 5,
+            "local_head": {
+              "seq": 20,
+              "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+            },
+            "ack": null
+          }
+        },
+        {
+          "kind": "Fork",
+          "seq": 18,
+          "evidence": {
+            "local_chain": "1212121212121212121212121212121212121212121212121212121212121212",
+            "relay_chain": "6363636363636363636363636363636363636363636363636363636363636363",
+            "source": "Welcome"
+          }
+        }
+      ],
+      "step": null,
+      "reconcile": "step_1_only",
+      "restored": null
+    },
+    {
+      "name": "head = L with a different chain: fork only; no reconcile beyond step 1",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [
+        {
+          "ctr": 6,
+          "frame": true,
+          "ack": null
+        }
+      ],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 20,
+          "chain": "4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d"
+        },
+        "last_ctr": 9,
+        "last_seq": 20
+      },
+      "unresolved_alarms": [],
+      "h": 6,
+      "evidence_found": [
+        "Fork"
+      ],
+      "alarms": [
+        {
+          "kind": "Fork",
+          "seq": 20,
+          "evidence": {
+            "local_chain": "1414141414141414141414141414141414141414141414141414141414141414",
+            "relay_chain": "4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d",
+            "source": "Welcome"
+          }
+        }
+      ],
+      "step": null,
+      "reconcile": "step_1_only",
+      "restored": null
+    },
+    {
+      "name": "an acknowledgement above the head: relay_behind with the largest such ack",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 8,
+      "has_record": true,
+      "records": [
+        {
+          "ctr": 6,
+          "frame": true,
+          "ack": [
+            19,
+            "1313131313131313131313131313131313131313131313131313131313131313"
+          ]
+        },
+        {
+          "ctr": 7,
+          "frame": true,
+          "ack": [
+            22,
+            "1616161616161616161616161616161616161616161616161616161616161616"
+          ]
+        },
+        {
+          "ctr": 8,
+          "frame": true,
+          "ack": [
+            23,
+            "1717171717171717171717171717171717171717171717171717171717171717"
+          ]
+        },
+        {
+          "ctr": 9,
+          "frame": true,
+          "ack": null
+        }
+      ],
+      "L": 23,
+      "local_chains": {
+        "23": "1717171717171717171717171717171717171717171717171717171717171717",
+        "21": "1515151515151515151515151515151515151515151515151515151515151515"
+      },
+      "welcome": {
+        "head": {
+          "seq": 21,
+          "chain": "1515151515151515151515151515151515151515151515151515151515151515"
+        },
+        "last_ctr": 8,
+        "last_seq": 21
+      },
+      "unresolved_alarms": [],
+      "h": 9,
+      "evidence_found": [
+        "RelayBehind"
+      ],
+      "alarms": [
+        {
+          "kind": "RelayBehind",
+          "evidence": {
+            "relay_head": {
+              "seq": 21,
+              "chain": "1515151515151515151515151515151515151515151515151515151515151515"
+            },
+            "relay_last_ctr": 8,
+            "local_head": {
+              "seq": 23,
+              "chain": "1717171717171717171717171717171717171717171717171717171717171717"
+            },
+            "ack": [
+              23,
+              "1717171717171717171717171717171717171717171717171717171717171717"
+            ]
+          }
+        }
+      ],
+      "step": null,
+      "reconcile": "step_1_only",
+      "restored": null
+    },
+    {
+      "name": "every relay_behind source at once raises one alarm",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 10,
+      "has_record": true,
+      "records": [
+        {
+          "ctr": 10,
+          "frame": true,
+          "ack": [
+            24,
+            "1818181818181818181818181818181818181818181818181818181818181818"
+          ]
+        }
+      ],
+      "L": 24,
+      "local_chains": {
+        "24": "1818181818181818181818181818181818181818181818181818181818181818",
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 20,
+          "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+        },
+        "last_ctr": 7,
+        "last_seq": 20
+      },
+      "unresolved_alarms": [],
+      "h": 10,
+      "evidence_found": [
+        "RelayBehind"
+      ],
+      "alarms": [
+        {
+          "kind": "RelayBehind",
+          "evidence": {
+            "relay_head": {
+              "seq": 20,
+              "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+            },
+            "relay_last_ctr": 7,
+            "local_head": {
+              "seq": 24,
+              "chain": "1818181818181818181818181818181818181818181818181818181818181818"
+            },
+            "ack": [
+              24,
+              "1818181818181818181818181818181818181818181818181818181818181818"
+            ]
+          }
+        }
+      ],
+      "step": 1,
+      "reconcile": "step_1_only",
+      "restored": null
+    },
+    {
+      "name": "an unresolved RelayBehind is held: no new alarm, still step 1 only",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 9,
+      "has_record": true,
+      "records": [],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 20,
+          "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+        },
+        "last_ctr": 8,
+        "last_seq": 20
+      },
+      "unresolved_alarms": [
+        "RelayBehind"
+      ],
+      "h": 9,
+      "evidence_found": [
+        "RelayBehind"
+      ],
+      "alarms": [],
+      "step": 1,
+      "reconcile": "step_1_only",
+      "restored": null
+    },
+    {
+      "name": "r > h: a restored copy; nothing is sealed until the log reaches q",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3",
+        "ENG-RECON-001",
+        "ENG-RECON-004"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [
+        {
+          "ctr": 6,
+          "frame": true,
+          "ack": null
+        }
+      ],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 30,
+          "chain": "1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e"
+        },
+        "last_ctr": 9,
+        "last_seq": 30
+      },
+      "unresolved_alarms": [],
+      "h": 6,
+      "evidence_found": [],
+      "alarms": [],
+      "step": 3,
+      "reconcile": "full",
+      "seal_before_q": false,
+      "restored": [
+        7,
+        9
+      ],
+      "a_after": 9,
+      "withheld": false,
+      "next_ctr": 10
+    },
+    {
+      "name": "r > h and the log does not reach r: withheld",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3",
+        "ENG-RECON-004"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      "welcome": {
+        "head": {
+          "seq": 30,
+          "chain": "1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e"
+        },
+        "last_ctr": 9,
+        "last_seq": 30
+      },
+      "unresolved_alarms": [],
+      "h": 5,
+      "evidence_found": [],
+      "alarms": [],
+      "step": 3,
+      "reconcile": "full",
+      "seal_before_q": false,
+      "restored": [
+        6,
+        9
+      ],
+      "a_after": 8,
+      "withheld": true
+    },
+    {
+      "name": "no record of this device in M_K: a = 0",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3",
+        "ENG-RECON-009"
+      ],
+      "a": 0,
+      "has_record": false,
+      "records": [],
+      "L": 12,
+      "local_chains": {
+        "12": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c"
+      },
+      "welcome": {
+        "head": {
+          "seq": 12,
+          "chain": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c"
+        },
+        "last_ctr": 0,
+        "last_seq": 0
+      },
+      "unresolved_alarms": [],
+      "h": 0,
+      "evidence_found": [],
+      "alarms": [],
+      "step": 2,
+      "reconcile": "full",
+      "seal_before_q": false,
+      "restored": null,
+      "a_after": 0,
+      "withheld": false,
+      "next_ctr": 1
+    },
+    {
+      "name": "no record of this device in M_K and the relay holds counters: restored",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3",
+        "ENG-RECON-009"
+      ],
+      "a": 0,
+      "has_record": false,
+      "records": [],
+      "L": 12,
+      "local_chains": {
+        "12": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c"
+      },
+      "welcome": {
+        "head": {
+          "seq": 15,
+          "chain": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+        },
+        "last_ctr": 3,
+        "last_seq": 15
+      },
+      "unresolved_alarms": [],
+      "h": 0,
+      "evidence_found": [],
+      "alarms": [],
+      "step": 3,
+      "reconcile": "full",
+      "seal_before_q": false,
+      "restored": [
+        1,
+        3
+      ],
+      "a_after": 3,
+      "withheld": false,
+      "next_ctr": 4
+    },
+    {
+      "name": "evidence and r > h: no registry.restored",
+      "kind": "welcome",
+      "clauses": [
+        "ENG-SESS-002",
+        "ENG-SESS-008",
+        "§11.2",
+        "§11.3",
+        "§10.3"
+      ],
+      "a": 5,
+      "has_record": true,
+      "records": [],
+      "L": 20,
+      "local_chains": {
+        "20": "1414141414141414141414141414141414141414141414141414141414141414",
+        "18": "1212121212121212121212121212121212121212121212121212121212121212"
+      },
+      "welcome": {
+        "head": {
+          "seq": 18,
+          "chain": "1212121212121212121212121212121212121212121212121212121212121212"
+        },
+        "last_ctr": 9,
+        "last_seq": 18
+      },
+      "unresolved_alarms": [],
+      "h": 5,
+      "evidence_found": [
+        "RelayBehind"
+      ],
+      "alarms": [
+        {
+          "kind": "RelayBehind",
+          "evidence": {
+            "relay_head": {
+              "seq": 18,
+              "chain": "1212121212121212121212121212121212121212121212121212121212121212"
+            },
+            "relay_last_ctr": 9,
+            "local_head": {
+              "seq": 20,
+              "chain": "1414141414141414141414141414141414141414141414141414141414141414"
+            },
+            "ack": null
+          }
+        }
+      ],
+      "step": null,
+      "reconcile": "step_1_only",
+      "restored": null
+    },
+    {
+      "name": "the relay holds x as sealed by an earlier copy",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 41,
+      "open_own": "x",
+      "conflicts_before": 1,
+      "expected": {
+        "acknowledged": "x",
+        "alarm": null,
+        "rehello": true,
+        "conflicts_after": 0,
+        "identity_clone": false,
+        "cleared": null
+      }
+    },
+    {
+      "name": "the relay holds another record y",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 41,
+      "open_own": "other",
+      "conflicts_before": 2,
+      "expected": {
+        "acknowledged": "y",
+        "alarm": null,
+        "rehello": true,
+        "conflicts_after": 0,
+        "identity_clone": false,
+        "cleared": "x"
+      }
+    },
+    {
+      "name": "no record's entry: restored_copy",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 41,
+      "open_own": "none",
+      "conflicts_before": 0,
+      "expected": {
+        "acknowledged": null,
+        "alarm": "RestoredCopy",
+        "rehello": true,
+        "conflicts_after": 1,
+        "identity_clone": false,
+        "cleared": "x"
+      }
+    },
+    {
+      "name": "no record's entry, second in a row",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 41,
+      "open_own": "none",
+      "conflicts_before": 1,
+      "expected": {
+        "acknowledged": null,
+        "alarm": "RestoredCopy",
+        "rehello": true,
+        "conflicts_after": 2,
+        "identity_clone": false,
+        "cleared": "x"
+      }
+    },
+    {
+      "name": "no record's entry, third in a row: identity_clone",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 41,
+      "open_own": "none",
+      "conflicts_before": 2,
+      "expected": {
+        "acknowledged": null,
+        "alarm": "RestoredCopy",
+        "rehello": true,
+        "conflicts_after": 3,
+        "identity_clone": true
+      }
+    },
+    {
+      "name": "open_own fails: relay_protocol",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 41,
+      "open_own": "error",
+      "conflicts_before": 0,
+      "expected": {
+        "acknowledged": null,
+        "alarm": "RelayProtocol",
+        "rehello": true,
+        "conflicts_after": 1,
+        "identity_clone": false,
+        "cleared": "x"
+      }
+    },
+    {
+      "name": "open_own fails, third in a row: identity_clone",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 41,
+      "open_own": "error",
+      "conflicts_before": 2,
+      "expected": {
+        "acknowledged": null,
+        "alarm": "RelayProtocol",
+        "rehello": true,
+        "conflicts_after": 3,
+        "identity_clone": true
+      }
+    },
+    {
+      "name": "seq = 0: the relay no longer holds the counter",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 0,
+      "open_own": "none",
+      "conflicts_before": 0,
+      "expected": {
+        "acknowledged": null,
+        "alarm": null,
+        "rehello": true,
+        "conflicts_after": 1,
+        "identity_clone": false,
+        "cleared": "x"
+      }
+    },
+    {
+      "name": "seq = 0, third in a row: identity_clone",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 0,
+      "open_own": "none",
+      "conflicts_before": 2,
+      "expected": {
+        "acknowledged": null,
+        "alarm": null,
+        "rehello": true,
+        "conflicts_after": 3,
+        "identity_clone": true
+      }
+    },
+    {
+      "name": "a match resets the count",
+      "kind": "conflict",
+      "clauses": [
+        "ENG-RECON-005",
+        "ENG-RECON-006",
+        "§11.4"
+      ],
+      "seq": 41,
+      "open_own": "x",
+      "conflicts_before": 2,
+      "expected": {
+        "acknowledged": "x",
+        "alarm": null,
+        "rehello": true,
+        "conflicts_after": 0,
+        "identity_clone": false,
+        "cleared": null
+      }
+    },
+    {
+      "name": "resend from the counter after last_ctr",
+      "kind": "gap",
+      "clauses": [
+        "ENG-RECON-007",
+        "§11.4",
+        "§10.4"
+      ],
+      "last_ctr": 6,
+      "last_seq": 30,
+      "records": [
+        {
+          "ctr": 5,
+          "ack": true
+        },
+        {
+          "ctr": 6,
+          "ack": true
+        },
+        {
+          "ctr": 7,
+          "ack": false
+        },
+        {
+          "ctr": 8,
+          "ack": false
+        }
+      ],
+      "expected": {
+        "relay_behind": false,
+        "resend_from_ctr": 7
+      }
+    },
+    {
+      "name": "an ack above last_ctr: relay_behind",
+      "kind": "gap",
+      "clauses": [
+        "ENG-RECON-007",
+        "§11.4",
+        "§10.4"
+      ],
+      "last_ctr": 5,
+      "last_seq": 30,
+      "records": [
+        {
+          "ctr": 5,
+          "ack": true
+        },
+        {
+          "ctr": 6,
+          "ack": true
+        },
+        {
+          "ctr": 7,
+          "ack": false
+        }
+      ],
+      "expected": {
+        "relay_behind": true
+      }
+    },
+    {
+      "name": "an ack two above last_ctr: relay_behind",
+      "kind": "gap",
+      "clauses": [
+        "ENG-RECON-007",
+        "§11.4",
+        "§10.4"
+      ],
+      "last_ctr": 4,
+      "last_seq": 30,
+      "records": [
+        {
+          "ctr": 5,
+          "ack": false
+        },
+        {
+          "ctr": 6,
+          "ack": true
+        }
+      ],
+      "expected": {
+        "relay_behind": true
+      }
+    },
+    {
+      "name": "no ack at all: resend from last_ctr + 1",
+      "kind": "gap",
+      "clauses": [
+        "ENG-RECON-007",
+        "§11.4",
+        "§10.4"
+      ],
+      "last_ctr": 4,
+      "last_seq": 30,
+      "records": [
+        {
+          "ctr": 5,
+          "ack": false
+        },
+        {
+          "ctr": 6,
+          "ack": false
+        },
+        {
+          "ctr": 7,
+          "ack": false
+        }
+      ],
+      "expected": {
+        "relay_behind": false,
+        "resend_from_ctr": 5
+      }
+    },
+    {
+      "name": "unacknowledged records the relay holds are skipped",
+      "kind": "gap",
+      "clauses": [
+        "ENG-RECON-007",
+        "§11.4",
+        "§10.4"
+      ],
+      "last_ctr": 7,
+      "last_seq": 30,
+      "records": [
+        {
+          "ctr": 5,
+          "ack": true
+        },
+        {
+          "ctr": 6,
+          "ack": false
+        },
+        {
+          "ctr": 7,
+          "ack": false
+        },
+        {
+          "ctr": 8,
+          "ack": false
+        }
+      ],
+      "expected": {
+        "relay_behind": false,
+        "resend_from_ctr": 8
+      }
+    }
+  ]
+}
