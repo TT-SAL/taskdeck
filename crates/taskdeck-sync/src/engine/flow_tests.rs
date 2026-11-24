@@ -559,3 +559,43 @@ fn imported_commands_are_rebound_and_resubmitted_in_order() {
     assert_eq!(a.e.confirmed().0.keys[&7].0, 71);
     assert_eq!(a.e.confirmed().0.items[&new_id], 31);
 }
+
+// spec: ENG-DUTY-003 ENG-DUTY-002
+#[test]
+fn a_duty_that_waits_only_for_a_fresh_head_asks_for_one() {
+    let hellos = |n: &Node| n.fx.iter().filter(|f| matches!(f, Effect::Hello)).count();
+    let appends = |n: &Node| n.fx.iter().filter(|f| matches!(f, Effect::Append { .. })).count();
+    let (mut a, f1) = creator(201);
+    let mut hub = Hub::with_genesis(&a, &f1);
+    // A push session: the relay says what arrives, the engine does not poll.
+    hub.push = true;
+    hub.serve(&mut a);
+    for _ in 0..4 {
+        a.tick(30_000);
+        hub.serve(&mut a);
+    }
+    // The first beat went out; its echo arrives as a push.
+    let page = hub.page(&a, a.e.status().head.seq, 256);
+    a.feed(Event::Page { req: None, page });
+    assert_eq!(a.e.status().board_seq, hub.log.len() as u64);
+    a.fx.clear();
+    // Twenty minutes of quiet: the head is older than 600,000 ms, but no duty is due: no Hello.
+    for _ in 0..40 {
+        a.tick(30_000);
+    }
+    assert_eq!((hellos(&a), appends(&a)), (0, 0));
+    // A day later the beat is due. The device is eligible but for the age of its head: it asks.
+    a.advance(86_400_000);
+    a.feed(Event::Tick);
+    assert_eq!((hellos(&a), appends(&a)), (1, 0));
+    // Not again within 30,000 ms; once more after them.
+    a.tick(10_000);
+    a.tick(19_000);
+    assert_eq!(hellos(&a), 1);
+    a.tick(1_000);
+    assert_eq!((hellos(&a), appends(&a)), (2, 0));
+    // The welcome gives it a head to be caught up with: the beat is taken.
+    let w = hub.welcome(&a);
+    a.feed(Event::Welcome(w));
+    assert_eq!(appends(&a), 1);
+}
