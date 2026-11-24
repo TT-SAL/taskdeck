@@ -85,3 +85,9 @@ In `/home/user/wt/c`, with `CARGO_TARGET_DIR=/home/user/wt/target-c`:
 
 Report: the families and steps that apply and those left out (with reasons); every place where
 you followed `relay-core.js` because `relay.md` was not enough; spec questions (clause ids).
+
+## A first attempt was cut off
+
+An earlier writer of this task was stopped by a usage limit after about ten minutes. It left one
+uncommitted file in the working copy, `crates/taskdeck-sync/src/sim/relay/util.rs` (192 lines).
+Read it, keep what is right, and go on; it was never compiled against the rest.
