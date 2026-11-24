@@ -584,3 +584,113 @@ fn compaction_keeps_what_the_board_needs() {
         assert!(net.relay().log().contains_key(&must));
     }
 }
+
+fn notes_of<T>(n: &Node, f: impl Fn(&crate::Notification) -> Option<T>) -> Vec<T> {
+    n.notes.iter().filter_map(f).collect()
+}
+
+fn type_code(n: &mut Node, text: &str) -> Result<(), &'static str> {
+    let before = notes_of(n, |x| match x {
+        crate::Notification::MoveCodeResult { result } => Some(*result),
+        _ => None,
+    })
+    .len();
+    n.feed(Event::User(crate::UserAction::MoveCode { text: text.to_owned() }));
+    let after = notes_of(n, |x| match x {
+        crate::Notification::MoveCodeResult { result } => Some(*result),
+        _ => None,
+    });
+    // ENG-MOVE-008: exactly one answer, in the same call.
+    assert_eq!(after.len(), before + 1);
+    after[before]
+}
+
+// spec: ENG-MOVE-001 ENG-MOVE-002 ENG-MOVE-003 ENG-MOVE-006 ENG-MOVE-007 ENG-MOVE-008 ENG-MOVE-009
+#[test]
+fn a_move_fences_seeds_and_is_followed_only_with_the_code() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(211);
+    let mut b = pair(&mut net, &mut a, 212, "Laptop", 1);
+    let mut k = 0u64;
+    while net.log_len() < 70 {
+        k += 1;
+        a.set(k, (k % 50) as u8, k as i64);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    for _ in 0..3 {
+        a.advance(86_400_000);
+        b.advance(86_400_000);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    net.add_relay(NEW);
+    let (calls, admins) = (net.calls.len(), net.admins.len());
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+
+    // The old relay sequenced the Fence at `f`, its last seq; the seed carries the log through `f`.
+    let f = net.relays[&old].head().expect("a head").seq;
+    let mine: Vec<&str> = net.calls[calls..].iter().filter(|c| c.0 == a.dev()).map(|c| c.1.as_str()).collect();
+    let at = |name: &str| mine.iter().position(|c| *c == name).unwrap_or_else(|| panic!("{name} in {mine:?}"));
+    assert!(at("admin:door") < at("admin:fence") && at("admin:fence") < at("admin:seed") && at("admin:seed") < at("admin:seed_tail"));
+    let seed = net.admins[admins..]
+        .iter()
+        .find_map(|(_, op)| match op {
+            AdminRequest::Seed { host, home_gen, first_seq, last_seq, devices, blob_id, .. } => {
+                Some((host.clone(), *home_gen, *first_seq, *last_seq, devices.clone(), *blob_id))
+            }
+            _ => None,
+        })
+        .expect("the seed");
+    let (host, home_gen, first_seq, last_seq, devices, blob_id) = seed;
+    assert_eq!((host.as_str(), home_gen, first_seq, last_seq), (NEW, 2, 1, f));
+    // Every device and the recovery identity, each with its key and its counter at `first_seq − 1`.
+    let mut seeded: Vec<_> = devices.iter().map(|d| (d.dev, d.last_ctr)).collect();
+    seeded.sort();
+    assert!(seeded.iter().any(|d| d.0 == a.dev()) && seeded.iter().any(|d| d.0 == b.dev()));
+    assert_eq!(seeded.len(), 3, "two devices and the recovery identity");
+    assert!(seeded.iter().all(|d| d.1 == 0));
+    // The frames are the old relay's, unchanged.
+    for seq in first_seq..=last_seq {
+        assert_eq!(net.relays[NEW].log()[&seq].frame, net.relays[&old].log()[&seq].frame, "{seq}");
+    }
+    // Only a blob the mover sealed itself is uploaded there: the one the seed names.
+    let blobs: Vec<_> = net.relays[NEW].blobs().values().map(|r| (r.id, r.author)).collect();
+    assert_eq!(blobs, vec![(blob_id, a.dev())]);
+    let reports = notes_of(&a, |x| match x {
+        crate::Notification::MoveReport { carried_through, old_relay_answered } => Some((*carried_through, *old_relay_answered)),
+        _ => None,
+    });
+    assert_eq!(reports, vec![(f, true)]);
+    let code = notes_of(&a, |x| match x {
+        crate::Notification::MoveCode { text } => Some(text.clone()),
+        _ => None,
+    })
+    .pop()
+    .expect("the move code");
+
+    // The other device saw the Fence and stays where it is until its user types the code.
+    assert_eq!(net.at[&b.dev()], old);
+    let moving = b.e.status().moving.expect("a move awaits its code");
+    assert_eq!((moving.host.as_str(), moving.home_gen, moving.fence_seq), (NEW, 2, f));
+    assert!(b.e.status().banners.iter().any(|x| x.kind == crate::BannerKind::Moved));
+    for _ in 0..5 {
+        assert_eq!(type_code(&mut b, "0000-0000"), Err("seal/move_code"));
+    }
+    // Five wrong codes in a row lock the entry for an hour, the right code included.
+    assert_eq!(type_code(&mut b, &code), Err("engine/move_locked"));
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(net.at[&b.dev()], old);
+    b.advance(3_600_000);
+    a.advance(3_600_000);
+    assert_eq!(type_code(&mut b, &code), Ok(()));
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(net.at[&b.dev()], NEW);
+    a.set(900, 1, 1);
+    b.set(901, 2, 2);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(a.board_bytes(), b.board_bytes());
+    assert!(net.relays[NEW].head().expect("a head").seq > f);
+    assert_eq!(net.relays[&old].head().expect("a head").seq, f);
+}
