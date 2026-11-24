@@ -10,7 +10,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import * as core from '../relay-core.js';
 import { startStandby } from '../standby.js';
-import { STD, TARGET, World, decodeResults, makeTarget, send } from './lib/harness.mjs';
+import { STD, TARGET, World, makeTarget, send } from './lib/harness.mjs';
 import { KEYS } from './vectors/dsl.mjs';
 
 // These cases belong to the standby target, as a vector case names its targets.
@@ -89,24 +89,31 @@ only('the standby\'s timeouts, its file per board, WAL and full synchronous', as
 // spec: RELAY-STBY-002
 only('the standby handles the requests of one board one at a time, in arrival order', async () => {
   const target = makeTarget('standby');
-  const world = new World({ keys: { rec: KEYS.rec, alice: KEYS.alice }, boards: { main: { salt: '03'.repeat(16), recovery: 'rec', first: 'alice' } } }, target);
+  const world = new World({ keys: { rec: KEYS.rec, alice: KEYS.alice }, boards: { main: { salt: '03'.repeat(16), recovery: 'rec', first: 'alice', create: false } } }, target);
   try {
     await world.init();
+    // A board that is seeding until one request has stored its tail of 256 frames: that request (A)
+    // checks 256 signatures. A hello (B) is sent at the moment the standby has read A's whole body,
+    // so B arrives second, while A is still at work. In arrival order B is answered after A, by an
+    // open board; handled on arrival, it would meet a board that is still seeding.
+    const frames = Array.from({ length: 256 }, (_, i) => ({ $frame: { author: 'alice', ctr: 1 + i } }));
+    const args = { home_gen: 2, first_seq: 1, chain_before: { $chain: 0 }, last_seq: 256, chain_last: { $chain_from: { before: { $chain: 0 }, first: 1, frames } },
+      entries: [{ dev: 'alice', sign_pk: 'alice', role: 1, status: 1, last_ctr: 0 }, { dev: 'rec', sign_pk: 'rec', role: 2, status: 1, last_ctr: 0 }] };
+    await world.step({ request: { route: 'admin-nonce', board: 'main', cred: { create: true }, body: { $dev: 'alice' } }, expect: { status: 200 } }, 'nonce');
+    await world.step({ request: { route: 'admin', board: 'main', cred: { create: true }, params: { op: 'seed' }, body: { $admin: { op: 'seed', signer: 'alice', args } } }, expect: { status: 200 } }, 'seed');
     const cred = await world.credHeader({ token: 'alice' }, 'main'), b = world.board('main');
-    const batch = async (frames) => world.bytes({ $batch: frames }, 'main');
-    // A: sixteen large frames, slow to check. B: one small frame that needs A's counters. B is
-    // sent once A's body is on the wire; without the queue B's transaction would run first.
-    const big = await batch(Array.from({ length: 16 }, (_, i) => ({ $frame: { author: 'alice', ctr: 1 + i, body_len: 262032 } })));
-    const small = await batch([{ $frame: { author: 'alice', ctr: 17 } }]);
-    const post = (body) => send(target.server.url, { method: 'POST', path: `/v1/b/${b.hex}/append`, headers: { ...cred, 'Content-Length': String(body.length) }, body });
-    const a = post(big);
-    await new Promise((r) => setTimeout(r, 5));
-    const second = post(small);
-    const [ra, rb] = await Promise.all([a, second]);
+    const tail = await world.bytes({ $cat: [{ $u64: 1 }, { $u16: 256 }, { $frames: frames }] }, 'main');
+    let second = null;
+    target.server.server.on('request', (req) => {
+      if (!req.url.endsWith('/seed/tail')) return;
+      req.on('end', () => setImmediate(() => { second = send(target.server.url, { method: 'GET', path: `/v1/b/${b.hex}/hello`, headers: cred }); }));
+    });
+    const ra = await send(target.server.url, { method: 'POST', path: `/v1/b/${b.hex}/seed/tail`, headers: { ...cred, 'Content-Length': String(tail.length) }, body: tail });
     assert.equal(ra.status, 200);
-    assert.deepEqual(decodeResults(ra.body).map((x) => x.status), Array(16).fill('new'));
-    assert.equal(rb.status, 200, 'the second request waited for the first');
-    assert.deepEqual(decodeResults(rb.body).map((x) => [x.status, x.seq]), [['new', 18]]);
+    assert.equal(JSON.parse(Buffer.from(ra.body).toString()).state, 'open');
+    assert.ok(second, 'the second request was sent when the first had arrived');
+    const rb = await second;
+    assert.equal(rb.status, 200, `the second request waited for the first: ${Buffer.from(rb.body).toString()}`);
   } finally {
     await world.stop();
   }
