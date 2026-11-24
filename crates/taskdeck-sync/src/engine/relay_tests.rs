@@ -1030,3 +1030,101 @@ fn the_minority_stops_and_adopts_with_a_typed_fingerprint() {
     assert_eq!(c.e.status().queued, 0);
     assert_eq!(a.e.confirmed().0.keys[&30].0, 900);
 }
+
+// spec: ENG-EVID-004 ENG-EVID-007
+#[test]
+fn a_relay_rolled_back_gets_its_tail_from_a_devices_log() {
+    let (mut net, mut a) = board(261);
+    let mut b = pair(&mut net, &mut a, 262, "Laptop", 1);
+    for k in 1..=3u64 {
+        a.set(k, k as u8, k as i64);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    // The relay as it is now; what follows it will lose: a pairing and entries by all three.
+    let earlier = net.relay().clone();
+    let cut = net.log_len();
+    let mut c = pair(&mut net, &mut a, 263, "Phone", 2);
+    let added_seq = pair_result(&a, 2).expect("an answer").expect("paired").1;
+    c.set(10, 10, 10);
+    for k in 4..=8u64 {
+        a.set(k, k as u8, k as i64);
+    }
+    b.set(20, 20, 20);
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    let full = net.relay().clone();
+    let head = net.log_len();
+    assert!(added_seq > cut && head > added_seq + 3);
+
+    // A's log lacks one record of the tail: its read is answered Missing, and A sends nothing.
+    net.relay().rollback_to(&earlier);
+    let lost = a.store.log.remove(&(added_seq + 1)).expect("a record");
+    let admins = net.admins.len();
+    net.settle(&mut [&mut a]);
+    assert!(has_alarm(&a, crate::AlarmKind::RelayBehind));
+    // (What lies before the missing record is restored: the request up to the DeviceAdded and its repair.)
+    for (dev, op) in &net.admins[admins..] {
+        if let (true, AdminRequest::RestoreTail { first_seq, frames, .. }) = (*dev == a.dev(), op) {
+            assert!(first_seq + frames.len() as u64 - 1 <= added_seq, "no request holds or passes the missing record");
+        }
+    }
+    assert!(a.e.status().stops.iter().any(|s| matches!(s.kind, crate::StopKind::LocalFault { .. })));
+    assert!(net.log_len() <= added_seq);
+    a.store.log.insert(added_seq + 1, lost);
+    // The relay is rolled back once more for the device that holds everything.
+    net.relay().rollback_to(&earlier);
+
+    // B holds the whole tail and restores it: from the relay's head on, the frames as its log
+    // holds them, each request ending with the first control entry in it, and that entry's
+    // repair (the added device's row) before the next request.
+    let (admins, calls) = (net.admins.len(), net.calls.len());
+    net.settle(&mut [&mut b]);
+    assert_eq!(net.log_len(), head);
+    for seq in cut + 1..=head {
+        assert_eq!(net.relay().log()[&seq].frame, full.log()[&seq].frame, "{seq}");
+    }
+    let mine: Vec<(usize, &AdminRequest)> = net.admins[admins..].iter().enumerate().filter(|(_, x)| x.0 == b.dev()).map(|(i, x)| (i + admins, &x.1)).collect();
+    let mut next = cut + 1;
+    let mut registered_at = None;
+    for (i, op) in &mine {
+        match op {
+            AdminRequest::RestoreTail { first_seq, chain_before, frames } => {
+                assert_eq!(*first_seq, next);
+                assert_eq!(net.admin_ctx[*i].0 + 1, next, "from the relay's head");
+                assert_eq!(*chain_before, full.log()[&(next - 1)].chain);
+                assert!(!frames.is_empty() && frames.len() <= 64);
+                for (j, f) in frames.iter().enumerate() {
+                    assert_eq!(*f, full.log()[&(next + j as u64)].frame);
+                }
+                let last = next + frames.len() as u64 - 1;
+                // No request runs past the DeviceAdded; the next one waits for its repair.
+                assert!(!(next <= added_seq && last > added_seq), "{next}..{last}");
+                if next > added_seq {
+                    assert!(registered_at.is_some(), "the row before the frames of its author");
+                }
+                next = last + 1;
+            }
+            AdminRequest::RegisterSeq { seq, dev, .. } => {
+                assert_eq!((*seq, *dev), (added_seq, c.dev()));
+                assert_eq!(next, added_seq + 1);
+                registered_at = Some(*i);
+            }
+            other => panic!("an unexpected request {other:?}"),
+        }
+    }
+    assert_eq!(next, head + 1);
+    assert!(registered_at.is_some());
+    assert!(net.calls[calls..].iter().any(|x| x.1 == "admin:restore_tail"));
+    // The evidence is resolved; everyone goes on, the device whose row was lost included.
+    a.restart(264);
+    for n in [&mut a, &mut b, &mut c] {
+        n.advance(3_700_000);
+    }
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    for n in [&a, &b, &c] {
+        assert!(n.e.status().stops.is_empty(), "{:?}", n.e.status().stops);
+    }
+    c.set(30, 30, 30);
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(a.board_bytes(), c.board_bytes());
+    assert_eq!(b.e.confirmed().0.keys[&30].0, 30);
+}
