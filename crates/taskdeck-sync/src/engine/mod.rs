@@ -48,6 +48,8 @@ mod kit_tests;
 #[cfg(test)]
 mod poison_tests;
 #[cfg(test)]
+mod reconcile_tests;
+#[cfg(test)]
 mod script_tests;
 #[cfg(test)]
 mod vectors_tests;

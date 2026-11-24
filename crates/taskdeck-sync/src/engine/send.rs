@@ -32,6 +32,9 @@ pub(crate) struct Send {
     pub conflict_ctrs: Vec<u64>,
     /// Records acknowledged through a conflict whose chain value is not known yet.
     pub chain_pending: Vec<[u8; 16]>,
+    /// A `gap` result's `last_ctr`: the relay holds this device's frames up to that counter, so
+    /// they are not resent (§11.4); the next welcome's reconcile takes over.
+    pub relay_ctr: Option<u64>,
 }
 
 impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
@@ -80,10 +83,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         let is_skip = |b: &Body| matches!(b, Body::Ctl(CtlIntent::Skip { .. }));
         // Step 1.
+        let relay_ctr = self.send.relay_ctr;
         let r: Vec<usize> = (0..self.outbox.len())
             .filter(|&i| {
                 let x = &self.outbox[i].r;
-                x.ack.is_none() && x.seen.is_none() && (!halted || is_skip(&x.body))
+                x.ack.is_none()
+                    && x.seen.is_none()
+                    && (!halted || is_skip(&x.body))
+                    && !(x.frame.is_some() && x.ctr.is_some_and(|c| relay_ctr.is_some_and(|rc| c <= rc)))
             })
             .collect();
         let Some(&first) = r.first() else { return };
@@ -476,7 +483,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 Evidence::RelayBehind { relay_head, relay_last_ctr: Some(last_ctr), local_head, ack: ack_above },
             );
         }
-        // Otherwise the next loop resends, identical, from the first unacknowledged frame.
+        // Otherwise the engine resends, identical, from the record with counter `last_ctr + 1`:
+        // the frames up to it are at the relay and come back with the log. A hello shows how far.
+        if ack_above.is_none() && a <= last_ctr {
+            self.send.relay_ctr = Some(last_ctr);
+            self.sess.need_hello = true;
+        }
     }
 
     /// §10.4: the relay refused one frame.

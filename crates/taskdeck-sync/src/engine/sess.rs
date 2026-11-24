@@ -360,11 +360,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         if evidence || self.evidence_stop() {
             // ENG-SESS-008: only step 1; nothing is read, no `restored`, no `w`.
-            self.repair_on_welcome(w.head);
+            self.repair_on_welcome(w.head, r);
             return;
         }
         self.sess.relay_head = Some(w.head);
         self.send.await_welcome = false;
+        self.send.relay_ctr = None;
         self.relay_answered();
         let restored = r > h;
         if restored {

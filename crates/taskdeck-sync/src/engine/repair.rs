@@ -30,12 +30,14 @@ pub(crate) struct Tail {
 
 impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// A welcome arrived under evidence (§11.2 "only its step 1"): the repair looks at the relay's head.
-    pub(crate) fn repair_on_welcome(&mut self, head: Head) {
+    pub(crate) fn repair_on_welcome(&mut self, head: Head, last_ctr: u64) {
         if !self.has_unresolved(AlarmKind::RelayBehind) {
             return;
         }
         let acks_echo = self.outbox.iter().filter_map(|r| r.r.ack).all(|a| a.0 <= head.seq);
-        if head.seq >= self.l && acks_echo && self.chain_at(self.l).is_some() {
+        // The relay must also hold every counter of this device that the log holds (§11.3 step 1).
+        let counters = last_ctr >= self.me().map_or(0, |d| d.last_ctr);
+        if head.seq >= self.l && acks_echo && counters && self.chain_at(self.l).is_some() {
             if head.seq > self.l || self.chain_at(self.l) == Some(head.chain) {
                 // §21.3 step 5: the relay holds the log head again. Beyond it, the pages that
                 // follow are checked against this device's chain like any others.

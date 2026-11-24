@@ -169,11 +169,10 @@ impl PNode {
         let mut ev = Vec::new();
         match op {
             PersistOp::WriteMeta(m) => {
-                if m.last_failed != self.seen_meta.1 {
-                    if let Some((x, a)) = m.last_failed {
+                if m.last_failed != self.seen_meta.1
+                    && let Some((x, a)) = m.last_failed {
                         ev.push(json!({"last_failed": [x, a]}));
                     }
-                }
                 if m.attempt != self.seen_meta.0 {
                     ev.push(json!({"attempt": m.attempt}));
                 }
