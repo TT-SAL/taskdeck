@@ -152,6 +152,8 @@ impl Node {
         // writes that were confirmed.
         if self.auto && !self.draining {
             self.draining = true;
+            // Until nothing is owed: a read's answer can bring more writes, and a write more reads.
+            while !(self.pq.is_empty() && self.reads.is_empty()) {
             while let Some((id, ops)) = self.pq.pop_front() {
                 for op in &ops {
                     self.store.apply(op);
@@ -175,6 +177,7 @@ impl Node {
                     },
                 };
                 self.feed(Event::LocalRead { req, result });
+            }
             }
             self.draining = false;
         }

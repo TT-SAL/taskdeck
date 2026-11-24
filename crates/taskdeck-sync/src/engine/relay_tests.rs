@@ -277,3 +277,66 @@ fn a_pairing_that_cannot_stand_is_dropped_or_undone() {
     assert_eq!(failed(&a), Some("seal/stale_epoch"));
     assert!(a.e.status().devices.iter().all(|r| r.dev != three.dev || r.status != DeviceStatus::Current));
 }
+
+fn members(n: &Node) -> Vec<(u16, DeviceStatus, String)> {
+    let mut rows: Vec<_> = n.e.status().devices.iter().map(|d| (d.device_no, d.status, d.name.clone())).collect();
+    rows.sort_by_key(|r| r.0);
+    rows
+}
+
+// spec: ENG-RESET-001 ENG-RESET-002 ENG-RESET-003
+#[test]
+fn a_restore_to_a_point_resets_the_board_and_nothing_else() {
+    let (mut net, mut a) = board(151);
+    let mut b = pair(&mut net, &mut a, 152, "Laptop", 1);
+    let boot = a.e.status().devices.iter().find(|d| d.dev == b.dev()).expect("B's row").bootstrap_seq;
+    for k in 1..=5u64 {
+        a.set(k, k as u8, k as i64 * 10);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    let t = a.e.status().board_seq;
+    let keys_t = a.e.confirmed().0.keys.clone();
+    b.set(6, 1, 999);
+    a.enqueue(7, crate::toy::ToyCommand::Del { key: 2 });
+    net.settle(&mut [&mut a, &mut b]);
+    let head = a.e.status().board_seq;
+    assert_ne!(a.e.confirmed().0.keys, keys_t);
+
+    // Offered: below the board head and above every current device's bootstrap seq.
+    let offered: Vec<u64> = a.e.restore_targets().iter().map(|x| x.0).collect();
+    assert_eq!(offered, (boot + 1..head).collect::<Vec<_>>());
+    assert!(offered.contains(&t));
+    for bad in [boot, head, head + 5] {
+        a.feed(Event::Op { ticket: 100 + bad, op: Operation::RestoreTo { seq: bad } });
+        assert!(matches!(op_result(&a, 100 + bad), Some(Err(_))), "{bad}");
+    }
+
+    let before = (members(&a), a.e.membership().epoch);
+    a.feed(Event::Op { ticket: 3, op: Operation::RestoreTo { seq: t } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 3), Some(Ok(())));
+    for n in [&a, &b] {
+        // The board is the one at `t`; the members and the epoch are what they were.
+        assert_eq!(n.e.confirmed().0.keys.iter().map(|(k, v)| (*k, v.0)).collect::<Vec<_>>(), keys_t.iter().map(|(k, v)| (*k, v.0)).collect::<Vec<_>>());
+        assert_eq!((members(n), n.e.membership().epoch), before);
+    }
+    // The other device shows the reset; its author does not.
+    assert!(b.e.status().banners.iter().any(|x| x.kind == crate::BannerKind::Reset));
+    assert_eq!(a.board_bytes(), b.board_bytes());
+
+    // A ResetTo whose hash is not this device's hash at the target is not applied: the
+    // device raises ResetMismatch and stops as diverged.
+    a.set(8, 9, 90);
+    net.settle(&mut [&mut a, &mut b]);
+    let board = b.board_bytes();
+    let wrong = CtlIntent::ResetTo { seq: t, state_hash: [9; 32], hash_version: 1 };
+    a.e.enqueue_own(Kind::Ctl, Body::Ctl(wrong), Via::Append, None).expect("an entry id");
+    let out = std::mem::take(&mut a.e.out);
+    a.absorb(out);
+    a.feed(Event::Tick);
+    net.settle(&mut [&mut a, &mut b]);
+    let st = b.e.status();
+    assert_eq!(b.board_bytes(), board);
+    assert!(st.alarms.iter().any(|x| x.kind == crate::AlarmKind::ResetMismatch));
+    assert!(st.stops.iter().any(|s| matches!(s.kind, crate::StopKind::Divergence)));
+}
