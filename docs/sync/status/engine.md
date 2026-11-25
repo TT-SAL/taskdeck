@@ -415,7 +415,14 @@ tail of a move), which are sent again; harmless.
   shared picture is uploaded again after a move.
 - Left open by `seal` (Q79): nothing binds the log between the bundle's head and `added_seq`; the
   remedy (the bundle carries the chain value at `added_seq`) is `engine`'s choice.
-- **Asked of the owner (2026-11-25), after D6 and the fixes of 1022, 1073, 2154:** (Q7) a device
+- **Decided by the owner (2026-11-25): Q7 "Accept as known limit", Q8 "Count it as removed".**
+  Spec text: local branches `spec-change-3` 183e016 (behaviour: ENG-RECV-007 a fenced relay is
+  read up to its Fence only; §21.3 step 1 repairs again; §28.4 step 4 `PairFailed` with the
+  revoke) and `spec-gate-2` 6099cd3 (gate: §31.7 retired device, the dropped seq above the final
+  head, invariant 4's injected frame above a Fence; SYNC.md §11 risk 7; SYNC_PLAN.md §6.5 item 2)
+  in `/home/user/wt/spec`, each to merge as its own pull request (parking cycle), then the engine
+  change for ENG-RECV-007 and task D7 (the simulator's checks for both).
+- Asked of the owner (2026-11-25), after D6 and the fixes of 1022, 1073, 2154: (Q7) a device
   the user retires (revoked with replace, re-paired) while it is cut off: on a fork's copy its
   entries only the copy acknowledged are lost with no alarm (`gate` 128, 1019, 2041, 2111, 2124,
   2155, 2240, 2245, 2277, 2295); shown a stale view, it never sees and never reports its own
