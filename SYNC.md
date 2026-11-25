@@ -427,6 +427,7 @@ Residual risks, plainly:
 4. **Cloudflare**: the DO incident rate rose in late 2026 [V R3], and the free tier could change; the exit plan is rehearsed in CI and yearly.
 5. **Android churn**: developer verification in 2027; One UI's sleeping lists; whether Auto Blocker or Advanced Protection blocks adb [U]; whether `about:blank` iframes get the document-start script [U].
 6. **chrono is unmaintained** (RUSTSEC-2026-0543): a reviewed ignore now, jiff later.
+7. **A device retired while cut off** (accepted 2026-11-25): if you revoke a device with *replace* and re-pair its machine while a misbehaving relay keeps that device on a forked copy or shows it a stale view, what only that copy acknowledged is lost, and a refusal of its own entries that it never saw is not reported. No alarm fires, because the old identity never meets the real relay again (`engine.md` §31.7).
 
 **Open questions**
 1. Which phone, One UI version and Android version? This sets minSdk and the install procedure.
