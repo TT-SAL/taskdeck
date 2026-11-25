@@ -6,24 +6,30 @@ in the order it happened; this file is the current truth and is rewritten, not a
 
 ## Resuming: read this first
 
-**Where things stand (2026-11-25 01:30 UTC):**
+**Where things stand (2026-11-25, after task D2):**
 
-- Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the spec
-  change). Open, draft: TT-SAL/taskdeck#30 (operations against the model relay, six fixes); the
-  branch `claude/cool-franklin-c6e6um` is pushed and holds everything up to the simulator's merge.
-- Task D (the simulator) is applied to the branch as a patch (`git diff 7a764c7 wt/d`, because a
-  merge across the squashes conflicts). Its writer and its checker finished; its fix pass was cut
-  off by the usage limit. The checker's findings (several high: invariant 6 not fully checked,
-  invariants 2 and 5 excuse too much) are in the workflow's journal
-  (`.../subagents/workflows/wf_70e5dcc6-438/journal.jsonl`, the second `result` line) and go to a
-  follow-up task D2 (brief `engine/briefs/d2-simulator-followup.md`).
-- The engine under the simulator: 100 quiet seeds pass. The writer reported engine defects with
-  seeds (see the journal entry of 2026-11-25); each is the lead's to fix with a regression file.
-- Every clause is cited (234 of 234), `unimplemented!()`: 0. What keeps the gate from passing is
-  the simulator: its `gate` seeds still fail (see the journal), so `cargo test -p taskdeck-sync`
-  is red and TT-SAL/taskdeck#30 cannot merge yet. Then: `bash scripts/gate.sh engine`, the one
-  round of checks, the exit pull request.
-- One question waits for the owner: the divergence rule (see "Open threads").
+- Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the first spec
+  change). Open, draft: TT-SAL/taskdeck#30 (everything since); the branch
+  `claude/cool-franklin-c6e6um` is pushed.
+- The simulator is on the branch with task D2's fix pass (invariants read strictly). Every clause
+  is cited (234 of 234), `unimplemented!()`: 0. Unit tests, `regressions` (9 files) and
+  `relay_conformance` pass; the `simulator` target (50 `gate` seeds by default) does not yet, so
+  CI of TT-SAL/taskdeck#30 is red.
+- What still fails under the simulator, by cause (D2's report, base 100), and whose it is:
+  - **A** a move's seed tail that carries an injected frame is refused by the new relay
+    (`relay.md` §12.7 against `engine.md` §28.3): the lead's, a spec change (the seed starts above
+    such a frame, checked before the fence) and then the engine. Not done yet.
+  - **A'**, **C**, **C'** entries lost to a relay rollback or fork, a restore tail refused for an
+    injected frame, a device paired through a forked copy: §31.7 as written cannot hold; **the
+    owner's decision** (see "Open threads", questions 2 and 3).
+  - **G** a pairing's `DeviceAdded` acknowledged and then refused (§28.4 step 4) against invariant
+    2: the owner's decision (question 3).
+  - **B**, **D**, **E**, **H**: engine, fixed on 2026-11-25 (see the journal); regression files
+    103, 115, 118, 137.
+- The second spec change (a pull request of its own, see "Spec changes to make") must merge before
+  TT-SAL/taskdeck#30 can be green: it needs the branch for itself, so the engine's work is parked
+  on a local branch for the time of that pull request's CI, as for TT-SAL/taskdeck#29.
+- Then: `bash scripts/gate.sh engine`, the one round of checks, the exit pull request.
 
 1. Read this file, then the last 40 lines of `engine/journal.md`. Do not read `engine.md` (the
    spec) in full again: use the clause index

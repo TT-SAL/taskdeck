@@ -579,11 +579,13 @@ fn a_duty_that_waits_only_for_a_fresh_head_asks_for_one() {
     a.feed(Event::Page { req: None, page });
     assert_eq!(a.e.status().board_seq, hub.log.len() as u64);
     a.fx.clear();
-    // Twenty minutes of quiet: the head is older than 600,000 ms, but no duty is due: no Hello.
+    // Twenty minutes of quiet. No duty is due, so nothing asks every 30,000 ms; the engine still
+    // asks for the head once per 600,000 ms: a push that never arrived cannot leave it behind.
     for _ in 0..40 {
         a.tick(30_000);
     }
-    assert_eq!((hellos(&a), appends(&a)), (0, 0));
+    assert_eq!((hellos(&a), appends(&a)), (2, 0));
+    a.fx.clear();
     // A day later the beat is due. The device is eligible but for the age of its head: it asks.
     a.advance(86_400_000);
     a.feed(Event::Tick);

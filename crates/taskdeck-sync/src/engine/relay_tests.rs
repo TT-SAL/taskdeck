@@ -830,6 +830,12 @@ fn a_move_from_a_relay_that_is_gone_sends_its_fence_as_an_append() {
     let calls = net.calls.len();
     a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
     net.settle(&mut [&mut a]);
+    // A relay that does not answer is not gone until the user says so: the door is known, and
+    // nothing is seeded.
+    assert_eq!(op_result(&a, 9), None);
+    assert!(net.calls[calls..].iter().all(|c| c.1 != "admin:seed"), "no seed without the Fence or the user's word");
+    a.feed(Event::User(crate::UserAction::OldRelayGone));
+    net.settle(&mut [&mut a]);
     assert_eq!(op_result(&a, 9), Some(Ok(())));
     let mine: Vec<&str> = net.calls[calls..].iter().filter(|c| c.0 == a.dev()).map(|c| c.1.as_str()).collect();
     assert!(!mine.contains(&"admin:fence"), "{mine:?}");
@@ -1333,4 +1339,91 @@ fn a_skip_it_cannot_replay_makes_a_device_wait_for_a_snapshot() {
     c.set(900, 90, 9);
     net.settle(&mut [&mut a, &mut b, &mut c]);
     assert_eq!(a.e.confirmed().0.keys[&90].0, 9);
+}
+
+// spec: ENG-MOVE-006 ENG-MOVE-009
+#[test]
+fn a_move_whose_relay_is_away_for_a_moment_still_fences_it() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(421);
+    let mut b = pair(&mut net, &mut a, 422, "Laptop", 1);
+    net.add_relay(NEW);
+    // The session with the old relay is lost just as the move begins.
+    a.feed(Event::Disconnected { unreachable: false, paused_until_ms: None });
+    let calls = net.calls.len();
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    let mine: Vec<&str> = net.calls[calls..].iter().filter(|c| c.0 == a.dev()).map(|c| c.1.as_str()).collect();
+    let at = |name: &str| mine.iter().position(|c| *c == name).unwrap_or_else(|| panic!("{name} in {mine:?}"));
+    assert!(at("admin:fence") < at("admin:seed"), "{mine:?}");
+    let f = net.relays[&old].head().expect("a head").seq;
+    let reports = notes_of(&a, |x| match x {
+        crate::Notification::MoveReport { carried_through, old_relay_answered } => Some((*carried_through, *old_relay_answered)),
+        _ => None,
+    });
+    assert_eq!(reports, vec![(f, true)]);
+}
+
+// spec: ENG-SESS-006
+#[test]
+fn nothing_is_sent_to_a_fenced_relay() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(431);
+    let mut b = pair(&mut net, &mut a, 432, "Laptop", 1);
+    let c = pair(&mut net, &mut a, 433, "Phone", 2);
+    net.settle(&mut [&mut a, &mut b]);
+    net.add_relay(NEW);
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    let code = notes_of(&a, |x| match x {
+        crate::Notification::MoveCode { text } => Some(text.clone()),
+        _ => None,
+    })
+    .pop()
+    .expect("the move code");
+    // The other device has not followed yet. What it would send to the fenced relay waits.
+    assert_eq!(net.at[&b.dev()], old);
+    let calls = net.calls.len();
+    b.feed(Event::Op { ticket: 10, op: Operation::Revoke { dev: c.dev(), replace: false } });
+    b.set(700, 7, 7);
+    for _ in 0..4 {
+        b.advance(700_000);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    let sent: Vec<&str> = net.calls[calls..].iter().filter(|x| x.0 == b.dev()).map(|x| x.1.as_str()).collect();
+    assert!(sent.iter().all(|x| !x.starts_with("admin") && *x != "append" && !x.starts_with("blob:upload")), "{sent:?}");
+    assert_eq!(op_result(&b, 10), None);
+    // Once it follows the move, the operation runs on the new relay.
+    assert_eq!(type_code(&mut b, &code), Ok(()));
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(net.at[&b.dev()], NEW);
+    assert_eq!(op_result(&b, 10), Some(Ok(())));
+    assert_eq!(status_of(&a, &c), DeviceStatus::Revoked);
+}
+
+// spec: ENG-OPS-006
+#[test]
+fn a_pairing_cut_off_by_a_restart_is_reported_failed() {
+    let (mut net, mut a) = board(441);
+    net.settle(&mut [&mut a]);
+    a.feed(Event::PairRegister { ticket: 5, device: new_device(442, "Laptop") });
+    // The upload is answered; the record is enqueued durably, and the process dies before the
+    // write that seals it.
+    let (i, _) = a.fx.iter().enumerate().find(|(_, f)| matches!(f, Effect::Blob { .. })).expect("the upload");
+    let fx = a.fx.remove(i).expect("it");
+    a.auto = false;
+    net.answer(&mut a, fx);
+    assert!(a.persist_one());
+    let admins = net.admins.len();
+    a.fx.clear();
+    a.auto = true;
+    a.restart(443);
+    net.settle(&mut [&mut a]);
+    assert_eq!(pair_result(&a, 5), Some(Err("engine/pair_interrupted")));
+    assert_eq!(net.admins.len(), admins, "nothing was registered");
+    assert!(a.e.outbox.is_empty());
 }

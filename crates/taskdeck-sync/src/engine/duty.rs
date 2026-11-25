@@ -195,6 +195,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         self.shred_step();
         self.fence_lookup();
+        if self.sess.fenced {
+            // §11.9: a fenced relay reads only. No repair, upload, admin call or duty entry goes
+            // to it; the device reads to its head and looks for the Fence.
+            self.reboot_step();
+            return;
+        }
         self.repair_step();
         self.reboot_step();
         if !self.eligible() {
