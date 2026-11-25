@@ -178,9 +178,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                         self.say_hello();
                     }
                 } else if self.sess.state == SessionState::Live
-                    && !self.sess.push
-                    && since.is_none_or(|d| d >= lim::POLL_MS)
+                    && since.is_none_or(|d| d >= if self.sess.push { lim::PUSH_HELLO_MS } else { lim::POLL_MS })
                 {
+                    // Without push the engine polls. With push it still asks for the head now and
+                    // then: a push that never arrived must not leave the device behind for good.
                     self.say_hello();
                 }
             }

@@ -83,6 +83,8 @@ pub(crate) mod lim {
     pub const STOP_HELLO_MS: u64 = 900_000;
     pub const SLOW_CONNECT_MS: u64 = 3_600_000;
     pub const CAUGHT_UP_MS: u64 = 600_000;
+    /// On a session with push: a `Hello` when the last one is this old.
+    pub const PUSH_HELLO_MS: u64 = 600_000;
     pub const CKPT_ENTRIES: u32 = 200;
     pub const CKPT_MS: u64 = 600_000;
     pub const ALARMS: usize = 256;
@@ -897,6 +899,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     arm(self.sess.hello_mono.map(|t| t + lim::STOP_HELLO_MS));
                 } else if !self.sess.push || self.sess.wait_welcome {
                     arm(self.sess.hello_mono.map(|t| t + lim::POLL_MS));
+                } else if self.sess.state == crate::SessionState::Live {
+                    arm(self.sess.hello_mono.map(|t| t + lim::PUSH_HELLO_MS));
                 }
                 arm(self.sess.pause_append_until.and_then(ahead));
                 arm(self.sess.pause_writes_until.and_then(ahead));

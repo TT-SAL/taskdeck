@@ -170,6 +170,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     pub(crate) fn can_call(&self) -> bool {
         matches!(self.sess.state, SessionState::Live | SessionState::Reconciling)
             && !self.dead
+            // §11.9: a fenced relay reads only; what would be sent waits for the relay its Fence leads to.
+            && !self.sess.fenced
             && self.sess.pause_writes_until.is_none_or(|t| self.wall >= t)
     }
 
@@ -1009,9 +1011,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let id = self.outbox[i].r.entry_id;
         let Some(p) = self.opx.pair.as_ref().filter(|p| p.entry == Some(id)) else {
             if matches!(self.outbox[i].r.via, Via::Register { .. }) {
-                // A pairing this process does not know (a Start in between): the record goes.
+                // A pairing this process does not know (a Start in between): the record goes
+                // unsent, and the pairing is reported failed under the ticket the record kept.
+                let ticket = self.outbox[i].r.op.unwrap_or(0);
                 self.outbox.remove(i);
                 self.persist(vec![PersistOp::Outbox(vec![OutboxOp::Drop(id)])]);
+                self.notify(Notification::PairFailed { ticket, code: "engine/pair_interrupted" });
                 return false;
             }
             return true;

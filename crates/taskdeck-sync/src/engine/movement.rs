@@ -31,6 +31,8 @@ pub(crate) struct MoveState {
     pub home_gen: u32,
     /// Did the old relay sequence this move's Fence (the first case of stage 2)?
     pub old_answered: bool,
+    /// The user said the old relay is gone: stage 2 no longer waits for it.
+    pub gone: bool,
     pub fence_seq: Option<u64>,
     pub s: u64,
     pub first_seq: u64,
@@ -270,9 +272,17 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     // ------------------------------------------------------------------ the moving device
 
+    /// `UserAction::OldRelayGone`: a move waiting in stage 2 for its relay goes on without it.
+    pub(crate) fn on_old_relay_gone(&mut self) {
+        if self.meta.ops.iter().any(|o| matches!(o.op, Operation::Move { .. }) && o.stage <= 2) {
+            self.opx.mv.gone = true;
+        }
+    }
+
     pub(crate) fn move_begin(&mut self, ticket: u64, op: Operation) {
         self.opx.mv.door = None;
         self.opx.mv.old_answered = false;
+        self.opx.mv.gone = false;
         self.opx.mv.fence_seq = None;
         self.opx.mv.blob = None;
         self.opx.mv.info = None;
@@ -330,11 +340,13 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 } else if relay_answers {
                     // Under an evidence stop: fence the old relay without a frame.
                     self.mv_admin(ticket, AdminRequest::Fence { host, door, home_gen, frame: None });
-                } else {
-                    // The old relay does not answer: on to the seed at once.
+                } else if self.opx.mv.gone {
+                    // The user says the old relay is gone: on to the seed at once.
                     self.opx.mv.home_gen = home_gen;
                     self.op_stage(ticket, 3);
                 }
+                // Otherwise the move waits for the session: a relay that does not answer right
+                // now is not gone, and seeding without its Fence would leave it accepting entries.
             }
             3 => self.move_seed(ticket, host),
             4 => self.move_tail(ticket),
