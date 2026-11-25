@@ -4,7 +4,7 @@
 use super::*;
 
 /// What a delivered event tells the invariants before the engine handles it.
-struct Contra {
+pub(super) struct Contra {
     what: String,
     l: u64,
 }
@@ -132,6 +132,7 @@ impl World<'_> {
             outstanding: BTreeMap::new(),
             exiting: false,
             hello_no: 0,
+            reads_open: BTreeSet::new(),
         });
         self.stats.starts += 1;
         self.trace.line(self.t, "start", &[("dev", V::I(id as i128)), ("attempt", V::I(i128::from(no)))]);
@@ -148,6 +149,7 @@ impl World<'_> {
     /// The process ends: a crash, a kill after `Shutdown`, a retirement.
     pub(super) fn stop_proc(&mut self, id: usize) {
         let Some(p) = self.idents[id].proc.take() else { return };
+        self.discard_unapplied(id, p.no);
         for (e, r) in p.engine.sealer().roots() {
             self.roots.insert((e, r));
         }
@@ -179,6 +181,9 @@ impl World<'_> {
         let wall = self.wall(m);
         let contra = self.contradiction(id, &ev);
         let Some(p) = self.idents[id].proc.as_mut() else { return };
+        if let Event::Page { req: Some(r), .. } = &ev {
+            p.reads_open.remove(r);
+        }
 
         let mono = self.t - p.start_t + 1;
         let name = ev_name(&ev);
@@ -221,9 +226,16 @@ impl World<'_> {
                 ident.expect_alarm = Some((line, c.what, c.l));
             }
         }
-        for e in effects {
+        let mut effects = effects.into_iter();
+        while let Some(e) = effects.next() {
             self.effect(id, e);
             if self.idents[id].proc.is_none() {
+                // A crash cut this call: the effects after this one were
+                // never performed (task D5).
+                if effects.next().is_some() {
+                    let call = self.idents[id].calls;
+                    self.idents[id].cut_calls.insert(call);
+                }
                 break;
             }
         }
@@ -239,26 +251,80 @@ impl World<'_> {
     /// device from the same identity in the same or the next call. At the end
     /// of each call, drops older than the previous call that are still
     /// unexplained are violations of invariant 5; `all` reports every one.
+    ///
+    /// Task D5: a drop counts only once the write that carries it is applied
+    /// (one still in the persist queue is judged when it is; one a crash or
+    /// an exit cut off deletes nothing, `discard_unapplied`), and the rule is
+    /// not asked of a call whose effects a crash cut off before the runtime
+    /// performed them (its `PairFailed` may be among those never performed).
     pub(super) fn check_pair_drops(&mut self, id: usize, all: bool) {
         let ident = &mut self.idents[id];
         let calls = ident.calls;
         let failed = ident.pair_failed.clone();
+        let cut = ident.cut_calls.clone();
         let mut bad = Vec::new();
-        ident.pair_drops.retain(|(dev, call, line)| {
-            if failed.iter().any(|(d, c)| d == dev && *c >= *call && *c <= call + 1) {
+        ident.pair_drops.retain(|(dev, call, line, key)| {
+            if failed.iter().any(|(d, c)| d == dev && *c >= *call && *c <= call + 1) || cut.contains(call) {
                 return false;
             }
             if all || calls > call + 1 {
-                bad.push((*dev, *line));
+                bad.push((*dev, *line, *key));
                 return false;
             }
             true
         });
         ident.pair_failed.retain(|(_, c)| c + 1 >= calls);
-        for (dev, line) in bad {
+        for (dev, line, key) in bad {
             let detail = format!("dev {id}: outbox Drop of the Register record of {} with no PairFailed in the same or the next call", hex(&dev));
-            self.violations.push(Violation { invariant: 5, line, detail });
+            let v = Staged::Violation(Violation { invariant: 5, line, detail });
+            match key {
+                Some(k) if self.unapplied.contains(&k) => self.staged.push((k, v)),
+                _ => self.commit(v),
+            }
         }
+    }
+
+    /// What a deletion tells invariant 5, once the write being noted (if
+    /// any) is applied to durable storage (task D5).
+    pub(super) fn stage(&mut self, s: Staged) {
+        match self.cur_write {
+            Some(k) if self.unapplied.contains(&k) => self.staged.push((k, s)),
+            _ => self.commit(s),
+        }
+    }
+
+    pub(super) fn commit(&mut self, s: Staged) {
+        match s {
+            Staged::Deletion(d) => self.deletions.push(d),
+            Staged::Violation(v) => self.violations.push(v),
+            Staged::Cancelled(e) => {
+                self.cancelled.insert(e);
+            }
+        }
+    }
+
+    /// The write `k` was applied to durable storage: what it deletes counts.
+    pub(super) fn wrote(&mut self, k: WriteKey) {
+        if !self.unapplied.remove(&k) {
+            return;
+        }
+        let (now, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut self.staged).into_iter().partition(|(x, _)| *x == k);
+        self.staged = keep;
+        for (_, s) in now {
+            self.commit(s);
+        }
+    }
+
+    /// The process `proc` of `id` ended: its writes not applied never will
+    /// be, and delete nothing (ENG-PERSIST-004; task D5).
+    pub(super) fn discard_unapplied(&mut self, id: usize, proc: u32) {
+        let gone: BTreeSet<WriteKey> = self.unapplied.iter().filter(|k| k.0 == id && k.1 == proc).copied().collect();
+        if gone.is_empty() {
+            return;
+        }
+        self.unapplied.retain(|k| !gone.contains(k));
+        self.staged.retain(|(k, _)| !gone.contains(k));
+        self.idents[id].pair_drops.retain(|d| !d.3.is_some_and(|k| gone.contains(&k)));
     }
 
     /// Records the confirmed state when `B` moved (invariant 4).
@@ -295,9 +361,19 @@ impl World<'_> {
     }
 
     /// Whether a welcome or page contradicts what the device holds (invariant 4).
-    fn contradiction(&self, id: usize, ev: &Event<ToyCommand>) -> Option<Contra> {
+    pub(super) fn contradiction(&self, id: usize, ev: &Event<ToyCommand>) -> Option<Contra> {
         let s = &self.idents[id].store;
         let (l, _) = s.head()?;
+        // ENG-EFFECT-002: the engine ignores an answer whose request id it
+        // did not issue or already received (a duplicated answer to a read
+        // delivered after the first copy), so such a page is no relay head
+        // the device saw and owes no alarm of §21.1 (task D5). A push (no
+        // request id) and the first answer to a read count.
+        if let Event::Page { req: Some(r), .. } = ev
+            && !self.idents[id].proc.as_ref().is_some_and(|p| p.reads_open.contains(r))
+        {
+            return None;
+        }
         let (head, entries): (Head, &[crate::PageEntry]) = match ev {
             Event::Welcome(w) => (w.head, &[]),
             Event::Page { page, .. } if !page.truncated => (page.head, &page.entries),
@@ -359,7 +435,11 @@ impl World<'_> {
         }
         match e {
             Effect::Persist { id: pid, ops } => {
+                let key = (id, self.proc_no(id).unwrap_or(0), pid);
+                self.unapplied.insert(key);
+                self.cur_write = Some(key);
                 self.note_persist(id, &ops, line);
+                self.cur_write = None;
                 let p = self.idents[id].proc.as_mut().expect("running");
                 let hist = ops
                     .iter()
@@ -405,11 +485,15 @@ impl World<'_> {
                 self.send_up(id, Call::Hello, key, 0);
             }
             Effect::Read { req, after, limit } => {
+                if let Some(p) = self.idents[id].proc.as_mut() {
+                    p.reads_open.insert(req);
+                }
                 self.outstanding(id, req, "read");
                 self.send_up(id, Call::Read { req, after, limit }, req, 0);
             }
             Effect::Append { req, frames } => {
                 self.settle_append(id, &frames, line);
+                self.idents[id].sent.extend(frames.iter().map(|f| h(f)));
                 self.outstanding(id, req, "append");
                 let bytes: usize = frames.iter().map(Vec::len).sum();
                 self.send_up(id, Call::Append { req, frames }, req, bytes);
@@ -498,22 +582,26 @@ impl World<'_> {
         let p = ident.proc.as_mut().expect("running");
         let Some((pid, ops, hist)) = p.queue.pop_front() else { return };
         p.writing = false;
+        let key = (id, proc, pid);
         let applied = match crash {
             Some(CrashAt::During) => {
                 let applied = self.fault.chance(500_000);
                 if applied {
                     self.idents[id].store.apply(&ops, hist.as_ref());
+                    self.wrote(key);
                 }
                 self.crash(id, CrashAt::During);
                 applied
             }
             Some(_) => {
                 ident.store.apply(&ops, hist.as_ref());
+                self.wrote(key);
                 self.crash(id, CrashAt::After);
                 true
             }
             None => {
                 ident.store.apply(&ops, hist.as_ref());
+                self.wrote(key);
                 self.deliver(id, Event::Persisted { id: pid });
                 if let Some(p) = self.idents[id].proc.as_ref()
                     && !p.writing && !p.queue.is_empty() {
@@ -592,7 +680,7 @@ impl World<'_> {
                 }
                 PersistOp::TruncateLogBelow(p, fc) => {
                     let ctx = self.join_floor(id, *p) || self.rejoin_truncation(id, *p, *fc);
-                    self.deletions.push((id, Deletion::Truncate(*p, ctx), b, line));
+                    self.stage(Staged::Deletion((id, Deletion::Truncate(*p, ctx), b, line)));
                 }
                 PersistOp::DeleteBases(seqs) => {
                     // The rejoin's own base deletion: one, between the confirmation and its truncation.
@@ -603,7 +691,7 @@ impl World<'_> {
                         }
                         _ => false,
                     };
-                    self.deletions.push((id, Deletion::Bases(seqs.clone(), ctx), b, line));
+                    self.stage(Staged::Deletion((id, Deletion::Bases(seqs.clone(), ctx), b, line)));
                 }
                 PersistOp::WriteIdentity(bytes) => {
                     if let Some((roots, pending)) = identity_keys(bytes) {
@@ -613,7 +701,7 @@ impl World<'_> {
                         ident.last_roots = roots;
                         ident.last_pending = pending;
                         if !lost.is_empty() {
-                            self.deletions.push((id, Deletion::Roots(lost), b, line));
+                            self.stage(Staged::Deletion((id, Deletion::Roots(lost), b, line)));
                         }
                         if !gone.is_empty() {
                             let logged = ops.iter().find_map(|o| match o {
@@ -621,7 +709,7 @@ impl World<'_> {
                                 _ => None,
                             });
                             let chain = logged.or_else(|| self.idents[id].store.chain_at(written));
-                            self.deletions.push((id, Deletion::Pending(gone, chain), written, line));
+                            self.stage(Staged::Deletion((id, Deletion::Pending(gone, chain), written, line)));
                         }
                     }
                     if let Some(p) = self.idents[id].proc.as_ref() {
@@ -657,6 +745,7 @@ impl World<'_> {
     fn note_put(&mut self, id: usize, r: &OutboxRecord) {
         // A put of a record already dropped as a cancelled hold would bring it back.
         self.cancelled.remove(&r.entry_id);
+        self.staged.retain(|(_, s)| !matches!(s, Staged::Cancelled(e) if *e == r.entry_id));
         self.first_put.entry(r.entry_id).or_insert(self.t);
         if let Some(fr) = &r.frame {
             let duty = matches!(
@@ -692,14 +781,33 @@ impl World<'_> {
                 _ => false,
             };
         if cancelled_hold {
-            self.cancelled.insert(*eid);
+            self.stage(Staged::Cancelled(*eid));
         }
         if !reached
             && let crate::Via::Register { dev, .. } = r.via
         {
             let call = self.idents[id].calls;
-            self.idents[id].pair_drops.push((dev, call, line));
+            let key = self.cur_write.filter(|k| self.unapplied.contains(k));
+            self.idents[id].pair_drops.push((dev, call, line, key));
             return;
+        }
+        // §19.4 step 5, ENG-SNAP-004: a `snap` record no `Append` carried,
+        // dropped unsent because the epoch moved past its blob's. Judged at
+        // the end against the log the device followed (task D5).
+        if !reached
+            && r.kind == Kind::Snap
+            && let Body::Snap(info) = &r.body
+        {
+            let sent = &self.idents[id].sent;
+            let unsent = r.ack.is_none()
+                && r.seen.is_none()
+                && !r.frame.as_ref().is_some_and(|f| sent.contains(&h(f)))
+                && !r.frame_hash.as_ref().is_some_and(|fh| sent.contains(fh));
+            if unsent {
+                let chain = self.idents[id].store.chain_at(b);
+                self.stage(Staged::Deletion((id, Deletion::Snap(*eid, info.epoch, chain), b, line)));
+                return;
+            }
         }
         if !(reached || cancelled_hold) {
             let detail = format!(
@@ -709,7 +817,7 @@ impl World<'_> {
                 r.seen,
                 r.ack.map(|a| a.0)
             );
-            self.violations.push(Violation { invariant: 5, line, detail });
+            self.stage(Staged::Violation(Violation { invariant: 5, line, detail }));
         }
     }
 
