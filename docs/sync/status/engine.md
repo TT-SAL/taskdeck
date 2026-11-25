@@ -6,11 +6,13 @@ in the order it happened; this file is the current truth and is rewritten, not a
 
 ## Resuming: read this first
 
-**Where things stand (2026-11-25, after task D3 and the lead's fixes that followed it):**
+**Where things stand (2026-11-25, after the owner's decisions; both spec changes merged):**
 
 - Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the first spec
-  change). Open, draft: TT-SAL/taskdeck#30 (everything since); the branch
-  `claude/cool-franklin-c6e6um` is pushed.
+  change), TT-SAL/taskdeck#31 and TT-SAL/taskdeck#32 (the second spec change and the gate
+  change). TT-SAL/taskdeck#30 (the engine's work since #29) was closed for the parking cycle; that
+  work is on the branch `claude/cool-franklin-c6e6um`, rebased onto day-planner fc18f4c and
+  pushed, and its pull request is opened again once task D6 is in and the gate passes locally.
 - Tests on the branch: 189 unit tests, `relay_conformance` (16), clippy, the wasm check pass;
   every clause is cited (234 of 234); `unimplemented!()`: 0. **`regressions` fails on one file,
   `1099.json`**: the lead added it for the lost `SeedTail` (it passed then); a later engine fix
