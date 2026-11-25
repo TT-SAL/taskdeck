@@ -170,6 +170,16 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             && !self.exiting
     }
 
+    /// Everything of `eligible` but the stops.
+    fn eligible_but_for_stops(&self) -> bool {
+        self.current_member()
+            && self.caught_up()
+            && !self.halted()
+            && !self.clock_blocked()
+            && !self.pipe.tail
+            && !self.exiting
+    }
+
     /// Everything but the freshness of the head holds: a `Hello` would make the device eligible.
     fn eligible_but_stale(&self) -> bool {
         self.current_member()
@@ -203,6 +213,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         self.repair_step();
         self.reboot_step();
+        if self.divergence_only() && self.eligible_but_for_stops() {
+            // §22.2, ENG-DIVERGE-002: under the divergence stop only the beat, without verdicts.
+            self.beat_step(false);
+            return;
+        }
         if !self.eligible() {
             if self.eligible_but_stale() && self.duty_pending() {
                 // A duty waits only for a head newer than 600,000 ms: ask for one.
@@ -213,7 +228,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
             return;
         }
-        self.beat_step();
+        self.beat_step(true);
         self.snapshot_step();
         self.compact_step();
         self.upgrade_step();
@@ -222,7 +237,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     /// Would some duty act if the device were eligible?
     fn duty_pending(&self) -> bool {
-        self.beat_reason().is_some()
+        self.beat_reason(true).is_some()
             || self.meta.duties.snapshot.is_some()
             || self.meta.duties.purge.is_some()
             || self.meta.duties.upgrade.is_some()
@@ -232,7 +247,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     // ------------------------------------------------------------------ beats (§23)
 
-    fn beat_reason(&self) -> Option<u8> {
+    /// Why a beat is due now. `verdicts` false: the beat of the divergence stop, which carries
+    /// none, so pending verdicts do not make it due, and which goes at once on entering the stop.
+    fn beat_reason(&self, verdicts: bool) -> Option<u8> {
         if self.outbox.iter().any(|r| r.r.kind == Kind::Beat) {
             return None;
         }
@@ -240,12 +257,16 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let lists_differ = me.rules != self.sm.supported_rules()
             || me.envelopes != self.sealer.supported_envelopes()
             || me.hash_versions != self.sm.hash_versions();
-        beat_due(self.wall, self.meta.last_beat_ms, lists_differ, !self.registry.pending_verdicts.is_empty())
+        if !verdicts && self.evid.beat_now {
+            return Some(4);
+        }
+        let pending = verdicts && !self.registry.pending_verdicts.is_empty();
+        beat_due(self.wall, self.meta.last_beat_ms, lists_differ, pending)
     }
 
-    /// ENG-BEAT-001, ENG-BEAT-002.
-    fn beat_step(&mut self) {
-        if self.beat_reason().is_none() {
+    /// ENG-BEAT-001, ENG-BEAT-002; under the divergence stop, ENG-DIVERGE-002.
+    fn beat_step(&mut self, verdicts: bool) {
+        if self.beat_reason(verdicts).is_none() {
             return;
         }
         let aligned = self.b - self.b % lim::STRIDE;
@@ -254,7 +275,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         } else {
             None
         };
-        let mut acks = self.registry.pending_verdicts.clone();
+        let mut acks = if verdicts { self.registry.pending_verdicts.clone() } else { Vec::new() };
         acks.sort_by_key(|a| a.0);
         acks.dedup_by_key(|a| a.0);
         acks.truncate(64);
@@ -268,6 +289,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.enqueue_own(Kind::Beat, Body::Beat(info), Via::Append, None).is_some() {
             self.meta.last_beat_ms = self.wall;
             self.touch_meta();
+            if !verdicts {
+                self.evid.beat_now = false;
+            }
         }
     }
 

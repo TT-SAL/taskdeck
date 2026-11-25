@@ -564,13 +564,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.sess.pause_writes_until = Some(refusal.until.unwrap_or(self.wall));
                 self.status_dirty = true;
             }
-            (401, "relay/unauthorized")
-                if connecting
-                    && self.vk.home_seq > 0
-                    && self.meta.relay.host == self.vk.home_host
-                    && self.meta.relay.door == self.vk.home_door
-                    && self.meta.relay.home_gen == self.vk.home_gen =>
-            {
+            (401, "relay/unauthorized") if connecting && !self.following() && self.at_home_relay() => {
                 // ENG-SESS-007: no member of the board there.
                 self.add_stop(StopKind::Closed, None);
             }
@@ -583,6 +577,18 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     self.sess.wait_welcome = true;
                 }
             }
+        }
+    }
+
+    /// §11.9: is the target the board's home relay? That of `M_K`'s latest accepted `Fence`, or,
+    /// on a board that never moved, the relay this device was created or joined on (a move or a
+    /// follow sets a generation above `M_K.home_gen`).
+    fn at_home_relay(&self) -> bool {
+        let r = &self.meta.relay;
+        if self.vk.home_seq > 0 {
+            r.host == self.vk.home_host && r.door == self.vk.home_door && r.home_gen == self.vk.home_gen
+        } else {
+            r.home_gen == self.vk.home_gen
         }
     }
 

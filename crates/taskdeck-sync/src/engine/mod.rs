@@ -714,6 +714,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         !self.meta.stops.is_empty() || self.dead
     }
 
+    /// Every stop in force is a divergence stop: the beat still goes (§22.2).
+    pub(crate) fn divergence_only(&self) -> bool {
+        !self.dead && !self.meta.stops.is_empty() && self.meta.stops.iter().all(|s| s.kind == StopKind::Divergence)
+    }
+
     /// Is a stop in force under which the engine reads and persists nothing from
     /// the relay (§21.2 item 2, §21.4)?
     pub(crate) fn no_apply(&self) -> bool {

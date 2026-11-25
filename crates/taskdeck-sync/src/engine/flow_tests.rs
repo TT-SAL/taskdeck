@@ -897,3 +897,27 @@ fn a_second_skip_of_a_target_whose_skip_is_in_the_outbox_is_refused() {
     assert_eq!(op_result(&a, 5), Some(Ok(())));
     assert_eq!(a.e.membership().skips.len(), 1);
 }
+
+// spec: ENG-SKIP-006
+#[test]
+fn a_skip_whose_target_another_device_skipped_first_is_done() {
+    let (mut a, f1) = creator(981);
+    let mut hub = Hub::with_genesis(&a, &f1);
+    let mut b = join(&mut hub, &mut a, 982, "Laptop");
+    let mut c = join(&mut hub, &mut a, 983, "Phone");
+    c.set(1, 1, 5);
+    hub.settle(&mut [&mut a, &mut b, &mut c]);
+    let t = hub.log.len() as u64;
+    // A and B each skip C's entry before either has seen the other's Skip.
+    a.feed(Event::Op { ticket: 5, op: Operation::Skip { seq: t } });
+    b.feed(Event::Op { ticket: 6, op: Operation::Skip { seq: t } });
+    hub.settle(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(hub.log.len() as u64, t + 2, "both Skips are in the log");
+    // The second is refused, and its operation is done all the same: the target is skipped.
+    assert_eq!(op_result(&a, 5), Some(Ok(())));
+    assert_eq!(op_result(&b, 6), Some(Ok(())));
+    for n in [&a, &b, &c] {
+        assert!(n.e.membership().skips.iter().any(|s| s.0 == t));
+        assert_eq!(n.board_bytes(), a.board_bytes());
+    }
+}
