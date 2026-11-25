@@ -11,12 +11,6 @@ struct Contra {
 
 impl World<'_> {
     pub(super) fn step(&mut self, ev: Ev) {
-        if let Ev::Tick { id, proc, .. } = &ev {
-            let (id, proc) = (*id, *proc);
-            if let Some(p) = self.idents[id].proc.as_mut().filter(|p| p.no == proc) {
-                p.last_tick = self.t;
-            }
-        }
         match ev {
             Ev::ToRelay { id, proc, conn, sel, call } => self.at_relay(id, proc, conn, sel, call),
             Ev::Down { id, proc, conn, msg } => self.down(id, proc, conn, msg),
@@ -92,8 +86,9 @@ impl World<'_> {
                 match FakeSealer::restore(&st.identity, st.history.clone(), reseed, &rules) {
                     Ok(f) => f,
                     Err(e) => {
-                        let line = self.trace.line(self.t, "check", &[("inv", V::I(0)), ("ok", V::I(0)), ("detail", V::S(e.code))]);
-                        self.violations.push(Violation { invariant: 0, line, detail: format!("dev {id}: restore failed: {}", e.code) });
+                        // The process cannot start, so the device cannot settle (§31.7 invariant 6).
+                        let line = self.trace.line(self.t, "check", &[("inv", V::I(6)), ("ok", V::I(0)), ("detail", V::S(e.code))]);
+                        self.violations.push(Violation { invariant: 6, line, detail: format!("dev {id}: restore failed: {}", e.code) });
                         return;
                     }
                 }
@@ -104,9 +99,15 @@ impl World<'_> {
         let b = self.idents[id].rng.next().to_be_bytes();
         session[..8].copy_from_slice(&a);
         session[8..].copy_from_slice(&b);
-        let engine = Engine::new(ToyMachine::new(rules.len() > 1), fake, Config {});
+        let engine = Engine::new(CountedToy(ToyMachine::new(rules.len() > 1)), fake, Config {});
         let ident = &mut self.idents[id];
         ident.unloaded = false;
+        // The prompts a new process shows are new: the simulated user answers
+        // them again (an answer sent to the old process died with it).
+        ident.asked.clear();
+        // Alarm ids continue from the durable `Meta`: one raised after the last
+        // durable write may be raised again under the same id (ENG-PERSIST-004).
+        ident.max_alarm = ident.store.meta.as_ref().and_then(|m| m.alarms.iter().map(|a| a.id).max()).unwrap_or(0);
         // The outbox as the new process will load it: the durable one.
         ident.live = ident.store.live_outbox().into_iter().map(|r| (r.entry_id, r)).collect();
         if let Some((roots, pending)) = identity_keys(&ident.store.identity) {
@@ -131,7 +132,6 @@ impl World<'_> {
             outstanding: BTreeMap::new(),
             exiting: false,
             hello_no: 0,
-            last_tick: 0,
         });
         self.stats.starts += 1;
         self.trace.line(self.t, "start", &[("dev", V::I(id as i128)), ("attempt", V::I(i128::from(no)))]);
@@ -179,6 +179,7 @@ impl World<'_> {
         let wall = self.wall(m);
         let contra = self.contradiction(id, &ev);
         let Some(p) = self.idents[id].proc.as_mut() else { return };
+
         let mono = self.t - p.start_t + 1;
         let name = ev_name(&ev);
         *self.stats.events.entry(name).or_default() += 1;
@@ -200,11 +201,21 @@ impl World<'_> {
         }
         let line = self.trace.line(self.t, "in", &f);
         let is_rejoin = matches!(ev, Event::User(UserAction::ConfirmRejoin));
+        self.cur_forget = match &ev {
+            Event::Enqueue { ticket, command: ToyCommand::Forget { id: item }, .. } => Some((id, *ticket, *item)),
+            _ => None,
+        };
         let effects = p.engine.handle(Input { wall_ms: wall, mono_ms: mono, event: ev });
+        // An evidence stop in force after the event, with its alarm (raised now
+        // or still open from before), covers the contradiction: the device
+        // applies nothing while it holds (§21.2).
+        let in_evidence_stop = contra.is_some() && p.engine.status().stops.iter().any(|s| s.alarm.is_some());
+        self.idents[id].calls += 1;
         if is_rejoin {
-            self.idents[id].rejoin_confirmed = true;
+            // §19.7: the confirmation explains the rejoin's own deletions that follow it.
+            self.idents[id].rejoin = Some((BTreeMap::new(), false));
         }
-        if let Some(c) = contra {
+        if let Some(c) = contra.filter(|_| !in_evidence_stop) {
             let ident = &mut self.idents[id];
             if ident.expect_alarm.is_none() && !ident.alarms.iter().any(|a| a.3 >= self.contra_since) {
                 ident.expect_alarm = Some((line, c.what, c.l));
@@ -213,10 +224,41 @@ impl World<'_> {
         for e in effects {
             self.effect(id, e);
             if self.idents[id].proc.is_none() {
-                return;
+                break;
             }
         }
-        self.sample(id);
+        self.cur_forget = None;
+        self.check_pair_drops(id, false);
+        if self.idents[id].proc.is_some() {
+            self.sample(id);
+        }
+    }
+
+    /// Ruling 2 of the D2 brief (§28.4 step 3): a pairing's `DeviceAdded`
+    /// dropped unsent is explained only by a `Notify(PairFailed)` for that
+    /// device from the same identity in the same or the next call. At the end
+    /// of each call, drops older than the previous call that are still
+    /// unexplained are violations of invariant 5; `all` reports every one.
+    pub(super) fn check_pair_drops(&mut self, id: usize, all: bool) {
+        let ident = &mut self.idents[id];
+        let calls = ident.calls;
+        let failed = ident.pair_failed.clone();
+        let mut bad = Vec::new();
+        ident.pair_drops.retain(|(dev, call, line)| {
+            if failed.iter().any(|(d, c)| d == dev && *c >= *call && *c <= call + 1) {
+                return false;
+            }
+            if all || calls > call + 1 {
+                bad.push((*dev, *line));
+                return false;
+            }
+            true
+        });
+        ident.pair_failed.retain(|(_, c)| c + 1 >= calls);
+        for (dev, line) in bad {
+            let detail = format!("dev {id}: outbox Drop of the Register record of {} with no PairFailed in the same or the next call", hex(&dev));
+            self.violations.push(Violation { invariant: 5, line, detail });
+        }
     }
 
     /// Records the confirmed state when `B` moved (invariant 4).
@@ -367,6 +409,7 @@ impl World<'_> {
                 self.send_up(id, Call::Read { req, after, limit }, req, 0);
             }
             Effect::Append { req, frames } => {
+                self.settle_append(id, &frames, line);
                 self.outstanding(id, req, "append");
                 let bytes: usize = frames.iter().map(Vec::len).sum();
                 self.send_up(id, Call::Append { req, frames }, req, bytes);
@@ -387,13 +430,33 @@ impl World<'_> {
                 if at_mono_ms <= mono + 1 {
                     self.stats.ticks_due_now += 1;
                 }
-                // A tick comes at or after the time asked (§4.3), never sooner than
-                // TICK_MIN after the last one: the runtime's timer granularity.
-                let at = (p.start_t + at_mono_ms).saturating_sub(1).max(self.t).max(p.last_tick + TICK_MIN);
+                // A tick comes at the time asked (§31.4, ruling 7 of the D2
+                // brief: at or after it), or now when that time has passed.
+                let at = (p.start_t + at_mono_ms).saturating_sub(1).max(self.t);
                 let (proc, tgen) = (p.no, p.tick_gen);
                 self.at(at, Ev::Tick { id, proc, tgen });
             }
             Effect::Notify(nt) => self.on_notify(id, nt, line),
+        }
+    }
+
+    /// §31.7 invariant 6: in the last 1,800,000 ms of the run no device emits
+    /// an `Append` other than of beats and duty entries (§29.3: beats,
+    /// snapshots' `snap` entries, the rules-upgrade proposal). A frame the
+    /// simulator never saw put in an outbox counts as no duty entry.
+    pub(super) fn settle_append(&mut self, id: usize, frames: &[Vec<u8>], line: u64) {
+        if self.t + SETTLE_QUIET <= self.t_end {
+            return;
+        }
+        for f in frames {
+            let what = match self.frames.get(&h(f)) {
+                Some((_, _, true)) => continue,
+                Some((eid, kind, false)) => format!("entry {} of kind {kind:?}", hex(eid)),
+                None => "a frame no outbox record carried".to_owned(),
+            };
+            let detail = format!("dev {id}: an Append of {what} at {} ms, in the last {SETTLE_QUIET} ms of the run", self.t);
+            self.violations.push(Violation { invariant: 6, line, detail });
+            return;
         }
     }
 
@@ -458,8 +521,16 @@ impl World<'_> {
     }
 
     /// What a `Persist` tells the invariants (2, 3, 5, alarms).
-    fn note_persist(&mut self, id: usize, ops: &[PersistOp], line: u64) {
+    pub(super) fn note_persist(&mut self, id: usize, ops: &[PersistOp], line: u64) {
         let b = self.idents[id].proc.as_ref().and_then(|p| board_head(&p.engine)).map_or(0, |h| h.seq);
+        // The highest seq this write makes durable: a pending root is dropped in
+        // the write that logs its own rotation (ENG-SEALER-009), while the
+        // engine's durable head is still below that seq.
+        let written = ops
+            .iter()
+            .filter_map(|o| if let PersistOp::AppendLog(rs) = o { rs.iter().map(|r| r.seq).max() } else { None })
+            .max()
+            .map_or(b, |s| s.max(b));
         for op in ops {
             match op {
                 PersistOp::Outbox(xs) => {
@@ -500,12 +571,24 @@ impl World<'_> {
                         }
                     }
                 }
-                PersistOp::TruncateLogBelow(p, _) => {
-                    let ctx = self.deletion_ctx(id) || self.join_floor(id, *p);
+                PersistOp::WriteCheckpoint(c) => {
+                    if let Some((cks, _)) = self.idents[id].rejoin.as_mut() {
+                        cks.insert(c.board_seq, c.board_chain);
+                    }
+                }
+                PersistOp::TruncateLogBelow(p, fc) => {
+                    let ctx = self.join_floor(id, *p) || self.rejoin_truncation(id, *p, *fc);
                     self.deletions.push((id, Deletion::Truncate(*p, ctx), b, line));
                 }
                 PersistOp::DeleteBases(seqs) => {
-                    let ctx = self.deletion_ctx(id);
+                    // The rejoin's own base deletion: one, between the confirmation and its truncation.
+                    let ctx = match self.idents[id].rejoin.as_mut() {
+                        Some((_, used)) if !*used => {
+                            *used = true;
+                            true
+                        }
+                        _ => false,
+                    };
                     self.deletions.push((id, Deletion::Bases(seqs.clone(), ctx), b, line));
                 }
                 PersistOp::WriteIdentity(bytes) => {
@@ -519,7 +602,7 @@ impl World<'_> {
                             self.deletions.push((id, Deletion::Roots(lost), b, line));
                         }
                         if !gone.is_empty() {
-                            self.deletions.push((id, Deletion::Pending(gone), b, line));
+                            self.deletions.push((id, Deletion::Pending(gone), written, line));
                         }
                     }
                     if let Some(p) = self.idents[id].proc.as_ref() {
@@ -533,10 +616,17 @@ impl World<'_> {
         }
     }
 
-    /// A deletion during a confirmed rejoin or a join is explained (§19.7, §19.8).
-    fn deletion_ctx(&self, id: usize) -> bool {
-        let i = &self.idents[id];
-        i.rejoin_confirmed || i.store.checkpoint.is_none()
+    /// The rejoin's own truncation (§19.7 step 4): `TruncateLogBelow(S + 1,
+    /// Some(C_S))` after a `ConfirmRejoin`, with `S` and `C_S` those of a
+    /// checkpoint written since the confirmation. It ends the rejoin's excuse.
+    fn rejoin_truncation(&mut self, id: usize, p: u64, fc: Option<Hash32>) -> bool {
+        let i = &mut self.idents[id];
+        let Some((cks, _)) = &i.rejoin else { return false };
+        let ok = fc.is_some() && p > 0 && cks.get(&(p - 1)).copied() == fc;
+        if ok {
+            i.rejoin = None;
+        }
+        ok
     }
 
     /// A truncation to the floor of a join (§19.8: the log is empty, its floor `h + 1`).
@@ -546,6 +636,8 @@ impl World<'_> {
     }
 
     fn note_put(&mut self, id: usize, r: &OutboxRecord) {
+        // A put of a record already dropped as a cancelled hold would bring it back.
+        self.cancelled.remove(&r.entry_id);
         self.first_put.entry(r.entry_id).or_insert(self.t);
         if let Some(fr) = &r.frame {
             let duty = matches!(
@@ -557,20 +649,40 @@ impl World<'_> {
         self.idents[id].live.insert(r.entry_id, r.clone());
     }
 
-    /// Invariant 5 for an outbox `Drop`: the entry reached the board head, a
-    /// hold was cancelled, a confirmed rejoin or a join.
-    fn explain_drop(&mut self, id: usize, eid: &[u8; 16], b: u64, line: u64) {
-        let ctx = self.deletion_ctx(id);
+    /// Invariant 5 for an outbox `Drop`: the entry reached the board head; or
+    /// a hold was cancelled: the held, unsent `Create` of the item that the
+    /// `Forget` being enqueued names (`Coalesce::CancelBoth`, §9.3); or a
+    /// pairing's unsent `DeviceAdded`, explained by a `PairFailed` for it in
+    /// the same or the next call (ruling 2 of the D2 brief, §28.4 step 3). A
+    /// rejoin keeps every outbox record (ENG-BOOT-008) and explains no drop.
+    pub(super) fn explain_drop(&mut self, id: usize, eid: &[u8; 16], b: u64, line: u64) {
         let Some(r) = self.idents[id].live.remove(eid) else { return };
         let st = &self.idents[id].store;
         let in_log = |fh: &Hash32| st.by_hash.get(fh).is_some_and(|s| *s <= b);
         let reached = r.seen.or(r.ack.map(|a| a.0)).is_some_and(|s| s <= b)
             || r.frame.as_ref().is_some_and(|f| in_log(&h(f)))
             || r.frame_hash.as_ref().is_some_and(in_log);
-        let cancelled_hold = r.hold && r.frame.is_none();
-        // §28.4 step 3: a pairing's DeviceAdded dropped unsent when the epoch raced it.
-        let pair_raced = matches!(r.via, crate::Via::Register { .. }) && r.frame.is_none();
-        if !(reached || cancelled_hold || pair_raced || ctx) {
+        let cancelled_hold = !reached
+            && r.hold
+            && r.frame.is_none()
+            && r.ack.is_none()
+            && match (&r.body, self.cur_forget) {
+                (Body::Cmd(payload), Some((fid, _, item))) if fid == id => {
+                    matches!(ToyMachine::new(true).parse(payload), Ok(ToyCommand::Create { id: c, .. }) if c == item)
+                }
+                _ => false,
+            };
+        if cancelled_hold {
+            self.cancelled.insert(*eid);
+        }
+        if !reached
+            && let crate::Via::Register { dev, .. } = r.via
+        {
+            let call = self.idents[id].calls;
+            self.idents[id].pair_drops.push((dev, call, line));
+            return;
+        }
+        if !(reached || cancelled_hold) {
             let detail = format!(
                 "dev {id}: outbox Drop of {} (kind {:?}, seen {:?}, ack {:?}) with B = {b}",
                 hex(eid),
@@ -624,10 +736,13 @@ impl World<'_> {
 
     fn timeout(&mut self, id: usize, proc: u32, conn: u64, key: u64) {
         let Some(p) = self.idents[id].proc.as_ref() else { return };
-        if p.no != proc || p.conn_no != conn {
+        let connect = key & KEY_CONNECT != 0 && key & KEY_HELLO == 0;
+        // A request (HTTPS) outlives the session number it was sent under
+        // until a disconnect clears it; a connect attempt does not.
+        if p.no != proc || (connect && p.conn_no != conn) {
             return;
         }
-        let live = if key & KEY_CONNECT != 0 && key & KEY_HELLO == 0 {
+        let live = if connect {
             p.connecting && p.conn.as_ref().is_some_and(|c| c.welcomed_t.is_none())
         } else {
             p.outstanding.contains_key(&key)
@@ -710,7 +825,11 @@ impl World<'_> {
 
     fn down(&mut self, id: usize, proc: u32, conn: u64, msg: Down) {
         let Some(p) = self.idents[id].proc.as_mut() else { return };
-        if p.no != proc || p.conn_no != conn {
+        // An answer to a request still outstanding is delivered even when it
+        // was sent before the current session began (a request emitted while
+        // connecting); a disconnect clears the outstanding requests (§10.5).
+        let answer_live = matches!(&msg, Down::Answer(key, _) if p.outstanding.contains_key(key));
+        if p.no != proc || (p.conn_no != conn && !answer_live) {
             return;
         }
         match msg {
@@ -783,6 +902,12 @@ impl World<'_> {
         Cred::Token { dev: i.dev, generation: i.tokens.get(&r).copied().unwrap_or(0) }
     }
 
+    /// Whether the relay would answer `relay/token_stale` to this credential (§8.2).
+    fn token_stale(&mut self, sel: Sel, cred: &Cred) -> bool {
+        let Cred::Token { dev, generation } = cred else { return false };
+        self.relay(sel).devices().get(dev).is_some_and(|d| d.role == 1 && d.state == 1 && d.generation != *generation)
+    }
+
     fn sel_index(sel: Sel) -> usize {
         match sel {
             Sel::Main(r) => r,
@@ -836,9 +961,23 @@ impl World<'_> {
             return;
         }
         let now = self.sel_now(sel);
-        let cred = self.cred(id, sel);
+        let mut cred = self.cred(id, sel);
         let dev = self.idents[id].dev;
         let before = self.relay(sel).head();
+        // §11.9: the runtime handles `relay/token_stale` itself: it logs in
+        // again and sends the request with the new token; the engine sees
+        // neither. (A refused login reaches the engine as `RelayRefused { req:
+        // None }` then `Disconnected`, below.)
+        let by_token = !matches!(call, Call::Login | Call::Admin { op: AdminRequest::Door { .. } | AdminRequest::Seed { .. }, .. });
+        if by_token && self.token_stale(sel, &cred) {
+            let reply = self.relay(sel).login(now, &cred, &dev);
+            self.route(sel, reply.out);
+            if let Ok(login) = reply.result {
+                self.idents[id].tokens.insert(Self::sel_index(sel), login.generation);
+                cred = Cred::Token { dev, generation: login.generation };
+                self.stats.token_renewals += 1;
+            }
+        }
         match call {
             Call::Login => {
                 let reply = self.relay(sel).login(now, &cred, &dev);
@@ -1013,7 +1152,8 @@ impl World<'_> {
     fn rehome(&mut self, r: usize, first_seq: u64) {
         let old: Vec<LogRow> = self.archive.iter().filter(|x| x.seq >= first_seq).cloned().collect();
         if !old.is_empty() {
-            self.branches.push(BranchLog { rows: self.archive.clone(), why: "the old relay after a move" });
+            let line = self.trace.lines();
+            self.branches.push(BranchLog { rows: self.archive.clone(), why: "the old relay after a move", line });
         }
         self.archive.truncate(first_seq.saturating_sub(1) as usize);
         self.home = r;

@@ -73,7 +73,6 @@ impl World<'_> {
         for s in &mut self.skew {
             *s = 0;
         }
-        self.trace.line(self.t, "fault", &[("kind", V::S("settle")), ("r", V::I(0)), ("p", V::Ints(&[]))]);
         for m in 0..self.machines.len() {
             self.wake(m);
         }
@@ -183,9 +182,6 @@ impl World<'_> {
                     }
                     None => {
                         if ident.forget_ticket == Some(ticket) {
-                            if let Some((_, _, Some(heid))) = ident.held {
-                                self.cancelled.insert(heid);
-                            }
                             ident.held = None;
                         }
                     }
@@ -207,8 +203,23 @@ impl World<'_> {
             }
             Notification::PairRegistered { ticket, snapshot, added_seq, .. } => self.pair_done(id, ticket, snapshot, added_seq),
             Notification::PairFailed { ticket, .. } => {
+                if let Some(dev) = self.pair_devs.get(&ticket).copied() {
+                    let call = self.idents[id].calls;
+                    self.idents[id].pair_failed.push((dev, call));
+                }
                 if let Some(pp) = self.pairs.remove(&ticket) {
                     self.retry_pair(pp);
+                } else if let Some(z) = self.paired.remove(&ticket) {
+                    // §28.4 step 4: the `DeviceAdded` was registered (so the
+                    // pairing machine started the new device) and then refused;
+                    // the relay drops its row, and the user pairs again.
+                    self.stop_proc(z);
+                    self.idents[z].retired = true;
+                    let m = self.idents[z].machine;
+                    self.machines[m].repairing = true;
+                    if self.t + 300_000 < self.t_end {
+                        self.at(self.t + 300_000, Ev::Pair { machine: m, replaces: Some(z) });
+                    }
                 }
             }
             Notification::OpDone { ticket, result } => {
@@ -222,6 +233,9 @@ impl World<'_> {
                 }
             }
             Notification::MoveCode { text } => self.move_code = Some(text),
+            // A refused code (`engine/move_no_fence` before the `Fence` is applied,
+            // a lockout): the user types it again at a later prompt.
+            Notification::MoveCodeResult { result: Err(_) } => self.idents[id].asked.retain(|k| !k.starts_with("move ")),
             Notification::Unsent { commands, from_device_no, .. } => self.idents[id].unsent = Some((commands, from_device_no)),
             Notification::ReadyToExit
                 if self.idents[id].proc.as_ref().is_some_and(|p| p.exiting) => {
@@ -359,6 +373,7 @@ impl World<'_> {
         let transcript = h(&pp.seed.to_be_bytes());
         let device = NewDevice { dev, sign_pk, hpke_pk, name: pp.name.clone(), transcript };
         self.pairs.insert(ticket, pp);
+        self.pair_devs.insert(ticket, dev);
         self.deliver(via, Event::PairRegister { ticket, device });
         // A pairing whose answer never comes is started again.
         self.at(self.t + 3_600_000, Ev::PairCheck { ticket });
@@ -399,8 +414,6 @@ impl World<'_> {
             Some((material, bundle, relay))
         });
         let Some((material, bundle, relay)) = opened else {
-            let line = self.trace.line(self.t, "check", &[("inv", V::I(0)), ("ok", V::I(1)), ("detail", V::S("pairing: the bundle could not be built; pairing again"))]);
-            let _ = line;
             self.retry_pair(pp);
             return;
         };
@@ -416,7 +429,13 @@ impl World<'_> {
             return;
         }
         let m = pp.machine;
-        if self.rules2(m) || self.idents.iter().any(|i| i.machine == m && i.build > 1) {
+        // Ruling 9 of the D2 brief: a machine whose build lacks the board's
+        // active rules is given the newer build before it pairs (`seal.md`
+        // §17.9 checks the bundle; the engine answers `engine/local_fault`
+        // for material it cannot load, §19.8).
+        let board_rules = self.engine(via).map_or(1, |e| e.membership().rules);
+        let newer = board_rules > 1 && !self.rules2(m) && !self.idents.iter().any(|i| i.machine == m && i.build > 1);
+        if self.rules2(m) || newer || self.idents.iter().any(|i| i.machine == m && i.build > 1) {
             fake.set_supported_rules(&[1, 2]);
         }
         let identity = fake.export_identity().to_vec();
@@ -431,7 +450,12 @@ impl World<'_> {
             self.idents[id].resubmit = self.idents[o].unsent.take();
             self.idents[id].build = self.idents[o].build;
         }
+        if newer {
+            self.idents[id].build = 2;
+            *self.stats.ops_started.entry("rules_build").or_default() += 1;
+        }
         self.machines[m].repairing = false;
+        self.paired.insert(ticket, id);
         self.stats.paired += 1;
         self.at(self.t + 1_000, Ev::Start { id });
     }
@@ -516,7 +540,8 @@ impl World<'_> {
                         self.at(self.t + 6_000, Ev::Start { id });
                     }
                 }
-                self.trace.line(self.t, "fault", &[("kind", V::S("rules_build")), ("r", V::I(0)), ("p", V::Ints(&[2]))]);
+                // A workload step, not a fault of §31.6: counted, no `fault` line (§31.9).
+                *self.stats.ops_started.entry("rules_build").or_default() += 1;
             }
             OpKind::Recovery => self.recovery_change(),
             OpKind::Poison => {
@@ -571,8 +596,7 @@ impl World<'_> {
         let reply = self.relay(sel).append(now, &Cred::Door, std::slice::from_ref(&sealed.frame));
         self.route(sel, reply.out);
         self.relay_line(sel, "recovery_append");
-        let line = self.fault_line("recovery_key", ("r", self.home as i128), &[ctr as i64]);
-        let _ = line;
+        *self.stats.ops_started.entry("recovery_key").or_default() += 1;
         let Ok(results) = reply.result else { return };
         let Some(AppendResult::New { seq, .. }) = results.first().cloned() else { return };
         // The tool classifies the entry before it registers the key (ENG-OPS-005's rule for the engine).
@@ -619,7 +643,7 @@ impl World<'_> {
         let reply = self.relay(sel).append(now, &cred, std::slice::from_ref(&sealed.frame));
         self.route(sel, reply.out);
         self.relay_line(sel, "poison");
-        self.fault_line("poison", ("r", f.relay as i128), &[f.ctr as i64]);
+        *self.stats.ops_started.entry("poison").or_default() += 1;
     }
 
     // ---------- faults (§31.6)
@@ -668,11 +692,11 @@ impl World<'_> {
                 }
                 let to = snap.head().map_or(0, |h| h.seq);
                 let from = self.relays[0].head().map_or(0, |h| h.seq);
-                self.branches.push(BranchLog { rows: self.archive.clone(), why: "the relay before a rollback" });
+                self.contra_since = self.t;
+                let line = self.fault_line("relay_rollback", ("r", 0), &[from as i64, to as i64]);
+                self.branches.push(BranchLog { rows: self.archive.clone(), why: check::WHY_ROLLBACK, line });
                 self.relays[0].rollback_to(&snap);
                 self.archive.truncate(to as usize);
-                self.contra_since = self.t;
-                self.fault_line("relay_rollback", ("r", 0), &[from as i64, to as i64]);
                 self.relay_line(Sel::Main(0), "rollback");
                 // The relay restarts from the earlier state: its sessions end.
                 let open: Vec<usize> = (0..self.idents.len())
@@ -689,6 +713,10 @@ impl World<'_> {
                 }
                 let cands: Vec<usize> = (0..self.idents.len()).filter(|&i| !self.idents[i].retired && self.idents[i].proc.is_some()).collect();
                 if cands.len() < 2 {
+                    // Too few processes to split: the fork starts later (FaultSet.fork means one fork).
+                    if self.t + 600_000 < self.t_f {
+                        self.at(self.t + 600_000, Ev::Fault(FaultEv::ForkStart));
+                    }
                     return;
                 }
                 let k = 1 + self.fault.below(cands.len() as u64 - 1) as usize;
@@ -700,7 +728,7 @@ impl World<'_> {
                 }
                 let at = self.relays[0].head().map_or(0, |h| h.seq);
                 let p: Vec<i64> = std::iter::once(at as i64).chain(set.iter().map(|x| *x as i64)).collect();
-                self.fault_line("relay_fork", ("r", 0), &p);
+                self.fork_line = self.fault_line("relay_fork", ("r", 0), &p);
                 self.fork = Some((self.relays[0].clone(), set.clone()));
                 for id in set {
                     if self.idents[id].proc.as_ref().is_some_and(|p| p.conn.is_some()) {
@@ -718,7 +746,7 @@ impl World<'_> {
                 if let Some(first) = rows.first().map(|r| r.seq) {
                     let mut all: Vec<LogRow> = self.archive.iter().take(first.saturating_sub(1) as usize).cloned().collect();
                     all.extend(rows);
-                    self.branches.push(BranchLog { rows: all, why: "the forked copy of the relay" });
+                    self.branches.push(BranchLog { rows: all, why: check::WHY_FORK, line: self.fork_line });
                 }
                 self.contra_since = self.t;
                 self.fault_line("relay_fork_end", ("r", 0), &[]);
@@ -768,7 +796,7 @@ impl World<'_> {
                 let now = self.sel_now(sel);
                 let Some((head, outs)) = self.relay(sel).inject_frame(now, frame) else { return };
                 let line = self.fault_line("injected_frame", ("r", self.home as i128), &[head.seq as i64, i64::from(i % 2)]);
-                self.injected_seqs.push((head.seq, line));
+                self.injected_seqs.push((head.seq, head.chain, line));
                 self.route(sel, outs);
                 self.relay_line(sel, "inject");
             }

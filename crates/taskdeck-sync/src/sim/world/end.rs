@@ -16,12 +16,15 @@ impl World<'_> {
                 self.violations.push(Violation { invariant: 6, line, detail });
             }
         }
+        for id in 0..self.idents.len() {
+            self.check_pair_drops(id, true);
+        }
         let home_head = self.relays[self.home].head();
         let mut facts_idents = Vec::new();
         let last_line = self.trace.lines();
         for id in 0..self.idents.len() {
             let ident = &self.idents[id];
-            let (status, final_b, device_no, current) = match ident.proc.as_ref() {
+            let (status, final_b, device_no, current, applied) = match ident.proc.as_ref() {
                 Some(p) => {
                     let e = &p.engine;
                     let (st, head) = e.confirmed();
@@ -29,9 +32,9 @@ impl World<'_> {
                     let sh = crate::state_hash(1, &bh, &e.membership_bytes());
                     let me = e.sealer().own_dev();
                     let current = e.membership().devices.iter().any(|d| d.dev == me && d.status == DeviceStatus::Current);
-                    (Some(e.status()), Some((head, bh, sh)), e.device_no(), current)
+                    (Some(e.status()), Some((head, bh, sh)), e.device_no(), current, st.applied())
                 }
-                None => (ident.last_status.clone(), None, None, false),
+                None => (ident.last_status.clone(), None, None, false, Vec::new()),
             };
             let meta = ident.store.meta.as_ref();
             let persisted = meta.is_some_and(|m| m.halt.is_some() || !m.stops.is_empty());
@@ -77,6 +80,7 @@ impl World<'_> {
                 None => "never started".to_owned(),
             };
             facts_idents.push(check::IdentFacts {
+                dev: ident.dev,
                 desc,
                 retired: ident.retired,
                 converges,
@@ -87,12 +91,17 @@ impl World<'_> {
                 caught_up,
                 joined_at: ident.joined_at,
                 samples: ident.samples.clone(),
+                applied,
                 alarms: ident.alarms.clone(),
                 outbox,
                 refusal_seqs,
                 expect_alarm: ident.expect_alarm.as_ref().map(|(l, w, _)| (*l, w.clone())),
                 last_line,
             });
+        }
+        #[cfg(test)]
+        if let Some(f) = self.tamper_facts {
+            f(&mut facts_idents);
         }
         let (board, relay) = match self.idents.first().map(|i| &i.genesis) {
             Some(Some((b, r))) => (b.clone(), r.clone()),

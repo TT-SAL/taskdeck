@@ -152,6 +152,26 @@ fn every_regression_file_holds_every_invariant() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
+// §31.8: `invariant`, `trace_sha256` and `first_bad_line` record the failing
+// run. These seeds' failing runs were reproduced with this simulator and the
+// engine before the fixes of 2139a96 (the run the files must record, not the
+// fixed run's trace or a line 0).
+#[test]
+fn files_record_the_reproduced_failing_runs() {
+    let known: [(&str, u8, &str, u64); 3] = [
+        ("102.json", 2, "640cfb2ecdc46205395eacba999b9302f248e4922fa2c6006bf0180016c7ce4b", 2_229_941),
+        ("111.json", 6, "e02d2109b27b77d3b16c961e5c17f8d4f196620371fd1defc601853384a1d173", 6_403),
+        ("116.json", 6, "ff1a4b2d2bf6720b9823206a7799f92b04adc9ffde069abf0d87f05c22da5146", 4_141_842),
+    ];
+    let files = files();
+    for (name, invariant, sha, line) in known {
+        let text = &files.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("tests/regress/{name} is missing")).1;
+        let f = parse(text).unwrap_or_else(|e| panic!("tests/regress/{name} does not parse: {e}"));
+        let c = &f.cases[0];
+        assert_eq!((c.invariant, c.trace_sha256.as_str(), c.first_bad_line), (invariant, sha, line), "tests/regress/{name}");
+    }
+}
+
 // §31.8: the parser takes exactly the file format, and a file that does not
 // parse is an error (so a broken file fails the test above).
 #[test]

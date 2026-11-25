@@ -15,6 +15,7 @@ pub use splitmix::SplitMix64;
 pub mod relay;
 
 mod check;
+mod counted;
 mod config;
 mod store;
 mod trace;
@@ -143,6 +144,8 @@ pub struct SimStats {
     pub trace_lines: u64,
     /// `ScheduleTick`s asking for a tick at most 1 ms after the call (a busy timer).
     pub ticks_due_now: u64,
+    /// Logins the model runtime made itself because a token was stale (§11.9).
+    pub token_renewals: u64,
 }
 
 /// Runs the simulator (engine.md §31.1).
