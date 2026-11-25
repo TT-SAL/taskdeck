@@ -156,7 +156,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.meta.ops.retain(|o| o.ticket != ticket);
         self.opx.mem.retain(|m| m.ticket != ticket);
         self.touch_meta();
-        self.notify_durable(Notification::OpDone { ticket, result });
+        // In this call, ahead of the write that drops the record: a process that stops before
+        // that write is durable resumes the operation from its record and reports it again; one
+        // that stops after it has reported it (§28.8; no row of §7.12 holds it back).
+        self.notify(Notification::OpDone { ticket, result });
     }
 
     fn op_ready(&self, ticket: u64) -> bool {
@@ -475,7 +478,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let replace = matches!(self.op_rec(ticket).map(|o| &o.op), Some(Operation::Revoke { replace: true, .. }));
         self.op_done(ticket, Ok(()));
         if replace {
-            self.notify_durable(Notification::ReplaceReady { dev });
+            self.notify(Notification::ReplaceReady { dev });
         }
     }
 

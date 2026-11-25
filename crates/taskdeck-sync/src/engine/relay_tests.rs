@@ -1766,6 +1766,51 @@ fn relay_behind_ends_only_when_every_acknowledgement_echoes() {
     assert!(a.fx.iter().all(|f| !matches!(f, Effect::Append { .. })), "nothing is sent while it does not echo");
 }
 
+// spec: ENG-OPS-003 ENG-OPS-002
+#[test]
+fn an_operation_that_ended_is_reported_though_the_process_stops_before_its_end_is_durable() {
+    // `gate` 5197: a `Revoke` with replace ended when its rotation was accepted; the write that
+    // removed the operation was made, the process stopped before its `Persisted`, and the
+    // `OpDone` and `ReplaceReady` that waited for it never came; after the restart nothing was
+    // left to report from.
+    let (mut net, mut a) = board(501);
+    let mut b = pair(&mut net, &mut a, 502, "Laptop", 1);
+    let c = pair(&mut net, &mut a, 503, "Phone", 2);
+    net.settle(&mut [&mut a, &mut b]);
+    a.feed(Event::Op { ticket: 9, op: Operation::Revoke { dev: c.dev(), replace: true } });
+    a.auto = false;
+    let mut cut = false;
+    for _ in 0..5000 {
+        // The write that ends the operation is made; its `Persisted` never comes.
+        let ends = a.pq.front().is_some_and(|(_, ops)| {
+            ops.iter().any(|op| matches!(op, PersistOp::WriteMeta(m) if m.ops.iter().all(|o| o.ticket != 9)))
+        });
+        if ends {
+            let (_, ops) = a.pq.pop_front().expect("the write");
+            for op in &ops {
+                a.store.apply(op);
+            }
+            cut = true;
+            break;
+        }
+        if a.persist_one() || a.read_one() {
+            continue;
+        }
+        match a.fx.pop_front() {
+            Some(fx) => {
+                net.answer(&mut a, fx);
+            }
+            None => a.tick(30_000),
+        }
+    }
+    assert!(cut, "the operation ended");
+    a.restart(504);
+    a.auto = true;
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    assert!(a.has_note(|x| matches!(x, crate::Notification::ReplaceReady { dev } if *dev == c.dev())));
+}
+
 /// Serves a node's effects one by one until the next one is the admin call `name`, which stays unanswered.
 fn serve_until_admin(net: &mut super::rkit_tests::Net, n: &mut Node, name: &str) {
     for _ in 0..20_000 {
