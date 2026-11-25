@@ -1726,6 +1726,46 @@ fn a_move_seeds_from_a_seq_whose_chain_the_device_holds() {
     }
 }
 
+// spec: ENG-EVID-005
+#[test]
+fn relay_behind_ends_only_when_every_acknowledgement_echoes() {
+    // `gate` 5797: a frame was acknowledged at a seq of a relay state that was lost, and another
+    // entry holds that seq in the log. On a relay whose `last_ctr` stopped below it, `gap` raised
+    // `relay_behind`; each welcome then resolved it because the acknowledged seq was not above
+    // the relay's head, and the device appended the same frames every 900,000 ms to the end.
+    let host = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(481);
+    for k in 1..=3u64 {
+        a.set(k, k as u8, k as i64);
+    }
+    net.settle(&mut [&mut a]);
+    // A frame sealed and sent, which this relay never got.
+    a.set(10, 10, 10);
+    let i = a.fx.iter().position(|f| matches!(f, Effect::Append { .. })).expect("the append");
+    a.fx.remove(i);
+    let l = a.e.status().head.seq;
+    let rec = a.e.outbox.iter().position(|r| r.r.frame.is_some()).expect("the sealed record");
+    // Its acknowledgement came from a relay state whose entry at `l` is not the log's.
+    let lost = (l, [9u8; 32]);
+    assert_ne!(a.e.chain_at(l), Some(lost.1));
+    a.e.outbox[rec].r.ack = Some(lost);
+    a.e.raise_evidence(
+        crate::AlarmKind::RelayBehind,
+        None,
+        None,
+        None,
+        crate::Evidence::RelayBehind { relay_head: a.e.log_head(), relay_last_ctr: None, local_head: a.e.log_head(), ack: Some(lost) },
+    );
+    // The relay's welcome: its head is the log head with this device's chain, and its counter
+    // for this device is the log's; the acknowledgement at `l` still does not echo.
+    let cred = net.cred(&host, &a.dev());
+    let w = net.relays[&host].hello(a.wall, &cred).result.expect("a welcome");
+    assert_eq!(w.head.seq, l);
+    a.feed(Event::Welcome(w));
+    assert!(a.e.status().stops.iter().any(|x| x.kind == crate::StopKind::Evidence), "{:?}", a.e.status().stops);
+    assert!(a.fx.iter().all(|f| !matches!(f, Effect::Append { .. })), "nothing is sent while it does not echo");
+}
+
 /// Serves a node's effects one by one until the next one is the admin call `name`, which stays unanswered.
 fn serve_until_admin(net: &mut super::rkit_tests::Net, n: &mut Node, name: &str) {
     for _ in 0..20_000 {
