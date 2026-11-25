@@ -1791,3 +1791,83 @@ fn a_pairing_found_after_a_start_still_ends_with_a_report() {
     assert!(a.e.status().devices.iter().all(|r| r.dev != three.dev || r.status != DeviceStatus::Current));
     assert!(a.e.outbox.is_empty());
 }
+
+// spec: ENG-CLASS-002 ENG-PERSIST-006
+#[test]
+fn the_alarm_of_a_made_up_frame_is_durable_before_a_checkpoint_above_it() {
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(521);
+    let mut b = pair(&mut net, &mut a, 522, "Laptop", 1);
+    net.settle(&mut [&mut a, &mut b]);
+    // B is away. The relay stores a frame nobody signed, and the log goes on past an aligned seq.
+    let mut frame = net.relays[&old].log().values().last().expect("a frame").frame.clone();
+    *frame.last_mut().expect("a byte") ^= 1;
+    let now = a.wall;
+    let (head, _) = net.relays.get_mut(&old).expect("the relay").inject_frame(now, frame).expect("stored");
+    let x = head.seq;
+    let stride = super::lim::STRIDE;
+    assert!(x < stride);
+    let mut k = 0u64;
+    while net.log_len() < stride + 3 {
+        k += 1;
+        a.set(k, (k % 50) as u8, k as i64);
+        net.settle(&mut [&mut a]);
+    }
+    // B reads it all, its writes confirmed one by one. Nothing at or below a checkpoint is
+    // classified again after a `Start`, so the frame's alarm must reach the disk before any
+    // checkpoint above the frame can: it is the first write after the page is durable, ahead of
+    // everything the board writes for the page's entries.
+    b.auto = false;
+    b.tick(700_000);
+    let holds = |ops: &[PersistOp]| ops.iter().any(|o| matches!(o, PersistOp::AppendLog(v) if v.iter().any(|r| r.seq == x)));
+    for _ in 0..20_000 {
+        if b.pq.front().is_some_and(|w| holds(&w.1)) {
+            break;
+        }
+        if b.persist_one() || b.read_one() {
+            continue;
+        }
+        match b.fx.pop_front() {
+            Some(fx) => {
+                net.answer(&mut b, fx);
+            }
+            None => b.tick(30_000),
+        }
+    }
+    assert!(b.persist_one(), "the page with the frame");
+    let next = b.pq.front().expect("a write after the page");
+    let alarmed = |m: &crate::Meta| m.alarms.iter().any(|al| al.kind == crate::AlarmKind::SkippedFrame && al.seq == Some(x));
+    assert!(
+        matches!(&next.1[..], [PersistOp::WriteMeta(m)] if alarmed(m)),
+        "the first write after the page carries the alarm: {:?}",
+        next.1.iter().map(|o| format!("{o:?}").chars().take(16).collect::<String>()).collect::<Vec<_>>()
+    );
+    let mut above = 0;
+    for _ in 0..20_000 {
+        if b.store.ckpt.as_ref().is_some_and(|c| c.board_seq >= x) {
+            above += 1;
+            let alarms = b.store.meta.as_ref().map(|m| m.alarms.clone()).unwrap_or_default();
+            assert!(
+                alarms.iter().any(|al| al.kind == crate::AlarmKind::SkippedFrame && al.seq == Some(x)),
+                "a checkpoint at {:?} is durable and the alarm of the frame at {x} is not",
+                b.store.ckpt.as_ref().map(|c| c.board_seq)
+            );
+        }
+        if b.persist_one() || b.read_one() {
+            continue;
+        }
+        match b.fx.pop_front() {
+            Some(fx) => {
+                net.answer(&mut b, fx);
+            }
+            None if above > 0 => break,
+            None => b.tick(30_000),
+        }
+    }
+    assert!(above > 0, "a checkpoint above the frame");
+    b.auto = true;
+    b.restart(523);
+    net.settle(&mut [&mut a, &mut b]);
+    assert!(b.e.meta.alarms.iter().any(|al| al.kind == crate::AlarmKind::SkippedFrame && al.seq == Some(x)));
+    assert_eq!(b.board_bytes(), a.board_bytes());
+}
