@@ -66,6 +66,12 @@ in the order it happened; this file is the current truth and is rewritten, not a
   relay its head reads as `RelayBehind`, the restore tail of the made-up frame is refused, and
   the device stays in the evidence stop with the move in stage 7. Proposed: a page from a relay
   that an accepted `Fence` moved the board away from is not taken above that `Fence`.
+- ENG-RECV-007 (a fenced relay is read up to its `Fence` only; spec in TT-SAL/taskdeck#33) is
+  built on the local branch `engine-recv` 7a946dd (worktree `/home/user/wt/engine`, target dir
+  `/home/user/wt/target-e`), with the test of `gate` 2154 rewritten for it: 221 unit tests,
+  conformance, clippy and wasm pass, but `regressions` fails until task D7, because the oracle
+  stops at the first `Fence` (its user types no move code). The stage branch carries #33 during
+  the parking cycle; `park/engine-3` (eb8577e) holds the engine's work.
 - Next: task D6 (the simulator's checks carry the decided invariants) integrated and the gate run
   at 1,000 seeds; the engine's pull request green and merged "(stage in progress, not the exit)";
   task E (scenario and trace vectors); `bash scripts/gate.sh engine`; the one round of checks;
@@ -272,6 +278,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_a03961da-e96 | D4 (second attempt) simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | done, applied to the branch as a patch from `wt/d4` 32a1637 (the lead ran its gate) | `src/sim/script.rs` (hand-built logs for the check), `src/sim/world.rs`, `api-simulator.md`; reported: gate 116 (a pairing refused after a restart dropped without `PairFailed`), 1021 (the crash-halt question again) | 471,311 |
 | wf_fc162934-033 | D5 three check faults; every violation printed | `engine/briefs/d5-check-faults.md` | done, applied to the branch as a patch from `wt/d5` a868350 (the lead ran its gate) | `src/sim/{check,script,world}.rs`, `src/sim/world/rt.rs`, `tests/simulator.rs` (`TD_SIM_ALL`), `api-simulator.md`; one low: the crash-cut exemption for a pairing drop covers the drop's own call, not the next | 327,558 |
 | wf_791ac2d4-7d3 | D6 the simulator's checks carry the owner's decisions (§31.7 invariants 2, 3, 4) | `engine/briefs/d6-decided-invariants.md` | done (write, two checks, two fix passes); applied to the branch as a patch from `wt/d6` b20dadf (the lead runs its gate) | `src/sim/{check,script,store,world}.rs`, `src/sim/world/{end,load,rt}.rs`, `api-simulator.md`: removed relay state from recorded acknowledgements, restore tails (sent, answered, owed) and made-up frames; never lost silently (an evidence alarm, durable, by a device holding the frame); a final refusal reported; the Skip window compared with a replay without t. Reported: `gate` 14 of 450 fail (fork plus re-pair ×10, 2272, engine 1022, 1073, 2154). Lows: `api-simulator.md` 204 lines (limit 100, 180 before); `relay/bad_signature` counts as a made-up frame's code (8 seeds) | 2,562,299 (5 agents, 819 tool uses, 5.3 h) |
+| (starting) | D7 a device retired while cut off; the dropped seq above the final head; invariant 4's injected frame above a Fence; the oracle follows every move (ENG-RECV-007) | `engine/briefs/d7-retired-oracle.md` | running since 2026-11-25 in `/home/user/wt/d7` (branch `wt/d7`, from the commit holding the brief on `engine-recv`) | | |
 
 ## Open threads
 
