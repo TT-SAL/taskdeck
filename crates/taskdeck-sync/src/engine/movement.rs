@@ -334,6 +334,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     }
                 } else if self.outbox.iter().any(|r| r.r.op == Some(ticket)) {
                     // The Fence record is on its way through the `fence` admin operation.
+                } else if let Some(code) = self.seed_bounds().err().filter(|_| relay_answers || self.opx.mv.gone) {
+                    // Nothing is fenced for a move whose seed cannot be made.
+                    self.op_done(ticket, Err(code));
                 } else if relay_answers && !self.evidence_stop() {
                     let via = Via::Fence { host: host.clone(), door, home_gen };
                     self.op_enqueue(ticket, CtlIntent::Fence { host, door, home_gen }, via);
@@ -458,6 +461,50 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     }
 
     /// Stage 3: `S`, `first_seq`, then the replay that gives `M_{first_seq-1}` and the material at `S`.
+    /// Stage 3's `S` and `first_seq` (§28.3), or why no seed can be made now.
+    fn seed_bounds(&self) -> Result<(u64, u64), &'static str> {
+        // The newest usable snapshot this device acknowledged, or wrote and another acknowledged.
+        let usable_seq = self
+            .registry
+            .snapshots
+            .iter()
+            .filter(|r| super::duty::usable(r, &self.own))
+            .filter(|r| r.own == Some(Verdict::Ack) || r.author == self.own)
+            .map(|r| r.info.seq)
+            .filter(|s| *s <= self.b && self.base_at_or_below(*s).is_some())
+            .max();
+        let s = usable_seq.or_else(|| self.bases.last().map(|b| b.0)).unwrap_or(self.b);
+        let window = (self.l + 1).saturating_sub(lim::SKIP_WINDOW);
+        let mut first = (s + 1).min(self.vk.purge_seq.max(window).max(1));
+        // The frames this device holds, and a base at or below the seq before the first.
+        first = first.max(self.floor);
+        // A frame this device classified `Skip` is one the new relay refuses in a seed tail
+        // (`relay.md` §12.7): the tail starts above the newest of them.
+        let unverified = self
+            .meta
+            .alarms
+            .iter()
+            .filter(|a| a.kind == crate::AlarmKind::SkippedFrame)
+            .filter_map(|a| a.seq)
+            .filter(|x| *x >= first && *x <= self.l)
+            .max();
+        if let Some(x) = unverified {
+            if x > s {
+                // No snapshot lies above it yet: the move waits for one.
+                return Err("engine/move_tail");
+            }
+            first = x + 1;
+        }
+        while first > 1 && first <= s + 1 && self.base_at_or_below(first - 1).is_none() {
+            first += 1;
+        }
+        // Before seq 1 there is nothing to rebuild (`M_0`, every counter zero): no base is needed for it.
+        if first > s + 1 || (first > 1 && self.base_at_or_below((first - 1).min(s)).is_none()) {
+            return Err("engine/local_fault");
+        }
+        Ok((s, first))
+    }
+
     fn move_seed(&mut self, ticket: u64, host: String) {
         if let Some((chain_before, devices)) = self.opx.mv.seed.clone() {
             // The replay is done and the fresh snapshot sealed: seed the new relay (ENG-MOVE-003).
@@ -478,31 +525,15 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.jobs.busy() {
             return;
         }
-        // The newest usable snapshot this device acknowledged, or wrote and another acknowledged.
-        let usable_seq = self
-            .registry
-            .snapshots
-            .iter()
-            .filter(|r| super::duty::usable(r, &self.own))
-            .filter(|r| r.own == Some(Verdict::Ack) || r.author == self.own)
-            .map(|r| r.info.seq)
-            .filter(|s| *s <= self.b && self.base_at_or_below(*s).is_some())
-            .max();
-        let s = usable_seq.or_else(|| self.bases.last().map(|b| b.0)).unwrap_or(self.b);
-        let window = (self.l + 1).saturating_sub(lim::SKIP_WINDOW);
-        let mut first = (s + 1).min(self.vk.purge_seq.max(window).max(1));
-        // The frames this device holds, and a base at or below the seq before the first.
-        first = first.max(self.floor);
-        while first > 1 && first <= s + 1 && self.base_at_or_below(first - 1).is_none() {
-            first += 1;
-        }
-        // Before seq 1 there is nothing to rebuild (`M_0`, every counter zero): no base is needed for it.
-        if first > s + 1 || (first > 1 && self.base_at_or_below((first - 1).min(s)).is_none()) {
-            return self.op_done(ticket, Err("engine/local_fault"));
-        }
+        let (s, first) = match self.seed_bounds() {
+            Ok(x) => x,
+            Err(code) => return self.op_done(ticket, Err(code)),
+        };
         self.opx.mv.s = s;
         self.opx.mv.first_seq = first;
-        self.opx.mv.carried = self.l;
+        // The tail ends at this move's Fence when the old relay sequenced it: what a fenced relay
+        // shows above its Fence was not accepted from a device.
+        self.opx.mv.carried = self.opx.mv.fence_seq.filter(|_| self.opx.mv.old_answered).unwrap_or(self.l);
         let from = if first > 1 { (first - 1).min(s) } else { s };
         let mut job = Job::new(Purpose::Seed { ticket }, from, (first - 1).max(s));
         job.want_states = if first > 1 { vec![first - 1, s] } else { vec![s] };
