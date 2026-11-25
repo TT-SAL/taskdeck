@@ -25,8 +25,8 @@ in the order it happened; this file is the current truth and is rewritten, not a
   only with "lost to a rolled-back relay state" (question 2). `gate` at base 1000, 100 seeds: 59
   fail: 57 only for that; 1018 a pairing's `DeviceAdded` refused after `register` (question 3);
   1098 a crash halt on a Skip's target (question 4). **Nothing else fails: what is left is the
-  owner's four questions.** The configurations without rollback and fork passed 60 of 60 before
-  these fixes and are to be run again after D4.
+  owner's questions.** Every named configuration except `fork` (17 without rollback and fork, and
+  `rollback`) passes 60 of 60 seeds at base 1000 on this engine (1,080 runs, the lead's run).
 - Fixed in the engine on 2026-11-25 after D3 (each with a test that failed before; journal):
   a `SeedTail` nobody answered is sent again (regression file 1099); a move reads back after a
   `Start` what its durable records say (door, generation, Fence seq) and goes on from its stage;
