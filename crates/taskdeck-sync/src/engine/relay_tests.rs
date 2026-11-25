@@ -1488,3 +1488,242 @@ fn a_move_starts_its_seed_above_a_frame_the_relay_made_up() {
         assert_eq!(net.relays[NEW].log()[&seq].frame, net.relays[&old].log()[&seq].frame, "{seq}");
     }
 }
+
+/// Serves a node's effects one by one until the next one is the admin call `name`, which stays unanswered.
+fn serve_until_admin(net: &mut super::rkit_tests::Net, n: &mut Node, name: &str) {
+    for _ in 0..20_000 {
+        match n.fx.front() {
+            Some(Effect::Admin { op, .. }) if super::rkit_tests::admin_name(op) == name => return,
+            Some(_) => {
+                let fx = n.fx.pop_front().expect("an effect");
+                net.answer(n, fx);
+            }
+            None => n.tick(30_000),
+        }
+    }
+    panic!("no {name} call");
+}
+
+fn move_reports(n: &Node) -> Vec<(u64, bool)> {
+    notes_of(n, |x| match x {
+        crate::Notification::MoveReport { carried_through, old_relay_answered } => Some((*carried_through, *old_relay_answered)),
+        _ => None,
+    })
+}
+
+// spec: ENG-MOVE-003 ENG-OPS-003
+#[test]
+fn a_seed_tail_nobody_answered_is_sent_again() {
+    const NEW: &str = "relay2.test";
+    let (mut net, mut a) = board(451);
+    let mut b = pair(&mut net, &mut a, 452, "Laptop", 1);
+    a.set(1, 1, 1);
+    net.settle(&mut [&mut a, &mut b]);
+    net.add_relay(NEW);
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    serve_until_admin(&mut net, &mut a, "admin:seed_tail");
+    // The request is lost on its way: the new relay stored nothing of the tail.
+    let lost = a.fx.pop_front().expect("the tail request");
+    assert!(matches!(lost, Effect::Admin { op: AdminRequest::SeedTail { .. }, .. }));
+    a.feed(Event::Disconnected { unreachable: false, paused_until_ms: None });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    // The board is open on the new relay, with the whole tail.
+    let f = a.e.membership().home_seq;
+    assert_eq!(net.relays[NEW].head().expect("a head").seq, f);
+    assert_eq!(move_reports(&a), vec![(f, true)]);
+}
+
+// spec: ENG-MOVE-006 ENG-OPS-003
+#[test]
+fn a_move_restarted_behind_its_fence_goes_on_to_the_seed() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(461);
+    let mut b = pair(&mut net, &mut a, 462, "Laptop", 1);
+    net.add_relay(NEW);
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    // The old relay sequences the Fence; the process dies before it has read it back.
+    serve_until_admin(&mut net, &mut a, "admin:fence");
+    let fence = a.fx.pop_front().expect("the fence request");
+    net.answer(&mut a, fence);
+    a.restart(463);
+    let calls = net.calls.len();
+    let f = net.relays[&old].head().expect("a head").seq;
+    // Whatever it asks the new relay for the door is answered only after it has read the Fence.
+    let mut held = Vec::new();
+    for _ in 0..200 {
+        match a.fx.pop_front() {
+            Some(fx @ Effect::Admin { op: AdminRequest::Door { .. }, .. }) => held.push(fx),
+            Some(fx) => {
+                net.answer(&mut a, fx);
+            }
+            None if a.e.status().board_seq >= f => break,
+            None => a.tick(30_000),
+        }
+    }
+    assert_eq!(a.e.status().board_seq, f);
+    for fx in held {
+        net.answer(&mut a, fx);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    let mine: Vec<&str> = net.calls[calls..].iter().filter(|c| c.0 == a.dev()).map(|c| c.1.as_str()).collect();
+    assert!(mine.contains(&"admin:seed") && !mine.contains(&"admin:fence"), "{mine:?}");
+    assert_eq!(move_reports(&a), vec![(f, true)]);
+}
+
+// spec: ENG-MOVE-003 ENG-OPS-003
+#[test]
+fn a_move_restarted_before_its_seed_seeds_with_the_fence_generation() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(471);
+    let mut b = pair(&mut net, &mut a, 472, "Laptop", 1);
+    net.add_relay(NEW);
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    // The Fence is accepted and read; the process dies with the seed not yet sent.
+    serve_until_admin(&mut net, &mut a, "admin:seed");
+    a.restart(473);
+    let f = net.relays[&old].head().expect("a head").seq;
+    serve_until_admin(&mut net, &mut a, "admin:seed");
+    let Some(Effect::Admin { op: AdminRequest::Seed { home_gen, last_seq, .. }, .. }) = a.fx.front() else { panic!("a seed") };
+    assert_eq!((*home_gen, *last_seq), (a.e.membership().home_gen, f));
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    assert_eq!(move_reports(&a), vec![(f, true)]);
+}
+
+// spec: ENG-MOVE-003 ENG-OPS-003
+#[test]
+fn a_move_restarted_after_its_whole_tail_does_not_fail_on_the_open_board() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(481);
+    let mut b = pair(&mut net, &mut a, 482, "Laptop", 1);
+    net.add_relay(NEW);
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    serve_until_admin(&mut net, &mut a, "admin:seed_tail");
+    // The tail is stored and the board opens; the process dies before stage 5 is written.
+    a.auto = false;
+    let tail = a.fx.pop_front().expect("the tail request");
+    net.answer(&mut a, tail);
+    a.auto = true;
+    a.restart(483);
+    let calls = net.calls.len();
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    let mine: Vec<&str> = net.calls[calls..].iter().filter(|c| c.0 == a.dev()).map(|c| c.1.as_str()).collect();
+    assert!(mine.contains(&"admin:seed"), "the seed is made again: {mine:?}");
+    let f = net.relays[&old].head().expect("a head").seq;
+    assert_eq!(move_reports(&a), vec![(f, true)]);
+    assert_eq!(net.at[&a.dev()], NEW);
+}
+
+// spec: ENG-MOVE-009 ENG-OPS-003
+#[test]
+fn a_move_restarted_after_the_switch_reports_once_what_it_carried() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(491);
+    a.set(1, 1, 1);
+    net.settle(&mut [&mut a]);
+    net.add_relay(NEW);
+    let last = net.log_len();
+    net.relays.remove(&old).expect("the old relay");
+    a.feed(Event::Disconnected { unreachable: true, paused_until_ms: None });
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    a.feed(Event::User(crate::UserAction::OldRelayGone));
+    // The target is switched; the process dies before the Fence is on the new relay.
+    for _ in 0..20_000 {
+        if matches!(a.fx.front(), Some(Effect::Connect { relay }) if relay.host == NEW) {
+            break;
+        }
+        match a.fx.pop_front() {
+            Some(fx) => {
+                net.answer(&mut a, fx);
+            }
+            None => a.tick(30_000),
+        }
+    }
+    assert!(move_reports(&a).is_empty());
+    a.restart(492);
+    let calls = net.calls.len();
+    net.settle(&mut [&mut a]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    assert_eq!(move_reports(&a), vec![(last, false)]);
+    assert_eq!(a.e.membership().home_seq, last + 1);
+    // The snapshot of the move is sealed again and uploaded (§28.3 stage 6).
+    let mine: Vec<&str> = net.calls[calls..].iter().filter(|c| c.0 == a.dev()).map(|c| c.1.as_str()).collect();
+    assert!(mine.contains(&"blob:upload:1"), "{mine:?}");
+    // A second restart reports nothing again.
+    a.restart(493);
+    net.settle(&mut [&mut a]);
+    assert_eq!(move_reports(&a), vec![(last, false)]);
+}
+
+// spec: ENG-MOVE-003 ENG-OPS-003
+#[test]
+fn a_move_whose_last_tail_answer_was_lost_goes_on_to_the_open_board() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(495);
+    let mut b = pair(&mut net, &mut a, 496, "Laptop", 1);
+    net.add_relay(NEW);
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    serve_until_admin(&mut net, &mut a, "admin:seed_tail");
+    // The new relay stores the whole tail and opens the board; its answer never arrives.
+    let Some(Effect::Admin { op, .. }) = a.fx.pop_front() else { panic!("the tail request") };
+    let cred = net.cred(NEW, &a.dev());
+    let now = a.wall;
+    assert!(net.relays.get_mut(NEW).expect("the new relay").admin(now, &cred, &a.dev(), &op).result.is_ok());
+    a.feed(Event::Disconnected { unreachable: false, paused_until_ms: None });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    let f = net.relays[&old].head().expect("a head").seq;
+    assert_eq!(move_reports(&a), vec![(f, true)]);
+    assert_eq!(net.at[&a.dev()], NEW);
+}
+
+// spec: ENG-MOVE-009 ENG-OPS-003
+#[test]
+fn a_move_report_written_but_never_shown_is_made_again_after_a_start() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(497);
+    let mut b = pair(&mut net, &mut a, 498, "Laptop", 1);
+    net.add_relay(NEW);
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    a.auto = false;
+    let reported = |ops: &[PersistOp]| {
+        ops.iter().any(|o| matches!(o, PersistOp::WriteMeta(m) if m.ops.iter().any(|x| x.ticket == 9 && x.stage == 7)))
+    };
+    for _ in 0..20_000 {
+        if a.pq.front().is_some_and(|w| reported(&w.1)) {
+            break;
+        }
+        if a.persist_one() || a.read_one() {
+            continue;
+        }
+        match a.fx.pop_front() {
+            Some(fx) => {
+                net.answer(&mut a, fx);
+            }
+            None => a.tick(30_000),
+        }
+    }
+    // The write that records the report is on the disk; the process dies before it hears so.
+    let (_, ops) = a.pq.pop_front().expect("the write of stage 7");
+    assert!(reported(&ops));
+    for op in &ops {
+        a.store.apply(op);
+    }
+    assert!(move_reports(&a).is_empty());
+    a.auto = true;
+    a.restart(499);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    let f = net.relays[&old].head().expect("a head").seq;
+    assert_eq!(move_reports(&a), vec![(f, true)]);
+    assert!(a.has_note(|x| matches!(x, crate::Notification::MoveCode { .. })));
+}

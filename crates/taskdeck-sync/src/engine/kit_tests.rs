@@ -163,26 +163,31 @@ impl Node {
                 self.feed(Event::Persisted { id });
             }
             // Local reads see the durable store.
-            while let Some((req, range, seq)) = self.reads.pop_front() {
-                let result = match range {
-                    Some((from, to)) => {
-                        let v: Vec<LogRecord> = (from..=to).filter_map(|s| self.store.log.get(&s).cloned()).collect();
-                        if v.len() as u64 == to - from + 1 {
-                            crate::LocalReadResult::Records(v)
-                        } else {
-                            crate::LocalReadResult::Missing { code: "device/missing" }
-                        }
-                    }
-                    None => match self.store.bases.get(&seq) {
-                        Some(c) => crate::LocalReadResult::Base(c.clone()),
-                        None => crate::LocalReadResult::Missing { code: "device/missing" },
-                    },
-                };
-                self.feed(Event::LocalRead { req, result });
-            }
+            while self.read_one() {}
             }
             self.draining = false;
         }
+    }
+
+    /// Answers the oldest local read from the durable store (manual mode calls it itself).
+    pub(crate) fn read_one(&mut self) -> bool {
+        let Some((req, range, seq)) = self.reads.pop_front() else { return false };
+        let result = match range {
+            Some((from, to)) => {
+                let v: Vec<LogRecord> = (from..=to).filter_map(|s| self.store.log.get(&s).cloned()).collect();
+                if v.len() as u64 == to - from + 1 {
+                    crate::LocalReadResult::Records(v)
+                } else {
+                    crate::LocalReadResult::Missing { code: "device/missing" }
+                }
+            }
+            None => match self.store.bases.get(&seq) {
+                Some(c) => crate::LocalReadResult::Base(c.clone()),
+                None => crate::LocalReadResult::Missing { code: "device/missing" },
+            },
+        };
+        self.feed(Event::LocalRead { req, result });
+        true
     }
 
     /// Confirms the oldest unconfirmed write (manual mode).

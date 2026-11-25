@@ -125,7 +125,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.notify(Notification::OpDone { ticket, result: Err("engine/op_busy") });
             return;
         }
-        self.meta.ops.push(OpRecord { ticket, op, stage, attempts: 0, started_ms: self.wall });
+        self.meta.ops.push(OpRecord { ticket, op, stage, attempts: 0, started_ms: self.wall, mark: 0 });
         self.touch_meta();
         let pid = self.flush_meta();
         self.opx.mem.push(OpMem { ticket, pid, busy: false, snap: None });
@@ -399,6 +399,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         if self.outbox.iter().any(|r| r.r.seen == Some(t)) {
             return Err(NO); // this device's own entry
+        }
+        let on_its_way = |b: &Body| matches!(b, Body::Ctl(CtlIntent::Skip { targets }) if targets.iter().any(|x| x.0 == t));
+        if self.outbox.iter().any(|r| on_its_way(&r.r.body)) {
+            // This device's Skip of it is in its outbox: a second one would be refused for good.
+            return Err(NO);
         }
         if self.meta.halt.as_ref().is_some_and(|h| h.seq == t && h.author == self.own) {
             return Err(NO);

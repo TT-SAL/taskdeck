@@ -417,6 +417,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.mk = Some(m.clone());
         self.mb = Some(m);
         self.pipe.queue.clear();
+        self.pipe.skip_at.clear();
         self.pipe.batches.clear();
         self.pipe.skipped.clear();
         self.pipe.pre = None;

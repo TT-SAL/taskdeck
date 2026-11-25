@@ -837,3 +837,63 @@ fn a_skip_target_frame_is_supplied_only_when_its_hash_fits() {
     // B, whose copy is the frame the log had, accepted it.
     assert!(!b.e.confirmed().0.keys.contains_key(&1));
 }
+
+// spec: ENG-SKIP-003
+#[test]
+fn reports_from_before_a_skip_are_not_compared_by_a_device_that_never_applied_the_target() {
+    let (mut a, f1) = creator(951);
+    let mut hub = Hub::with_genesis(&a, &f1);
+    let mut b = join(&mut hub, &mut a, 952, "Laptop");
+    let mut c = join(&mut hub, &mut a, 953, "Phone");
+    hub.settle(&mut [&mut a, &mut b, &mut c]);
+    // C is away from here on. The target lies just below an aligned seq.
+    let stride = super::lim::STRIDE;
+    let mut k = 0u64;
+    while (hub.log.len() as u64) < stride - 3 {
+        k += 1;
+        a.set(k, (k % 40) as u8, k as i64);
+        hub.settle(&mut [&mut a, &mut b]);
+    }
+    b.set(900, 41, 5);
+    hub.settle(&mut [&mut a, &mut b]);
+    let t = hub.log.len() as u64;
+    while (hub.log.len() as u64) < stride + 2 {
+        k += 1;
+        a.set(k, (k % 40) as u8, k as i64);
+        hub.settle(&mut [&mut a, &mut b]);
+    }
+    assert!(t < stride);
+    // A day passes: A and B report their state at the aligned seq, with the target applied.
+    a.advance(90_000_000);
+    b.advance(90_000_000);
+    hub.settle(&mut [&mut a, &mut b]);
+    assert!(a.e.registry.reports.iter().any(|r| r.seq == stride && r.dev == b.dev()));
+    a.feed(Event::Op { ticket: 5, op: Operation::Skip { seq: t } });
+    hub.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 5), Some(Ok(())));
+    // C reads the target, the reports and the Skip together: it never applies the target.
+    hub.settle(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(c.e.status().board_seq, hub.log.len() as u64);
+    assert_eq!(c.board_bytes(), a.board_bytes());
+    let kinds: Vec<_> = c.e.meta.alarms.iter().map(|x| x.kind).collect();
+    assert!(kinds.is_empty(), "no alarm for a state from before the Skip: {kinds:?}");
+    assert!(c.e.status().stops.is_empty());
+}
+
+// spec: ENG-SKIP-004
+#[test]
+fn a_second_skip_of_a_target_whose_skip_is_in_the_outbox_is_refused() {
+    let (mut a, f1) = creator(961);
+    let mut hub = Hub::with_genesis(&a, &f1);
+    let mut b = join(&mut hub, &mut a, 962, "Laptop");
+    b.set(1, 1, 5);
+    hub.settle(&mut [&mut a, &mut b]);
+    let t = hub.log.len() as u64;
+    a.feed(Event::Op { ticket: 5, op: Operation::Skip { seq: t } });
+    // The first Skip is composed and not yet in the log.
+    a.feed(Event::Op { ticket: 6, op: Operation::Skip { seq: t } });
+    assert_eq!(op_result(&a, 6), Some(Err("engine/skip_target")));
+    hub.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 5), Some(Ok(())));
+    assert_eq!(a.e.membership().skips.len(), 1);
+}
