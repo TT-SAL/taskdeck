@@ -1,9 +1,10 @@
-# The simulator: how to run it (tasks D, D2 and D3)
+# The simulator: how to run it (tasks D, D2, D3 and D4)
 
 Module `taskdeck_sync::sim` (feature `sim`; the test targets get it from the crate's dev-dependency on itself).
 Spec: engine.md §31. Code: `src/sim.rs` (types), `src/sim/config.rs` (named configurations), `src/sim/world.rs` and
 `src/sim/world/` (model runtime, network, workload, faults), `src/sim/store.rs` (durable storage), `src/sim/check.rs`
-(ledger, oracle, the six invariants), `src/sim/trace.rs` (§31.9).
+(ledger, oracle, the six invariants), `src/sim/trace.rs` (§31.9), `src/sim/script.rs` (hand-built logs for the
+simulator's own tests).
 
 ## Run seeds
 
@@ -110,7 +111,7 @@ One JSON object per line, `t` (virtual ms) and `k` first:
   Task D3 had added a second history, the oracle replayed with its process killed while `t` was under a marker
   until it crash-halted on `t`, open to a device that crash-halted on `t`; the D3 fix pass removed it: those states
   come from the engine under test run under faults, not from an independent expected value, and accepting them
-  loosened invariant 4 (test `invariant_4_at_a_skip_window_is_judged_by_the_no_fault_oracle_only`). A violation of a
+  loosened invariant 4 (test `invariant_4_at_a_skip_window_is_judged_by_the_no_fault_oracle_only`, `script.rs`). A violation of a
   device whose storage held a crash halt on `t` (`IdentFacts::crash_halts`) ends with
   `; it crash-halted on the target t: ENG-HALT-004 against §31.7 invariant 4, a spec question (api-simulator.md)`.
 - 3: accepted once; or still in the outbox of a device halted or stopped with a persisted reason, or revoked (in
@@ -126,6 +127,32 @@ One JSON object per line, `t` (virtual ms) and `k` first:
   3 and 6 name a device whose `DeviceAdded` only a rolled-back or forked state holds: `its pairing is only on …`.
 - Roots: every `(epoch, root)` any device held; two branches may rotate to one epoch with two roots, and each log is
   classified with the choice per epoch that opens it furthest (`check::pick_roots`; D3, gate seeds 1019 and 1058).
+
+## The simulator's own tests (task D4)
+
+A test of the simulator holds whatever the engine does at a seed: no test names a seq, a device number or a trace
+line that a run happened to produce (every engine fix moves seeds). They are built in this order of preference:
+
+- **A quiet `World`** (no fault, no operation): `world.rs` runs quiet seed 3 to its end, changes one fact (an archive
+  row, a sample, an acknowledgement, a deletion, `tamper_facts`), and asserts which invariants the change breaks,
+  counting only the violations the untampered run does not have. `a_quiet_run_holds_every_invariant` is the one unit
+  test that asks the engine something (that run holds every invariant).
+- **A hand-built log** (`src/sim/script.rs`): `HandLog` creates a board with the creator's fake ("Desk"), seals
+  Desk's commands, `DeviceAdded` and rotations, seals Skips as the board's recovery identity (`seal.md` §13.6: a
+  device may not skip its own frame), and has the model relay sequence them; two `HandLog`s of one seed built with the
+  same first steps are a fork (both Desks draw entry ids from the seed, so a test that needs the fork's entries to
+  carry ids of their own has the fork's Desk draw one id it never seals). `Case` holds the facts `check::check` is handed (reference log, branches, identities,
+  acknowledgements, deletions), `settled` and `honest` build identities whose samples are the oracle's. No engine runs
+  except the §31.7 oracle; where a test leans on what the oracle confirms, it asserts that as a premise with its own
+  message (for example: the oracle halts on a second poison entry inside a Skip's window, ENG-POISON-003).
+- A bounded seed search (at most 40 runs, the first seed that shows a pattern, a failure naming the pattern) only for
+  a situation nothing else can build; none is needed today.
+
+Each test of `script.rs` fails when its rule is removed from `check.rs` (task D4 tried each by hand; the fix pass added
+`a_pending_root_drop_on_a_fork_is_judged_by_the_forks_log` for invariant 5's `Deletion::Pending` with a chain, which
+the rewrite of the epoch-rotation test had left without one). The files under
+`tests/regress/` are exempt: they record failing runs. `tests/simulator.rs` is the gate itself (seeds of a range,
+determinism, one seed's trace).
 
 ## Spec question (task D3): a device that crash-halted on a Skip's target, against invariant 4
 

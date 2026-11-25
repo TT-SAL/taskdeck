@@ -943,7 +943,8 @@ mod tests {
     //! exactly the invariant that fact belongs to.
     use super::*;
 
-    fn tampered(f: impl FnOnce(&mut World<'_>)) -> Vec<u8> {
+    /// The violations of quiet seed 3 run to its end, with `f` applied before the checks.
+    fn quiet_violations(f: impl FnOnce(&mut World<'_>)) -> Vec<(u8, String)> {
         let cfg = SimConfig::named("quiet").expect("quiet");
         let mut w = World::new(3, &cfg, false);
         w.setup();
@@ -956,14 +957,31 @@ mod tests {
         }
         f(&mut w);
         let (r, _) = w.finish_run();
-        let mut invs: Vec<u8> = r.violations.iter().map(|v| v.invariant).collect();
+        r.violations.into_iter().map(|v| (v.invariant, v.detail)).collect()
+    }
+
+    /// The invariants `f` breaks: those of the violations the tampered run
+    /// has and the same run untampered has not (task D4: a tampering test
+    /// holds whatever the engine does at the seed).
+    fn tampered(f: impl FnOnce(&mut World<'_>)) -> Vec<u8> {
+        let mut new = quiet_violations(f);
+        for b in quiet_violations(|_| {}) {
+            if let Some(i) = new.iter().position(|x| *x == b) {
+                new.remove(i);
+            }
+        }
+        let mut invs: Vec<u8> = new.iter().map(|v| v.0).collect();
+        invs.sort_unstable();
         invs.dedup();
         invs
     }
 
+    // The one test here that asks the engine something: a run with no fault
+    // and no operation holds every invariant (the tampering tests below do
+    // not lean on it: they compare with the untampered run).
     #[test]
     fn a_quiet_run_holds_every_invariant() {
-        assert_eq!(tampered(|_| {}), Vec::<u8>::new());
+        assert_eq!(quiet_violations(|_| {}), Vec::new());
     }
 
     // Invariant 1: a device whose state is not the oracle's at its B.
@@ -1016,29 +1034,9 @@ mod tests {
         assert_eq!(tampered(|w| w.deletions.push((0, Deletion::Roots(vec![1]), 100, 9))), vec![5]);
     }
 
-    /// Runs seed `seed` of configuration `name`, applies `f`, returns the broken invariants.
-    fn tampered_in(name: &str, seed: u64, f: impl FnOnce(&mut World<'_>)) -> Vec<u8> {
-        let cfg = SimConfig::named(name).expect("named");
-        let mut w = World::new(seed, &cfg, false);
-        w.setup();
-        while let Some(s) = w.q.pop() {
-            w.t = s.t;
-            if matches!(s.ev, Ev::End) {
-                break;
-            }
-            w.step(s.ev);
-        }
-        f(&mut w);
-        let (r, _) = w.finish_run();
-        let mut invs: Vec<u8> = r.violations.iter().map(|v| v.invariant).collect();
-        invs.sort_unstable();
-        invs.dedup();
-        invs
-    }
-
-    // Invariant 5: an excuse matches the one deletion it explains. The drop of
-    // a pending root no device ever sealed is unexplained, also in a run with
-    // accepted epoch rotations (`revoke`).
+    // Invariant 5: the drop of a pending root no device ever sealed is
+    // unexplained (`sim::script` checks the drop of a rotation's own root
+    // against accepted rotations).
     #[test]
     fn a_pending_root_drop_needs_its_own_rotation() {
         let bogus = |w: &mut World<'_>| {
@@ -1046,14 +1044,6 @@ mod tests {
             w.deletions.push((0, Deletion::Pending(vec![[0xEE; 16]], None), b, 9));
         };
         assert_eq!(tampered(bogus), vec![5]);
-        let mut checked = 0;
-        for seed in 100..106u64 {
-            if tampered_in("revoke", seed, |_| {}).is_empty() {
-                assert_eq!(tampered_in("revoke", seed, bogus), vec![5], "revoke seed {seed}");
-                checked += 1;
-            }
-        }
-        assert!(checked > 0);
     }
 
     /// An outbox record of identity `id` the quiet run put, to build test records from.
@@ -1256,43 +1246,6 @@ mod tests {
         .contains(&6));
     }
 
-    // Invariant 4 (ruling 6 of the D2 brief): compare at every `B` the oracle
-    // has, also at a `B` between a Skip's target and the Skip. A wrong state
-    // sampled there is reported.
-    #[test]
-    fn a_wrong_state_between_a_skip_and_its_target_breaks_tampering() {
-        let mut checked = 0;
-        for seed in 100..106u64 {
-            let cfg = SimConfig::named("skip").expect("skip");
-            let mut w = World::new(seed, &cfg, false);
-            w.setup();
-            while let Some(s) = w.q.pop() {
-                w.t = s.t;
-                if matches!(s.ev, Ev::End) {
-                    break;
-                }
-                w.step(s.ev);
-            }
-            let roots: Vec<(u32, [u8; 32])> = w.roots.iter().copied().collect();
-            let led = check::ledger(&w.archive, w.template.as_ref(), &roots);
-            let between: BTreeSet<u64> =
-                led.iter().flat_map(|l| l.skip_targets.iter().flat_map(move |t| *t..l.seq)).collect();
-            let ref_chain: BTreeMap<u64, Hash32> = w.archive.iter().map(|r| (r.seq, r.chain)).collect();
-            let hit = w.idents.iter().enumerate().find_map(|(i, x)| {
-                x.samples
-                    .iter()
-                    .position(|s| s.0 > x.joined_at && between.contains(&s.0) && ref_chain.get(&s.0) == Some(&s.1))
-                    .map(|k| (i, k))
-            });
-            let Some((i, k)) = hit else { continue };
-            w.idents[i].samples[k].2 = [0xee; 32];
-            let (r, _) = w.finish_run();
-            assert!(r.violations.iter().any(|v| v.invariant == 4 && v.detail.contains("Skip")), "skip seed {seed}");
-            checked += 1;
-        }
-        assert!(checked > 0);
-    }
-
     // Invariant 2, second half: every device whose B is past an acknowledged
     // entry's seq has applied it exactly once (`counted` keeps what each
     // device's confirmed state applied).
@@ -1314,135 +1267,6 @@ mod tests {
         }
         assert_eq!(tampered(|w| w.tamper_facts = Some(Box::new(twice))), vec![2]);
         assert_eq!(tampered(|w| w.tamper_facts = Some(Box::new(never))), vec![2]);
-    }
-
-    /// Runs seed `seed` of `cfg` to its end (before the checks).
-    fn run_to_end(cfg: &SimConfig, seed: u64) -> World<'_> {
-        let mut w = World::new(seed, cfg, false);
-        w.setup();
-        while let Some(s) = w.q.pop() {
-            w.t = s.t;
-            if matches!(s.ev, Ev::End) {
-                break;
-            }
-            w.step(s.ev);
-        }
-        w
-    }
-
-    // Task D3 fix pass: invariant 4 compares a device's confirmed state at B
-    // with the §31.7 oracle only, a fresh engine replaying the reference log
-    // from seq 1 with no faults, a B between a Skip's target and the Skip
-    // included (ruling 6 of the D2 brief). The D3 writer had added the states
-    // of the oracle replayed with injected crashes: those are the engine
-    // under test run under faults, not an independent expected value, and
-    // accepting them loosened invariant 4 (nobody loosens an invariant).
-    // Gate seed 1014: device 2 crash-halts on the healthy entry 192 (two
-    // kills while 192 is under its marker), every other device applies it,
-    // device 2's Skip at 197 is accepted, and device 2 confirms 192, 195 and
-    // 196 without 192 (ENG-HALT-004, ENG-SKIP-002); the oracle has 192
-    // applied at each. The conflict is a spec question (api-simulator.md),
-    // reported, not settled in the check: these three stay violations, and
-    // their text names it.
-    #[test]
-    fn invariant_4_at_a_skip_window_is_judged_by_the_no_fault_oracle_only() {
-        let cfg = SimConfig::named("gate").expect("gate");
-        let w = run_to_end(&cfg, 1014);
-        let all: Vec<(u32, [u8; 32])> = w.roots.iter().copied().collect();
-        let led = check::ledger(&w.archive, w.template.as_ref(), &all);
-        let skip = led.iter().find(|l| l.accept && l.skip_targets.contains(&192)).expect("the Skip of 192");
-        assert_eq!(skip.seq, 197);
-        assert!(w.idents[2].crash_halts.contains(&192), "device 2 crash-halted on 192");
-        let (board, relay) = match w.idents.first().map(|i| &i.genesis) {
-            Some(Some((b, r))) => (b.clone(), r.clone()),
-            _ => panic!("genesis"),
-        };
-        // The oracle confirms every B from the target to the Skip (nothing
-        // there goes uncompared).
-        let (o, _) = check::oracle(&w.archive, w.template.as_ref(), &all, &board, &relay);
-        for b in 192..197u64 {
-            assert!(o.contains_key(&b), "B = {b}");
-        }
-        let (r, _) = w.finish_run();
-        for b in [192u64, 195, 196] {
-            let want = format!("dev 2: confirmed state at {b} differs from the oracle's on the reference log (between a Skip's target and the Skip at 197); it crash-halted on the target 192: ENG-HALT-004 against §31.7 invariant 4, a spec question");
-            assert!(r.violations.iter().any(|v| v.invariant == 4 && v.detail.starts_with(&want)), "B = {b}: {:?}", r.violations);
-        }
-    }
-
-    // A device that applied a Skip's target is held to the oracle's state
-    // there, and its violation names no spec question (it did not
-    // crash-halt on the target). Gate seed 1014: device 0 applied 192; given
-    // device 2's state at 195 (without 192), it is reported.
-    #[test]
-    fn a_device_that_applied_the_skip_target_is_held_to_the_oracle() {
-        let cfg = SimConfig::named("gate").expect("gate");
-        let mut w = run_to_end(&cfg, 1014);
-        assert!(w.idents[2].crash_halts.contains(&192) && !w.idents[0].crash_halts.contains(&192));
-        assert!(w.idents[0].samples.iter().any(|s| s.0 == 195), "device 0 confirmed 195");
-        let other = *w.idents[2].samples.iter().find(|s| s.0 == 195).expect("device 2 confirmed 195");
-        let own = *w.idents[0].samples.iter().find(|s| s.0 == 195).expect("device 0 confirmed 195");
-        assert_eq!(own.1, other.1, "the same chain at 195");
-        assert_ne!(own.2, other.2, "device 2's state at 195 lacks 192");
-        w.tamper_facts = Some(Box::new(move |x: &mut [check::IdentFacts]| {
-            for s in x[0].samples.iter_mut().filter(|s| s.0 == 195) {
-                s.2 = other.2;
-            }
-        }));
-        let (r, _) = w.finish_run();
-        let v = r.violations.iter().find(|v| v.invariant == 4 && v.detail.starts_with("dev 0: confirmed state at 195"));
-        assert!(v.is_some_and(|v| !v.detail.contains("spec question")), "{:?}", r.violations);
-    }
-
-    // §28.4 step 4 (task D3): a pairing's `DeviceAdded` that `register`
-    // acknowledged and the board then refused is named as such. A refused
-    // frame carries no items (`Opened::items` is filled on accept), so the
-    // check tells it by the `register` that acknowledged it. Before the D3
-    // review it looked for a `DeviceAdded` item in the refused entry and so
-    // could never name one. Gate seed 1017's refused entry at 218 is a raced
-    // Skip (not named); recorded as acknowledged by `register`, it is.
-    #[test]
-    fn a_refused_entry_register_acknowledged_is_named_a_pairing() {
-        let cfg = SimConfig::named("gate").expect("gate");
-        let mut w = run_to_end(&cfg, 1017);
-        let all: Vec<(u32, [u8; 32])> = w.roots.iter().copied().collect();
-        let led = check::ledger(&w.archive, w.template.as_ref(), &all);
-        let l = led.iter().find(|l| l.seq == 218).expect("218");
-        assert_eq!(l.class, "refuse");
-        assert!(l.skip_targets.is_empty() && l.added.is_empty(), "a refused entry carries no items");
-        let eid = l.entry_id.expect("opened");
-        assert!(!w.registered.contains(&eid));
-        w.registered.insert(eid);
-        let (r, _) = w.finish_run();
-        assert_eq!(r.violations.len(), 1, "{:?}", r.violations);
-        assert!(
-            r.violations[0].invariant == 2 && r.violations[0].detail.ends_with(": a pairing's DeviceAdded refused after register (§28.4 step 4)"),
-            "{:?}",
-            r.violations
-        );
-    }
-
-    // Gate seed 1058: a fork's copy and the reference log
-    // each rotate to epoch 2, with two roots. Before task D3 the simulator
-    // kept one root per epoch, the fork's frame at 115 could not be opened
-    // (`seal/missing_root`), so the entry lost there read as lost otherwise
-    // (no `lost to a rolled-back relay state`), and device 3's drop of the
-    // pending root of its rotation at fork seq 114 was checked against the
-    // reference log and read as an unexplained deletion (invariant 5). Every
-    // record a device applied there and lost is named (invariant 3).
-    #[test]
-    fn an_epoch_rotated_on_two_branches_keeps_both_roots() {
-        let cfg = SimConfig::named("gate").expect("gate");
-        let w = run_to_end(&cfg, 1058);
-        let epoch2: Vec<_> = w.roots.iter().filter(|(e, _)| *e == 2).collect();
-        assert_eq!(epoch2.len(), 2, "both roots of epoch 2 are kept");
-        let (r, _) = w.finish_run();
-        assert!(!r.violations.is_empty());
-        for v in &r.violations {
-            assert!(v.invariant == 2 || v.invariant == 3, "{v:?}");
-            assert!(v.detail.contains("rolled-back relay state (the forked copy of the relay, fault at trace line "), "{v:?}");
-        }
-        assert!(r.violations.iter().any(|v| v.invariant == 3 && v.detail.contains("applied on a rolled-back relay state")));
     }
 
     // §31.4: the runtime opens its socket from the login's answer. A push
@@ -1482,29 +1306,4 @@ mod tests {
         w.down(0, proc, conn, Down::Sock(SockMsg::Push(page)));
         assert_eq!(pages(&w), before + 1, "a push before the login's answer");
     }
-
-
-    // Gate seed 1019: machine 4 pairs through device 0 while device 0 is on a
-    // fork's copy, so `register` and its `DeviceAdded` exist only there; when
-    // the fork ends the relay refuses its login with `relay/unauthorized`
-    // (§11.9) and it never settles (invariant 6). Before task D3 one root per
-    // epoch hid the reference log's frames from the oracle ("the oracle
-    // never reached B"); now its violations are all named, the pairing one
-    // included. And gate seed 1017: a Skip refused `seal/ctl_target` after
-    // the relay acknowledged it (another device's Skip of the same target
-    // came first) is not a pairing's `DeviceAdded` (§28.4 step 4).
-    #[test]
-    fn a_pairing_lost_with_a_fork_is_named_and_a_raced_skip_is_not_a_pairing() {
-        let cfg = SimConfig::named("gate").expect("gate");
-        let (r, _) = run_to_end(&cfg, 1019).finish_run();
-        assert!(!r.violations.iter().any(|v| v.invariant == 1), "{:?}", r.violations.iter().find(|v| v.invariant == 1));
-        for v in &r.violations {
-            assert!(v.detail.contains("rolled-back relay state ("), "{v:?}");
-        }
-        assert!(r.violations.iter().any(|v| v.invariant == 6 && v.detail.contains("its pairing is only on a rolled-back relay state")));
-        let (r, _) = run_to_end(&cfg, 1017).finish_run();
-        assert_eq!(r.violations.len(), 1, "{:?}", r.violations);
-        assert!(r.violations[0].detail.contains("[\"refuse\"]") && !r.violations[0].detail.contains("§28.4"), "{:?}", r.violations);
-    }
-
 }
