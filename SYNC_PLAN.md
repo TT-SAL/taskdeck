@@ -253,7 +253,7 @@ Then the simulator: seeded and deterministic, with a model relay that follows `s
 
 Gate: 1,000 seeds per CI run with these invariants; every failing seed becomes a regression test.
 1. Devices that are honest and connected converge to one state hash.
-2. An acknowledged entry is never lost and is applied exactly once everywhere.
+2. An acknowledged entry is never lost and is applied exactly once everywhere. A relay that forks, or rolls back under entries another device then overwrites, can lose entries; for those faults the promise is that the loss is never silent: a device that holds the entry raises an alarm with evidence (`engine.md` §31.7; the owner's decision of 2026-11-25).
 3. A queued edit survives any crash and is sent exactly once.
 4. Tampering always raises an alarm with evidence and never changes state.
 5. No relay answer deletes local data or keys.
