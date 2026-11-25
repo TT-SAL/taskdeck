@@ -263,6 +263,9 @@ pub(super) enum Staged {
     /// An alarm of `check::is_evidence`'s kinds: (identity, kind, its trace
     /// line). It counts once durable, with the frames held then (task D6).
     Alarm(usize, AlarmKind, u64),
+    /// The snapshot duty a `WriteMeta` holds: (identity, value, its trace
+    /// line). It counts once durable (task D9).
+    SnapDuty(usize, check::SnapDuty, u64),
 }
 
 /// A test's change to the end-of-run facts (`World::tamper_facts`).
@@ -360,6 +363,10 @@ pub(crate) struct Ident {
     /// The frames a relay made up that its engine took into its log: (seq,
     /// frame hash, trace line of the `Persist`) (task D7).
     pub(crate) took: Vec<(u64, Hash32, u64)>,
+    /// Its durable snapshot duty, `Meta.duties.snapshot` (`(S, τ_S,
+    /// failures)`, §29.3), each time an applied `WriteMeta` changed it:
+    /// (trace line of the `Persist`, value) (task D9).
+    pub(crate) snap_duty: Vec<(u64, check::SnapDuty)>,
     pub(crate) last_status: Option<crate::Status>,
 }
 
@@ -410,8 +417,13 @@ pub(crate) struct World<'a> {
     /// The reference log (every row ever stored at the home relay, by seq), and other branches.
     pub(crate) archive: Vec<LogRow>,
     pub(crate) branches: Vec<BranchLog>,
-    /// Frame hash → (entry id, kind, duty entry).
-    frames: BTreeMap<Hash32, ([u8; 16], Kind, bool)>,
+    /// Frame hash → (entry id, kind, duty entry): every frame an outbox
+    /// record carried (task D9: an entry's kind and how often it was sealed,
+    /// also for a frame the observer cannot open).
+    pub(crate) frames: BTreeMap<Hash32, ([u8; 16], Kind, bool)>,
+    /// The aligned seq `S` each `snap` record is a snapshot of (its
+    /// `SnapInfo.seq`, §19.4 step 4; task D9).
+    pub(crate) snap_seqs: BTreeMap<[u8; 16], u64>,
     /// Entry ids a relay acknowledged, as the answer reached the device:
     /// (entry id, ident, line, from the reference branch).
     pub(crate) acked: Vec<([u8; 16], usize, u64, bool)>,
@@ -736,6 +748,7 @@ impl<'a> World<'a> {
             archive: Vec::new(),
             branches: Vec::new(),
             frames: BTreeMap::new(),
+            snap_seqs: BTreeMap::new(),
             acked: Vec::new(),
             acks: Vec::new(),
             restore_tails: Vec::new(),
@@ -987,6 +1000,7 @@ impl<'a> World<'a> {
             met_reference: 0,
             log_reach: 0,
             took: Vec::new(),
+            snap_duty: Vec::new(),
             last_status: None,
         });
         self.machines[machine].ident = id;
@@ -2296,5 +2310,80 @@ mod tests {
             assert_eq!((w.violations.len(), w.deletions.len()), (before.0 + 1, before.1), "a sent snap's drop is a violation");
         };
         assert_eq!(tampered(sent), vec![5]);
+    }
+
+    // Task D9 (§31.7 invariant 2, "Duty going on counts"): the run records
+    // what the check reads of a refused duty entry. Each frame an outbox
+    // record carries, with its entry id and kind (also for a frame the
+    // observer cannot open); the aligned seq of each `snap` record; and each
+    // durable change of the snapshot duty (`Meta.duties.snapshot`): once its
+    // write is applied, not while it is queued, never when a crash cut it
+    // off, once per change. In a quiet run, each identity's last recorded
+    // duty is the one its durable `Meta` holds (whatever the engine wrote).
+    #[test]
+    fn what_a_duty_going_on_reads_is_recorded() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, u64::MAX);
+        for (i, x) in w.idents.iter().enumerate() {
+            let durable = x.store.meta.as_ref().map(|m| m.duties.snapshot);
+            assert_eq!(x.snap_duty.last().map(|d| d.1), durable, "dev {i}: the last duty recorded is the durable one");
+            assert!(x.snap_duty.windows(2).all(|d| d[0].1 != d[1].1 && d[0].0 <= d[1].0), "dev {i}: one entry per change, in order");
+        }
+        let mut r = unsent(&w, 0x93);
+        r.kind = Kind::Snap;
+        r.frame = Some(vec![0x93; 40]);
+        r.body = Body::Snap(crate::SnapInfo { seq: 192, hash: [0; 32], hash_version: 1, blob: [0x93; 16], sha256: [0; 32], size: 100, parts: 1, inflated: 100, epoch: 1 });
+        w.note_persist(1, &[PersistOp::Outbox(vec![OutboxOp::Put(r)])], 9);
+        assert_eq!(w.frames.get(&h(&[0x93; 40])), Some(&([0x93; 16], Kind::Snap, true)), "the frame, its entry and kind");
+        assert_eq!(w.snap_seqs.get(&[0x93; 16]), Some(&192), "the snapshot's seq");
+        let mut meta = w.idents[1].store.meta.clone().expect("a meta");
+        let with = |meta: &mut crate::Meta, d: check::SnapDuty| {
+            meta.duties.snapshot = d;
+            [PersistOp::WriteMeta(meta.clone())]
+        };
+        let n = w.idents[1].snap_duty.len();
+        let ops = with(&mut meta, Some((1 << 20, 5, 2)));
+        w.note_persist(1, &ops, 9);
+        assert_eq!(w.idents[1].snap_duty.len(), n + 1);
+        assert_eq!(w.idents[1].snap_duty.last(), Some(&(9, Some((1 << 20, 5, 2)))), "a write applied at once");
+        w.note_persist(1, &ops, 10);
+        assert_eq!(w.idents[1].snap_duty.len(), n + 1, "the same duty again is no change");
+        let k = unapplied_write(&mut w, &with(&mut meta, None));
+        assert_eq!(w.idents[1].snap_duty.len(), n + 1, "a write still queued");
+        w.discard_unapplied(k.0, k.1);
+        assert_eq!(w.idents[1].snap_duty.len(), n + 1, "a write a crash cut off");
+        let k = unapplied_write(&mut w, &with(&mut meta, None));
+        w.wrote(k);
+        assert_eq!(w.idents[1].snap_duty.last(), Some(&(9, None)), "a write once applied");
+    }
+
+    // The simulated user pairs a machine again once per retirement (task D9,
+    // a fault of the workload, gate 17163374614648705494): a `PairFailed` for
+    // the pairing of an identity it had already retired and re-paired (a
+    // revocation it saw first, `begin_repair`) starts no second pairing of
+    // that machine, which would leave one of its two new identities running
+    // on with no machine; one for an identity still running retires it and
+    // pairs its machine again (§28.4 step 4).
+    #[test]
+    fn a_machine_is_paired_again_once_per_retirement() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, 3_600_000);
+        assert!(w.workload_on && w.t + 300_000 < w.t_end, "mid-run");
+        let pairs = |w: &World<'_>, m: usize| w.q.iter().filter(|s| matches!(s.ev, Ev::Pair { machine, .. } if machine == m)).count();
+        let (z, m) = (2, w.idents[2].machine);
+        let before = pairs(&w, m);
+        w.paired.insert(1 << 41, z);
+        w.begin_repair(z);
+        assert!(w.idents[z].retired);
+        assert_eq!(pairs(&w, m), before + 1, "the re-pair after the retirement");
+        w.on_notify(0, Notification::PairFailed { ticket: 1 << 41, code: "seal/stale_epoch" }, 95);
+        assert_eq!(pairs(&w, m), before + 1, "no second pairing of its machine");
+        let (y, my) = (1, w.idents[1].machine);
+        assert!(!w.idents[y].retired && w.idents[y].proc.is_some(), "dev 1 runs");
+        let before = pairs(&w, my);
+        w.paired.insert(1 << 42, y);
+        w.on_notify(0, Notification::PairFailed { ticket: 1 << 42, code: "seal/stale_epoch" }, 96);
+        assert!(w.idents[y].retired && w.idents[y].proc.is_none(), "retired and stopped");
+        assert_eq!(pairs(&w, my), before + 1, "its machine is paired again");
     }
 }

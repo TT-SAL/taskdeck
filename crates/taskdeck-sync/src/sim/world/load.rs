@@ -210,10 +210,17 @@ impl World<'_> {
                 }
                 if let Some(pp) = self.pairs.remove(&ticket) {
                     self.retry_pair(pp);
-                } else if let Some(z) = self.paired.remove(&ticket) {
+                } else if let Some(z) = self.paired.remove(&ticket)
+                    && !self.idents[z].retired
+                {
                     // §28.4 step 4: the `DeviceAdded` was registered (so the
                     // pairing machine started the new device) and then refused;
-                    // the relay drops its row, and the user pairs again.
+                    // the relay drops its row, and the user pairs again. Not
+                    // when the user already retired that device and re-paired
+                    // its machine (`begin_repair`, a revocation it saw first):
+                    // a second pairing of one machine would leave one of its
+                    // two identities running on with no machine (task D9,
+                    // gate 17163374614648705494).
                     self.stop_proc(z);
                     self.idents[z].retired = true;
                     let m = self.idents[z].machine;

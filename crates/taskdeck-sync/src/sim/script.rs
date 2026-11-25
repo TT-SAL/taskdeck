@@ -21,7 +21,8 @@ use super::world::WALL0;
 use crate::fake::{FakeMembership, FakeSealer};
 use crate::toy::{ToyCommand, ToyMachine};
 use crate::{
-    AppendResult, Body, ClassifyInput, CtlIntent, Dev, DeviceStatus, Hash32, Head, PlainEntry, RelayTarget, SeedDevice, Sealer, StateMachine,
+    AppendResult, Body, ClassifyInput, CtlIntent, Dev, DeviceStatus, Hash32, Head, Kind, PlainEntry, RelayTarget, SeedDevice, Sealer,
+    StateMachine,
 };
 
 /// One board's log, built entry by entry.
@@ -36,6 +37,9 @@ pub(crate) struct HandLog {
     pub(crate) target: RelayTarget,
     /// The `at_ms` of the next entry (one second per entry).
     at: i64,
+    /// The second device Desk paired (`pair`, "Laptop"): its fake and its
+    /// token's generation at the relay.
+    laptop: Option<(FakeSealer, u32)>,
 }
 
 impl HandLog {
@@ -56,7 +60,7 @@ impl HandLog {
         let mut template = desk.observer(seed ^ 0x5eed_0b5e_77e7, &[]).expect("the creator holds the anchor");
         template.set_supported_rules(&check::ORACLE_RULES);
         let target = RelayTarget { host: "relay-a.example".to_owned(), door: relay.door(), home_gen: 1 };
-        let mut log = HandLog { m: desk.membership_zero(), desk, template, relay, tgen, board, target, at: WALL0 + 1_000 };
+        let mut log = HandLog { m: desk.membership_zero(), desk, template, relay, tgen, board, target, at: WALL0 + 1_000, laptop: None };
         log.classify_last();
         log
     }
@@ -265,6 +269,92 @@ impl HandLog {
         self.tgen = tgen;
         (f, std::mem::replace(&mut self.relay, new))
     }
+
+    /// The membership after the last row (as Desk classified it).
+    pub(crate) fn membership(&self) -> FakeMembership {
+        self.m.clone()
+    }
+
+    /// The board's epoch after the last row.
+    pub(crate) fn epoch(&self) -> u32 {
+        self.desk.view(&self.m).epoch
+    }
+
+    /// A `snap` body for the aligned seq `s` (§19.4 step 4), its blob made
+    /// up, for a frame sealed under `epoch` (`seal.md` §11.5: the two must
+    /// be equal, or the entry is refused `seal/bad_payload`).
+    pub(crate) fn snap_body(s: u64, epoch: u32) -> Body {
+        Body::Snap(crate::SnapInfo { seq: s, hash: [0x5a; 32], hash_version: 1, blob: [0x5b; 16], sha256: [0x5c; 32], size: 100, parts: 1, inflated: 100, epoch })
+    }
+
+    /// A beat body: rules 1, no state report, no verdicts (§23.2).
+    pub(crate) fn beat_body() -> Body {
+        Body::Beat(crate::BeatInfo { rules: vec![1], envelopes: vec![(1, 1)], hash_versions: vec![1], state: None, acks: vec![] })
+    }
+
+    /// Desk's snapshot of the aligned seq `s`, sealed under the current epoch: (seq, entry id).
+    pub(crate) fn snap(&mut self, s: u64) -> (u64, [u8; 16]) {
+        let body = Self::snap_body(s, self.epoch());
+        self.desk_seal(body)
+    }
+
+    /// Desk pairs a second device, "Laptop", whose keys `FakeSealer::join_keys(seed)`
+    /// draws (§28.4): Desk seals its `DeviceAdded`, the relay stores it with
+    /// `register` (frame mode, `relay.md` §12.3) and gives Laptop a token, and
+    /// Laptop's fake joins from Desk's bundle at that seq (`FakeSealer::join`:
+    /// the roots the membership commits to, epoch 1 here). Returns the
+    /// entry's seq and Laptop's device id.
+    pub(crate) fn pair(&mut self, seed: u64) -> (u64, Dev) {
+        let (dev, sign_pk, hpke_pk) = FakeSealer::join_keys(seed);
+        let bootstrap_seq = self.head().seq;
+        let entry = self.entry(Body::Ctl(CtlIntent::AddDevice { dev, sign_pk, hpke_pk, name: "Laptop".to_owned(), transcript: [7; 32], bootstrap_seq }));
+        let me = self.desk.own_dev();
+        let ctr = self.desk.view(&self.m).devices.iter().find(|d| d.dev == me).expect("Desk is a member").last_ctr + 1;
+        let sealed = self.desk.seal(&self.m, ctr, &entry).expect("Desk seals");
+        let frame_hash: Hash32 = Sha256::digest(&sealed.frame).into();
+        let op = AdminOp::Register { dev, sign_pk, frame_hash, frame: Some(sealed.frame), seq: 0 };
+        let reply = self.relay.op(self.at, &Cred::Token { dev: me, generation: self.tgen }, &me, &op);
+        let tgen = reply.token_gen.unwrap_or(1);
+        let seq = reply.result.unwrap_or_else(|e| panic!("the relay refused the register: {}", e.code)).seq.expect("the DeviceAdded's seq");
+        self.classify_last();
+        assert!(self.desk.view(&self.m).devices.iter().any(|d| d.dev == dev), "the DeviceAdded at {seq} is accepted");
+        let head = self.head();
+        let membership = self.desk.membership_bytes(&self.m);
+        let material = crate::SnapshotMaterial { seq: head.seq, chain: head.chain, hash_version: 1, state_hash: [0; 32], board: Vec::new(), membership };
+        let mut fake = FakeSealer::join(seed, "Laptop", self.desk.bundle(material, seq));
+        fake.set_supported_rules(&check::ORACLE_RULES);
+        assert_eq!(fake.own_dev(), dev, "Laptop's keys are the ones Desk added");
+        self.laptop = Some((fake, tgen));
+        (seq, dev)
+    }
+
+    /// Laptop (`pair`) seals `body` under the membership `m` (the one after
+    /// the last row, or an earlier one: a frame sealed under the epoch before
+    /// a rotation), with its next counter after the last row, based on the
+    /// head; the relay does not sequence it yet (`laptop_append` does, before
+    /// Laptop seals anything else): (frame, entry id).
+    pub(crate) fn laptop_hold(&mut self, m: &FakeMembership, body: Body) -> (Vec<u8>, [u8; 16]) {
+        let entry = self.entry(body);
+        let (fake, _) = self.laptop.as_mut().expect("Laptop is paired");
+        let me = fake.own_dev();
+        let ctr = self.desk.view(&self.m).devices.iter().find(|d| d.dev == me).expect("Laptop is a member").last_ctr + 1;
+        (fake.seal(m, ctr, &entry).expect("Laptop seals").frame, entry.entry_id)
+    }
+
+    /// Desk seals `body` under the entry id `entry_id` (one another frame
+    /// carries too) and the relay sequences it: its seq.
+    pub(crate) fn desk_seal_as(&mut self, entry_id: [u8; 16], body: Body) -> u64 {
+        let mut entry = self.entry(body);
+        entry.entry_id = entry_id;
+        self.seal_entry(&entry)
+    }
+
+    /// The relay sequences a frame Laptop sealed (`laptop_hold`), sent with Laptop's token: its seq.
+    pub(crate) fn laptop_append(&mut self, frame: Vec<u8>) -> u64 {
+        let (fake, tgen) = self.laptop.as_ref().expect("Laptop is paired");
+        let cred = Cred::Token { dev: fake.own_dev(), generation: *tgen };
+        self.append(cred, frame)
+    }
 }
 
 /// What a test hands the checks (`check::Facts`, owned).
@@ -281,6 +371,8 @@ pub(crate) struct Case {
     pub enqueued: Vec<([u8; 16], usize, u64, u64)>,
     pub registered: BTreeMap<[u8; 16], Dev>,
     pub entry_ops: BTreeMap<[u8; 16], (usize, u64)>,
+    pub frames: BTreeMap<Hash32, ([u8; 16], Kind, bool)>,
+    pub snap_seqs: BTreeMap<[u8; 16], u64>,
     pub cancelled: BTreeSet<[u8; 16]>,
     pub made_up: BTreeMap<Hash32, MadeUp>,
     pub injected: Vec<Injected>,
@@ -305,6 +397,8 @@ impl Case {
             enqueued: Vec::new(),
             registered: BTreeMap::new(),
             entry_ops: BTreeMap::new(),
+            frames: BTreeMap::new(),
+            snap_seqs: BTreeMap::new(),
             cancelled: BTreeSet::new(),
             made_up: BTreeMap::new(),
             injected: Vec::new(),
@@ -334,6 +428,8 @@ impl Case {
             enqueued: &self.enqueued,
             registered: &self.registered,
             entry_ops: &self.entry_ops,
+            frames: &self.frames,
+            snap_seqs: &self.snap_seqs,
             cancelled: &self.cancelled,
             injected: &self.injected,
             made_up: &self.made_up,
@@ -369,6 +465,7 @@ pub(crate) fn settled(dev: Dev, joined_at: u64, samples: Vec<(u64, Hash32, Hash3
         applied: Vec::new(),
         alarms: Vec::new(),
         took: Vec::new(),
+        snap_duty: Vec::new(),
         evidence: Vec::new(),
         outbox: Vec::new(),
         refusal_seqs: BTreeSet::new(),
@@ -2234,5 +2331,354 @@ mod tests {
         x.crossings.push(Crossing { from: t - 1, to: t, to_chain: chain(t), k: s, k_chain: chain(s), line: 0 });
         c.idents.push(x);
         assert_eq!(c.check(), Vec::new());
+    }
+
+    // §31.7 invariant 2, the second outcome's last case (the owner's decision
+    // of 2026-11-25, "Duty going on counts", task D9): an entry of the
+    // engine's own duties refused with a re-sealable code, for which no
+    // refusal record is written (ENG-REF-001) and no entry is sealed again
+    // (§24.3), whose duty went on. The board: Laptop's `snap` entry for
+    // 128, sealed under epoch 1 before Desk's rotation, which the relay
+    // sequenced first, is refused `seal/stale_epoch` at `q` (`seal.md`
+    // §13.9: no `snap` entry under the previous epoch), as an own snapshot
+    // of gate seeds was; then Desk's snapshots of 64 (`below`, under `S`)
+    // and of 128 (`cover`, at `S`). Facts: Desk is identity 0, Laptop
+    // identity 1; the relay acknowledged the refused entry to Laptop at
+    // trace line 10 (delivered at 11).
+    struct DutyBoard {
+        case: Case,
+        q: u64,
+        eid: [u8; 16],
+        frame: Hash32,
+        below: u64,
+        cover: u64,
+        desk: Dev,
+    }
+
+    fn duty_board() -> DutyBoard {
+        let mut log = HandLog::new(SEED);
+        for k in 0..130u8 {
+            log.set(k % 8, i64::from(k));
+        }
+        let (added, laptop) = log.pair(9);
+        let m1 = log.membership();
+        let (frame, eid) = log.laptop_hold(&m1, HandLog::snap_body(128, 1));
+        log.rotate();
+        let q = log.laptop_append(frame.clone());
+        let (below, _) = log.snap(64);
+        let (cover, _) = log.snap(128);
+        log.set(1, 1);
+        let mut c = Case::of(&log);
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        let l = &led[q as usize - 1];
+        assert_eq!((l.class, l.code, l.kind, l.entry_id), ("refuse", Some("seal/stale_epoch"), Some(Kind::Snap), Some(eid)), "Laptop's snapshot is refused for its epoch");
+        for p in [below, cover] {
+            let l = &led[p as usize - 1];
+            assert!(l.accept && l.kind == Some(Kind::Snap) && l.author == log.desk_dev(), "Desk's snapshot at {p} is accepted");
+        }
+        let fh: Hash32 = Sha256::digest(&frame).into();
+        c.idents = vec![settled(log.desk_dev(), 0, Vec::new()), settled(laptop, added, Vec::new())];
+        c.acks = vec![AckFact { eid, ident: 1, sel: Sel::Main(0), seq: q, frame: fh, line: 10 }];
+        c.acked = vec![(eid, 1, 11, true)];
+        c.frames = BTreeMap::from([(fh, (eid, Kind::Snap, true))]);
+        c.snap_seqs = BTreeMap::from([(eid, 128)]);
+        DutyBoard { case: c, q, eid, frame: fh, below, cover, desk: log.desk_dev() }
+    }
+
+    /// A relay acknowledged to identity `ident`, at trace line `line`, an entry `eid` of kind `kind`.
+    fn ack_later(c: &mut Case, ident: usize, line: u64, kind: Kind, eid: [u8; 16]) {
+        let frame = [eid[0]; 32];
+        c.acks.push(AckFact { eid, ident, sel: Sel::Main(0), seq: 900, frame, line });
+        c.frames.insert(frame, (eid, kind, kind != Kind::Cmd));
+    }
+
+    // A refused `snap` entry passes when its duty went on, read from what the
+    // run records: Laptop wrote a later `snap` entry that a relay acknowledged
+    // after the relay sequenced the refused one (whatever became of it); its
+    // durable snapshot duty for 128 ended with three failures (two counted,
+    // then cleared after that); or Desk's snapshot of a seq at or above 128
+    // reached Laptop's log (§19.2: accepting it clears the duty). Without
+    // any of them it fails, and so does each near miss: a later entry
+    // acknowledged no later than the refused one, to another device, of
+    // another kind, or the refused entry itself; a duty cleared after one
+    // failure, before the refused entry was sequenced, for another seq, or
+    // replaced by a later seq rather than ended; Laptop's log reaching only
+    // Desk's snapshot of 64, or the covering snapshot being Laptop's own; and
+    // an entry sealed into two frames (§24.3: a duty entry is never sealed
+    // again).
+    #[test]
+    fn a_refused_snap_entry_passes_only_when_its_duty_went_on() {
+        let DutyBoard { case: mut c, q, eid, frame, below, cover, desk } = duty_board();
+        let stopped = vec![(2, 11, format!(
+            "dev 1: acknowledged entry {} is accepted 0 times in the reference log (classes there: [\"refuse\"]): finally refused at {q}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it; a snap entry refused at {q} with seal/stale_epoch, for which no refusal record is written (ENG-REF-001), and its snapshot duty did not go on: its device wrote no other snap entry after it, its duty for 128 did not end with three failures, and no other device's snapshot of a seq at or above 128 reached its log (§19.2, §19.4)",
+            check::hexs(&eid)
+        ))];
+        assert_eq!(c.check(), stopped, "its duty did not go on");
+        c.idents[1].refusal_seqs = BTreeSet::from([q]);
+        assert_eq!(c.check(), Vec::new(), "a refusal record is a report, as before");
+        c.idents[1].refusal_seqs = BTreeSet::new();
+        // A later `snap` entry of its own, acknowledged.
+        let (acks, frames) = (c.acks.clone(), c.frames.clone());
+        let later = |c: &mut Case, ident: usize, line: u64, kind: Kind, e: [u8; 16]| {
+            (c.acks, c.frames) = (acks.clone(), frames.clone());
+            ack_later(c, ident, line, kind, e);
+            c.check()
+        };
+        assert_eq!(later(&mut c, 1, 20, Kind::Snap, [0xa2; 16]), Vec::new(), "a later snap entry of its own");
+        for (name, ident, line, kind, e) in [
+            ("acknowledged with the refused one", 1, 10, Kind::Snap, [0xa2; 16]),
+            ("acknowledged before it", 1, 9, Kind::Snap, [0xa2; 16]),
+            ("another device's", 0, 20, Kind::Snap, [0xa2; 16]),
+            ("a beat", 1, 20, Kind::Beat, [0xa3; 16]),
+        ] {
+            assert_eq!(later(&mut c, ident, line, kind, e), stopped, "a later entry {name}");
+        }
+        (c.acks, c.frames) = (acks.clone(), frames.clone());
+        c.acks.push(AckFact { eid, ident: 1, sel: Sel::Main(0), seq: q, frame, line: 20 });
+        assert_eq!(c.check(), stopped, "the refused entry acknowledged again (`dup`) is no later entry");
+        // Sealed into two frames: no duty entry is sealed again (§24.3).
+        (c.acks, c.frames) = (acks.clone(), frames.clone());
+        ack_later(&mut c, 1, 20, Kind::Snap, [0xa2; 16]);
+        c.frames.insert([0xee; 32], (eid, Kind::Snap, true));
+        assert_eq!(
+            c.check(),
+            vec![(2, 11, format!(
+                "dev 1: acknowledged entry {} is accepted 0 times in the reference log (classes there: [\"refuse\"]): finally refused at {q}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it; a snap entry refused at {q} with seal/stale_epoch, but sealed into 2 frames (§24.3: no duty entry is sealed again)",
+                check::hexs(&eid)
+            ))],
+            "sealed twice"
+        );
+        (c.acks, c.frames) = (acks.clone(), frames.clone());
+        assert!(c.frames.keys().eq([&frame]), "one frame again");
+        // Its snapshot duty for 128 ended with three failures.
+        let tau = WALL0 + 3_600_000;
+        let duty = |c: &mut Case, d: Vec<(u64, check::SnapDuty)>| {
+            c.idents[1].snap_duty = d;
+            c.check()
+        };
+        assert_eq!(duty(&mut c, vec![(5, Some((128, tau, 2))), (12, None)]), Vec::new(), "the duty ended with three failures");
+        for (name, d) in [
+            ("after one failure", vec![(5, Some((128, tau, 1))), (12, None)]),
+            ("before the refused entry was sequenced", vec![(5, Some((128, tau, 2))), (10, None)]),
+            ("for another seq", vec![(5, Some((64, tau, 2))), (12, None)]),
+            ("replaced by a later seq", vec![(5, Some((128, tau, 2))), (12, Some((192, tau, 0)))]),
+        ] {
+            assert_eq!(duty(&mut c, d), stopped, "a duty cleared {name}");
+        }
+        c.idents[1].snap_duty = Vec::new();
+        // Another device's snapshot covered it.
+        c.idents[1].log_reach = cover;
+        assert_eq!(c.check(), Vec::new(), "Desk's snapshot of 128 reached Laptop's log");
+        c.idents[1].log_reach = below;
+        assert_eq!(c.check(), stopped, "Laptop's log reached only Desk's snapshot of 64");
+        c.idents[1].log_reach = cover;
+        c.idents[1].dev = desk;
+        assert_eq!(c.check(), stopped, "the snapshot of 128 is its own");
+    }
+
+    // The duty that went on is the duty of the entry's device ("its duty went
+    // on", §31.7 invariant 2 as the owner amended it): Laptop's refused `snap`
+    // entry passes when Laptop's own duty for 128 ended with three failures,
+    // or when Desk's snapshot of 128 reached Laptop's log; not when Desk's
+    // duty for 128 ended so, nor when Desk's snapshot of 128 reached a third
+    // device's log ("Phone", identity 2) and not Laptop's.
+    #[test]
+    fn another_devices_duty_going_on_does_not_pass_the_entry() {
+        let DutyBoard { case: mut c, q, eid, cover, .. } = duty_board();
+        let stopped = c.check();
+        let why = format!(
+            "a snap entry refused at {q} with seal/stale_epoch, for which no refusal record is written (ENG-REF-001), and its snapshot duty did not go on: its device wrote no other snap entry after it, its duty for 128 did not end with three failures, and no other device's snapshot of a seq at or above 128 reached its log (§19.2, §19.4)"
+        );
+        assert!(
+            matches!(stopped.as_slice(), [(2, 11, t)] if t.starts_with(&format!("dev 1: acknowledged entry {}", check::hexs(&eid))) && t.ends_with(&why)),
+            "Laptop's duty did not go on: {stopped:?}"
+        );
+        // Three failures: Laptop's duty for 128 ending so passes the entry, Desk's does not.
+        let ended = vec![(5, Some((128, WALL0 + 3_600_000, 2))), (12, None)];
+        c.idents[1].snap_duty.clone_from(&ended);
+        assert_eq!(c.check(), Vec::new(), "Laptop's duty for 128 ended with three failures");
+        c.idents[1].snap_duty = Vec::new();
+        c.idents[0].snap_duty = ended;
+        assert_eq!(c.check(), stopped, "Desk's duty for 128 ended with three failures");
+        c.idents[0].snap_duty = Vec::new();
+        // Covered: Desk's snapshot of 128 reaching Laptop's log passes the entry, reaching Phone's does not.
+        let mut phone = settled(dev(0x77), 0, Vec::new());
+        phone.log_reach = cover;
+        c.idents.push(phone);
+        assert_eq!(c.check(), stopped, "Desk's snapshot of 128 reached Phone's log, not Laptop's");
+        c.idents[1].log_reach = cover;
+        assert_eq!(c.check(), Vec::new(), "Desk's snapshot of 128 reached Laptop's log");
+    }
+
+    // A beat refused `seal/old_epoch` (two rotations late: the observer opens
+    // no such frame, so the run's record of Laptop's outbox gives its kind
+    // and the reference log holds its frame) passes when Laptop beat again:
+    // a later beat a relay acknowledged to it after the refused one; not a
+    // later `snap` entry, nor a beat acknowledged with it (§23).
+    #[test]
+    fn a_refused_beat_passes_only_when_its_device_beat_again() {
+        let mut log = HandLog::new(SEED);
+        log.set(0, 1);
+        let (added, laptop) = log.pair(9);
+        let m1 = log.membership();
+        let (frame, eid) = log.laptop_hold(&m1, HandLog::beat_body());
+        log.rotate();
+        log.rotate();
+        let q = log.laptop_append(frame.clone());
+        log.set(1, 1);
+        let mut c = Case::of(&log);
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        let l = &led[q as usize - 1];
+        assert_eq!((l.class, l.code, l.kind, l.entry_id), ("refuse", Some("seal/old_epoch"), None, None), "Laptop's beat is refused two epochs late, unopened");
+        let fh: Hash32 = Sha256::digest(&frame).into();
+        c.idents = vec![settled(log.desk_dev(), 0, Vec::new()), settled(laptop, added, Vec::new())];
+        c.acks = vec![AckFact { eid, ident: 1, sel: Sel::Main(0), seq: q, frame: fh, line: 10 }];
+        c.acked = vec![(eid, 1, 11, true)];
+        c.frames = BTreeMap::from([(fh, (eid, Kind::Beat, true))]);
+        let stopped = vec![(2, 11, format!(
+            "dev 1: acknowledged entry {} is accepted 0 times in the reference log (classes there: []): acknowledged at {q} (trace line 10) by a relay state no rollback or fork removed; a beat refused at {q} with seal/old_epoch, for which no refusal record is written (ENG-REF-001), and its device beat no more after it (§23)",
+            check::hexs(&eid)
+        ))];
+        assert_eq!(c.check(), stopped, "it beat no more");
+        let (acks, frames) = (c.acks.clone(), c.frames.clone());
+        for (name, line, kind, want) in [
+            ("a later beat", 20, Kind::Beat, Vec::new()),
+            ("a later snap entry", 20, Kind::Snap, stopped.clone()),
+            ("a beat acknowledged with it", 10, Kind::Beat, stopped.clone()),
+        ] {
+            (c.acks, c.frames) = (acks.clone(), frames.clone());
+            ack_later(&mut c, 1, line, kind, [0xb3; 16]);
+            assert_eq!(c.check(), want, "{name}");
+        }
+    }
+
+    // Nothing wider: a `cmd` entry and an operation's control entry, each
+    // refused `seal/stale_epoch` (sealed by Laptop under the epoch before
+    // Desk's rotation, based on the head after it, `seal.md` §13.9) and never
+    // sealed again, are held to the other outcomes as before, though Laptop
+    // went on with later entries of their kinds; the `cmd` entry also fails
+    // invariant 3, which asks a refusal record of a refused edit.
+    #[test]
+    fn a_cmd_or_control_entry_refused_for_its_epoch_is_not_a_duty_entry() {
+        let mut log = HandLog::new(SEED);
+        log.set(0, 1);
+        let (added, laptop) = log.pair(9);
+        let m1 = log.membership();
+        log.rotate();
+        let set = Body::Cmd(ToyMachine::new(true).encode(&ToyCommand::Set { key: 2, value: 2 }));
+        let (cmd, cmd_id) = log.laptop_hold(&m1, set);
+        let q1 = log.laptop_append(cmd.clone());
+        let (ctl, ctl_id) = log.laptop_hold(&m1, Body::Ctl(CtlIntent::RulesUpgrade { rules: 2, mode: crate::UpgradeMode::Normal }));
+        let q2 = log.laptop_append(ctl.clone());
+        log.set(1, 1);
+        let mut c = Case::of(&log);
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        for (q, eid, kind) in [(q1, cmd_id, Kind::Cmd), (q2, ctl_id, Kind::Ctl)] {
+            let l = &led[q as usize - 1];
+            assert_eq!((l.class, l.code, l.kind, l.entry_id), ("refuse", Some("seal/stale_epoch"), Some(kind), Some(eid)), "Laptop's {kind:?} entry is refused for its epoch");
+        }
+        let (h1, h2): (Hash32, Hash32) = (Sha256::digest(&cmd).into(), Sha256::digest(&ctl).into());
+        c.idents = vec![settled(log.desk_dev(), 0, Vec::new()), settled(laptop, added, Vec::new())];
+        c.acks = vec![
+            AckFact { eid: cmd_id, ident: 1, sel: Sel::Main(0), seq: q1, frame: h1, line: 10 },
+            AckFact { eid: ctl_id, ident: 1, sel: Sel::Main(0), seq: q2, frame: h2, line: 10 },
+        ];
+        c.acked = vec![(cmd_id, 1, 11, true), (ctl_id, 1, 11, true)];
+        c.frames = BTreeMap::from([(h1, (cmd_id, Kind::Cmd, false)), (h2, (ctl_id, Kind::Ctl, false))]);
+        c.entry_ops = BTreeMap::from([(ctl_id, (1, 33))]);
+        c.enqueued = vec![(cmd_id, 1, 1, 12)];
+        ack_later(&mut c, 1, 20, Kind::Cmd, [0xc1; 16]);
+        ack_later(&mut c, 1, 20, Kind::Ctl, [0xc2; 16]);
+        let tail = "and its device reported no refusal record, PairFailed of its pairing or end of its operation for it";
+        assert_eq!(
+            c.check(),
+            vec![
+                (2, 11, format!("dev 1: acknowledged entry {} is accepted 0 times in the reference log (classes there: [\"refuse\"]): finally refused at {q1}, {tail}", check::hexs(&cmd_id))),
+                (2, 11, format!("dev 1: acknowledged entry {} is accepted 0 times in the reference log (classes there: [\"refuse\"]): an operation's entry, finally refused at {q2}, {tail}", check::hexs(&ctl_id))),
+                (3, 12, format!(
+                    "dev 1: enqueued entry {} is accepted 0 times and not held or refused (in its outbox: false): acknowledged at {q1} (trace line 10) by a relay state no rollback or fork removed",
+                    check::hexs(&cmd_id)
+                )),
+            ]
+        );
+    }
+
+    // Nothing wider: a `snap` entry refused with a code that is not
+    // re-sealable (`seal/bad_payload`: its blob's epoch is not its frame's,
+    // `seal.md` §11.5) still needs its refusal record (ENG-REF-001), though
+    // its duty went on in every way the run records.
+    #[test]
+    fn a_duty_entry_refused_with_another_code_still_needs_its_refusal_record() {
+        let mut log = HandLog::new(SEED);
+        for k in 0..66u8 {
+            log.set(k % 8, i64::from(k));
+        }
+        let (added, laptop) = log.pair(9);
+        let m = log.membership();
+        let (frame, eid) = log.laptop_hold(&m, HandLog::snap_body(64, 7));
+        let q = log.laptop_append(frame.clone());
+        let (cover, _) = log.snap(64);
+        log.set(1, 1);
+        let mut c = Case::of(&log);
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        let l = &led[q as usize - 1];
+        assert_eq!((l.class, l.code, l.kind), ("refuse", Some("seal/bad_payload"), Some(Kind::Snap)), "Laptop's snapshot is refused for its payload");
+        let fh: Hash32 = Sha256::digest(&frame).into();
+        let mut x = settled(laptop, added, Vec::new());
+        x.snap_duty = vec![(5, Some((64, WALL0, 2))), (12, None)];
+        x.log_reach = cover;
+        c.idents = vec![settled(log.desk_dev(), 0, Vec::new()), x];
+        c.acks = vec![AckFact { eid, ident: 1, sel: Sel::Main(0), seq: q, frame: fh, line: 10 }];
+        c.acked = vec![(eid, 1, 11, true)];
+        c.frames = BTreeMap::from([(fh, (eid, Kind::Snap, true))]);
+        c.snap_seqs = BTreeMap::from([(eid, 64)]);
+        ack_later(&mut c, 1, 20, Kind::Snap, [0xa2; 16]);
+        assert_eq!(
+            c.check(),
+            vec![(2, 11, format!(
+                "dev 1: acknowledged entry {} is accepted 0 times in the reference log (classes there: [\"refuse\"]): finally refused at {q}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it",
+                check::hexs(&eid)
+            ))]
+        );
+        c.idents[1].refusal_seqs = BTreeSet::from([q]);
+        assert_eq!(c.check(), Vec::new(), "with its refusal record");
+    }
+
+    // "The reference log holds it once": Laptop's beat, refused
+    // `seal/old_epoch` at `q`, whose entry id a later frame of Desk's carries
+    // too (refused `seal/bad_payload` at `q2`), is held twice; a later beat
+    // of Laptop's does not make it a duty that went on.
+    #[test]
+    fn a_duty_entry_the_reference_log_holds_twice_is_not_one_whose_duty_went_on() {
+        let mut log = HandLog::new(SEED);
+        for k in 0..66u8 {
+            log.set(k % 8, i64::from(k));
+        }
+        let (added, laptop) = log.pair(9);
+        let m1 = log.membership();
+        let (frame, eid) = log.laptop_hold(&m1, HandLog::beat_body());
+        log.rotate();
+        log.rotate();
+        let q = log.laptop_append(frame.clone());
+        let q2 = log.desk_seal_as(eid, HandLog::snap_body(64, 7));
+        log.set(1, 1);
+        let mut c = Case::of(&log);
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        let (l, l2) = (&led[q as usize - 1], &led[q2 as usize - 1]);
+        assert_eq!((l.class, l.code, l.entry_id), ("refuse", Some("seal/old_epoch"), None), "Laptop's beat is refused unopened");
+        assert_eq!((l2.class, l2.code, l2.entry_id), ("refuse", Some("seal/bad_payload"), Some(eid)), "Desk's frame of the same entry id is refused");
+        let fh: Hash32 = Sha256::digest(&frame).into();
+        c.idents = vec![settled(log.desk_dev(), 0, Vec::new()), settled(laptop, added, Vec::new())];
+        c.acks = vec![AckFact { eid, ident: 1, sel: Sel::Main(0), seq: q, frame: fh, line: 10 }];
+        c.acked = vec![(eid, 1, 11, true)];
+        c.frames = BTreeMap::from([(fh, (eid, Kind::Beat, true))]);
+        ack_later(&mut c, 1, 20, Kind::Beat, [0xb3; 16]);
+        assert_eq!(
+            c.check(),
+            vec![(2, 11, format!(
+                "dev 1: acknowledged entry {} is accepted 0 times in the reference log (classes there: [\"refuse\"]): finally refused at {q2}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it",
+                check::hexs(&eid)
+            ))]
+        );
     }
 }

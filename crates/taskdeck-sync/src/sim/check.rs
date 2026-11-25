@@ -64,7 +64,16 @@ pub(crate) struct Ledger {
     pub seq: u64,
     pub accept: bool,
     pub class: &'static str,
+    /// The receipt's code: a refusal's (`seal.md` §22), or a halt's.
+    pub code: Option<&'static str>,
     pub entry_id: Option<[u8; 16]>,
+    /// The entry's kind, when the observer opened the frame (a frame refused
+    /// before it is opened, `seal/old_epoch` among them, has none).
+    pub kind: Option<Kind>,
+    /// The frame's author.
+    pub author: Dev,
+    /// The aligned seq an accepted `snap` entry is a snapshot of (§19.4).
+    pub snap_seq: Option<u64>,
     /// A `Cmd` entry: the one kind the engine hands to `apply`.
     pub cmd: bool,
     pub purge_before: Option<u64>,
@@ -195,7 +204,11 @@ fn ledger_with(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u
             seq: r.seq,
             accept: false,
             class: "error",
+            code: None,
             entry_id: None,
+            kind: None,
+            author: [0; 16],
+            snap_seq: None,
             cmd: false,
             purge_before: None,
             new_epoch: None,
@@ -217,8 +230,12 @@ fn ledger_with(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u
         };
         l.accept = rc.class == Class::Accept;
         l.class = class_name(&rc.class);
+        l.code = rc.code;
+        l.author = rc.author;
         if let Some(o) = &rc.opened {
             l.entry_id = Some(o.entry_id);
+            l.kind = Some(o.kind);
+            l.snap_seq = o.snap.as_ref().map(|i| i.seq);
             l.cmd = o.kind == Kind::Cmd;
             l.at_ms = o.at_ms;
             l.based_on = o.based_on.seq;
@@ -803,6 +820,10 @@ pub(crate) struct Crossing {
     pub line: u64,
 }
 
+/// A snapshot duty as `Meta` holds it (`duties.snapshot`: `(S, τ_S,
+/// failures)`, §29.3); none when no snapshot is due (task D9).
+pub(crate) type SnapDuty = Option<(u64, i64, u8)>;
+
 /// What the end of a run hands the checks.
 pub(crate) struct Facts<'a> {
     pub reference: &'a [LogRow],
@@ -822,6 +843,12 @@ pub(crate) struct Facts<'a> {
     pub registered: &'a BTreeMap<[u8; 16], Dev>,
     /// The operation each entry's outbox record belongs to (`OutboxRecord.op`): (ident, ticket).
     pub entry_ops: &'a BTreeMap<[u8; 16], (usize, u64)>,
+    /// Every frame an outbox record carried, by hash: (entry id, kind, duty
+    /// entry). An entry's kind, also where the observer opens no frame of it
+    /// (`seal/old_epoch`), and the frames it was sealed into (task D9).
+    pub frames: &'a BTreeMap<Hash32, ([u8; 16], Kind, bool)>,
+    /// The aligned seq `S` of each `snap` record (`SnapInfo.seq`, task D9).
+    pub snap_seqs: &'a BTreeMap<[u8; 16], u64>,
     pub cancelled: &'a BTreeSet<[u8; 16]>,
     pub injected: &'a [Injected],
     /// The frames the relay made up (`injected_frame`, §31.6), by hash.
@@ -869,6 +896,9 @@ pub(crate) struct IdentFacts {
     /// The frames a relay made up that its engine took into its log (an
     /// `AppendLog` that carried one): (seq, frame hash, trace line).
     pub took: Vec<(u64, Hash32, u64)>,
+    /// Its durable snapshot duty (`Meta.duties.snapshot`: `(S, τ_S,
+    /// failures)`, §29.3) at each change: (trace line, value) (task D9).
+    pub snap_duty: Vec<(u64, SnapDuty)>,
     /// Its durable alarms of `is_evidence`'s kinds.
     pub evidence: Vec<EvidenceAlarm>,
     pub outbox: Vec<([u8; 16], u64)>,
@@ -1103,6 +1133,78 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
         }
     }
     let accepted_once = |e: &[u8; 16]| by_id.get(e).map_or(0, |ls| ls.iter().filter(|l| l.accept).count());
+    // "An entry of the engine's own duties" (§31.7 invariant 2, the second
+    // outcome's last case; the owner's decision of 2026-11-25, "Duty going on
+    // counts", task D9): a `snap` entry or a beat, refused with a re-sealable
+    // code (`seal/stale_epoch`, `seal/old_epoch`, §24.3), for which no
+    // refusal record is written (ENG-REF-001) and no entry is sealed again
+    // (§24.3), and whose duty went on. Read from what the run records:
+    // - the entry: the kind its outbox record carried (`Facts::frames`; the
+    //   observer's, where it opened the frame: it opens none refused
+    //   `seal/old_epoch`) is `Snap` or `Beat`; it was sealed into one frame;
+    //   the reference log holds it at one seq `q` (that frame, or a row with
+    //   its entry id), refused with one of the two codes;
+    // - its duty went on, on a device the relay acknowledged it to, after
+    //   the relay sequenced it at `q`: a relay acknowledged to that device a
+    //   later entry of the same kind, whatever became of it (the device beat
+    //   again, §23; it wrote another `snap` entry, §19.4); or, for a `snap`
+    //   entry, its durable snapshot duty for the entry's `S` ended with three
+    //   failures (two counted, then cleared after `q` was sequenced: §19.2,
+    //   §19.4), or another device's snapshot covered it: the reference log
+    //   holds another device's accepted `snap` entry for a seq at or above
+    //   `S`, and the device's log reached that entry (§19.2: accepting it
+    //   clears the duty).
+    // Nothing wider: a `cmd` or control entry, a duty entry refused with
+    // another code or sealed twice is held to the other outcomes. `Err` says
+    // why not, for a duty entry refused with a re-sealable code (empty for
+    // any other entry).
+    let duty_went_on = |eid: &[u8; 16], delivered: u64| -> Result<(), String> {
+        let sealed: Vec<(&Hash32, Kind)> = f.frames.iter().filter(|(_, (e, _, _))| e == eid).map(|(h, (_, k, _))| (h, *k)).collect();
+        let Some(&(_, own_kind)) = sealed.first() else { return Err(String::new()) };
+        let mut held: BTreeSet<u64> = reference.iter().filter(|r| sealed.iter().any(|(h, _)| **h == r.hash)).map(|r| r.seq).collect();
+        held.extend(by_id.get(eid).into_iter().flatten().map(|l| l.seq));
+        let (Some(&q), 1) = (held.first(), held.len()) else { return Err(String::new()) };
+        let Some(l) = ledger_at(&led, q) else { return Err(String::new()) };
+        let code = match l.code {
+            Some(c) if l.class == "refuse" && (c == "seal/stale_epoch" || c == "seal/old_epoch") => c,
+            _ => return Err(String::new()),
+        };
+        let kind = l.kind.unwrap_or(own_kind);
+        let what = match kind {
+            Kind::Snap => "a snap entry",
+            Kind::Beat => "a beat",
+            Kind::Cmd | Kind::Ctl => return Err(String::new()),
+        };
+        if sealed.len() > 1 {
+            return Err(format!("; {what} refused at {q} with {code}, but sealed into {} frames (§24.3: no duty entry is sealed again)", sealed.len()));
+        }
+        let given = acks_of(eid).filter(|a| a.seq == q).map(|a| a.line).min().unwrap_or(delivered);
+        let s = f.snap_seqs.get(eid).copied();
+        let later = |d: usize| {
+            f.acks.iter().any(|a| a.ident == d && a.eid != *eid && a.line > given && f.frames.get(&a.frame).is_some_and(|(_, k, _)| *k == kind))
+        };
+        let ended = |x: &IdentFacts, s: u64| {
+            x.snap_duty.windows(2).any(|w| w[0].1.is_some_and(|(ds, _, n)| ds == s && n == 2) && w[1].1.is_none() && w[1].0 > given)
+        };
+        let covered = |x: &IdentFacts, s: u64| {
+            led.iter().any(|o| o.accept && o.kind == Some(Kind::Snap) && o.author != x.dev && o.snap_seq.is_some_and(|p| p >= s) && x.log_reach >= o.seq)
+        };
+        let went_on = devs_of(eid).iter().any(|d| {
+            later(*d) || (kind == Kind::Snap && s.is_some_and(|s| f.idents.get(*d).is_some_and(|x| ended(x, s) || covered(x, s))))
+        });
+        match (went_on, kind, s) {
+            (true, _, _) => Ok(()),
+            (false, Kind::Beat, _) => Err(format!(
+                "; {what} refused at {q} with {code}, for which no refusal record is written (ENG-REF-001), and its device beat no more after it (§23)"
+            )),
+            (false, _, Some(s)) => Err(format!(
+                "; {what} refused at {q} with {code}, for which no refusal record is written (ENG-REF-001), and its snapshot duty did not go on: its device wrote no other snap entry after it, its duty for {s} did not end with three failures, and no other device's snapshot of a seq at or above {s} reached its log (§19.2, §19.4)"
+            )),
+            (false, _, None) => Err(format!(
+                "; {what} refused at {q} with {code}, for which no refusal record is written (ENG-REF-001), and its device wrote no other snap entry after it (§19.4)"
+            )),
+        }
+    };
     // "Its device was retired while cut off" (§31.7 invariant 2, last
     // outcome; the owner's decision of 2026-11-25, task D7): every device of
     // `devs` (the entry's device) was retired, its machine re-paired as a new
@@ -1168,6 +1270,7 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
             if reported(eid, rows[0].seq, *line) {
                 continue;
             }
+            let Err(duty) = duty_went_on(eid, *line) else { continue };
             let Err(retired) = retired_cut_off(eid, &devs_of(eid)) else { continue };
             let what = if f.registered.contains_key(eid) {
                 "a pairing's DeviceAdded refused after register (§28.4 step 4), "
@@ -1177,17 +1280,20 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
                 ""
             };
             v.push((2, *line, format!(
-                "{base}: {what}finally refused at {}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it{retired}",
+                "{base}: {what}finally refused at {}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it{retired}{duty}",
                 rows[0].seq
             )));
             continue;
         }
         if n == 0 && rows.is_empty() {
+            // A duty entry the observer did not open (refused
+            // `seal/old_epoch`): the reference log holds its frame (task D9).
+            let Err(duty) = duty_went_on(eid, *line) else { continue };
             match quiet(eid) {
                 Ok(()) => {}
                 Err(why) => {
                     let Err(retired) = retired_cut_off(eid, &devs_of(eid)) else { continue };
-                    v.push((2, *line, format!("{base}: {why}{retired}")));
+                    v.push((2, *line, format!("{base}: {why}{retired}{duty}")));
                 }
             }
             continue;

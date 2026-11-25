@@ -372,6 +372,12 @@ impl World<'_> {
                 let held = self.idents[id].store.held_frames();
                 self.idents[id].evidence.push(EvidenceAlarm { line, kind, held });
             }
+            Staged::SnapDuty(id, duty, line) => {
+                let d = &mut self.idents[id].snap_duty;
+                if d.last().is_none_or(|(_, v)| *v != duty) {
+                    d.push((line, duty));
+                }
+            }
         }
     }
 
@@ -787,6 +793,8 @@ impl World<'_> {
                     for (kind, l) in evidence {
                         self.stage(Staged::Alarm(id, kind, l));
                     }
+                    // Task D9: the snapshot duty, once this write is applied.
+                    self.stage(Staged::SnapDuty(id, meta.duties.snapshot, line));
                 }
                 PersistOp::WriteCheckpoint(c) => {
                     if let Some((cks, _)) = self.idents[id].rejoin.as_mut() {
@@ -871,6 +879,9 @@ impl World<'_> {
                 (Kind::Beat | Kind::Snap, _) | (Kind::Ctl, Body::Ctl(CtlIntent::RulesUpgrade { mode: crate::UpgradeMode::Normal, .. }))
             );
             self.frames.insert(h(fr), (r.entry_id, r.kind, duty));
+        }
+        if let Body::Snap(info) = &r.body {
+            self.snap_seqs.insert(r.entry_id, info.seq);
         }
         self.idents[id].live.insert(r.entry_id, r.clone());
     }

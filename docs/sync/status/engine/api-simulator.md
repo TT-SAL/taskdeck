@@ -1,7 +1,7 @@
-# The simulator: how to run it (tasks D to D8)
+# The simulator: how to run it (tasks D to D9)
 
 Module `taskdeck_sync::sim` (feature `sim`; the test targets get it from the crate's dev-dependency on itself).
-Spec: engine.md §31, §31.7 as the owner amended it on 2026-11-25 (tasks D6, D7). Code: `src/sim.rs` (types),
+Spec: engine.md §31, §31.7 as the owner amended it on 2026-11-25 (tasks D6, D7, D9). Code: `src/sim.rs` (types),
 `src/sim/config.rs` (named configurations), `src/sim/world.rs` and `src/sim/world/` (model runtime, network,
 workload, faults), `src/sim/store.rs` (durable storage), `src/sim/check.rs` (ledger, oracle, the six invariants),
 `src/sim/trace.rs` (§31.9), `src/sim/script.rs` (hand-built logs for the simulator's own tests).
@@ -81,7 +81,9 @@ One JSON object per line, `t` (virtual ms) and `k` first:
 - `relay/token_stale` never reaches the engine: the runtime logs in again (§11.9); a refused login reaches it as
   `RelayRefused { req: None }`, then `Disconnected`. A disconnect discards every outstanding request.
 - The simulated user answers prompts again after a restart; on `ReplaceReady` (§28.5 step 3) it exports the revoked
-  machine's unsent edits, retires that identity and pairs the machine again. Sleep is `Shutdown` then exit.
+  machine's unsent edits, retires that identity and pairs the machine again. Sleep is `Shutdown` then exit. A
+  `PairFailed` after `PairRegistered` (§28.4 step 4) retires the new identity and pairs its machine again, unless the
+  user had retired it already (task D9: a second pairing of one machine left an identity running with no machine).
 - Withholding shows one device a stale view; a rollback restores the tables and ends every session; a fork serves
   a subset of devices from a copy until it ends.
 
@@ -111,7 +113,11 @@ welcome, page or answer that reached it (the runtime's own `Disconnected` is non
 `ReplaceReady` that named the identity (`retired_at`, the user's export and re-pair of §24.5; a re-pair for another
 reason has none); how far its log reached (`log_reach`: its `AppendLog`s and checkpoints); each injected frame with
 its hash and the host of the relay that showed it (`check::Injected`); each made-up frame an `AppendLog` of an
-identity carried (`IdentFacts::took`).
+identity carried (`IdentFacts::took`). Task D9: every frame an outbox record carried, with its entry id and kind
+(`World::frames`, `Facts::frames`: also for a frame the observer cannot open, refused `seal/old_epoch`), each `snap`
+record's `S` (`World::snap_seqs`), and each durable change of the snapshot duty `Meta.duties.snapshot` (`(S, τ_S,
+failures)`, `IdentFacts::snap_duty`, counted once its write is applied); the ledger keeps each receipt's code, kind,
+author and an accepted `snap` entry's `S`.
 
 **The oracle** (task D7) types the move code of each accepted `Fence` that awaits one (`Status::moving`,
 `Sealer::move_code(f, H(frame))`, §28.3 "On every other device" item 2) and answers the `Connect` that follows as its
@@ -153,14 +159,26 @@ would hold it there). `OracleRun::moves` lists the `Fence`s it followed, with th
   or (task D7) its device, every device it was acknowledged to, was retired after `ReplaceReady` while cut off: every
   acknowledgement came from a removed state (at least one) and no relay produced a message that reached it at or after
   the earliest such fault's trace line, or the reference log holds it once, refused, above the device's `log_reach`.
+  Task D9 (the owner's decision of 2026-11-25, "Duty going on counts"): or a `snap` entry or a beat (the kind its
+  outbox record carried; the observer's where it opened the frame), sealed into one frame, held once by the reference
+  log (that frame, or a row with its entry id), refused `seal/stale_epoch` or `seal/old_epoch`, whose duty went on, on
+  a device it was acknowledged to, after the relay sequenced it: a relay acknowledged to that device a later entry of
+  the same kind (another entry id, whatever became of it); or, for a `snap` entry, that device's durable duty for the
+  entry's `S` went from two failures to cleared (three failures, §19.2, §19.4), or the reference log holds another
+  device's accepted `snap` entry for a seq at or above `S` that that device's log reached (its `log_reach`; §19.2:
+  accepting it clears the duty). The duty and the log are that device's own: another identity's duty ending, or
+  another identity's log reaching the covering snapshot, passes nothing. Nothing wider: a `cmd` or control entry,
+  another code, or a duty entry sealed twice is held to the outcomes above.
   Otherwise the text names the outcome that failed (`lost to a removed relay state (…), and no device that held its
   frame raised an alarm …`, `lost to a rolled-back relay state that is not removed (…)`, `acknowledged at … by a
-  relay state no rollback or fork removed`, `… finally refused at …, and its device reported no …`). Second half as
+  relay state no rollback or fork removed`, `… finally refused at …, and its device reported no …`, and for a duty
+  entry `… for which no refusal record is written (ENG-REF-001), and its … did not go on …`). Second half as
   before: every device whose final `B` is past the seq applied it exactly once (`CountedToy`, `src/sim/counted.rs`),
   read on the log it followed; an entry an accepted Skip at or below `B` targets is expected 0 times.
 - 3: accepted once; or still in the outbox of a device halted or stopped with a persisted reason, or revoked; or
   refused with a refusal record; or dropped as a cancelled hold; or never lost silently; or its device (the one that
-  enqueued it) retired while cut off, as 2 reads it.
+  enqueued it) retired while cut off, as 2 reads it. Task D9 changes nothing here: only an `Enqueue`d command gets
+  `Notify(Enqueued)` with an entry id, and invariant 3's refusal outcome is its own (a refusal record).
 - 4: the confirmed state at every sampled `B` past the device's join against the oracle's first state at `B` on the
   log it followed (`check::oracle`: a fresh engine, no faults; `keep_first`), except between a Skip's target `t` and
   the Skip `s`: a state whose device last crossed `t` (before that state, on that log) with `K ≥ s` there is that of
@@ -210,11 +228,18 @@ line that a run happened to produce. In this order of preference:
   they are recorded or sent: an engine that sends none, or never resumes. Premises are asserted.
 - A bounded seed search only for a situation nothing else can build; none is needed.
 
-Each test fails when its rule is removed (tasks D6 to D8 removed or widened each rule in turn and ran the tests). D4's
+Each test fails when its rule is removed (tasks D6 to D9 removed or widened each rule in turn and ran the tests;
+D9's fix pass added `another_devices_duty_going_on_does_not_pass_the_entry`: no test failed when the three failures,
+or the covering snapshot's `log_reach`, was read from any identity rather than from the device the entry was
+acknowledged to; it gives Desk's duty for `S` the three failures, then a third device's log the covering snapshot,
+and fails under each widening, as under removing either rule). D4's
 open item: no oracle run can tell `keep_first` from an overwrite, because the oracle's confirmed head never returns to
 a seq it passed (a Skip replay is not shown through `confirmed`); `the_oracle_keeps_its_first_state_at_each_b` tests
 the rule itself. A `HandLog` also seals Desk's purge rotations (`purge`) and `ResetTo`s (`reset_to`, with the
-oracle's state hash at the target, which the oracle checks, §28.1) (task D8).
+oracle's state hash at the target, which the oracle checks, §28.1) (task D8). Task D9: `pair` pairs a second device,
+"Laptop", through `register` (frame mode) and joins its fake from Desk's bundle; `laptop_hold` seals a Laptop entry under
+a given membership (an epoch before a rotation) without sequencing it, `laptop_append` sequences it later; `snap`,
+`snap_body` and `beat_body` build duty entries.
 
 ## Open reading (task D6, for the owner)
 
@@ -239,3 +264,19 @@ The owner decided task D6's other two (a device retired while cut off; a dropped
   ENG-RESET-002's comparison holds; read the other, the unchanged board at `q`, and that device then differs from
   the oracle at `s`. The check takes neither: no expected value from `q` (a violation, the stricter reading). Where
   `t` left the board at `r` unchanged, both readings give the reset board, and the check expects it.
+
+## Readings (task D9, for the owner)
+
+- "Its duty went on" is read from the run's records only, after the relay sequenced the refused entry (the trace line
+  of its acknowledgement at that seq): a later entry is one a relay acknowledged later; the three failures are the
+  durable `Meta` duty for `S` at two failures, then cleared (a duty replaced by a later seq is not "ended"; the engine of
+  this base writes failures 0, 1, 2 and then clears the duty, never 3: 2,450 `gate` seeds); "another device's snapshot
+  covered it" is that device's accepted `snap` entry for a seq at or above `S` in the reference log, at or below the
+  device's `log_reach` (it took the entry into its log, which clears the duty, §19.2), at any seq. The failure counted
+  alone is not the duty going on: a device that halts or stops after the refusal fails.
+- A refused beat whose device beat no more before the end fails, also when the next beat was not yet due: §23.1 sets
+  `last_beat_ms` when the refused beat was enqueued, so without a pending verdict or an update the next one is due a day
+  later; with `days = 1` a beat refused late in the run has no successor.
+- On this base no `gate` seed (bases 100, 1000, 2000, 17163374614648704531 and 5000: 2,450 runs) has a `snap` entry or a
+  beat refused `seal/stale_epoch` or `seal/old_epoch`: the rule is exercised by the hand-built tests only (the seeds of
+  the brief run otherwise since the evidence cut and Q10).
