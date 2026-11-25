@@ -1811,6 +1811,38 @@ fn an_operation_that_ended_is_reported_though_the_process_stops_before_its_end_i
     assert!(a.has_note(|x| matches!(x, crate::Notification::ReplaceReady { dev } if *dev == c.dev())));
 }
 
+// spec: ENG-OPS-013 ENG-OPS-004
+#[test]
+fn a_pairing_reported_registered_is_never_reported_failed_after_a_start() {
+    // `gate` 5271: the relay stored the `DeviceAdded` and the engine gave `PairRegistered`, but
+    // the acknowledgement waited for a page's write that never came; after a `Start` the record
+    // looked unacknowledged, and the same ticket got `PairFailed` (`engine/pair_interrupted`).
+    let host = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(511);
+    a.set(1, 1, 1);
+    net.settle(&mut [&mut a]);
+    let cred = net.cred(&host, &a.dev());
+    let three = new_device(512, "Three");
+    a.feed(Event::PairRegister { ticket: 12, device: three });
+    let (req, op) = take_blob(&mut a);
+    let result = net.relay().blob(a.wall, &cred, &op).result;
+    a.feed(Event::BlobResult { req, result });
+    let (req, register) = take_admin(&mut a);
+    let reply = net.relay().admin(a.wall, &cred, &a.dev(), &register);
+    assert!(reply.result.is_ok());
+    a.feed(Event::AdminResult { req, result: reply.result });
+    assert!(matches!(pair_result(&a, 12), Some(Ok(_))));
+    // The process stops before any page brings the entry back.
+    a.restart(513);
+    net.settle(&mut [&mut a]);
+    let failed = notes_of(&a, |x| match x {
+        crate::Notification::PairFailed { ticket: 12, code } => Some(*code),
+        _ => None,
+    });
+    assert_eq!(failed, Vec::<&str>::new(), "a ticket reported registered is not reported failed");
+    assert_eq!(a.e.status().queued, 0);
+}
+
 /// Serves a node's effects one by one until the next one is the admin call `name`, which stays unanswered.
 fn serve_until_admin(net: &mut super::rkit_tests::Net, n: &mut Node, name: &str) {
     for _ in 0..20_000 {

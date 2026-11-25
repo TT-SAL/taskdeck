@@ -1068,7 +1068,18 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             match (result, p.info.clone()) {
                 (Ok((seq, _)), Some(snapshot)) => {
                     let (ticket, head) = (p.ticket, p.head);
-                    self.notify(Notification::PairRegistered { ticket, head, snapshot, added_seq: seq });
+                    // The acknowledgement is durable before the report: a record found after a
+                    // `Start` with its acknowledgement had its `PairRegistered`, and one without
+                    // it is reported failed (§28.4 "After a Start"), never both for one ticket.
+                    let note = Notification::PairRegistered { ticket, head, snapshot, added_seq: seq };
+                    match self.rec_index(id).map(|i| self.outbox[i].r.clone()) {
+                        Some(rec) => {
+                            self.send.ack_puts.retain(|x| x != id);
+                            let pid = self.persist(vec![PersistOp::Outbox(vec![OutboxOp::Put(rec)])]);
+                            self.after(pid, super::After::Notify(note));
+                        }
+                        None => self.notify(note),
+                    }
                 }
                 (Err(code), _) => self.pair_fail(code),
                 _ => {}
