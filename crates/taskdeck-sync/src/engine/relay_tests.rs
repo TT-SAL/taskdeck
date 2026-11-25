@@ -1427,3 +1427,64 @@ fn a_pairing_cut_off_by_a_restart_is_reported_failed() {
     assert_eq!(net.admins.len(), admins, "nothing was registered");
     assert!(a.e.outbox.is_empty());
 }
+
+// spec: ENG-MOVE-003 ENG-MOVE-006
+#[test]
+fn a_move_starts_its_seed_above_a_frame_the_relay_made_up() {
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(451);
+    let mut b = pair(&mut net, &mut a, 452, "Laptop", 1);
+    let mut k = 0u64;
+    let mut fill = |net: &mut super::rkit_tests::Net, a: &mut Node, b: &mut Node, upto: u64| {
+        while net.log_len() < upto {
+            k += 1;
+            a.set(k, (k % 50) as u8, k as i64);
+            net.settle(&mut [a, b]);
+        }
+        for _ in 0..3 {
+            a.advance(86_400_000);
+            b.advance(86_400_000);
+            net.settle(&mut [a, b]);
+        }
+    };
+    fill(&mut net, &mut a, &mut b, 70);
+    // The relay stores a frame nobody signed: a stored frame with its last byte changed.
+    let mut frame = net.relays[&old].log().values().last().expect("a frame").frame.clone();
+    *frame.last_mut().expect("a byte") ^= 1;
+    let now = a.wall;
+    let (head, _) = net.relays.get_mut(&old).expect("the relay").inject_frame(now, frame).expect("stored");
+    let x = head.seq;
+    net.settle(&mut [&mut a, &mut b]);
+    assert!(has_alarm(&a, crate::AlarmKind::SkippedFrame));
+    net.add_relay(NEW);
+
+    // No snapshot lies above that frame yet: the move ends before anything is fenced.
+    let calls = net.calls.len();
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Err("engine/move_tail")));
+    assert!(net.calls[calls..].iter().all(|c| c.1 != "admin:fence" && c.1 != "admin:seed"));
+    a.set(800, 8, 8);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(a.board_bytes(), b.board_bytes(), "the board works on where it is");
+
+    // Once a snapshot above it is usable, the seed starts right after the frame.
+    fill(&mut net, &mut a, &mut b, 140);
+    let admins = net.admins.len();
+    a.feed(Event::Op { ticket: 10, op: Operation::Move { host: NEW.to_owned() } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 10), Some(Ok(())));
+    let (first_seq, last_seq) = net.admins[admins..]
+        .iter()
+        .find_map(|(_, op)| match op {
+            AdminRequest::Seed { first_seq, last_seq, .. } => Some((*first_seq, *last_seq)),
+            _ => None,
+        })
+        .expect("the seed");
+    let f = net.relays[&old].head().expect("a head").seq;
+    assert_eq!((first_seq, last_seq), (x + 1, f));
+    for seq in first_seq..=last_seq {
+        assert_eq!(net.relays[NEW].log()[&seq].frame, net.relays[&old].log()[&seq].frame, "{seq}");
+    }
+}

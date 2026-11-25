@@ -276,7 +276,17 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// At the board apply of the aligned `S`: is a snapshot due? Records the duty.
     pub(crate) fn snapshot_due_at(&mut self, s: u64, tau: i64) -> bool {
         let in_outbox = self.outbox.iter().any(|r| r.r.kind == Kind::Snap);
-        let due = snapshot_due(s, tau, &self.registry.snapshots, &self.own, in_outbox, self.duty.owed_mismatch > 0);
+        // A frame this device skipped lies above every snapshot it knows: one snapshot is due, so
+        // that a move's seed can start above that frame (§28.3 stage 3).
+        let above_skipped = self
+            .meta
+            .alarms
+            .iter()
+            .filter(|a| a.kind == crate::AlarmKind::SkippedFrame)
+            .filter_map(|a| a.seq)
+            .any(|x| x < s && self.registry.snapshots.iter().all(|r| r.info.seq <= x));
+        let owed = self.duty.owed_mismatch > 0 || above_skipped;
+        let due = snapshot_due(s, tau, &self.registry.snapshots, &self.own, in_outbox, owed);
         if due {
             self.meta.duties.snapshot = Some((s, tau, 0));
             self.duty.snap_rank = self.mb.as_ref().and_then(|m| rank_of(&self.sealer.view(m), &self.own));
