@@ -231,6 +231,10 @@ struct Proc {
     hello_no: u64,
 }
 
+/// A test's change to the end-of-run facts (`World::tamper_facts`).
+#[cfg(test)]
+pub(crate) type TamperFacts = Box<dyn Fn(&mut [check::IdentFacts])>;
+
 /// One device identity (a machine is paired again as a new identity).
 pub(crate) struct Ident {
     machine: usize,
@@ -252,6 +256,9 @@ pub(crate) struct Ident {
     pub(crate) joined_at: u64,
     /// Samples of the confirmed state: (B, C_B, board hash, line).
     pub(crate) samples: Vec<(u64, Hash32, Hash32, u64)>,
+    /// The seqs of the crash halts this identity's storage held (§16.2): the
+    /// one kind of device that may confirm a `B` in `t..s` without `t`.
+    pub(crate) crash_halts: BTreeSet<u64>,
     last_b: (u64, Hash32),
     /// Alarms raised: (id, kind, seq, time).
     pub(crate) alarms: Vec<(u64, AlarmKind, Option<u64>, u64)>,
@@ -342,9 +349,12 @@ pub(crate) struct World<'a> {
     /// `Enqueued` with an entry id: (entry id, ident, time, line).
     pub(crate) enqueued: Vec<([u8; 16], usize, u64, u64)>,
     pub(crate) cancelled: BTreeSet<[u8; 16]>,
+    /// The entry ids of pairings' `DeviceAdded` frames that a relay's
+    /// `register` acknowledged with a seq (§28.4 step 3).
+    pub(crate) registered: BTreeSet<[u8; 16]>,
     /// A test's change to the end-of-run facts of each identity, before the checks.
     #[cfg(test)]
-    pub(crate) tamper_facts: Option<fn(&mut [check::IdentFacts])>,
+    pub(crate) tamper_facts: Option<TamperFacts>,
     /// The first time an entry id was put in an outbox.
     pub(crate) first_put: BTreeMap<[u8; 16], u64>,
     /// Deletions to explain at the end (invariant 5): (ident, what, B then, line).
@@ -352,7 +362,9 @@ pub(crate) struct World<'a> {
     pub(crate) violations: Vec<Violation>,
     /// The observer template: the creator's genesis fake with the anchor.
     template: Option<FakeSealer>,
-    pub(crate) roots: BTreeMap<u32, [u8; 32]>,
+    /// Every `(epoch, root)` any device held (two branches may rotate to one
+    /// epoch with two roots: `check::pick_roots`).
+    pub(crate) roots: BTreeSet<(u32, [u8; 32])>,
     /// Injected frames: (seq, chain there, line).
     pub(crate) injected_seqs: Vec<(u64, Hash32, u64)>,
     move_code: Option<String>,
@@ -383,7 +395,11 @@ pub(crate) enum Deletion {
     Truncate(u64, bool),
     Bases(Vec<u64>, bool),
     Roots(Vec<u32>),
-    Pending(Vec<[u8; 16]>),
+    /// Pending roots dropped by an identity write, with the chain the device
+    /// holds at the highest seq that write makes durable (which branch it
+    /// followed there: a fork's copy can sequence a rotation the reference
+    /// log never holds).
+    Pending(Vec<[u8; 16]>, Option<Hash32>),
 }
 
 fn h(b: &[u8]) -> Hash32 {
@@ -591,11 +607,12 @@ impl<'a> World<'a> {
             cancelled: BTreeSet::new(),
             #[cfg(test)]
             tamper_facts: None,
+            registered: BTreeSet::new(),
             first_put: BTreeMap::new(),
             deletions: Vec::new(),
             violations: Vec::new(),
             template: None,
-            roots: BTreeMap::new(),
+            roots: BTreeSet::new(),
             injected_seqs: Vec::new(),
             move_code: None,
             moved: false,
@@ -724,14 +741,14 @@ impl<'a> World<'a> {
         self.relays.push(relay);
         let mut template = fake.observer(seeds[0] ^ 0x5eed_0b5e_77e7, &[]);
         if let Some(t) = &mut template {
-            t.set_supported_rules(&[1, 2]);
+            t.set_supported_rules(&check::ORACLE_RULES);
         }
         self.template = template;
         let target = RelayTarget { host: HOSTS[0].to_owned(), door, home_gen: 1 };
         let identity = fake.export_identity().to_vec();
         let history = fake.history();
         for (e, r) in fake.roots() {
-            self.roots.insert(e, r);
+            self.roots.insert((e, r));
         }
         let store = Store::new(identity, history, Bootstrap::Genesis { board: board.clone(), frame_1: f1, relay: target.clone() });
         let id = self.new_ident(0, "Desk".to_owned(), seeds[0], fake, store, 0);
@@ -792,6 +809,7 @@ impl<'a> World<'a> {
             next_n: 1,
             joined_at,
             samples: Vec::new(),
+            crash_halts: BTreeSet::new(),
             last_b: (0, [0; 32]),
             alarms: Vec::new(),
             alarm_lines: Vec::new(),
@@ -1025,7 +1043,7 @@ mod tests {
     fn a_pending_root_drop_needs_its_own_rotation() {
         let bogus = |w: &mut World<'_>| {
             let b = w.archive.last().map_or(0, |r| r.seq);
-            w.deletions.push((0, Deletion::Pending(vec![[0xEE; 16]]), b, 9));
+            w.deletions.push((0, Deletion::Pending(vec![[0xEE; 16]], None), b, 9));
         };
         assert_eq!(tampered(bogus), vec![5]);
         let mut checked = 0;
@@ -1078,7 +1096,7 @@ mod tests {
             }
             w.step(s.ev);
         }
-        let roots: Vec<(u32, [u8; 32])> = w.roots.iter().map(|(e, r)| (*e, *r)).collect();
+        let roots: Vec<(u32, [u8; 32])> = w.roots.iter().copied().collect();
         let led = check::ledger(&w.archive, w.template.as_ref(), &roots);
         let eid = led.iter().rev().find(|l| l.accept).and_then(|l| l.entry_id).expect("an entry");
         let seq = led.iter().rev().find(|l| l.entry_id == Some(eid)).map(|l| l.seq).expect("its seq");
@@ -1255,7 +1273,7 @@ mod tests {
                 }
                 w.step(s.ev);
             }
-            let roots: Vec<(u32, [u8; 32])> = w.roots.iter().map(|(e, r)| (*e, *r)).collect();
+            let roots: Vec<(u32, [u8; 32])> = w.roots.iter().copied().collect();
             let led = check::ledger(&w.archive, w.template.as_ref(), &roots);
             let between: BTreeSet<u64> =
                 led.iter().flat_map(|l| l.skip_targets.iter().flat_map(move |t| *t..l.seq)).collect();
@@ -1294,7 +1312,199 @@ mod tests {
                 }
             }
         }
-        assert_eq!(tampered(|w| w.tamper_facts = Some(twice)), vec![2]);
-        assert_eq!(tampered(|w| w.tamper_facts = Some(never)), vec![2]);
+        assert_eq!(tampered(|w| w.tamper_facts = Some(Box::new(twice))), vec![2]);
+        assert_eq!(tampered(|w| w.tamper_facts = Some(Box::new(never))), vec![2]);
     }
+
+    /// Runs seed `seed` of `cfg` to its end (before the checks).
+    fn run_to_end(cfg: &SimConfig, seed: u64) -> World<'_> {
+        let mut w = World::new(seed, cfg, false);
+        w.setup();
+        while let Some(s) = w.q.pop() {
+            w.t = s.t;
+            if matches!(s.ev, Ev::End) {
+                break;
+            }
+            w.step(s.ev);
+        }
+        w
+    }
+
+    // Task D3 fix pass: invariant 4 compares a device's confirmed state at B
+    // with the §31.7 oracle only, a fresh engine replaying the reference log
+    // from seq 1 with no faults, a B between a Skip's target and the Skip
+    // included (ruling 6 of the D2 brief). The D3 writer had added the states
+    // of the oracle replayed with injected crashes: those are the engine
+    // under test run under faults, not an independent expected value, and
+    // accepting them loosened invariant 4 (nobody loosens an invariant).
+    // Gate seed 1014: device 2 crash-halts on the healthy entry 192 (two
+    // kills while 192 is under its marker), every other device applies it,
+    // device 2's Skip at 197 is accepted, and device 2 confirms 192, 195 and
+    // 196 without 192 (ENG-HALT-004, ENG-SKIP-002); the oracle has 192
+    // applied at each. The conflict is a spec question (api-simulator.md),
+    // reported, not settled in the check: these three stay violations, and
+    // their text names it.
+    #[test]
+    fn invariant_4_at_a_skip_window_is_judged_by_the_no_fault_oracle_only() {
+        let cfg = SimConfig::named("gate").expect("gate");
+        let w = run_to_end(&cfg, 1014);
+        let all: Vec<(u32, [u8; 32])> = w.roots.iter().copied().collect();
+        let led = check::ledger(&w.archive, w.template.as_ref(), &all);
+        let skip = led.iter().find(|l| l.accept && l.skip_targets.contains(&192)).expect("the Skip of 192");
+        assert_eq!(skip.seq, 197);
+        assert!(w.idents[2].crash_halts.contains(&192), "device 2 crash-halted on 192");
+        let (board, relay) = match w.idents.first().map(|i| &i.genesis) {
+            Some(Some((b, r))) => (b.clone(), r.clone()),
+            _ => panic!("genesis"),
+        };
+        // The oracle confirms every B from the target to the Skip (nothing
+        // there goes uncompared).
+        let (o, _) = check::oracle(&w.archive, w.template.as_ref(), &all, &board, &relay);
+        for b in 192..197u64 {
+            assert!(o.contains_key(&b), "B = {b}");
+        }
+        let (r, _) = w.finish_run();
+        for b in [192u64, 195, 196] {
+            let want = format!("dev 2: confirmed state at {b} differs from the oracle's on the reference log (between a Skip's target and the Skip at 197); it crash-halted on the target 192: ENG-HALT-004 against §31.7 invariant 4, a spec question");
+            assert!(r.violations.iter().any(|v| v.invariant == 4 && v.detail.starts_with(&want)), "B = {b}: {:?}", r.violations);
+        }
+    }
+
+    // A device that applied a Skip's target is held to the oracle's state
+    // there, and its violation names no spec question (it did not
+    // crash-halt on the target). Gate seed 1014: device 0 applied 192; given
+    // device 2's state at 195 (without 192), it is reported.
+    #[test]
+    fn a_device_that_applied_the_skip_target_is_held_to_the_oracle() {
+        let cfg = SimConfig::named("gate").expect("gate");
+        let mut w = run_to_end(&cfg, 1014);
+        assert!(w.idents[2].crash_halts.contains(&192) && !w.idents[0].crash_halts.contains(&192));
+        assert!(w.idents[0].samples.iter().any(|s| s.0 == 195), "device 0 confirmed 195");
+        let other = *w.idents[2].samples.iter().find(|s| s.0 == 195).expect("device 2 confirmed 195");
+        let own = *w.idents[0].samples.iter().find(|s| s.0 == 195).expect("device 0 confirmed 195");
+        assert_eq!(own.1, other.1, "the same chain at 195");
+        assert_ne!(own.2, other.2, "device 2's state at 195 lacks 192");
+        w.tamper_facts = Some(Box::new(move |x: &mut [check::IdentFacts]| {
+            for s in x[0].samples.iter_mut().filter(|s| s.0 == 195) {
+                s.2 = other.2;
+            }
+        }));
+        let (r, _) = w.finish_run();
+        let v = r.violations.iter().find(|v| v.invariant == 4 && v.detail.starts_with("dev 0: confirmed state at 195"));
+        assert!(v.is_some_and(|v| !v.detail.contains("spec question")), "{:?}", r.violations);
+    }
+
+    // §28.4 step 4 (task D3): a pairing's `DeviceAdded` that `register`
+    // acknowledged and the board then refused is named as such. A refused
+    // frame carries no items (`Opened::items` is filled on accept), so the
+    // check tells it by the `register` that acknowledged it. Before the D3
+    // review it looked for a `DeviceAdded` item in the refused entry and so
+    // could never name one. Gate seed 1017's refused entry at 218 is a raced
+    // Skip (not named); recorded as acknowledged by `register`, it is.
+    #[test]
+    fn a_refused_entry_register_acknowledged_is_named_a_pairing() {
+        let cfg = SimConfig::named("gate").expect("gate");
+        let mut w = run_to_end(&cfg, 1017);
+        let all: Vec<(u32, [u8; 32])> = w.roots.iter().copied().collect();
+        let led = check::ledger(&w.archive, w.template.as_ref(), &all);
+        let l = led.iter().find(|l| l.seq == 218).expect("218");
+        assert_eq!(l.class, "refuse");
+        assert!(l.skip_targets.is_empty() && l.added.is_empty(), "a refused entry carries no items");
+        let eid = l.entry_id.expect("opened");
+        assert!(!w.registered.contains(&eid));
+        w.registered.insert(eid);
+        let (r, _) = w.finish_run();
+        assert_eq!(r.violations.len(), 1, "{:?}", r.violations);
+        assert!(
+            r.violations[0].invariant == 2 && r.violations[0].detail.ends_with(": a pairing's DeviceAdded refused after register (§28.4 step 4)"),
+            "{:?}",
+            r.violations
+        );
+    }
+
+    // Gate seed 1058: a fork's copy and the reference log
+    // each rotate to epoch 2, with two roots. Before task D3 the simulator
+    // kept one root per epoch, the fork's frame at 115 could not be opened
+    // (`seal/missing_root`), so the entry lost there read as lost otherwise
+    // (no `lost to a rolled-back relay state`), and device 3's drop of the
+    // pending root of its rotation at fork seq 114 was checked against the
+    // reference log and read as an unexplained deletion (invariant 5). Every
+    // record a device applied there and lost is named (invariant 3).
+    #[test]
+    fn an_epoch_rotated_on_two_branches_keeps_both_roots() {
+        let cfg = SimConfig::named("gate").expect("gate");
+        let w = run_to_end(&cfg, 1058);
+        let epoch2: Vec<_> = w.roots.iter().filter(|(e, _)| *e == 2).collect();
+        assert_eq!(epoch2.len(), 2, "both roots of epoch 2 are kept");
+        let (r, _) = w.finish_run();
+        assert!(!r.violations.is_empty());
+        for v in &r.violations {
+            assert!(v.invariant == 2 || v.invariant == 3, "{v:?}");
+            assert!(v.detail.contains("rolled-back relay state (the forked copy of the relay, fault at trace line "), "{v:?}");
+        }
+        assert!(r.violations.iter().any(|v| v.invariant == 3 && v.detail.contains("applied on a rolled-back relay state")));
+    }
+
+    // §31.4: the runtime opens its socket from the login's answer. A push
+    // the relay sends on the socket of a login whose answer has not arrived
+    // (lost, or still on its way) reaches no engine. Before task D3 it did
+    // (gate seed 1076: device 2's login answer was lost after a rollback, the
+    // pushes of a restore tail reached its engine while it was connecting,
+    // and invariant 4 asked for a `RelayBehind` alarm for a page it ignored).
+    #[test]
+    fn a_push_before_the_login_answer_reaches_no_engine() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = World::new(3, &cfg, false);
+        w.setup();
+        let welcomed = |w: &World<'_>| w.idents[0].proc.as_ref().and_then(|p| p.conn.as_ref()).is_some_and(|c| c.welcomed_t.is_some());
+        while let Some(s) = w.q.pop() {
+            w.t = s.t;
+            if matches!(s.ev, Ev::End) {
+                break;
+            }
+            w.step(s.ev);
+            if w.t > 600_000 && welcomed(&w) {
+                break;
+            }
+        }
+        assert!(welcomed(&w));
+        let (seq, chain) = w.idents[0].store.head().expect("a log");
+        let page = Page { head: Head { seq, chain }, relay_now: 0, floor: 0, purge_floor: 0, more: false, truncated: false, fenced: false, entries: vec![] };
+        let pages = |w: &World<'_>| w.stats.events.get("page").copied().unwrap_or(0);
+        let p = w.idents[0].proc.as_ref().expect("running");
+        let (proc, conn) = (p.no, p.conn_no);
+        let before = pages(&w);
+        w.down(0, proc, conn, Down::Sock(SockMsg::Push(page.clone())));
+        assert_eq!(pages(&w), before + 1, "a push on a session whose login was answered");
+        if let Some(c) = w.idents[0].proc.as_mut().and_then(|p| p.conn.as_mut()) {
+            c.welcomed_t = None;
+        }
+        w.down(0, proc, conn, Down::Sock(SockMsg::Push(page)));
+        assert_eq!(pages(&w), before + 1, "a push before the login's answer");
+    }
+
+
+    // Gate seed 1019: machine 4 pairs through device 0 while device 0 is on a
+    // fork's copy, so `register` and its `DeviceAdded` exist only there; when
+    // the fork ends the relay refuses its login with `relay/unauthorized`
+    // (§11.9) and it never settles (invariant 6). Before task D3 one root per
+    // epoch hid the reference log's frames from the oracle ("the oracle
+    // never reached B"); now its violations are all named, the pairing one
+    // included. And gate seed 1017: a Skip refused `seal/ctl_target` after
+    // the relay acknowledged it (another device's Skip of the same target
+    // came first) is not a pairing's `DeviceAdded` (§28.4 step 4).
+    #[test]
+    fn a_pairing_lost_with_a_fork_is_named_and_a_raced_skip_is_not_a_pairing() {
+        let cfg = SimConfig::named("gate").expect("gate");
+        let (r, _) = run_to_end(&cfg, 1019).finish_run();
+        assert!(!r.violations.iter().any(|v| v.invariant == 1), "{:?}", r.violations.iter().find(|v| v.invariant == 1));
+        for v in &r.violations {
+            assert!(v.detail.contains("rolled-back relay state ("), "{v:?}");
+        }
+        assert!(r.violations.iter().any(|v| v.invariant == 6 && v.detail.contains("its pairing is only on a rolled-back relay state")));
+        let (r, _) = run_to_end(&cfg, 1017).finish_run();
+        assert_eq!(r.violations.len(), 1, "{:?}", r.violations);
+        assert!(r.violations[0].detail.contains("[\"refuse\"]") && !r.violations[0].detail.contains("§28.4"), "{:?}", r.violations);
+    }
+
 }

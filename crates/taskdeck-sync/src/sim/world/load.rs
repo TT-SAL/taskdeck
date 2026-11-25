@@ -570,7 +570,8 @@ impl World<'_> {
             }
             return;
         };
-        let roots: Vec<(u32, [u8; 32])> = self.roots.iter().map(|(e, r)| (*e, *r)).collect();
+        let all: Vec<(u32, [u8; 32])> = self.roots.iter().copied().collect();
+        let roots = check::pick_roots(&self.archive, self.template.as_ref(), &all);
         let seed = self.work.next();
         let Some(mut tool) = self.template.as_ref().and_then(|t| t.observer(seed, &roots)) else { return };
         let e = self.engine(d).expect("running");

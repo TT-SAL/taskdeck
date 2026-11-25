@@ -48,6 +48,9 @@ pub(crate) struct Ledger {
     pub purge_before: Option<u64>,
     pub new_epoch: Option<u32>,
     pub skip_targets: Vec<u64>,
+    /// The devices a `DeviceAdded` item of the entry adds (accepted entries
+    /// only: a refused one carries no items).
+    pub added: Vec<Dev>,
     pub tau: i64,
 }
 
@@ -61,8 +64,59 @@ fn class_name(c: &Class) -> &'static str {
     }
 }
 
-/// Classifies `rows` (seqs 1..) with an observer of `template` holding `roots`.
+/// Classifies `rows` (seqs 1..) with an observer of `template` holding the
+/// roots `pick_roots` chooses for them among `roots`.
 pub(crate) fn ledger(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8; 32])]) -> Vec<Ledger> {
+    ledger_with(rows, template, &pick_roots(rows, template, roots))
+}
+
+/// One root per epoch for the log `rows`, out of every `(epoch, root)` any
+/// device held. Two branches of one board can each rotate to the same epoch
+/// with a different root (a fork's copy and the reference log, a rollback's
+/// lost tail), and an observer holds one root per epoch: for each epoch with
+/// several, the choice under which the classification of `rows` reaches
+/// furthest before a frame it cannot open (`seal/missing_root`); the first
+/// such choice in `(epoch, root)` order on a tie.
+pub(crate) fn pick_roots(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8; 32])]) -> Vec<(u32, [u8; 32])> {
+    let mut by_epoch: BTreeMap<u32, Vec<[u8; 32]>> = BTreeMap::new();
+    for (e, r) in roots {
+        let v = by_epoch.entry(*e).or_default();
+        if !v.contains(r) {
+            v.push(*r);
+        }
+    }
+    let combos = by_epoch.values().map(Vec::len).product::<usize>();
+    let choice = |k: usize| -> Vec<(u32, [u8; 32])> {
+        let mut k = k;
+        by_epoch
+            .iter()
+            .map(|(e, rs)| {
+                let r = rs[k % rs.len()];
+                k /= rs.len();
+                (*e, r)
+            })
+            .collect()
+    };
+    if combos <= 1 {
+        return choice(0);
+    }
+    let reach = |c: &[(u32, [u8; 32])]| ledger_with(rows, template, c).iter().position(|l| l.class == "error").unwrap_or(rows.len());
+    let mut best = (0usize, choice(0));
+    for k in 0..combos.min(64) {
+        let c = choice(k);
+        let n = reach(&c);
+        if k == 0 || n > best.0 {
+            best = (n, c);
+        }
+        if n == rows.len() {
+            break;
+        }
+    }
+    best.1
+}
+
+/// Classifies `rows` (seqs 1..) with an observer of `template` holding `roots`.
+fn ledger_with(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8; 32])]) -> Vec<Ledger> {
     let mut out = Vec::new();
     let Some(mut s) = template.and_then(|t| t.observer(0x0b5e_77e7, roots)) else { return out };
     let mut m: FakeMembership = s.membership_zero();
@@ -85,13 +139,25 @@ pub(crate) fn ledger(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u
             skip_targets: &skip,
         };
         let Ok(rc) = s.classify(&input) else {
-            out.push(Ledger { seq: r.seq, accept: false, class: "error", entry_id: None, cmd: false, purge_before: None, new_epoch: None, skip_targets: vec![], tau });
+            out.push(Ledger {
+                seq: r.seq,
+                accept: false,
+                class: "error",
+                entry_id: None,
+                cmd: false,
+                purge_before: None,
+                new_epoch: None,
+                skip_targets: vec![],
+                added: vec![],
+                tau,
+            });
             prev = r.chain;
             continue;
         };
         let mut purge_before = None;
         let mut new_epoch = None;
         let mut skip_targets = Vec::new();
+        let mut added = Vec::new();
         let mut entry_id = None;
         let mut cmd = false;
         if let Some(o) = &rc.opened {
@@ -107,6 +173,7 @@ pub(crate) fn ledger(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u
                         purge_before = *p;
                     }
                     CtlItem::Skip { seq, .. } => skip_targets.push(*seq),
+                    CtlItem::DeviceAdded { dev, .. } => added.push(*dev),
                     _ => {}
                 }
             }
@@ -120,6 +187,7 @@ pub(crate) fn ledger(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u
             purge_before,
             new_epoch,
             skip_targets,
+            added,
             tau,
         });
         m = rc.membership;
@@ -131,12 +199,31 @@ pub(crate) fn ledger(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u
 /// The oracle's confirmed state at each `B` it passed: `B → (C_B, board hash, state hash)`.
 pub(crate) type OracleStates = BTreeMap<u64, (Hash32, Hash32, Hash32)>;
 
-/// Replays `rows` from seq 1 with a fresh engine and no faults (§31.7).
-pub(crate) fn oracle(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8; 32])], board: &[u8], relay: &RelayTarget) -> OracleStates {
-    oracle_run(rows, template, roots, board, relay).0
+/// The rules the oracle's sealer supports: the template's (`World::setup`).
+pub(crate) const ORACLE_RULES: [u32; 2] = [1, 2];
+
+/// The oracle on `rows` (§31.7): a fresh engine replaying them from seq 1
+/// with no faults, under the roots `pick_roots` chooses among `roots`. Its
+/// state at each `B` is the first one it had there (a Skip replay does not
+/// overwrite it). It is the only expected value invariant 4 accepts, a `B`
+/// between a Skip's target and the Skip included (ruling 6 of the D2 brief):
+/// a replay with injected crashes would be the engine under test run under
+/// faults, not an independent expected value (task D3 fix pass). A device
+/// that crash-halted on a Skip's target and so confirms the `B`s up to the
+/// Skip without it (ENG-HALT-004) differs from this oracle there; that is a
+/// spec question, reported (`api-simulator.md`), not settled in the check.
+pub(crate) fn oracle(
+    rows: &[LogRow],
+    template: Option<&FakeSealer>,
+    roots: &[(u32, [u8; 32])],
+    board: &[u8],
+    relay: &RelayTarget,
+) -> (OracleStates, BTreeSet<Dev>) {
+    oracle_run(rows, template, &pick_roots(rows, template, roots), board, relay)
 }
 
-/// The oracle's states, and the devices its final membership lists as revoked.
+/// Replays `rows` from seq 1 with a fresh engine and no faults (§31.7): the
+/// oracle's states, and the devices its final membership lists as revoked.
 fn oracle_run(
     rows: &[LogRow],
     template: Option<&FakeSealer>,
@@ -264,6 +351,8 @@ pub(crate) struct Facts<'a> {
     pub idents: Vec<IdentFacts>,
     pub acked: &'a [([u8; 16], usize, u64, bool)],
     pub enqueued: &'a [([u8; 16], usize, u64, u64)],
+    /// Pairings' `DeviceAdded` entry ids that `register` acknowledged.
+    pub registered: &'a BTreeSet<[u8; 16]>,
     pub cancelled: &'a BTreeSet<[u8; 16]>,
     pub injected: &'a [(u64, Hash32, u64)],
     pub deletions: &'a [(usize, super::world::Deletion, u64, u64)],
@@ -284,6 +373,8 @@ pub(crate) struct IdentFacts {
     pub caught_up: bool,
     pub joined_at: u64,
     pub samples: Vec<(u64, Hash32, Hash32, u64)>,
+    /// The seqs of the crash halts its storage held (§16.2).
+    pub crash_halts: BTreeSet<u64>,
     /// The seqs `apply` ran for on the lineage of the final confirmed state,
     /// since it was last loaded from bytes (`counted`), oldest first.
     pub applied: Vec<u64>,
@@ -300,7 +391,7 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
     let mut v: Vec<(u8, u64, String)> = Vec::new();
     let reference = f.reference;
     let led = ledger(reference, f.template, &f.roots);
-    let (states, revoked_in_ref) = oracle_run(reference, f.template, &f.roots, &f.board, &f.relay);
+    let (states, revoked_in_ref) = oracle(reference, f.template, &f.roots, &f.board, &f.relay);
     let head = reference.last().map(|r| Head { seq: r.seq, chain: r.chain }).unwrap_or_default();
     let ref_chain: BTreeMap<u64, Hash32> = reference.iter().map(|r| (r.seq, r.chain)).collect();
 
@@ -320,6 +411,37 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
             None => v.push((1, x.last_line, format!("dev {i}: the oracle never reached B = {}", b.seq))),
         }
     }
+
+    // The rollback or fork branch on which a device applied an entry: the
+    // branch holds it with class `Accept` at `q`, and the device confirmed a
+    // `B ≥ q` on that branch's chain.
+    let lost_ledgers: Vec<(&BranchLog, Vec<Ledger>)> = f
+        .branches
+        .iter()
+        .filter(|b| b.why == WHY_ROLLBACK || b.why == WHY_FORK)
+        .map(|b| (b, ledger(&b.rows, f.template, &f.roots)))
+        .collect();
+    let applied_on_lost_branch = |eid: &[u8; 16], x: &IdentFacts| -> Option<(&'static str, u64)> {
+        lost_ledgers.iter().find_map(|(br, l)| {
+            let q = l.iter().find(|l| l.accept && l.entry_id.as_ref() == Some(eid))?.seq;
+            let chain: BTreeMap<u64, Hash32> = br.rows.iter().map(|r| (r.seq, r.chain)).collect();
+            x.samples.iter().any(|(b, c, _, _)| *b >= q && chain.get(b) == Some(c)).then_some((br.why, br.line))
+        })
+    };
+    // Task D3: a device whose pairing only a rolled-back or forked relay
+    // state holds (its `DeviceAdded` is accepted on such a branch and not in
+    // the reference log): the relay forgot its registration with that state,
+    // and it is refused `relay/unauthorized` from then on.
+    let pairing_lost = |x: &IdentFacts| -> String {
+        if x.joined_at == 0 || led.iter().any(|l| l.accept && l.added.contains(&x.dev)) {
+            return String::new();
+        }
+        lost_ledgers
+            .iter()
+            .find(|(_, l)| l.iter().any(|l| l.accept && l.added.contains(&x.dev)))
+            .map(|(br, _)| format!(": its pairing is only on a rolled-back relay state ({}, fault at trace line {})", br.why, br.line))
+            .unwrap_or_default()
+    };
 
     // 2. Acknowledged entries.
     let mut by_id: BTreeMap<[u8; 16], Vec<&Ledger>> = BTreeMap::new();
@@ -353,6 +475,13 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
             .flatten()
             .map(|(b, _)| format!(": lost to a rolled-back relay state ({}, fault at trace line {})", b.why, b.line))
             .unwrap_or_default();
+        // Task D3: a pairing's `DeviceAdded` that `register` acknowledged and
+        // the board then refused (a racing rotation made it stale, §28.4 step
+        // 4); the owner decides that case. Told by the `register` that
+        // acknowledged it: a refused frame carries no items (`Opened::items`
+        // is filled on accept only), so its `DeviceAdded` cannot be read here.
+        let pairing = n == 0 && lost.is_empty() && f.registered.contains(eid) && by_id.get(eid).is_some_and(|ls| ls.iter().any(|l| l.class == "refuse"));
+        let lost = if pairing { ": a pairing's DeviceAdded refused after register (§28.4 step 4)".to_owned() } else { lost };
         v.push((2, *line, format!("dev {dev}: acknowledged entry {} is accepted {n} times in the reference log (classes there: {classes:?}){lost}", hexs(eid))));
     }
 
@@ -414,15 +543,21 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
         let refused = n == 0
             && by_id.get(eid).is_some_and(|ls| ls.iter().any(|l| !l.accept && x.refusal_seqs.contains(&l.seq)));
         if !(held || refused) {
-            v.push((3, *line, format!("dev {dev}: enqueued entry {} is accepted {n} times and not held or refused (in its outbox: {in_outbox})", hexs(eid))));
+            // Task D3: a record its device applied on a relay state that a
+            // rollback or a fork later removed from the reference branch is
+            // named as such, with the fault's trace line (still a violation).
+            let lost = if n == 0 && !in_outbox { applied_on_lost_branch(eid, x) } else { None };
+            let lost = lost.map(|(why, l)| format!(": applied on a rolled-back relay state ({why}, fault at trace line {l})")).unwrap_or_else(|| pairing_lost(x));
+            v.push((3, *line, format!("dev {dev}: enqueued entry {} is accepted {n} times and not held or refused (in its outbox: {in_outbox}){lost}", hexs(eid))));
         }
     }
 
-    // 4. Tampering: the confirmed state at every B against the oracle's,
-    // skipping none (ruling 6 of the D2 brief): the oracle replays the
-    // reference log with the same Skips, so its state at a B between a Skip's
-    // target and the Skip is the one a device that confirmed that B had.
-    // Named in the report, so that a failure there can be told apart.
+    // 4. Tampering: the confirmed state at every B against the oracle's
+    // (§31.7: a fresh engine, the reference log from seq 1, no faults),
+    // skipping none (ruling 6 of the D2 brief), a B between a Skip's target
+    // and the Skip included. Such a violation names the Skip, and, for a
+    // device that crash-halted on the target, the spec question it turns on
+    // (ENG-HALT-004 against invariant 4), so that it can be told apart.
     let skip_window = |b: u64| led.iter().find(|l| l.skip_targets.iter().any(|t| *t <= b && b < l.seq)).map(|l| l.seq);
     let mut branch_states: BTreeMap<usize, OracleStates> = BTreeMap::new();
     for (i, x) in f.idents.iter().enumerate() {
@@ -439,13 +574,12 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
                     v.push((4, *line, format!("dev {i}: confirmed state at {b} on a chain no relay served")));
                     continue;
                 };
-                let s = branch_states
-                    .entry(k)
-                    .or_insert_with(|| oracle(&f.branches[k].rows, f.template, &f.roots, &f.board, &f.relay));
+                let s = branch_states.entry(k).or_insert_with(|| oracle(&f.branches[k].rows, f.template, &f.roots, &f.board, &f.relay).0);
                 s.get(b)
             };
-            if let Some((oc, obh, _)) = st
-                && oc == c
+            // The oracle's state at B, when it is on the same chain.
+            let same = st.filter(|(oc, _, _)| oc == c);
+            if let Some((_, obh, _)) = same
                 && obh != bh
             {
                 let on = if on_ref {
@@ -454,7 +588,22 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
                     f.branches.iter().find(|br| br.rows.iter().any(|r| r.seq == *b && r.chain == *c)).map_or("", |br| br.why)
                 };
                 let window = skip_window(*b).map(|s| format!(" (between a Skip's target and the Skip at {s})")).unwrap_or_default();
-                v.push((4, *line, format!("dev {i}: confirmed state at {b} differs from the oracle's on {on}{window}")));
+                let halted = led
+                    .iter()
+                    .filter(|l| l.accept && *b < l.seq)
+                    .find_map(|l| l.skip_targets.iter().find(|t| **t <= *b && x.crash_halts.contains(t)))
+                    .map(|t| {
+                        format!("; it crash-halted on the target {t}: ENG-HALT-004 against §31.7 invariant 4, a spec question (api-simulator.md)")
+                    })
+                    .unwrap_or_default();
+                v.push((4, *line, format!("dev {i}: confirmed state at {b} differs from the oracle's on {on}{window}{halted}")));
+            }
+            // Ruling 6: nothing between a Skip's target and the Skip goes
+            // uncompared; a B there the oracle never confirmed is reported.
+            if on_ref && same.is_none()
+                && let Some(s) = skip_window(*b)
+            {
+                v.push((4, *line, format!("dev {i}: confirmed state at {b} between a Skip's target and the Skip at {s}, where the oracle confirmed nothing")));
             }
         }
         if let Some((line, what)) = &x.expect_alarm {
@@ -493,10 +642,25 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
                 *r <= *b && es.iter().all(|e| e < n) && led.iter().any(|l| l.seq <= *b && l.tau > tau + 2_592_000_000)
             }),
             // An identity change dropping the pending roots of own rotations:
-            // each one's own entry is in the reference log at or below B, either
-            // accepted (it reached the board head) or refused (a refused own
-            // rotation, SEAL-MEM-016). Nothing else excuses the drop of one.
-            Deletion::Pending(ids) => ids.iter().all(|e| own_entry_at.get(e).is_some_and(|s| s <= b)),
+            // each one's own entry is at or below B in the log the device
+            // followed there (the reference log, or the branch whose chain it
+            // holds at B), either accepted (it reached the board head) or
+            // refused (a refused own rotation, SEAL-MEM-016). Nothing else
+            // excuses the drop of one.
+            Deletion::Pending(ids, chain) => {
+                let k = chain
+                    .filter(|c| ref_chain.get(b) != Some(c))
+                    .and_then(|c| f.branches.iter().position(|br| br.rows.iter().any(|r| r.seq == *b && r.chain == c)));
+                let on_branch: BTreeMap<[u8; 16], u64>;
+                let at = match k {
+                    None => &own_entry_at,
+                    Some(k) => {
+                        on_branch = ledger(&f.branches[k].rows, f.template, &f.roots).iter().filter_map(|l| Some((l.entry_id?, l.seq))).rev().collect();
+                        &on_branch
+                    }
+                };
+                ids.iter().all(|e| at.get(e).is_some_and(|s| s <= b))
+            }
         };
         if !ok {
             v.push((5, *line, format!("dev {dev}: {d:?} with B = {b} is not explained by §31.7 invariant 5")));
@@ -509,7 +673,7 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
             continue;
         }
         if !(x.live && x.caught_up) && !x.halted_or_stopped_persisted {
-            v.push((6, x.last_line, format!("dev {i}: neither live and caught up nor halted or stopped with a persisted reason ({})", x.desc)));
+            v.push((6, x.last_line, format!("dev {i}: neither live and caught up nor halted or stopped with a persisted reason ({}){}", x.desc, pairing_lost(x))));
         }
         if x.live && !x.halted_or_stopped_persisted {
             for (e, put) in &x.outbox {
