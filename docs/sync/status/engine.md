@@ -218,6 +218,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_6790fa34-60e | C model relay, first attempt | `engine/briefs/c-model-relay.md` | lost: the owner's usage limit cut the writer off | nothing kept beyond commit 678fdc2 on `wt/c` | 265,340 |
 | wf_e736e661-ee0 | C model relay, second attempt | `engine/briefs/c-model-relay.md` | done, merged (the lead ran its gate: 16 conformance tests pass) | `src/sim/relay.rs` + `relay/{seq,admin,blobs,socket,util}.rs`, `tests/relay_conformance.rs` (11 families of `relay/test/vectors/`, about 575 steps; 7 families left out with reasons in the file header), `engine/api-model-relay.md`; check: no findings; 8 questions on relay.md; asks the fake for an accessor of the genesis `rsign_pk` and `salt` | 532,591 |
 | wf_70e5dcc6-438 | D simulator | `engine/briefs/d-simulator.md` | written and checked; the fix pass was cut off by the usage limit; applied to the branch as a patch | `src/sim.rs`, `src/sim/{config,store,trace,check,world}.rs`, `world/{rt,load,end}.rs`, `tests/simulator.rs`, `tests/regressions.rs`, `engine/api-simulator.md`; three helpers in the fake; quiet: 1,000 seeds pass (40 s release, 228 s debug); gate: 154 of 200 seeds failed against the engine of 7a764c7; 7 engine defects reported with seeds; 10 spec questions; the checker found 4 or more high defects in the invariants | 893,600 |
+| wf_fbed9968-73a | D2 simulator follow-up (the check's findings, the lead's rulings, what still fails) | `engine/briefs/d2-simulator-followup.md` | running since 2026-11-25 01:50 UTC in `/home/user/wt/d2` (branch `wt/d2`); task id wuy58twth | | |
 
 ## Open threads
 
@@ -236,6 +237,21 @@ the device's group has become strictly larger with another member. With two devi
 disagree nothing changes (both stay stopped). The test
 `the_minority_stops_and_adopts_with_a_typed_fingerprint` arranges the order so that the rule as
 written gives the intended result, and says so in a comment.
+
+**For the owner, second question (an invariant would change, so the lead does not decide it):
+invariant 2 of §31.7 against a relay rollback.** Invariant 2 says every entry a relay
+acknowledged is in the reference log at the end. Seed 107 of `rollback`: the relay rolled back
+two seqs that only one device had read; that device slept; another device, which had never seen
+those seqs, appended at them. The first device detects it (RelayBehind, then the evidence stop),
+as §21 asks, but its two acknowledged entries are in no relay's log, and no rule of the spec can
+bring them back without losing the other device's. SYNC_PLAN.md §6.5 words the gate as "no lost
+or twice-applied entry" beside "tampering alarms without a state change", which reads as: a
+rollback is tampering, and the promise for it is the alarm, not the entry. The lead's proposal,
+not applied: invariant 2 excepts an entry whose only acknowledgement came from a relay state
+that a rollback or fork fault removed from the reference branch, provided a device that holds
+its frame raised evidence of §21.1 (so the loss is never silent). Until the owner decides, the
+simulator reports such seeds as failing, with the text "lost to a rolled-back relay state", and
+the gate of 1,000 seeds cannot pass with the rollback and fork faults on.
 
 Low, for the round of checks to weigh: the engine's trial apply is `apply` on a copy, not
 `SM::trial_apply` (§9.1 says "apply the command to a copy"; ENG-GEN-012 lists `trial_apply`).
