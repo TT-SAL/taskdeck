@@ -257,7 +257,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_fbed9968-73a | D2 simulator follow-up (the check's findings, the lead's rulings, what still fails) | `engine/briefs/d2-simulator-followup.md` | done, applied to the branch as a patch (the lead ran its gate) | invariants read strictly, `sim/counted.rs`, regression files 1, 102, 111, 116, 200, a report of what still fails by cause (the journal, 2026-11-25) | 977,242 |
 | wf_0eb7fcfb-f49 | D3 what still fails under `gate`, seed by seed (diagnosis; simulator faults fixed, engine faults reported) | `engine/briefs/d3-gate-seeds.md` | done, applied to the branch as a patch (the lead ran its gate) | `src/sim/{check,world}.rs`, `src/sim/world/{rt,load,end}.rs`, `api-simulator.md`; gate base 1000: 61 of 100 fail, base 100: 27 of 50 | 827,210 |
 | wf_1623f41a-09b | D4 simulator tests, first attempt | `engine/briefs/d4-sim-tests.md` | lost: the container restarted nine minutes into the writer (54 turns); its 16 uncommitted lines were discarded | nothing kept | not reported (about 55,000 output tokens) |
-| (second attempt, id in the journal) | D4 simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | running since 2026-11-25 in `/home/user/wt/d4` (branch `wt/d4`, from c6354ae) | | |
+| wf_a03961da-e96 | D4 (second attempt) simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | running since 2026-11-25 in `/home/user/wt/d4` (branch `wt/d4`, from c6354ae); task id w395ke6op | | |
 
 ## Open threads
 
