@@ -487,22 +487,53 @@ pub(crate) struct World<'a> {
     staged: Vec<(WriteKey, Staged)>,
 }
 
-/// A deletion a device emitted, to be explained (§31.7 invariant 5).
-#[derive(Clone, Debug)]
+/// A deletion a device emitted, to be explained (§31.7 invariant 5). Each
+/// carries the chain value the device held at the `B` it is judged at (its
+/// confirmed `C_B`, or for `Pending` its chain at the highest seq the write
+/// makes durable): which log it followed there, so that the check reads the
+/// rules that explain it on that log (task D8: a fork's copy can sequence a
+/// rotation or a purge the reference log never holds).
+#[derive(Clone)]
 pub(crate) enum Deletion {
-    Truncate(u64, bool),
-    Bases(Vec<u64>, bool),
-    Roots(Vec<u32>),
+    /// `TruncateLogBelow(p)`, whether a join or a rejoin explains it, `C_B`.
+    Truncate(u64, bool, Option<Hash32>),
+    /// `DeleteBases(seqs)`, whether a rejoin explains it, `C_B`.
+    Bases(Vec<u64>, bool, Option<Hash32>),
+    /// `forget_roots_below`: the epochs whose roots an identity write drops, `C_B`.
+    Roots(Vec<u32>, Option<Hash32>),
     /// Pending roots dropped by an identity write, with the chain the device
-    /// holds at the highest seq that write makes durable (which branch it
-    /// followed there: a fork's copy can sequence a rotation the reference
-    /// log never holds).
+    /// holds at the highest seq that write makes durable.
     Pending(Vec<[u8; 16]>, Option<Hash32>),
     /// An unsent `snap` record dropped (§19.4 step 5, ENG-SNAP-004): its
     /// entry id, the epoch its blob was sealed under, and the chain the
-    /// device holds at `B` (which log it followed there). Explained only by
-    /// an accepted rotation to a later epoch at or below `B` (task D5).
+    /// device holds at `B`. Explained only by an accepted rotation to a later
+    /// epoch at or below `B` (task D5).
     Snap([u8; 16], u32, Option<Hash32>),
+}
+
+impl Deletion {
+    /// The chain value the device held at the seq the deletion is judged at.
+    pub(crate) fn chain(&self) -> Option<Hash32> {
+        match self {
+            Deletion::Truncate(_, _, c) | Deletion::Bases(_, _, c) | Deletion::Roots(_, c) | Deletion::Pending(_, c) | Deletion::Snap(_, _, c) => *c,
+        }
+    }
+}
+
+/// A violation's text names a chain by its first four bytes and an entry by
+/// its id in hex.
+impl std::fmt::Debug for Deletion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let c = |c: &Option<Hash32>| c.map_or_else(|| "none".to_owned(), |c| check::hexs(&c[..4]));
+        let ids = |e: &[[u8; 16]]| e.iter().map(|x| check::hexs(x)).collect::<Vec<String>>().join(", ");
+        match self {
+            Deletion::Truncate(p, ctx, ch) => write!(f, "Truncate({p}, {ctx}, chain {})", c(ch)),
+            Deletion::Bases(seqs, ctx, ch) => write!(f, "Bases({seqs:?}, {ctx}, chain {})", c(ch)),
+            Deletion::Roots(es, ch) => write!(f, "Roots({es:?}, chain {})", c(ch)),
+            Deletion::Pending(es, ch) => write!(f, "Pending([{}], chain {})", ids(es), c(ch)),
+            Deletion::Snap(e, epoch, ch) => write!(f, "Snap({}, {epoch}, chain {})", check::hexs(e), c(ch)),
+        }
+    }
 }
 
 fn h(b: &[u8]) -> Hash32 {
@@ -1156,8 +1187,8 @@ mod tests {
     // Invariant 5: a truncation no rule explains.
     #[test]
     fn an_unexplained_truncation_breaks_no_deletion() {
-        assert_eq!(tampered(|w| w.deletions.push((0, Deletion::Truncate(40, false), 100, 9))), vec![5]);
-        assert_eq!(tampered(|w| w.deletions.push((0, Deletion::Roots(vec![1]), 100, 9))), vec![5]);
+        assert_eq!(tampered(|w| w.deletions.push((0, Deletion::Truncate(40, false, None), 100, 9))), vec![5]);
+        assert_eq!(tampered(|w| w.deletions.push((0, Deletion::Roots(vec![1], None), 100, 9))), vec![5]);
     }
 
     // Invariant 5: the drop of a pending root no device ever sealed is
@@ -2062,6 +2093,36 @@ mod tests {
         w.note_persist(1, ops, 9);
         w.cur_write = None;
         k
+    }
+
+    // Invariant 5, task D8: a truncation, a base deletion and a root drop
+    // carry the chain value the device holds at the B they are judged at
+    // (its confirmed head, `C_B`), so that the check reads what explains them
+    // on the log it followed there (a fork's copy can hold a purge the
+    // reference log never holds).
+    #[test]
+    fn a_deletion_records_the_chain_at_its_b() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, u64::MAX);
+        let head = w.idents[1].proc.as_ref().and_then(|p| rt::board_head(&p.engine)).expect("identity 1 runs at the end of the run");
+        assert!(head.seq > 1, "the premise: identity 1 confirmed entries");
+        let identity = w.idents[1].store.identity.clone();
+        assert!(identity_keys(&identity).is_some_and(|(roots, _)| !roots.contains(&99)), "the premise: identity 1 holds no root of epoch 99");
+        w.idents[1].last_roots.insert(99);
+        let n = w.deletions.len();
+        w.note_persist(1, &[PersistOp::TruncateLogBelow(40, None), PersistOp::DeleteBases(vec![2]), PersistOp::WriteIdentity(identity.into())], 9);
+        let got: Vec<String> = w.deletions[n..].iter().map(|(id, d, b, line)| format!("{id} {d:?} {b} {line}")).collect();
+        let c = check::hexs(&head.chain[..4]);
+        let b = head.seq;
+        assert_eq!(
+            got,
+            vec![
+                format!("1 Truncate(40, false, chain {c}) {b} 9"),
+                format!("1 Bases([2], false, chain {c}) {b} 9"),
+                format!("1 Roots([99], chain {c}) {b} 9"),
+            ]
+        );
+        assert!(w.deletions[n..].iter().all(|(_, d, _, _)| d.chain() == Some(head.chain)), "{got:?}");
     }
 
     // Invariant 5, task D5: a deletion counts only when its write was

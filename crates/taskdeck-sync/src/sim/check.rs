@@ -84,8 +84,8 @@ pub(crate) struct Ledger {
     /// The active rules version in `M_seq` (one that a `RulesUpgrade`
     /// activates is `SM::upgrade`d before the next entry, §14.1).
     pub rules: u32,
-    /// An accepted `ResetTo` item (§28.1).
-    pub reset: bool,
+    /// The target seq of a `ResetTo` item (§28.1).
+    pub reset_to: Option<u64>,
     /// The host a `Fence` item of the entry names (§28.3).
     pub fence_host: Option<String>,
 }
@@ -207,7 +207,7 @@ fn ledger_with(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u
             at_ms: 0,
             based_on: 0,
             rules: view.rules,
-            reset: false,
+            reset_to: None,
             fence_host: None,
         };
         let Ok(rc) = s.classify(&input) else {
@@ -237,7 +237,7 @@ fn ledger_with(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u
                     }
                     CtlItem::Skip { seq, .. } => l.skip_targets.push(*seq),
                     CtlItem::DeviceAdded { dev, .. } => l.added.push(*dev),
-                    CtlItem::ResetTo { .. } => l.reset = true,
+                    CtlItem::ResetTo { seq, .. } => l.reset_to = Some(*seq),
                     CtlItem::Fence { host, .. } => l.fence_host = Some(host.clone()),
                     _ => {}
                 }
@@ -462,24 +462,58 @@ fn oracle_run(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8
 }
 
 /// The board hash at each `B` of `a + 1..=end` of the log `led` replayed from
-/// `start` (the oracle's first toy state at `a`) with the seqs of `out` left
-/// out: §31.7 invariant 4's "the reference log replayed with `t` left out",
-/// computed from the oracle's classes without running the engine. The toy
-/// applies each accepted `cmd` entry in order under `Ctx { seq, d_author,
-/// at_ms, based_on }` (§13.1: a parse failure or an `apply` refusal changes
+/// the oracle's first toy state at `a` (`boards`, the oracle's first toy
+/// state at each `B`) with the seqs of `out` left out: §31.7 invariant 4's
+/// "the reference log replayed with `t` left out", computed from the
+/// oracle's classes without running the engine. The toy applies each
+/// accepted `cmd` entry in order under `Ctx { seq, d_author, at_ms,
+/// based_on }` (§13.1: a parse failure or an `apply` refusal changes
 /// nothing), and is upgraded with the entry whose membership activates a
 /// newer rules version, before the next entry (§14.1, ENG-SM-002; the board
-/// at that seq has it already). It stops before what it does not model: a
-/// `Panic` (the apply panics: a crash halt, §15), a `ResetTo` (§28.1), an
-/// accepted Skip (§17.3).
-pub(crate) fn replay_without(led: &[Ledger], start: &ToyState, a: u64, end: u64, out: &BTreeSet<u64>) -> BTreeMap<u64, Hash32> {
+/// at that seq has it already). An accepted `ResetTo` of target `r` at `q`
+/// is applied as a device that never applied the left-out seqs applies it:
+/// in an ordinary board apply (§16.2, §17.3 step 1), not a replay, so §28.1
+/// "Every device" step 1 compares its state hash at `r` with the entry's
+/// (ENG-RESET-002), the hash of the state the oracle held there when it
+/// applied the entry: its first state there, as far as `without` finds the
+/// replay agreeing with the oracle. The device's state at `r` is the
+/// replay's own for a target above `a`, else the oracle's first, which no
+/// left-out seq precedes. With the oracle's board
+/// there (the same `M_r`, so the same state hash, §18.3) the comparison
+/// passes and the board becomes `SM::reset(state_r, state_{q−1})` (step 3),
+/// the state a replay through `q` gives without the comparison (§28.1, last
+/// paragraph): both agree (task D8, gate 5175). With another board there (a
+/// left-out seq changed it) they do not: step 1 raises `ResetMismatch` and
+/// leaves the board, a replay resets it, as the oracle's Skip replay at `s`
+/// does (ENG-SKIP-002), and §31.7 does not say which one invariant 4 expects
+/// (a spec question, task D8's fix pass). The replay then stops before `q`:
+/// no expected value, so every state there is a violation (the stricter
+/// reading, ruling 6). It also stops before what it does not model: a
+/// `Panic` (the apply panics: a crash halt, §15), an accepted Skip (§17.3), a
+/// `ResetTo` whose target the oracle never confirmed.
+pub(crate) fn replay_without(led: &[Ledger], boards: &BTreeMap<u64, ToyState>, a: u64, end: u64, out: &BTreeSet<u64>) -> BTreeMap<u64, Hash32> {
     let toy = ToyMachine::new(true);
-    let mut st = start.clone();
     let mut v = BTreeMap::new();
+    let Some(start) = boards.get(&a) else { return v };
+    let mut st = start.clone();
+    // The replay's own states from `a` on: the targets of a `ResetTo` above `a`.
+    let mut own: BTreeMap<u64, ToyState> = BTreeMap::from([(a, st.clone())]);
     for q in a + 1..=end {
         let Some(l) = ledger_at(led, q) else { break };
-        if l.accept && (l.reset || !l.skip_targets.is_empty()) {
+        if l.accept && !l.skip_targets.is_empty() {
             break;
+        }
+        if l.accept
+            && let Some(r) = l.reset_to
+        {
+            // The state whose hash the entry names, and the device's own at `r`.
+            let Some(named) = boards.get(&r) else { break };
+            let mine = if r > a { own.get(&r) } else { Some(named) };
+            let Some(target) = mine.filter(|m| toy.board_hash(m) == toy.board_hash(named)) else { break };
+            match toy.reset(target, &st) {
+                Ok(x) => st = x,
+                Err(_) => break,
+            }
         }
         if l.accept && l.cmd && !out.contains(&q) {
             match toy.parse(&l.payload) {
@@ -495,6 +529,7 @@ pub(crate) fn replay_without(led: &[Ledger], start: &ToyState, a: u64, end: u64,
             break;
         }
         v.insert(q, toy.board_hash(&st));
+        own.insert(q, st.clone());
     }
     v
 }
@@ -531,12 +566,11 @@ fn windows_of(led: &[Ledger]) -> Vec<(u64, u64)> {
 fn without(ctx: &LogCtx, out: &BTreeSet<u64>) -> BTreeMap<u64, Hash32> {
     let Some(&t0) = out.first() else { return BTreeMap::new() };
     let a = t0 - 1;
-    let Some(start) = ctx.run.boards.get(&a) else { return BTreeMap::new() };
     let end = ctx.windows.iter().filter(|(t, _)| out.contains(t)).map(|(_, s)| s - 1).max().unwrap_or(a);
     let alike: BTreeSet<u64> = out.intersection(&ctx.run.halts).copied().collect();
     let mut upto = end;
     let mut compared = false;
-    for (b, h) in replay_without(&ctx.led, start, a, end, &alike) {
+    for (b, h) in replay_without(&ctx.led, &ctx.run.boards, a, end, &alike) {
         let Some(o) = ctx.run.states.get(&b) else { continue };
         if o.1 != h {
             upto = b - 1;
@@ -547,7 +581,7 @@ fn without(ctx: &LogCtx, out: &BTreeSet<u64>) -> BTreeMap<u64, Hash32> {
     if !compared {
         return BTreeMap::new();
     }
-    replay_without(&ctx.led, start, a, upto, out)
+    replay_without(&ctx.led, &ctx.run.boards, a, upto, out)
 }
 
 /// Whether the device's state sampled at trace line `line` is that of a
@@ -1373,57 +1407,50 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
         }
     }
 
-    // 5. No deletion by the relay.
-    let purges: Vec<(u64, u64, u32, i64)> =
-        led.iter().filter(|l| l.accept).filter_map(|l| Some((l.seq, l.purge_before?, l.new_epoch?, l.tau))).collect();
-    let own_entry_at: BTreeMap<[u8; 16], u64> = led.iter().filter_map(|l| Some((l.entry_id?, l.seq))).rev().collect();
+    // 5. No deletion by the relay. Each deletion is judged on the log the
+    // device followed at the seq it is judged at: the reference log, or the
+    // branch whose chain it holds there (`Deletion::chain`). A fork's copy
+    // can sequence a rotation, or a purge, that the reference log never
+    // holds, and a device on it applies that entry as any accepted one
+    // (task D5 for `Pending` and `Snap`; task D8, gate 17163374614648704986
+    // and 5685, for the purge's `TruncateLogBelow`, `DeleteBases` and
+    // `forget_roots_below`, §28.2 "On every device"). With no chain, or one
+    // no log holds there, the reference log.
+    let mut del_ledgers: BTreeMap<usize, Vec<Ledger>> = BTreeMap::new();
     for (dev, d, b, line) in f.deletions {
         use super::world::Deletion;
+        let k = d
+            .chain()
+            .filter(|c| ref_chain.get(b) != Some(c))
+            .and_then(|c| f.branches.iter().position(|br| br.rows.iter().any(|r| r.seq == *b && r.chain == c)));
+        let on: &[Ledger] = match k {
+            None => &led,
+            Some(k) => del_ledgers.entry(k).or_insert_with(|| ledger(&f.branches[k].rows, f.template, &f.roots)),
+        };
+        // The accepted purge rotations of that log: (seq, purge_before, new epoch, τ there).
+        let purges = || on.iter().filter(|l| l.accept).filter_map(|l| Some((l.seq, l.purge_before?, l.new_epoch?, l.tau)));
         let ok = match d {
-            Deletion::Truncate(p, ctx) => *ctx || purges.iter().any(|(r, pb, _, _)| pb == p && r <= b) || (*p + 16_384 <= *b + 1),
-            Deletion::Bases(seqs, ctx) => *ctx || purges.iter().any(|(r, _, _, _)| *r <= *b && seqs.iter().all(|s| s < r)),
-            Deletion::Roots(es) => purges.iter().any(|(r, _, n, tau)| {
-                *r <= *b && es.iter().all(|e| e < n) && led.iter().any(|l| l.seq <= *b && l.tau > tau + 2_592_000_000)
+            Deletion::Truncate(p, ctx, _) => *ctx || purges().any(|(r, pb, _, _)| pb == *p && r <= *b) || (*p + 16_384 <= *b + 1),
+            Deletion::Bases(seqs, ctx, _) => *ctx || purges().any(|(r, _, _, _)| r <= *b && seqs.iter().all(|s| *s < r)),
+            Deletion::Roots(es, _) => purges().any(|(r, _, n, tau)| {
+                r <= *b && es.iter().all(|e| *e < n) && on.iter().any(|l| l.seq <= *b && l.tau > tau + 2_592_000_000)
             }),
             // An identity change dropping the pending roots of own rotations:
             // each one's own entry is at or below B in the log the device
-            // followed there (the reference log, or the branch whose chain it
-            // holds at B), either accepted (it reached the board head) or
+            // followed there, either accepted (it reached the board head) or
             // refused (a refused own rotation, SEAL-MEM-016). Nothing else
             // excuses the drop of one.
-            Deletion::Pending(ids, chain) => {
-                let k = chain
-                    .filter(|c| ref_chain.get(b) != Some(c))
-                    .and_then(|c| f.branches.iter().position(|br| br.rows.iter().any(|r| r.seq == *b && r.chain == c)));
-                let on_branch: BTreeMap<[u8; 16], u64>;
-                let at = match k {
-                    None => &own_entry_at,
-                    Some(k) => {
-                        on_branch = ledger(&f.branches[k].rows, f.template, &f.roots).iter().filter_map(|l| Some((l.entry_id?, l.seq))).rev().collect();
-                        &on_branch
-                    }
-                };
+            Deletion::Pending(ids, _) => {
+                let at: BTreeMap<[u8; 16], u64> = on.iter().filter_map(|l| Some((l.entry_id?, l.seq))).rev().collect();
                 ids.iter().all(|e| at.get(e).is_some_and(|s| s <= b))
             }
             // Task D5 (§19.4 step 5, ENG-SNAP-004): a `snap` record never
             // sent, dropped at or after an accepted rotation that ended the
             // epoch its blob was sealed under, in the log the device followed
-            // there (the reference log, or the branch whose chain it holds at
-            // B), where no row carries its entry. Nothing wider: no rotation,
-            // a refused one, one above B, or one to an epoch no later than
-            // the blob's explains nothing.
-            Deletion::Snap(eid, epoch, chain) => {
-                let k = chain
-                    .filter(|c| ref_chain.get(b) != Some(c))
-                    .and_then(|c| f.branches.iter().position(|br| br.rows.iter().any(|r| r.seq == *b && r.chain == c)));
-                let on_branch: Vec<Ledger>;
-                let on: &[Ledger] = match k {
-                    None => &led,
-                    Some(k) => {
-                        on_branch = ledger(&f.branches[k].rows, f.template, &f.roots);
-                        &on_branch
-                    }
-                };
+            // there, where no row carries its entry. Nothing wider: no
+            // rotation, a refused one, one above B, or one to an epoch no
+            // later than the blob's explains nothing.
+            Deletion::Snap(eid, epoch, _) => {
                 // Never sent: no row of that log carries its entry.
                 !on.iter().any(|l| l.entry_id == Some(*eid))
                     && on.iter().any(|l| l.accept && l.seq <= *b && l.new_epoch.is_some_and(|n| n > *epoch))

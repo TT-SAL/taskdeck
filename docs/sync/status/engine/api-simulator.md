@@ -1,4 +1,4 @@
-# The simulator: how to run it (tasks D to D7)
+# The simulator: how to run it (tasks D to D8)
 
 Module `taskdeck_sync::sim` (feature `sim`; the test targets get it from the crate's dev-dependency on itself).
 Spec: engine.md §31, §31.7 as the owner amended it on 2026-11-25 (tasks D6, D7). Code: `src/sim.rs` (types),
@@ -167,16 +167,22 @@ would hold it there). `OracleRun::moves` lists the `Fence`s it followed, with th
   a device that never applied `t` (§12.4 step 1, §17.3 step 1; a crash halt on `t` holds the board below `t` until
   the Skip clears it) and is compared with `check::replay_without`: the toy applying the ledger's accepted `cmd`
   entries from the oracle's first state at `t − 1` with `t` left out, upgraded where the membership activates a rules
-  version, stopping at a `Panic`, a `ResetTo` or a Skip; it counts only as far as the same replay run as the oracle
-  ran agrees with the oracle. A `B` in `t..s` that no expected value covers is a violation (ruling 6). The toy stamps
-  each key with the seq that set it: the log without `t` keeps the seqs (a twin whose `t` is a `Fail`), it is not a
-  log one entry shorter. Alarms of §21.1 for contradicting welcomes and pages, `SkippedFrame` for injected frames,
-  and the duplicated answer of a read (task D5) as before. Task D7: an injected frame above an accepted `Fence` that
+  version, a `ResetTo` of `r` at `q` applied as such a device applies it, in a board apply with §28.1 step 1's
+  comparison: `SM::reset(state_r, state_{q−1})` when its state at `r` (the replay's own, the oracle's below `t`) has
+  the board of the oracle's first state there, whose hash the entry names; with another board there the replay stops
+  before `q` (the open reading below), as it stops at a `Panic` or a Skip; it counts only as far as the same replay
+  run as the oracle ran agrees with the oracle. A `B` in `t..s` that no expected value covers is a violation (ruling
+  6). The toy stamps each key with the seq that set it: the log without
+  `t` keeps the seqs (a twin whose `t` is a `Fail`), it is not a log one entry shorter. Alarms of §21.1 for
+  contradicting welcomes and pages, `SkippedFrame` for injected frames, and the duplicated answer of a read (task D5)
+  as before. Task D7: an injected frame above an accepted `Fence` that
   names another host than the relay that showed it (that `Fence` fenced it), in the log that holds the frame (the
   reference log, or a branch such as the old relay after a move), owes no `SkippedFrame`; instead no identity's
   `AppendLog` may have carried it (`took`, ENG-RECV-007).
 - 5: deletions explained as listed in §31.7 and tasks D2 to D5 (a `Register` drop needs its `PairFailed` in the same or
-  the next call, not asked when a crash cut either call, task D6); a deletion counts once its write is applied.
+  the next call, not asked when a crash cut either call, task D6); a deletion counts once its write is applied. Each
+  is read on the log the device followed at its `B` (task D8: every `Deletion` carries the device's `C_B`, so a purge
+  that a fork's copy sequenced explains the truncation, base deletion and root drop of a device on that copy).
 - 6: also no `Append` other than of beats, `snap` entries and the rules-upgrade proposal in the last 1,800,000 ms.
 - Roots: every `(epoch, root)` any device held; each log is classified with the choice per epoch that opens it
   furthest (`check::pick_roots`).
@@ -204,9 +210,11 @@ line that a run happened to produce. In this order of preference:
   they are recorded or sent: an engine that sends none, or never resumes. Premises are asserted.
 - A bounded seed search only for a situation nothing else can build; none is needed.
 
-Each test fails when its rule is removed (tasks D6 and D7 removed or widened each rule in turn and ran the tests). D4's open item: no oracle run can tell
-`keep_first` from an overwrite, because the oracle's confirmed head never returns to a seq it passed (a Skip replay
-is not shown through `confirmed`); `the_oracle_keeps_its_first_state_at_each_b` tests the rule itself.
+Each test fails when its rule is removed (tasks D6 to D8 removed or widened each rule in turn and ran the tests). D4's
+open item: no oracle run can tell `keep_first` from an overwrite, because the oracle's confirmed head never returns to
+a seq it passed (a Skip replay is not shown through `confirmed`); `the_oracle_keeps_its_first_state_at_each_b` tests
+the rule itself. A `HandLog` also seals Desk's purge rotations (`purge`) and `ResetTo`s (`reset_to`, with the
+oracle's state hash at the target, which the oracle checks, §28.1) (task D8).
 
 ## Open reading (task D6, for the owner)
 
@@ -220,3 +228,14 @@ The owner decided task D6's other two (a device retired while cut off; a dropped
   that holds more than the relay on its chain owes one, whatever other evidence it holds (§21.3: "as any device does
   that holds more than the relay"), except a halted one (§16.4). This replaces the reading that took a device that
   sent no next request after a stored one, or none after `relay/not_next`, for the race.
+
+## Open reading (task D8, for the owner)
+
+- A `ResetTo` at `q` of a target `r` inside a Skip's window (`t ≤ r < q < s`), where `t` changed the board at `r`. A
+  device that never applied `t` applies the `ResetTo` in a board apply (§16.2, §17.3 step 1): §28.1 step 1 compares
+  its hash at `r` (without `t`) with the entry's (with `t`), raises `ResetMismatch`, leaves its board and stops
+  (§22.2). A replay through `q` resets without comparing (§28.1, last paragraph), as the oracle's Skip replay at `s`
+  does (ENG-SKIP-002). Read one way, invariant 4 expects the reset board at `q`, which only an engine that skips
+  ENG-RESET-002's comparison holds; read the other, the unchanged board at `q`, and that device then differs from
+  the oracle at `s`. The check takes neither: no expected value from `q` (a violation, the stricter reading). Where
+  `t` left the board at `r` unchanged, both readings give the reset board, and the check expects it.

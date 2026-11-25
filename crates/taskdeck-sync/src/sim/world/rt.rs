@@ -707,7 +707,11 @@ impl World<'_> {
 
     /// What a `Persist` tells the invariants (2, 3, 5, alarms).
     pub(super) fn note_persist(&mut self, id: usize, ops: &[PersistOp], line: u64) {
-        let b = self.idents[id].proc.as_ref().and_then(|p| board_head(&p.engine)).map_or(0, |h| h.seq);
+        let bh = self.idents[id].proc.as_ref().and_then(|p| board_head(&p.engine));
+        let b = bh.map_or(0, |h| h.seq);
+        // The chain at `B`: which log the device followed there, where the
+        // check reads what explains a deletion judged at `B` (task D8).
+        let b_chain = bh.map(|h| h.chain);
         // The highest seq this write makes durable: a pending root is dropped in
         // the write that logs its own rotation (ENG-SEALER-009), while the
         // engine's durable head is still below that seq.
@@ -791,7 +795,7 @@ impl World<'_> {
                 }
                 PersistOp::TruncateLogBelow(p, fc) => {
                     let ctx = self.join_floor(id, *p) || self.rejoin_truncation(id, *p, *fc);
-                    self.stage(Staged::Deletion((id, Deletion::Truncate(*p, ctx), b, line)));
+                    self.stage(Staged::Deletion((id, Deletion::Truncate(*p, ctx, b_chain), b, line)));
                 }
                 PersistOp::DeleteBases(seqs) => {
                     // The rejoin's own base deletion: one, between the confirmation and its truncation.
@@ -802,7 +806,7 @@ impl World<'_> {
                         }
                         _ => false,
                     };
-                    self.stage(Staged::Deletion((id, Deletion::Bases(seqs.clone(), ctx), b, line)));
+                    self.stage(Staged::Deletion((id, Deletion::Bases(seqs.clone(), ctx, b_chain), b, line)));
                 }
                 PersistOp::WriteIdentity(bytes) => {
                     if let Some((roots, pending)) = identity_keys(bytes) {
@@ -812,7 +816,7 @@ impl World<'_> {
                         ident.last_roots = roots;
                         ident.last_pending = pending;
                         if !lost.is_empty() {
-                            self.stage(Staged::Deletion((id, Deletion::Roots(lost), b, line)));
+                            self.stage(Staged::Deletion((id, Deletion::Roots(lost, b_chain), b, line)));
                         }
                         if !gone.is_empty() {
                             let logged = ops.iter().find_map(|o| match o {

@@ -182,6 +182,17 @@ impl HandLog {
         self.desk_seal(Body::Ctl(CtlIntent::Rotate { revoke: vec![], reinstate: vec![], purge_before: None }))
     }
 
+    /// Desk's `ResetTo` of the board at `seq`, whose state hash is
+    /// `state_hash` (§28.1 stage 2): (seq, entry id).
+    pub(crate) fn reset_to(&mut self, seq: u64, state_hash: Hash32) -> (u64, [u8; 16]) {
+        self.desk_seal(Body::Ctl(CtlIntent::ResetTo { seq, state_hash, hash_version: 1 }))
+    }
+
+    /// Desk's purge rotation with `purge_before = p` (§28.2 step 2): (seq, entry id).
+    pub(crate) fn purge(&mut self, p: u64) -> (u64, [u8; 16]) {
+        self.desk_seal(Body::Ctl(CtlIntent::Rotate { revoke: vec![], reinstate: vec![], purge_before: Some(p) }))
+    }
+
     /// A Skip of `target` sealed by the board's recovery identity, appended with the door: (seq, entry id).
     pub(crate) fn skip(&mut self, target: u64) -> (u64, [u8; 16]) {
         let frame = self.relay.log().get(&target).expect("the target").frame.clone();
@@ -713,6 +724,213 @@ mod tests {
         );
     }
 
+    // Invariant 4 (ruling 6, task D8, gate 5175): a `ResetTo` between a
+    // Skip's target and the Skip is part of the log replayed without the
+    // target. Desk's poison entry `t` (a `Panic`) is followed by Desk's
+    // `ResetTo` of the board at `r < t` and by the recovery identity's Skip
+    // of `t`. The replay without `t` sets the board to `SM::reset(state_r,
+    // state_t)` at the `ResetTo`, as a device that never applied `t` does
+    // (its state at `r < t` is the oracle's, so the comparison of §28.1
+    // "Every device" step 1 passes: step 3) and as a replay through it does
+    // (its last paragraph); the oracle, which halted on `t` and applied the
+    // `ResetTo` once the Skip cleared the halt, agrees. A
+    // device that never applied `t` and confirmed the `ResetTo`'s seq with
+    // that board (here the oracle's of a twin log whose `t` is a `Fail`, so
+    // the same log without it) holds; one with another board there breaks
+    // invariant 4.
+    #[test]
+    fn a_reset_in_a_skip_window_is_part_of_the_replay_without_the_target() {
+        let mut log = HandLog::new(SEED);
+        let mut twin = HandLog::new(SEED);
+        for l in [&mut log, &mut twin] {
+            for k in 0..3u8 {
+                l.set(k, 10 + i64::from(k));
+            }
+        }
+        let r = log.head().seq;
+        for l in [&mut log, &mut twin] {
+            l.set(1, 5);
+            l.set(4, 4);
+        }
+        let (t, _) = log.cmd(&ToyCommand::Panic);
+        twin.cmd(&ToyCommand::Fail { code: 0 });
+        let h_r = Case::of(&log).oracle().get(&r).expect("the oracle confirmed r").2;
+        let (q, _) = log.reset_to(r, h_r);
+        twin.reset_to(r, h_r);
+        let (s, _) = log.skip(t);
+        log.set(2, 7);
+        let mut c = Case::of(&log);
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        assert!(led.iter().any(|l| l.seq == q && l.accept && l.reset_to == Some(r)), "the ResetTo of {r} is accepted at {q}");
+        assert!(led.iter().any(|l| l.seq == s && l.accept && l.skip_targets == vec![t]), "the Skip of {t} is accepted at {s}");
+        let tw = Case::of(&twin).oracle();
+        let without = tw.get(&q).expect("the twin's oracle confirmed the ResetTo").1;
+        let run = check::oracle_full(&c.reference, Some(&c.template), &c.roots, &c.board, &c.relay);
+        // The premises: the oracle halted on `t`; the reset changed the board
+        // (it differs from the one before it); the twin's board at `q` is the
+        // oracle's own there, which never applied `t` either.
+        assert!(run.halts.contains(&t), "the premise: the oracle crash-halts on the poison entry {t} ({:?})", run.halts);
+        assert_ne!(without, tw.get(&(q - 1)).expect("the twin's oracle confirmed t").1, "the premise: the ResetTo changes the board");
+        assert_eq!(run.states.get(&q).map(|x| x.1), Some(without), "the premise: the oracle's board at {q} is the log without {t}");
+        let chain = |b: u64| c.reference[b as usize - 1].chain;
+        let mut x = settled(dev(0xd2), 1, honest(&run.states, 2..t));
+        x.samples.push((q, chain(q), without, 1));
+        x.crossings.push(Crossing { from: t - 1, to: q, to_chain: chain(q), k: s, k_chain: chain(s), line: 0 });
+        c.idents = vec![x.clone()];
+        assert_eq!(c.check(), Vec::new(), "its state at {q} is the log replayed without {t}");
+        x.samples.last_mut().expect("the sample at the ResetTo").2 = [0xee; 32];
+        c.idents = vec![x];
+        assert_eq!(
+            c.check(),
+            vec![(4, 1, format!(
+                "dev 0: confirmed state at {q} differs from the reference log replayed without [{t}], which it never applied (between a Skip's target and the Skip at {s})"
+            ))]
+        );
+    }
+
+    // Invariant 4 (task D8 fix pass): a `ResetTo` at `q` whose target `r`
+    // lies inside a Skip's window, where the target `t` left the board at `r`
+    // as it is without `t` (Desk's healthy `Set` at `t`, Desk's `Set` of the
+    // same key at `r = t + 1`, a `Set` of another key, Desk's `ResetTo` of
+    // `r`, the Skip of `t`). A device that never applied `t` holds at `r` the
+    // board of the oracle's state there, whose hash the entry names (§18.3:
+    // the same `M_r`), so the comparison of §28.1 "Every device" step 1
+    // passes and it resets as a replay through `q` does without one: a single
+    // state, and the log replayed without `t` goes on through `q`. A device
+    // that never applied `t` and confirmed `q` with that board (the oracle's
+    // of a twin log whose `t` is a `Fail` and whose `ResetTo` is the log's
+    // own) holds; one with another board there breaks invariant 4.
+    #[test]
+    fn a_reset_to_a_seq_the_skip_target_left_unchanged_is_part_of_the_replay_without_it() {
+        let mut log = HandLog::new(SEED);
+        let mut twin = HandLog::new(SEED);
+        for l in [&mut log, &mut twin] {
+            for k in 0..3u8 {
+                l.set(k, 10 + i64::from(k));
+            }
+        }
+        let (t, _) = log.set(1, 99);
+        twin.cmd(&ToyCommand::Fail { code: 0 });
+        let (r, _) = log.set(1, 5);
+        twin.set(1, 5);
+        for l in [&mut log, &mut twin] {
+            l.set(4, 4);
+        }
+        let h = |l: &HandLog| Case::of(l).oracle().get(&r).expect("the oracle confirmed r").2;
+        let h_log = h(&log);
+        assert_eq!(h_log, h(&twin), "the premise: the state hash at {r} is the same without t");
+        let (q, _) = log.reset_to(r, h_log);
+        twin.reset_to(r, h_log);
+        let (s, _) = log.skip(t);
+        let mut c = Case::of(&log);
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        assert!(led.iter().any(|l| l.seq == q && l.accept && l.reset_to == Some(r)), "the ResetTo of {r} is accepted at {q}");
+        assert!(led.iter().any(|l| l.seq == s && l.accept && l.skip_targets == vec![t]), "the Skip of {t} is accepted at {s}");
+        let run = check::oracle_full(&c.reference, Some(&c.template), &c.roots, &c.board, &c.relay);
+        let tw = Case::of(&twin).oracle();
+        let board = |b: u64| tw.get(&b).unwrap_or_else(|| panic!("the twin's oracle confirmed {b}")).1;
+        // The premises: `t` changed the board at `t`; the twin, which never
+        // applied it, compared and applied the `ResetTo`, which changed its board.
+        assert!(run.states.get(&t).is_some_and(|o| o.1 != board(t)), "the premise: t changes the board at {t}");
+        assert_ne!(board(q), board(q - 1), "the premise: the ResetTo changes the board at {q}");
+        let exp = check::replay_without(&led, &run.boards, t - 1, s - 1, &BTreeSet::from([t]));
+        let all: BTreeMap<u64, Hash32> = (t..=q).map(|b| (b, board(b))).collect();
+        assert_eq!(exp, all, "the replay without {t} goes on through the ResetTo at {q}");
+        let chain = |b: u64| c.reference[b as usize - 1].chain;
+        let mut x = settled(dev(0xd2), 1, honest(&run.states, 2..t));
+        x.samples.extend((t..=q).map(|b| (b, chain(b), board(b), 1)));
+        x.crossings.push(Crossing { from: t - 1, to: t, to_chain: chain(t), k: s, k_chain: chain(s), line: 0 });
+        c.idents = vec![x.clone()];
+        assert_eq!(c.check(), Vec::new(), "its states in {t}..={q} are the log replayed without {t}");
+        x.samples.last_mut().expect("the sample at the ResetTo").2 = [0xee; 32];
+        c.idents = vec![x];
+        assert_eq!(
+            c.check(),
+            vec![(4, 1, format!(
+                "dev 0: confirmed state at {q} differs from the reference log replayed without [{t}], which it never applied (between a Skip's target and the Skip at {s})"
+            ))]
+        );
+    }
+
+    // Invariant 4 (task D8 fix pass): a `ResetTo` at `q` whose target `r`
+    // lies inside a Skip's window, where the target `t` changed the board
+    // (Desk's healthy `Set` at `t`, a `Set` at `r = t + 1`, a `Set` of t's
+    // key, Desk's `ResetTo` of `r` with the state hash it holds there, with
+    // `t`, and the Skip of `t`). A device that never applied `t` applies the
+    // `ResetTo` in an ordinary board apply (§16.2, §17.3 step 1), not in a
+    // replay, so §28.1 "Every device" step 1 compares its state hash at `r`,
+    // which lacks `t`, with the entry's (ENG-RESET-002): `ResetMismatch`, the
+    // entry not applied, the board as it was (the oracle of a twin log whose
+    // `t` is a `Fail` and whose `ResetTo` is the log's own). A replay through
+    // `q` resets without the comparison (§28.1, last paragraph), as the
+    // oracle's Skip replay at `s` does (ENG-SKIP-002). The spec gives two
+    // states at `q` for "the reference log replayed with `t` left out" and
+    // names neither (a spec question, reported): the check takes the stricter
+    // reading, no expected value from `q` on (ruling 6), so the reset board,
+    // which only an engine that skips the comparison holds there (the oracle
+    // of a twin whose `ResetTo` names the twin's own state hash), breaks
+    // invariant 4, as the unchanged board does. Below `q` the replay holds.
+    #[test]
+    fn a_reset_to_a_seq_the_skip_target_changed_has_no_expected_value_in_the_window() {
+        let mut log = HandLog::new(SEED);
+        // The log without `t`: with the log's own `ResetTo` (a device that
+        // compares, §28.1 step 1) and with one naming its own state at `r`
+        // (as an engine that skips the comparison resets).
+        let mut compares = HandLog::new(SEED);
+        let mut skips = HandLog::new(SEED);
+        for l in [&mut log, &mut compares, &mut skips] {
+            for k in 0..3u8 {
+                l.set(k, 10 + i64::from(k));
+            }
+        }
+        let (t, _) = log.set(1, 99);
+        let (r, _) = log.set(4, 4);
+        for l in [&mut compares, &mut skips] {
+            l.cmd(&ToyCommand::Fail { code: 0 });
+            l.set(4, 4);
+        }
+        for l in [&mut log, &mut compares, &mut skips] {
+            l.set(1, 5);
+        }
+        let h = |l: &HandLog| Case::of(l).oracle().get(&r).expect("the oracle confirmed r").2;
+        let (h_log, h_twin) = (h(&log), h(&skips));
+        assert_ne!(h_log, h_twin, "the premise: t changes the state hash at {r}");
+        let (q, _) = log.reset_to(r, h_log);
+        compares.reset_to(r, h_log);
+        skips.reset_to(r, h_twin);
+        let (s, _) = log.skip(t);
+        let mut c = Case::of(&log);
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        assert!(led.iter().any(|l| l.seq == q && l.accept && l.reset_to == Some(r)), "the ResetTo of {r} is accepted at {q}");
+        assert!(led.iter().any(|l| l.seq == s && l.accept && l.skip_targets == vec![t]), "the Skip of {t} is accepted at {s}");
+        let run = check::oracle_full(&c.reference, Some(&c.template), &c.roots, &c.board, &c.relay);
+        let (cmp, skp) = (Case::of(&compares).oracle(), Case::of(&skips).oracle());
+        let board = |o: &check::OracleStates, b: u64| o.get(&b).unwrap_or_else(|| panic!("the twin's oracle confirmed {b}")).1;
+        // The premises: the device that compares keeps its board at `q`; the
+        // one that does not resets it; the oracle, with `t`, holds a third.
+        assert_eq!(board(&cmp, q), board(&cmp, q - 1), "the premise: ResetMismatch leaves the board at {q} as it was");
+        assert_ne!(board(&skp, q), board(&skp, q - 1), "the premise: the reset changes the board at {q}");
+        assert!(run.states.get(&q).is_some_and(|o| o.1 != board(&cmp, q) && o.1 != board(&skp, q)), "the premise: the oracle's board at {q} has t");
+        let chain = |b: u64| c.reference[b as usize - 1].chain;
+        let device = |at_q: Hash32| {
+            let mut x = settled(dev(0xd2), 1, honest(&run.states, 2..t));
+            x.samples.extend((t..q).map(|b| (b, chain(b), board(&cmp, b), 1)));
+            x.samples.push((q, chain(q), at_q, 1));
+            x.crossings.push(Crossing { from: t - 1, to: t, to_chain: chain(t), k: s, k_chain: chain(s), line: 0 });
+            x
+        };
+        let want = vec![(4, 1, format!(
+            "dev 0: confirmed state at {q} between a Skip's target and the Skip at {s}, where no replay of the reference log without [{t}], which it never applied, reaches"
+        ))];
+        c.idents = vec![device(board(&skp, q))];
+        assert_eq!(c.check(), want, "the reset board at {q}, held only by an engine that skips the comparison");
+        c.idents = vec![device(board(&cmp, q))];
+        assert_eq!(c.check(), want, "the board §28.1 step 1 leaves at {q}: the stricter reading");
+        let exp = check::replay_without(&led, &run.boards, t - 1, s - 1, &BTreeSet::from([t]));
+        let below: BTreeMap<u64, Hash32> = (t..q).map(|b| (b, board(&cmp, b))).collect();
+        assert_eq!(exp, below, "the replay without {t} covers {t}..{q} and stops before the ResetTo at {q}");
+    }
+
     // §31.7 (task D4's open item): the oracle's state at each B is the first
     // one it had there (`check::keep_first`), and a later visit does not
     // overwrite it. No run of the oracle can tell `keep_first` from an
@@ -779,7 +997,7 @@ mod tests {
         assert_eq!(run.states.keys().next_back(), Some(&head), "the oracle reached the final head");
         let genesis = ToyState { rules: 1, keys: BTreeMap::new(), items: BTreeMap::new(), marks: BTreeMap::new() };
         assert_eq!(run.boards.get(&1), Some(&genesis), "the premise: the board starts empty, at rules 1");
-        let toy = check::replay_without(&led, &genesis, 1, head, &BTreeSet::new());
+        let toy = check::replay_without(&led, &run.boards, 1, head, &BTreeSet::new());
         for b in 2..=head {
             let (chain, bh, _) = run.states.get(&b).unwrap_or_else(|| panic!("the oracle confirmed B = {b}"));
             assert_eq!(*chain, c.reference[b as usize - 1].chain, "the oracle's chain at {b} is the reference log's");
@@ -1807,6 +2025,82 @@ mod tests {
         ] {
             let text = format!("dev 3: {:?} with B = {} is not explained by §31.7 invariant 5", d.1, d.2);
             c.deletions = vec![d];
+            assert_eq!(c.check(), vec![(5, 9, text)]);
+        }
+    }
+
+    // Invariant 5 on a fork (task D8, gate 17163374614648704986 and 5685): a
+    // device that followed a fork's copy, where Desk's purge rotation with
+    // `purge_before = p` was accepted at `r`, truncates its log below `p`,
+    // deletes its bases below `r` and, once its log clock is thirty days past
+    // the rotation, forgets the roots below the purge's epoch (§28.2 "On every
+    // device"). Each is explained by that accepted purge rotation on the log
+    // it followed at B, the branch whose chain it holds at B, although the
+    // reference log holds no purge. Nothing wider: the same deletions judged
+    // on the reference log, a truncation to another seq, a base at `r`, a
+    // deletion below `r`, and the roots before the thirty days are each not
+    // explained.
+    #[test]
+    fn a_purges_deletions_on_a_fork_are_judged_by_the_forks_log() {
+        let (mut reference, mut fork) = forked(|l| {
+            for k in 0..3u8 {
+                l.set(k, i64::from(k));
+            }
+        });
+        reference.set(4, 4);
+        reference.set(5, 5);
+        reference.set(6, 6);
+        // Both Desks draw entry ids from one seed: the fork's draws one it
+        // never seals, so no entry of the fork reuses an id of the reference log's.
+        fork.desk.new_entry_id().expect("an entry id");
+        fork.set(7, 7);
+        let p = fork.head().seq;
+        let (r, _) = fork.purge(p);
+        let (q, _) = fork.set(8, 8);
+        fork.at += 2_600_000_000;
+        let (z, _) = fork.set(9, 9);
+        let mut c = Case::of(&reference);
+        c.roots.extend(fork.roots());
+        let fork_rows = fork.rows();
+        let chain = |b: u64| fork_rows[b as usize - 1].chain;
+        // The premises: the purge rotation is accepted at `r` on the fork,
+        // with its new epoch; the reference log holds no purge; the fork's
+        // rows from `r - 1` on are not the reference log's.
+        let fl = check::ledger(&fork_rows, Some(&c.template), &c.roots);
+        let n = fl
+            .iter()
+            .find(|l| l.seq == r && l.accept && l.purge_before == Some(p))
+            .and_then(|l| l.new_epoch)
+            .unwrap_or_else(|| panic!("the purge rotation is accepted at {r} on the fork: {:?}", fl.iter().find(|l| l.seq == r)));
+        assert!(fl.iter().all(|l| l.accept), "every row of the fork is accepted");
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        assert!(led.iter().all(|l| l.purge_before.is_none()), "the reference log holds no purge");
+        for b in [r - 1, r, q] {
+            assert_ne!(c.reference.get(b as usize - 1).map(|x| x.chain), Some(chain(b)), "the fork differs from the reference log at {b}");
+        }
+        c.branches.push(BranchLog { rows: fork_rows.clone(), why: check::WHY_FORK, line: 77, removed_from: 5 });
+        let d = |what: Deletion, b: u64| (3usize, what, b, 9u64);
+        let on = |b: u64| Some(chain(b));
+        c.deletions = vec![
+            d(Deletion::Truncate(p, false, on(r)), r),
+            d(Deletion::Bases(vec![2, r - 1], false, on(r)), r),
+            d(Deletion::Truncate(p, false, on(q)), q),
+            d(Deletion::Roots((1..n).collect(), on(z)), z),
+        ];
+        assert_eq!(c.check(), Vec::new());
+        for x in [
+            d(Deletion::Truncate(p, false, None), r),
+            d(Deletion::Truncate(p, false, Some(c.reference[r as usize - 1].chain)), r),
+            d(Deletion::Bases(vec![2], false, None), r),
+            d(Deletion::Roots((1..n).collect(), None), z.min(c.reference.len() as u64)),
+            d(Deletion::Truncate(p + 1, false, on(r)), r),
+            d(Deletion::Truncate(p, false, on(r - 1)), r - 1),
+            d(Deletion::Bases(vec![r], false, on(r)), r),
+            d(Deletion::Bases(vec![2], false, on(r - 1)), r - 1),
+            d(Deletion::Roots((1..n).collect(), on(q)), q),
+        ] {
+            let text = format!("dev 3: {:?} with B = {} is not explained by §31.7 invariant 5", x.1, x.2);
+            c.deletions = vec![x];
             assert_eq!(c.check(), vec![(5, 9, text)]);
         }
     }
