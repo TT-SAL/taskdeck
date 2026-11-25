@@ -1204,6 +1204,77 @@ fn a_relay_rolled_back_gets_its_tail_from_a_devices_log() {
     assert_eq!(b.e.confirmed().0.keys[&30].0, 30);
 }
 
+// spec: ENG-EVID-004
+#[test]
+fn a_repair_lost_on_the_way_is_sent_again_before_the_next_restore_request() {
+    // `gate` 1022: a restore tail stored a `DeviceAdded`; the repair after it (the added device's
+    // row) was lost with the connection; after the reconnect the next request carried a frame of
+    // that device, and the relay refused it `relay/unknown_author` again and again.
+    let (mut net, mut a) = board(281);
+    let mut b = pair(&mut net, &mut a, 282, "Laptop", 1);
+    a.set(1, 1, 1);
+    net.settle(&mut [&mut a, &mut b]);
+    let earlier = net.relay().clone();
+    let mut c = pair(&mut net, &mut a, 283, "Phone", 2);
+    let added_seq = pair_result(&a, 2).expect("an answer").expect("paired").1;
+    c.set(10, 10, 10);
+    b.set(20, 20, 20);
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    let full = net.relay().clone();
+    let head = net.log_len();
+    assert!(head > added_seq + 1);
+
+    net.relay().rollback_to(&earlier);
+    // B restores up to the `DeviceAdded`; the repair it sends next never reaches the relay.
+    let mut lost = false;
+    'run: for _ in 0..40 {
+        while let Some(fx) = b.fx.pop_front() {
+            if let Effect::Admin { op: AdminRequest::RegisterSeq { .. }, .. } = &fx {
+                b.fx.clear();
+                b.feed(Event::Disconnected { unreachable: false, paused_until_ms: None });
+                lost = true;
+                break 'run;
+            }
+            net.answer(&mut b, fx);
+        }
+        b.tick(30_000);
+    }
+    assert!(lost, "B restored the DeviceAdded and sent its repair");
+    assert_eq!(net.log_len(), added_seq);
+    let admins = net.admins.len();
+
+    // After the reconnect, the entry's repair goes out again before any frame of its device.
+    net.settle(&mut [&mut b]);
+    assert_eq!(net.log_len(), head);
+    for seq in added_seq..=head {
+        assert_eq!(net.relay().log()[&seq].frame, full.log()[&seq].frame, "{seq}");
+    }
+    let mut registered = false;
+    for (i, (dev, op)) in net.admins.iter().enumerate().skip(admins) {
+        assert_ne!(net.admin_ctx[i].3, Err("relay/unknown_author".to_owned()), "{op:?}");
+        match op {
+            AdminRequest::RegisterSeq { seq, dev: added, .. } => {
+                assert_eq!((*dev, *seq, *added), (b.dev(), added_seq, c.dev()));
+                registered = true;
+            }
+            AdminRequest::RestoreTail { first_seq, .. } => {
+                assert!(registered, "the row before the frames of its author: request from {first_seq}");
+            }
+            other => panic!("an unexpected request {other:?}"),
+        }
+    }
+    for n in [&mut a, &mut b, &mut c] {
+        n.advance(3_700_000);
+    }
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    for n in [&a, &b, &c] {
+        assert!(n.e.status().stops.is_empty(), "{:?}", n.e.status().stops);
+    }
+    c.set(30, 30, 30);
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(b.e.confirmed().0.keys[&30].0, 30);
+}
+
 // spec: ENG-OPS-005
 #[test]
 fn a_recovery_key_change_is_registered_by_the_engine_only_in_a_repair() {

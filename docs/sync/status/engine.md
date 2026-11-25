@@ -50,6 +50,11 @@ in the order it happened; this file is the current truth and is rewritten, not a
   frames it had sealed before the halt (`gate` 122: the Skip's counter lay above an unsent
   frame's, the relay answered `gap`, and the device sent the Skip again 318 times until its next
   reconnect).
+- Fixed after D6 (each with a test that failed before and a regression file): a restore that
+  goes on right after a control entry at the relay's head sends that entry's repairs first,
+  since this device cannot know whether they succeeded (a lost answer, a restart; the relay
+  answers a repeated repair as done) (`gate` 1022: the repair of a restored `DeviceAdded` was
+  lost with the connection, and every later request was refused `relay/unknown_author`).
 - Next: task D6 (the simulator's checks carry the decided invariants) integrated and the gate run
   at 1,000 seeds; the engine's pull request green and merged "(stage in progress, not the exit)";
   task E (scenario and trace vectors); `bash scripts/gate.sh engine`; the one round of checks;
