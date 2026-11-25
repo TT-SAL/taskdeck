@@ -29,10 +29,23 @@ in the order it happened; this file is the current truth and is rewritten, not a
 - The second spec change (a pull request of its own, see "Spec changes to make") must merge before
   TT-SAL/taskdeck#30 can be green: it needs the branch for itself, so the engine's work is parked
   on a local branch for the time of that pull request's CI, as for TT-SAL/taskdeck#29.
-- Task D3 (an opus workflow, wf_0eb7fcfb-f49) is diagnosing the `gate` seeds that fail for other
-  reasons than a rollback or fork (base 1000: 1014, 1098, 1099, 1058, 1017, 1029, 1019). When it
-  reports: run its gate, apply `git diff <its base> wt/d3`, fix what it attributes to the engine
-  (each with a test and a regression file).
+- Task D3 is done and applied (the lead ran its gate: 165 unit tests, regressions, conformance,
+  clippy, wasm). It fixed three simulator faults (one root per epoch; a push before the login
+  answer; violation texts that name a rollback or fork) and reported, for the lead:
+  - engine faults in the move: **A** the move goes on after a `SeedTail` nobody answered (gate
+    1009, 1099); **B** after a restart that follows the Fence the move sends `Door` again and never
+    seeds (gate 1021); **C** the seed sent again after a restart says `home_gen 0, first_seq 1` and
+    is refused `relay/bad_args` (gate 1095); **D** a device that applies its own Skip raises
+    mismatch alarms for seqs at or above the target (gate 1014, §17.3 last paragraph).
+  - spec questions: two devices skip the same target and the second Skip is acknowledged, then
+    refused `seal/ctl_target` for good (gate 1017, 1029, 108, 104) against invariant 2; a device
+    that crash-halted on a Skip's target confirms states between the target and the Skip without
+    the target, the no-fault oracle has it applied (gate 1014, 1098) against invariant 4; a device
+    whose pairing existed only on a rolled-back or forked relay state is answered
+    `relay/unauthorized` at every hourly login and never stops (1019, 1062, 1074, 1081, 1097); a
+    restore tail that holds an injected frame is refused `relay/wrong_board` every time (1074).
+  - No gate seed at base 100 or 1000 is a refused pairing (§28.4 step 4): seed 108, which D2 took
+    for one, is the Skip race.
 - Then, once the owner has decided questions 2 and 3: the spec change (one pull request), task E
   (scenario and trace vectors), `bash scripts/gate.sh engine`, the one round of checks, the exit
   pull request.
@@ -239,7 +252,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_e736e661-ee0 | C model relay, second attempt | `engine/briefs/c-model-relay.md` | done, merged (the lead ran its gate: 16 conformance tests pass) | `src/sim/relay.rs` + `relay/{seq,admin,blobs,socket,util}.rs`, `tests/relay_conformance.rs` (11 families of `relay/test/vectors/`, about 575 steps; 7 families left out with reasons in the file header), `engine/api-model-relay.md`; check: no findings; 8 questions on relay.md; asks the fake for an accessor of the genesis `rsign_pk` and `salt` | 532,591 |
 | wf_70e5dcc6-438 | D simulator | `engine/briefs/d-simulator.md` | written and checked; the fix pass was cut off by the usage limit; applied to the branch as a patch | `src/sim.rs`, `src/sim/{config,store,trace,check,world}.rs`, `world/{rt,load,end}.rs`, `tests/simulator.rs`, `tests/regressions.rs`, `engine/api-simulator.md`; three helpers in the fake; quiet: 1,000 seeds pass (40 s release, 228 s debug); gate: 154 of 200 seeds failed against the engine of 7a764c7; 7 engine defects reported with seeds; 10 spec questions; the checker found 4 or more high defects in the invariants | 893,600 |
 | wf_fbed9968-73a | D2 simulator follow-up (the check's findings, the lead's rulings, what still fails) | `engine/briefs/d2-simulator-followup.md` | done, applied to the branch as a patch (the lead ran its gate) | invariants read strictly, `sim/counted.rs`, regression files 1, 102, 111, 116, 200, a report of what still fails by cause (the journal, 2026-11-25) | 977,242 |
-| wf_0eb7fcfb-f49 | D3 what still fails under `gate`, seed by seed (diagnosis; simulator faults fixed, engine faults reported) | `engine/briefs/d3-gate-seeds.md` | running since 2026-11-25 in `/home/user/wt/d3` (branch `wt/d3`); task id wubw01es9 | | |
+| wf_0eb7fcfb-f49 | D3 what still fails under `gate`, seed by seed (diagnosis; simulator faults fixed, engine faults reported) | `engine/briefs/d3-gate-seeds.md` | done, applied to the branch as a patch (the lead ran its gate) | `src/sim/{check,world}.rs`, `src/sim/world/{rt,load,end}.rs`, `api-simulator.md`; gate base 1000: 61 of 100 fail, base 100: 27 of 50 | 827,210 |
 
 ## Open threads
 

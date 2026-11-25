@@ -1,4 +1,4 @@
-# The simulator: how to run it (tasks D and D2)
+# The simulator: how to run it (tasks D, D2 and D3)
 
 Module `taskdeck_sync::sim` (feature `sim`; the test targets get it from the crate's dev-dependency on itself).
 Spec: engine.md §31. Code: `src/sim.rs` (types), `src/sim/config.rs` (named configurations), `src/sim/world.rs` and
@@ -77,7 +77,8 @@ One JSON object per line, `t` (virtual ms) and `k` first:
   writes, plus the write in progress at a `during` crash half the time. Restart delay 1–31 s.
 - Messages: 5 ms plus the drawn delay; socket messages keep their order; HTTPS answers do not. A request with no
   answer after 20,000 ms (plus 1 s per 64 KiB) ends the session as unreachable (`device.md` §10.10).
-- Every `Connect` logs in, opens a socket and says hello; backoff as DEV-BACKOFF-001.
+- Every `Connect` logs in, opens a socket and says hello; backoff as DEV-BACKOFF-001. Nothing the relay sends on that
+  socket reaches the engine before the login's answer has (D3: a lost answer left pushes flowing to a connecting engine).
 - Ticks are delivered at the time asked (now, when it has passed); `SimStats.ticks_due_now` counts `ScheduleTick`s
   that asked for a tick within 1 ms.
 - `relay/token_stale` never reaches the engine: the runtime logs in again and sends the request with the new token
@@ -92,7 +93,10 @@ One JSON object per line, `t` (virtual ms) and `k` first:
 ## The invariants as checked (§31.7, strict readings)
 
 - 2: every acknowledged `entry_id` once with class `Accept` in the reference log, whatever became of its device; one
-  that only a rolled-back or forked relay state held reads `lost to a rolled-back relay state (…, fault at trace line N)`.
+  that only a rolled-back or forked relay state held reads `lost to a rolled-back relay state (…, fault at trace line N)`;
+  a refused entry that a relay's `register` acknowledged with a seq (a pairing's `DeviceAdded`; a refused frame
+  carries no items, so the check tells it by the `register`, `World::registered`) reads
+  `a pairing's DeviceAdded refused after register (§28.4 step 4)`.
   And every device whose final `B` is past that seq has applied it exactly once: the devices run `CountedToy`
   (`src/sim/counted.rs`), the toy with a trail of the seqs `apply` ran for on each state value's lineage since its
   last load from bytes (invisible to the engine: not in the bytes, the hash or any decision). It is read on the log
@@ -100,13 +104,41 @@ One JSON object per line, `t` (virtual ms) and `k` first:
   the trail holds; an entry an accepted Skip at or below `B` targets is expected 0 times (ENG-SKIP-002). A violation
   reads `B = … is past seq … of acknowledged entry …, which it applied n times (expected m)`.
 - 4: the confirmed state at every sampled `B` past the device's join, against the oracle's on the branch it followed,
-  a `B` between a Skip's target and the Skip included (ruling 6; such a violation names the Skip).
+  a `B` between a Skip's target `t` and the Skip `s` included (ruling 6; such a violation names the Skip). The oracle
+  is the one of §31.7 only (`check::oracle`): a fresh engine replaying the log from seq 1 with no faults, its first
+  state at each `B` (a Skip replay does not overwrite it). A `B` in `t..s` it never confirmed is reported too.
+  Task D3 had added a second history, the oracle replayed with its process killed while `t` was under a marker
+  until it crash-halted on `t`, open to a device that crash-halted on `t`; the D3 fix pass removed it: those states
+  come from the engine under test run under faults, not from an independent expected value, and accepting them
+  loosened invariant 4 (test `invariant_4_at_a_skip_window_is_judged_by_the_no_fault_oracle_only`). A violation of a
+  device whose storage held a crash halt on `t` (`IdentFacts::crash_halts`) ends with
+  `; it crash-halted on the target t: ENG-HALT-004 against §31.7 invariant 4, a spec question (api-simulator.md)`.
 - 3: accepted once; or still in the outbox of a device halted or stopped with a persisted reason, or revoked (in
-  its status or in the oracle's membership); or refused with a refusal record; or dropped as a cancelled hold.
+  its status or in the oracle's membership); or refused with a refusal record; or dropped as a cancelled hold. A
+  record its device applied on a branch a rollback or fork removed reads `applied on a rolled-back relay state (…)`.
 - 5: a `Drop` reached the board head, or is the held `Create` of the `Forget` being enqueued, or a `Register`
   record with a `PairFailed` for its device in the same or the next call; a `ConfirmRejoin` explains its own
   `TruncateLogBelow(S + 1, Some(C_S))` and one `DeleteBases`, then nothing; an identity write that drops a pending
-  root of an own rotation needs that rotation's own entry in the reference log at or below the highest seq the same
-  write makes durable (accepted: it reached the head; refused: a refused own rotation). Another device's rotation
+  root of an own rotation needs that rotation's own entry, in the log the device followed there (the chain it holds
+  at that seq), at or below the highest seq the same write makes durable (accepted: it reached the head; refused: a refused own rotation). Another device's rotation
   excuses no pending root.
 - 6: also no `Append` other than of beats, `snap` entries and the rules-upgrade proposal in the last 1,800,000 ms.
+  3 and 6 name a device whose `DeviceAdded` only a rolled-back or forked state holds: `its pairing is only on …`.
+- Roots: every `(epoch, root)` any device held; two branches may rotate to one epoch with two roots, and each log is
+  classified with the choice per epoch that opens it furthest (`check::pick_roots`; D3, gate seeds 1019 and 1058).
+
+## Spec question (task D3): a device that crash-halted on a Skip's target, against invariant 4
+
+Gate seed 1014 (1098 likewise: device 0, target 200, Skip at 201): device 2 crash-halts on the healthy entry 192 (§15.2, two hard aborts while 192 is under
+its marker), every other device applies it, and device 2's Skip of 192 is accepted at 197. After the Skip clears the
+halt device 2 applies 192 as skipped and the entries after it (§17.3 step 1, ENG-HALT-004), so its confirmed state
+at 192, 195 and 196 lacks 192 (ENG-SKIP-002). The §31.7 oracle applied 192 when it reached it and has it at each of
+those `B`. The check reports three invariant-4 violations; they stay failing until the owner decides.
+
+- Reading A (invariant 4 as written): "no device's confirmed state at any moment differs from the oracle's at the
+  same `B`" with the oracle a fault-free replay. Device 2's states differ: either the engine is wrong (ENG-HALT-004
+  should not let a device confirm a `B` in `t..s` without `t` when the oracle has `t` there, for example by
+  confirming nothing below `s` after the Skip) or the invariant is violated by design.
+- Reading B (ENG-HALT-004 and ENG-SKIP-002 as written): a device that crash-halted on `t` legitimately confirms the
+  `B`s of `t..s` without `t`; invariant 4 then needs an expected value for those `B`s that is derived independently
+  (for instance the log replayed with `t` excluded), stated in §31.7. The check does not choose one.

@@ -149,7 +149,7 @@ impl World<'_> {
     pub(super) fn stop_proc(&mut self, id: usize) {
         let Some(p) = self.idents[id].proc.take() else { return };
         for (e, r) in p.engine.sealer().roots() {
-            self.roots.insert(e, r);
+            self.roots.insert((e, r));
         }
         if let Some(c) = &p.conn
             && let Some(s) = c.socket {
@@ -498,16 +498,19 @@ impl World<'_> {
         let p = ident.proc.as_mut().expect("running");
         let Some((pid, ops, hist)) = p.queue.pop_front() else { return };
         p.writing = false;
-        match crash {
+        let applied = match crash {
             Some(CrashAt::During) => {
-                if self.fault.chance(500_000) {
+                let applied = self.fault.chance(500_000);
+                if applied {
                     self.idents[id].store.apply(&ops, hist.as_ref());
                 }
                 self.crash(id, CrashAt::During);
+                applied
             }
             Some(_) => {
                 ident.store.apply(&ops, hist.as_ref());
                 self.crash(id, CrashAt::After);
+                true
             }
             None => {
                 ident.store.apply(&ops, hist.as_ref());
@@ -516,7 +519,18 @@ impl World<'_> {
                     && !p.writing && !p.queue.is_empty() {
                         self.start_write(id);
                     }
+                true
             }
+        };
+        // A crash halt made durable (§16.2): an invariant-4 violation of this
+        // identity between the halt's seq and the Skip of it names the spec
+        // question it turns on (ENG-HALT-004 against §31.7 invariant 4).
+        let ident = &mut self.idents[id];
+        if applied
+            && let Some(h) = ident.store.meta.as_ref().and_then(|m| m.halt.as_ref())
+            && matches!(h.kind, crate::HaltKind::Crash { .. })
+        {
+            ident.crash_halts.insert(h.seq);
         }
     }
 
@@ -602,12 +616,17 @@ impl World<'_> {
                             self.deletions.push((id, Deletion::Roots(lost), b, line));
                         }
                         if !gone.is_empty() {
-                            self.deletions.push((id, Deletion::Pending(gone), written, line));
+                            let logged = ops.iter().find_map(|o| match o {
+                                PersistOp::AppendLog(rs) => rs.iter().find(|r| r.seq == written).map(|r| r.chain),
+                                _ => None,
+                            });
+                            let chain = logged.or_else(|| self.idents[id].store.chain_at(written));
+                            self.deletions.push((id, Deletion::Pending(gone, chain), written, line));
                         }
                     }
                     if let Some(p) = self.idents[id].proc.as_ref() {
                         for (e, r) in p.engine.sealer().roots() {
-                            self.roots.insert(e, r);
+                            self.roots.insert((e, r));
                         }
                     }
                 }
@@ -823,7 +842,7 @@ impl World<'_> {
         }
     }
 
-    fn down(&mut self, id: usize, proc: u32, conn: u64, msg: Down) {
+    pub(super) fn down(&mut self, id: usize, proc: u32, conn: u64, msg: Down) {
         let Some(p) = self.idents[id].proc.as_mut() else { return };
         // An answer to a request still outstanding is delivered even when it
         // was sent before the current session began (a request emitted while
@@ -868,6 +887,14 @@ impl World<'_> {
                 self.deliver(id, ev);
             }
             Down::Sock(m) => {
+                // The runtime opens its socket from the login's answer: until
+                // that answer has arrived (it may be lost, or still on its
+                // way) it holds no socket, and nothing the relay pushes on
+                // the one it opened reaches the engine (§31.4; `device.md`
+                // §10.5).
+                if !p.conn.as_ref().is_some_and(|c| c.welcomed_t.is_some()) {
+                    return;
+                }
                 let ev = match m {
                     SockMsg::Push(page) => Event::Page { req: None, page },
                     SockMsg::Second(s) => Event::Second { session: s },
@@ -1108,6 +1135,7 @@ impl World<'_> {
                         _ => {}
                     }
                 }
+                let register = matches!(op, AdminRequest::Register { .. });
                 let carried = match &op {
                     AdminRequest::Register { frame, .. } => Some(frame.clone()),
                     AdminRequest::Fence { frame: Some(f), .. } => Some(f.clone()),
@@ -1116,6 +1144,9 @@ impl World<'_> {
                 if let (Some(f), Ok(ok)) = (carried, &reply.result)
                     && ok.seq.is_some()
                         && let Some((eid, _, _)) = self.frames.get(&h(&f)) {
+                            if register {
+                                self.registered.insert(*eid);
+                            }
                             self.pending_acks.insert((id, proc, req), vec![(*eid, sel == Sel::Main(self.home))]);
                         }
                 let ev = match reply.result {

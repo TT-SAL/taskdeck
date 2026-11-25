@@ -91,6 +91,7 @@ impl World<'_> {
                 caught_up,
                 joined_at: ident.joined_at,
                 samples: ident.samples.clone(),
+                crash_halts: ident.crash_halts.clone(),
                 applied,
                 alarms: ident.alarms.clone(),
                 outbox,
@@ -100,14 +101,14 @@ impl World<'_> {
             });
         }
         #[cfg(test)]
-        if let Some(f) = self.tamper_facts {
+        if let Some(f) = &self.tamper_facts {
             f(&mut facts_idents);
         }
         let (board, relay) = match self.idents.first().map(|i| &i.genesis) {
             Some(Some((b, r))) => (b.clone(), r.clone()),
             _ => (Vec::new(), RelayTarget::default()),
         };
-        let roots: Vec<(u32, [u8; 32])> = self.roots.iter().map(|(e, r)| (*e, *r)).collect();
+        let roots: Vec<(u32, [u8; 32])> = self.roots.iter().copied().collect();
         let found = {
             let facts = Facts {
                 reference: &self.archive,
@@ -119,6 +120,7 @@ impl World<'_> {
                 idents: facts_idents,
                 acked: &self.acked,
                 enqueued: &self.enqueued,
+                registered: &self.registered,
                 cancelled: &self.cancelled,
                 injected: &self.injected_seqs,
                 deletions: &self.deletions,
