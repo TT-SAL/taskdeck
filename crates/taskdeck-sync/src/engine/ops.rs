@@ -829,6 +829,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             return;
         }
         let Some(op) = self.op_rec(ticket).map(|o| o.op.clone()) else { return };
+        if let (Operation::Skip { seq }, Some("seal/ctl_target")) = (&op, code)
+            && self.vk.skips.iter().any(|s| s.0 == *seq)
+        {
+            // §17.1: another entry skipped the target first; what the user asked for holds.
+            return self.op_done(ticket, Ok(()));
+        }
         match (&op, code) {
             (Operation::Revoke { dev, .. }, None) => self.revoke_finish(ticket, *dev),
             (

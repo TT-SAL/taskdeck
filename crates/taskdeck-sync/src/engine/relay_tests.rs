@@ -1025,9 +1025,11 @@ fn the_minority_stops_and_adopts_with_a_typed_fingerprint() {
     net.settle(&mut [&mut a, &mut b, &mut c]);
     assert!(diverged(&c));
     assert!(!diverged(&a) && !diverged(&b));
-    // Under the stop C seals nothing, sends nothing and takes no duty; it keeps reading.
-    let sent_by = |net: &super::rkit_tests::Net, n: &Node| net.calls.iter().filter(|x| x.0 == n.dev() && (x.1 == "append" || x.1.starts_with("blob:upload"))).count();
-    let sent = sent_by(&net, &c);
+    // Under the stop C seals nothing but its beat, which carries its report and no verdict, and
+    // takes no other duty; it keeps reading.
+    let uploads_by = |net: &super::rkit_tests::Net, n: &Node| net.calls.iter().filter(|x| x.0 == n.dev() && x.1.starts_with("blob:upload")).count();
+    let uploads = uploads_by(&net, &c);
+    let from = c.persists.len();
     c.set(900, 30, 900);
     grow(&mut net, &mut a, &mut b, 80);
     for _ in 0..3 {
@@ -1036,7 +1038,10 @@ fn the_minority_stops_and_adopts_with_a_typed_fingerprint() {
         }
         net.settle(&mut [&mut a, &mut b, &mut c]);
     }
-    assert_eq!(sent_by(&net, &c), sent);
+    assert_eq!(uploads_by(&net, &c), uploads);
+    let sealed: Vec<_> = puts(&c, from).into_iter().filter(|r| r.frame.is_some()).collect();
+    assert!(!sealed.is_empty(), "C's beats go on under the stop");
+    assert!(sealed.iter().all(|r| matches!(&r.body, Body::Beat(i) if i.acks.is_empty() && i.state.is_some())));
     assert_eq!(c.e.status().queued, 1);
     assert_eq!(c.e.status().head.seq, net.log_len());
     assert!(diverged(&c));
@@ -1906,4 +1911,88 @@ fn a_halted_device_fills_the_counter_gap_below_its_skip() {
     }
     assert_eq!(a.board_bytes(), b.board_bytes());
     assert_eq!(a.e.confirmed().0.keys[&1].0, 5);
+}
+
+// spec: ENG-DIVERGE-001 ENG-DIVERGE-002 ENG-DIVERGE-005
+#[test]
+fn healthy_devices_that_heard_the_wrong_one_first_go_on_together() {
+    let (mut net, mut a) = board(561);
+    let mut b = pair(&mut net, &mut a, 562, "Laptop", 1);
+    let mut c = pair(&mut net, &mut a, 563, "Phone", 2);
+    let mut k = 0u64;
+    while net.log_len() < 55 {
+        k += 1;
+        a.set(k, (k % 20) as u8, k as i64);
+        net.settle(&mut [&mut a, &mut b, &mut c]);
+    }
+    // C's replica goes wrong (a build that computes differently): key 1 is off by one, and
+    // nothing writes key 1 again.
+    if let Some(state) = c.e.state.as_mut() {
+        state.keys.get_mut(&1).expect("key 1").0 += 1;
+    }
+    c.e.pipe.pre = c.e.state.clone();
+    // C goes on alone past seq 64 and writes the snapshot there, with its own hash.
+    while net.log_len() < 70 {
+        k += 1;
+        c.set(k, 30, k as i64);
+        net.settle(&mut [&mut c]);
+    }
+    for _ in 0..3 {
+        c.advance(3_600_000);
+        net.settle(&mut [&mut c]);
+    }
+    assert!(net.calls.iter().any(|x| x.0 == c.dev() && x.1 == "blob:upload:1"), "C wrote the snapshot of 64");
+    // A reads C's snapshot entry before any agreeing report: one against one, a tie: A stops.
+    let from_a = a.persists.len();
+    a.advance(600_000);
+    net.settle(&mut [&mut a]);
+    assert!(diverged(&a), "a tie stops A");
+    // On entering the stop A sent its own report at once, without verdicts. (Under the rule as it
+    // was, A sent nothing, B then read C's entry alone and stopped too, and the two healthy
+    // devices waited for each other for good.)
+    let beats: Vec<_> = puts(&a, from_a).into_iter().filter(|r| r.kind == Kind::Beat && r.frame.is_some()).collect();
+    assert!(beats.iter().any(|r| matches!(&r.body, Body::Beat(i) if i.acks.is_empty() && i.state.map(|s| s.0) == Some(64))));
+    // B reads both: two against one, it does not stop; its beat, with its verdict on C's snapshot,
+    // ends A's stop at 64, the seq where it began.
+    b.advance(600_000);
+    net.settle(&mut [&mut b]);
+    assert!(!diverged(&b), "the majority goes on");
+    a.advance(600_000);
+    net.settle(&mut [&mut a]);
+    assert!(!diverged(&a), "the stop ends at the seq where it began");
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    assert!(!diverged(&a) && !diverged(&b), "the healthy majority goes on");
+    assert!(diverged(&c), "the minority stays stopped");
+    a.set(900, 31, 900);
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(a.e.status().queued, 0);
+    assert_eq!(a.board_bytes(), b.board_bytes());
+}
+
+// spec: ENG-SESS-007
+#[test]
+fn a_relay_without_a_row_for_the_device_closes_it_on_a_board_never_moved() {
+    let host = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(571);
+    net.settle(&mut [&mut a]);
+    let before = net.relays[&host].clone();
+    let mut b = pair(&mut net, &mut a, 572, "Laptop", 1);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(b.e.membership().home_seq, 0, "the board never moved");
+    // The relay goes back to a state that never had B (as a relay copy that paired B and was
+    // thrown away): B's next sign-in is refused `401 relay/unauthorized`.
+    net.relays.get_mut(&host).expect("the relay").rollback_to(&before);
+    b.feed(Event::Disconnected { unreachable: false, paused_until_ms: None });
+    net.settle(&mut [&mut b]);
+    let stops = b.e.status().stops;
+    assert!(stops.iter().any(|s| s.kind == crate::StopKind::Closed && s.action == crate::StopAction::RePair), "{stops:?}");
+    // No `Connect` while the stop is in force.
+    let dev = b.dev();
+    let connects = |net: &super::rkit_tests::Net| net.calls.iter().filter(|x| x.0 == dev && x.1 == "connect").count();
+    let n = connects(&net);
+    for _ in 0..4 {
+        b.advance(3_600_000);
+        net.settle(&mut [&mut b]);
+    }
+    assert_eq!(connects(&net), n);
 }

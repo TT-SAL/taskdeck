@@ -57,7 +57,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// §10.1: may the engine send now?
     pub(crate) fn may_send(&self) -> bool {
         self.sess.state == SessionState::Live
-            && !self.stopped()
+            && (!self.stopped() || self.divergence_only())
             && !self.sess.fenced
             && !self.fence_pending()
             && !self.following()
@@ -87,6 +87,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         // identical. Nothing but the Skip is sealed (ENG-HALT-006).
         let skip_waits =
             halted && self.outbox.iter().any(|x| is_skip(&x.r.body) && x.r.ack.is_none() && x.r.seen.is_none());
+        // §22.2: under the divergence stop only the beat is sealed, and ahead of it, identical,
+        // the frames sealed before the stop that the relay does not hold yet (as for a Skip
+        // under a halt).
+        let diverged = self.stopped();
+        let beat_waits =
+            diverged && self.outbox.iter().any(|x| x.r.kind == Kind::Beat && x.r.ack.is_none() && x.r.seen.is_none());
         // Step 1.
         let relay_ctr = self.send.relay_ctr;
         let r: Vec<usize> = (0..self.outbox.len())
@@ -95,6 +101,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 x.ack.is_none()
                     && x.seen.is_none()
                     && (!halted || is_skip(&x.body) || (skip_waits && x.frame.is_some()))
+                    && (!diverged || x.kind == Kind::Beat || (beat_waits && x.frame.is_some()))
                     && !(x.frame.is_some() && x.ctr.is_some_and(|c| relay_ctr.is_some_and(|rc| c <= rc)))
             })
             .collect();

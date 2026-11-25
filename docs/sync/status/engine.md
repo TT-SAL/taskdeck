@@ -11,7 +11,7 @@ in the order it happened; this file is the current truth and is rewritten, not a
 - Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the first spec
   change). Open, draft: TT-SAL/taskdeck#30 (everything since); the branch
   `claude/cool-franklin-c6e6um` is pushed.
-- Tests on the branch: 186 unit tests, `relay_conformance` (16), clippy, the wasm check pass;
+- Tests on the branch: 189 unit tests, `relay_conformance` (16), clippy, the wasm check pass;
   every clause is cited (234 of 234); `unimplemented!()`: 0. **`regressions` fails on one file,
   `1099.json`**: the lead added it for the lost `SeedTail` (it passed then); a later engine fix
   changed what that seed does, and it now ends with "lost to a rolled-back relay state" only
@@ -277,7 +277,45 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 
 ## Open threads
 
-### Decisions the owner must make (they change §31.7 or a MUST; the gate cannot pass without 2, 3 and 4)
+### The owner's decisions (2026-11-25: "We will go with your recommendations and what you believe is optimal")
+
+Decided as the lead proposed; each is to be written into the spec change and carried out.
+**Done in the engine (2026-11-25, each with a test that failed before):** 1 (the beat under the
+divergence stop, the stop ending at its own seq: `healthy_devices_that_heard_the_wrong_one_first_go_on_together`,
+and the existing divergence test now asserts that only beats are sealed under the stop), the
+sign-in rule of 2 (`a_relay_without_a_row_for_the_device_closes_it_on_a_board_never_moved`;
+also not while following an address), the extra of 3
+(`a_skip_whose_target_another_device_skipped_first_is_done`). Their tests cite ENG-DIVERGE-005
+and ENG-SKIP-006, clauses the spec change adds: until it merges `spec-coverage` reports these two
+as bad citations. The simulator's part of 2, 3 and 4 is task D6. After the sign-in rule no `gate`
+seed at base 1000 has a device that retries its sign-in for good; the classes are as before.
+
+1. **Divergence (§22.2):** under the divergence stop a device still sends its beat (the state
+   report only, no verdicts), and one at once when it enters the stop; the stop also ends at the
+   seq where it began once the device's group is strictly larger and has another member. Engine
+   (lead) and spec.
+2. **Rollback and fork (§31.7, plan §6.5 item 2):** for these two faults the promise is "never
+   lost silently": invariants 2 and 3 except an entry whose only acknowledgements came from a
+   relay state that a rollback or fork removed from the reference branch, provided a device
+   holding it raised §21.1 evidence; invariants 1 and 6 also except a device that joined on a
+   removed branch; a restore tail refused for a relay-made frame is covered. **The sign-in rule:**
+   the §11.9 row for `401 relay/unauthorized` (stop `Closed`, `RePair`, ENG-SESS-007) also holds
+   on a board never moved (no `Fence` in `M_K`, `meta.relay.home_gen = M_K.home_gen`). The plan's
+   gate line gets the same note. Spec, simulator (agent), engine (lead).
+3. **Final refusals (§31.7 invariant 2):** invariant 2 allows what invariant 3 allows (finally
+   refused with a refusal record); the cases are §28.4 step 4 and the second of two Skips of one
+   target. The lead's optional extra, taken as optimal: a Skip whose entry is refused because its
+   target is already skipped ends with `Ok(())`. Spec, simulator (agent), engine (lead).
+4. **The Skip window (§31.7 invariant 4):** a device that never applied the target `t` is compared,
+   from `t` to the Skip, with the reference log replayed without `t`, computed by the simulator
+   without the engine under test. Spec, simulator (agent).
+5. **ENG-MOVE-009:** "exactly once, and once more after each `Start` that finds the report written
+   and the move not ended" (already in the patch and the engine).
+6. **`1099.json`** stays as it is; it is expected to pass once the simulator carries decision 2.
+
+The questions as they were put, for the record:
+
+#### (asked on 2026-11-25)
 
 1. **Divergence (§22.2, ENG-DIVERGE-001/002)**: as written the stop can halt the healthy majority
    (details in the next paragraph). Proposal: a stopped device still sends its beat, and the stop
