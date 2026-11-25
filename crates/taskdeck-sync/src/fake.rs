@@ -1915,6 +1915,42 @@ impl FakeSealer {
         self.history.borrow().values().cloned().collect()
     }
 
+    /// The genesis anchor's recovery signing key and salt, `(rsign_pk, salt)`:
+    /// what the model relay's `create` needs (`relay.md` §10.2). `None` for a
+    /// fake that did not create the board. Draws nothing.
+    pub fn genesis_keys(&self) -> Option<(Hash32, [u8; 16])> {
+        self.anchor.as_ref().map(|a| (a.rsign_pk, a.salt))
+    }
+
+    /// Every epoch root this fake holds, `(e, R_e)` ascending: what the
+    /// simulator's oracle collects (engine.md §31.7). Draws nothing.
+    // Used by the simulator (stage `engine`, task D).
+    #[allow(dead_code)]
+    pub(crate) fn roots(&self) -> Vec<(u32, [u8; 32])> {
+        self.roots.iter().map(|(e, r)| (*e, *r)).collect()
+    }
+
+    /// The simulator's oracle sealer (engine.md §31.7): a fake of this board
+    /// with the genesis anchor of `self` (which must have created it), its own
+    /// keys drawn from `seed` as `join` draws them (so it authors nothing in the
+    /// log and is no member), every root of `self` and every root of `roots`,
+    /// and `self`'s supported rules. `None` when `self` holds no anchor.
+    // Used by the simulator (stage `engine`, task D).
+    #[allow(dead_code)]
+    pub(crate) fn observer(&self, seed: u64, roots: &[(u32, [u8; 32])]) -> Option<FakeSealer> {
+        let a = self.anchor.as_ref()?;
+        let mut rng = SplitMix64 { state: seed };
+        let (sk, dev) = device_keys(&mut rng);
+        let mut fake = Self::blank(rng, sk, dev, self.board_id);
+        fake.anchor = Some(Anchor { rsign_pk: a.rsign_pk, salt: a.salt, root: a.root });
+        fake.roots = self.roots.clone();
+        for (e, r) in roots {
+            fake.roots.insert(*e, *r);
+        }
+        fake.supported_rules = self.supported_rules.clone();
+        Some(fake)
+    }
+
     /// The fake a new process builds after a restart (engine.md §31.4): keys,
     /// board id, anchor, roots and pending roots from `identity` (the bytes of
     /// `export_identity`), the control history `history` (from `history()`),
