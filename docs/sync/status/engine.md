@@ -11,27 +11,24 @@ in the order it happened; this file is the current truth and is rewritten, not a
 - Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the first spec
   change). Open, draft: TT-SAL/taskdeck#30 (everything since); the branch
   `claude/cool-franklin-c6e6um` is pushed.
-- Tests on the branch: 179 unit tests, `regressions` (10 files), `relay_conformance` (16),
-  clippy, the wasm check pass; every clause is cited (234 of 234); `unimplemented!()`: 0. Task D4
-  rebuilt the simulator's own tests on hand-built logs (`src/sim/script.rs`), so none depends on
-  what the engine does at a seed. The `simulator` target (50 `gate` seeds) fails, so CI of
-  TT-SAL/taskdeck#30 is red.
-- The simulator after the fixes (the lead's runs, every violation of every failing seed read,
-  not only the five the gate prints): `gate` at base 100, 50 seeds: 26 fail, 25 only with "lost to
-  a rolled-back relay state" (question 2), and 134 (a simulator fault, below). `gate` at base
-  1000, 100 seeds: 59 fail: 56 only for question 2; 1018 a pairing's `DeviceAdded` refused after
-  `register` (question 3); 1021 and 1098 a crash halt on a Skip's target (question 4). **Nothing
-  else fails: what is left is the owner's questions and one simulator fault.** Every named
-  configuration except `fork` (17 without rollback and fork, and `rollback`) passes 60 of 60 seeds
-  at base 1000 (1,080 runs, the lead's run on 84948a8).
-- **For the next simulator task (an agent's, together with what the owner decides):** `gate` seed
-  134, invariant 4 "dev 4: applied seq 198 after a relay head 196 below its log head 197 without
-  an alarm", reported at trace line 10817, which is before dev 4's first line (11094): the line
-  is wrong, and the page is a duplicate (fault `duplication` at 11107) of the answer to the read
-  at 11106, delivered again at 11143 after dev 4's log head had reached 197. The engine ignores an
-  answer to a request already answered (ENG-EFFECT-002), so no alarm is owed: the check must not
-  count such a page. Also open from D4: no test fails when a Skip replay overwrites the oracle's
-  first state at a `B`.
+- Tests on the branch: 180 unit tests, `relay_conformance` (16), clippy, the wasm check pass;
+  every clause is cited (234 of 234); `unimplemented!()`: 0. **`regressions` fails on one file,
+  `1099.json`**: the lead added it for the lost `SeedTail` (it passed then); a later engine fix
+  changed what that seed does, and it now ends with "lost to a rolled-back relay state" only
+  (question 2). The lead does not remove or change the file; it turns green with the answer to
+  question 2, or the owner says what to do with it (question 6). The other nine files pass. The
+  `simulator` target (50 `gate` seeds) fails, so CI of TT-SAL/taskdeck#30 is red.
+- The simulator (the lead's runs, every violation of every failing seed read): `gate` at base
+  2000, 300 seeds, on the current engine: 178 fail; 168 only with "lost to a rolled-back relay
+  state" (question 2); 2019, 2082, 2167 the second of two Skips of one target and 2075 a pairing's
+  `DeviceAdded` refused after `register` (question 3); 2159, 2207, 2236 a crash halt on a Skip's
+  target (question 4); 2085, 2120, 2172 simulator faults (task D5). The samples at base 100 and
+  1000 (26 of 50 and 59 of 100 failing, the same causes) are from before the last engine fix.
+  Every named configuration except `fork` passed 60 of 60 seeds at base 1000 on 84948a8.
+- Task D5 (agents, running): three places where the check blames the engine for what a clause
+  asks of it (a duplicated answer page counted as a relay head below the log head; a `Drop` in a
+  write a crash never applied; a `snap` record dropped unsent after the epoch moved), and a way to
+  print every violation of a failing seed.
 - Fixed in the engine on 2026-11-25 after D3 (each with a test that failed before; journal):
   a `SeedTail` nobody answered is sent again (regression file 1099); a move reads back after a
   `Start` what its durable records say (door, generation, Fence seq) and goes on from its stage;
@@ -42,7 +39,11 @@ in the order it happened; this file is the current truth and is rewritten, not a
   in stage 6; reports from before a Skip are not compared by a device that already knows the
   Skip; a second Skip of a target whose Skip is still in this device's outbox is refused; a pairing's
   sealed `Register` record found after a `Start` ends with a report however it ends (D4's
-  finding, `gate` 116: refused after the restart, it was dropped without `PairFailed`).
+  finding, `gate` 116: refused after the restart, it was dropped without `PairFailed`); what a
+  page's commit records (the alarm of a relay-made frame) is written before the board applies
+  the page (`gate` 2188: a crash between a checkpoint above the frame and the alarm's write lost
+  the alarm, a later move then carried the frame in its tail, the new relay refused it, and the
+  board was left fenced with every edit queued).
 - Next: task D4; the owner's answers; then the spec change (one pull request: the patch plus the
   additions listed under "Spec changes to make" plus what the owner decides), the simulator's
   checks adapted by an agent, task E (scenario and trace vectors), `bash scripts/gate.sh engine`,
@@ -218,12 +219,12 @@ only commit in a pull request of its own; then work goes on.
 ## Spec changes to make
 
 - **The second spec change is written** and waits as `engine/spec-change-2.patch` (a `git diff` on
-  day-planner e38d44e; also the local branch `spec-change-2` in `/home/user/wt/spec`, 52fa10c;
+  day-planner e38d44e; also the local branch `spec-change-2` in `/home/user/wt/spec`, 3d6a9c3;
   `spec-lint` ok, 965 clauses). Apply it with `git apply`. It holds:
   - the fields of `FaultSet`, `OpSet`, `SimStats`; ENG-SESS-011 (a `Hello` per 600,000 ms on a push
     session); §11.9 fenced row; §19.2 item 3; §28.4 after a `Start` (`engine/pair_interrupted`,
     ENG-OPS-012, and ENG-OPS-013: a sealed `Register` record found after a `Start` ends with a
-    report); D11;
+    report); D11; D12 (a page's alarms are written before a checkpoint above it);
   - §28.3: `UserAction::OldRelayGone`, the seed check before the fence, `first_seq` above a skipped
     frame, `last_seq = f`, `engine/move_tail`, ENG-MOVE-010, ENG-MOVE-011, ENG-MOVE-003 reworded;
     a move across a `Start` and a lost answer (what is read back, `OpRecord.mark`, a `seed-tail`
@@ -267,6 +268,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_0eb7fcfb-f49 | D3 what still fails under `gate`, seed by seed (diagnosis; simulator faults fixed, engine faults reported) | `engine/briefs/d3-gate-seeds.md` | done, applied to the branch as a patch (the lead ran its gate) | `src/sim/{check,world}.rs`, `src/sim/world/{rt,load,end}.rs`, `api-simulator.md`; gate base 1000: 61 of 100 fail, base 100: 27 of 50 | 827,210 |
 | wf_1623f41a-09b | D4 simulator tests, first attempt | `engine/briefs/d4-sim-tests.md` | lost: the container restarted nine minutes into the writer (54 turns); its 16 uncommitted lines were discarded | nothing kept | not reported (about 55,000 output tokens) |
 | wf_a03961da-e96 | D4 (second attempt) simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | done, applied to the branch as a patch from `wt/d4` 32a1637 (the lead ran its gate) | `src/sim/script.rs` (hand-built logs for the check), `src/sim/world.rs`, `api-simulator.md`; reported: gate 116 (a pairing refused after a restart dropped without `PairFailed`), 1021 (the crash-halt question again) | 471,311 |
+| (id in the journal) | D5 three check faults; every violation printed | `engine/briefs/d5-check-faults.md` | running since 2026-11-25 in `/home/user/wt/d5` (branch `wt/d5`) | | |
 
 ## Open threads
 
@@ -314,7 +316,11 @@ harness under the session directory; its args are `{id, brief, dir, target, path
    the durable write and the notification, the engine emits the code and the report again at the
    next `Start`, or the code is lost and nobody can follow the move. Proposal: "exactly one per
    `Start`". The engine does this now; say so if it should not.
-6. For information, no decision needed now: a board whose log holds a frame the relay made up can
+6. **Regression file `1099.json`.** It records a run the engine fixed (a `SeedTail` nobody
+   answered), passed when added, and fails since a later engine fix moved the seed into a fork
+   loss (question 2). Every regression file made from a `gate` seed can turn this way until
+   question 2 is decided. The lead leaves it failing. Say if it should be handled otherwise.
+7. For information, no decision needed now: a board whose log holds a frame the relay made up can
    move only once a snapshot lies above that frame (the engine now makes one due at the next
    aligned seq), and a frame injected in the seconds between the move's check and its Fence still
    strands the board read-only on the old relay. Curing either fully needs `relay.md` §12.7/§12.9

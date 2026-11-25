@@ -549,6 +549,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.pipe.pages_since_rebase += 1;
         }
         self.after_commit();
+        // What the commit recorded (the alarm of a `Skip`-class frame, the membership's effects)
+        // is written before the board applies these entries: a checkpoint above them never
+        // becomes durable without it, and below a checkpoint nothing is classified again.
+        self.flush_meta();
     }
 
     /// What one classified entry does when its membership is committed: alarms of
