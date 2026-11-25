@@ -238,7 +238,11 @@ only commit in a pull request of its own; then work goes on.
 - **In progress (2026-11-25):** TT-SAL/taskdeck#30 is closed; the remote branch holds the
   behaviour change alone, as TT-SAL/taskdeck#31; the engine's work is parked on the local branch
   `park/engine-2` (worktree `/home/user/wt/engine`; its last pushed head d4901dc is also the last
-  head of TT-SAL/taskdeck#30). Next: #31 merged, then the gate change, then rebase and push.
+  head of TT-SAL/taskdeck#30). TT-SAL/taskdeck#31 (the behaviour change) merged on 2026-11-25 as
+  day-planner 5b999eb, CI green on every job that ran. TT-SAL/taskdeck#32 (the gate change,
+  d0cdc98 on day-planner 5b999eb) is open. Next: #32 merged, then
+  `git rebase --onto origin/day-planner e38d44e park/engine-2`, the branch set to it and pushed
+  (lease on d0cdc98), the engine's pull request opened again.
 - The stage has one branch, so: close TT-SAL/taskdeck#30 (its content stays on the engine branch),
   park the engine's work on a local branch, make the branch day-planner plus the behaviour
   commit, pull request, CI, merge; then day-planner plus the gate commit, pull request, CI, merge;
