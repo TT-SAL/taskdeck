@@ -198,6 +198,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.fetch_skip_frames();
         }
         let head = self.sess.relay_head.map_or(0, |h| h.seq);
+        // A relay fenced at `f` is read no further (§12.2, ENG-RECV-007).
+        let head = self.fenced_at().map_or(head, |f| head.min(f));
         let idle = self.pipe.flight.is_none() && self.pipe.stash.is_none();
         if head > self.l {
             if self.sess.read.is_none() && self.can_take_page() && !self.sess.wait_welcome && !self.follow_holds_reads() {
@@ -590,6 +592,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         } else {
             r.home_gen == self.vk.home_gen
         }
+    }
+
+    /// §12.2 (ENG-RECV-007): the seq at which the relay the session is on is fenced, when it
+    /// sequenced the accepted `Fence` that moves the board to another relay (its generation is
+    /// below that `Fence`'s) and the session does not follow an address.
+    pub(crate) fn fenced_at(&self) -> Option<u64> {
+        let away = self.vk.home_seq > 0 && self.vk.home_gen > self.meta.relay.home_gen;
+        (away && !self.following()).then_some(self.vk.home_seq)
     }
 
     /// A fenced relay whose log holds no accepted `Fence` that leads elsewhere (§11.9).

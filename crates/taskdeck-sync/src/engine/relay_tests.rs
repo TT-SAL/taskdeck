@@ -1617,12 +1617,12 @@ fn a_move_starts_its_seed_above_a_frame_the_relay_made_up() {
     }
 }
 
-// spec: ENG-MOVE-010
+// spec: ENG-RECV-007 ENG-MOVE-010
 #[test]
-fn a_made_up_frame_above_the_moves_fence_does_not_end_the_move() {
-    // `gate` 2154: the old relay sequenced the move's Fence at f and showed a frame above it,
-    // which the device classified Skip; the move ended with `engine/move_tail` though that frame
-    // is never carried, and the board stayed fenced with no new home.
+fn a_frame_a_fenced_relay_shows_above_its_fence_is_taken_by_no_device() {
+    // `gate` 2154: the old relay sequenced the move's Fence at f and showed a frame it made up
+    // above it. The moving device classified it Skip and ended the move with `engine/move_tail`;
+    // kept in a log, it also made the new relay look behind, and its restore tail was refused.
     const NEW: &str = "relay2.test";
     let old = super::kit_tests::relay().host;
     let (mut net, mut a) = board(461);
@@ -1641,21 +1641,40 @@ fn a_made_up_frame_above_the_moves_fence_does_not_end_the_move() {
     let mut frame = net.relays[&old].log()[&f].frame.clone();
     *frame.last_mut().expect("a byte") ^= 1;
     let now = a.wall;
-    net.relays.get_mut(&old).expect("the relay").inject_frame(now, frame).expect("stored");
-    // A reads up to that frame, classifies it Skip, and seeds the new relay up to its Fence.
+    net.relays.get_mut(&old).expect("the relay").inject_frame(now, frame.clone()).expect("stored");
+    assert_eq!(net.relays[&old].head().expect("a head").seq, f + 1);
+    // A reads the old relay up to its Fence and no further, and seeds the new relay up to it.
     serve_until_admin(&mut net, &mut a, "admin:seed");
-    assert!(has_alarm(&a, crate::AlarmKind::SkippedFrame));
-    assert!(a.e.status().head.seq > f);
-    let (first_seq, last_seq) = match a.fx.front() {
-        Some(Effect::Admin { op: AdminRequest::Seed { first_seq, last_seq, .. }, .. }) => (*first_seq, *last_seq),
+    assert_eq!(a.e.status().head.seq, f);
+    let last_seq = match a.fx.front() {
+        Some(Effect::Admin { op: AdminRequest::Seed { last_seq, .. }, .. }) => *last_seq,
         _ => panic!("the seed"),
     };
     assert_eq!(last_seq, f, "the tail ends at the Fence");
     net.settle(&mut [&mut a, &mut b]);
-    assert_ne!(op_result(&a, 9), Some(Err("engine/move_tail")));
-    for seq in first_seq..=last_seq {
-        assert_eq!(net.relays[NEW].log()[&seq].frame, net.relays[&old].log()[&seq].frame, "{seq}");
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    // B read the Fence on the old relay and took nothing above it either.
+    assert_eq!(b.e.status().head.seq, f);
+    assert!(!has_alarm(&b, crate::AlarmKind::SkippedFrame));
+    for n in [&a, &b] {
+        assert!(n.store.log.get(&(f + 1)).is_none_or(|r| r.frame != frame), "the made-up frame is in no log");
     }
+    // B follows with the move code; both go on at the new relay, with no stop.
+    let code = notes_of(&a, |x| match x {
+        crate::Notification::MoveCode { text } => Some(text.clone()),
+        _ => None,
+    })
+    .pop()
+    .expect("the move code");
+    assert_eq!(type_code(&mut b, &code), Ok(()));
+    a.set(30, 7, 70);
+    net.settle(&mut [&mut a, &mut b]);
+    for n in [&a, &b] {
+        assert!(n.e.status().stops.is_empty(), "{:?}", n.e.status().stops);
+        assert!(n.store.log.get(&(f + 1)).is_some_and(|r| r.frame != frame));
+    }
+    assert_eq!(b.e.confirmed().0.keys[&7].0, 70);
+    assert_eq!(a.board_bytes(), b.board_bytes());
 }
 
 /// Serves a node's effects one by one until the next one is the admin call `name`, which stays unanswered.

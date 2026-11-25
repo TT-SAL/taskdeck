@@ -104,7 +104,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         // Step 5: contiguity.
         let mut entries: Vec<(u64, Vec<u8>)> = Vec::with_capacity(page.entries.len());
         let mut next = self.l + 1;
+        // From a relay fenced at `f`, nothing above `f` is taken, without evidence (ENG-RECV-007).
+        let fenced = self.fenced_at();
         for e in page.entries {
+            if fenced.is_some_and(|f| e.seq > f) {
+                break;
+            }
             if e.seq <= self.l {
                 // A repeated push: the frame must be the one the log holds.
                 if let (Some(prev), Some(own)) = (self.chain_at(e.seq.wrapping_sub(1)), self.chain_at(e.seq)) {
@@ -413,6 +418,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             dry.push((seq, c));
             m = entry.m.clone();
             out.push(entry);
+            if is_ctl && !stash.from_log && view.home_seq == seq && view.home_gen > self.meta.relay.home_gen && !self.following() {
+                // §12.3 step 5 (ENG-RECV-007): this `Fence` fences the relay the page came from;
+                // what that relay shows above it is not taken, and the cut is the next entry.
+                break;
+            }
             if halt.is_some() {
                 // §16.3: the dry run ends after the halting entry; nothing after it is evidence.
                 break;
