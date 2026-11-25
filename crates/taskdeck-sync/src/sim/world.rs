@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 use sha2::{Digest, Sha256};
 
 use super::check::{self, BranchLog, Facts};
+use super::counted::CountedToy;
 use super::relay::{Cred, LogRow, ModelRelay, Out, SockMsg, SocketId};
 use super::store::Store;
 use super::trace::{Trace, V};
@@ -40,7 +41,7 @@ use crate::{
     StopAction, StopKind, UserAction,
 };
 
-pub(crate) type Eng = Engine<ToyMachine, FakeSealer>;
+pub(crate) type Eng = Engine<CountedToy, FakeSealer>;
 
 /// The wall clock at virtual time 0 (a date in 2023; the beat interval needs a clock far from 0).
 pub(crate) const WALL0: i64 = 1_700_000_000_000;
@@ -52,8 +53,8 @@ const TIMEOUT: u64 = 20_000;
 /// The base one-way latency of a message, before the drawn delay.
 const LATENCY: u64 = 5;
 const KEY_HELLO: u64 = 1 << 63;
-/// The runtime's timer granularity: ticks at least this far apart.
-const TICK_MIN: u64 = 1_000;
+/// §31.7 invariant 6: the end of the run in which only beats and duty entries are appended.
+const SETTLE_QUIET: u64 = 1_800_000;
 const KEY_CONNECT: u64 = 1 << 62;
 
 // ---------- scheduled events
@@ -228,7 +229,6 @@ struct Proc {
     outstanding: BTreeMap<u64, (u64, &'static str)>,
     exiting: bool,
     hello_no: u64,
-    last_tick: u64,
 }
 
 /// One device identity (a machine is paired again as a new identity).
@@ -256,7 +256,17 @@ pub(crate) struct Ident {
     /// Alarms raised: (id, kind, seq, time).
     pub(crate) alarms: Vec<(u64, AlarmKind, Option<u64>, u64)>,
     alarm_lines: Vec<u64>,
-    rejoin_confirmed: bool,
+    /// A confirmed rejoin in progress (§19.7): the checkpoints written since
+    /// `ConfirmRejoin` (seq → chain), and whether its base deletion was used.
+    /// It explains exactly the rejoin's own `TruncateLogBelow(S + 1, Some(C_S))`
+    /// and one `DeleteBases`, then ends.
+    rejoin: Option<(BTreeMap<u64, Hash32>, bool)>,
+    /// Calls delivered to this identity's engine (the pairing ruling counts them).
+    calls: u64,
+    /// Register records dropped and not yet explained: (dev, call, line).
+    pair_drops: Vec<(Dev, u64, u64)>,
+    /// `PairFailed` notifications: (dev, call).
+    pair_failed: Vec<(Dev, u64)>,
     /// The engine loaded no replica at a `Start` (it refused it).
     unloaded: bool,
     asked: BTreeSet<String>,
@@ -332,6 +342,9 @@ pub(crate) struct World<'a> {
     /// `Enqueued` with an entry id: (entry id, ident, time, line).
     pub(crate) enqueued: Vec<([u8; 16], usize, u64, u64)>,
     pub(crate) cancelled: BTreeSet<[u8; 16]>,
+    /// A test's change to the end-of-run facts of each identity, before the checks.
+    #[cfg(test)]
+    pub(crate) tamper_facts: Option<fn(&mut [check::IdentFacts])>,
     /// The first time an entry id was put in an outbox.
     pub(crate) first_put: BTreeMap<[u8; 16], u64>,
     /// Deletions to explain at the end (invariant 5): (ident, what, B then, line).
@@ -340,7 +353,8 @@ pub(crate) struct World<'a> {
     /// The observer template: the creator's genesis fake with the anchor.
     template: Option<FakeSealer>,
     pub(crate) roots: BTreeMap<u32, [u8; 32]>,
-    pub(crate) injected_seqs: Vec<(u64, u64)>,
+    /// Injected frames: (seq, chain there, line).
+    pub(crate) injected_seqs: Vec<(u64, Hash32, u64)>,
     move_code: Option<String>,
     moved: bool,
     seed: u64,
@@ -353,6 +367,14 @@ pub(crate) struct World<'a> {
     /// The time of the last rollback or fork end: contradictions after it expect an alarm.
     contra_since: u64,
     pending_acks: PendingAcks,
+    /// The `Enqueue` of a `Forget` being delivered: (identity, ticket, item id).
+    cur_forget: Option<(usize, u64, u64)>,
+    /// The device each pairing ticket registers (kept after the ticket ends).
+    pair_devs: BTreeMap<u64, Dev>,
+    /// The trace line of the current fork's `relay_fork` fault.
+    fork_line: u64,
+    /// The identity each completed pairing ticket started (`PairRegistered`).
+    paired: BTreeMap<u64, usize>,
 }
 
 /// A deletion a device emitted, to be explained (§31.7 invariant 5).
@@ -567,6 +589,8 @@ impl<'a> World<'a> {
             acked: Vec::new(),
             enqueued: Vec::new(),
             cancelled: BTreeSet::new(),
+            #[cfg(test)]
+            tamper_facts: None,
             first_put: BTreeMap::new(),
             deletions: Vec::new(),
             violations: Vec::new(),
@@ -583,6 +607,10 @@ impl<'a> World<'a> {
             faulty: Vec::new(),
             contra_since: 0,
             pending_acks: BTreeMap::new(),
+            cur_forget: None,
+            pair_devs: BTreeMap::new(),
+            fork_line: 0,
+            paired: BTreeMap::new(),
         };
         for i in 0..n {
             w.machines.push(Machine { ident: usize::MAX, awake: true, phone: i + 1 == n && n > 2, repairing: false });
@@ -638,15 +666,16 @@ impl<'a> World<'a> {
     }
 
     fn relay_line(&mut self, sel: Sel, op: &str) {
-        let r = match sel {
-            Sel::Main(r) => r as i128,
-            Sel::Fork => 2,
+        // §31.9: `r` is 0 or 1; a fork's copy is relay 0's, its ops are named `fork_…`.
+        let (r, op) = match sel {
+            Sel::Main(r) => (r as i128, op.to_owned()),
+            Sel::Fork => (0, format!("fork_{op}")),
         };
         let head = self.relay(sel).head().unwrap_or_default();
         self.trace.line(
             self.t,
             "relay",
-            &[("r", V::I(r)), ("op", V::S(op)), ("head", V::I(i128::from(head.seq))), ("chain", V::Hex(&head.chain))],
+            &[("r", V::I(r)), ("op", V::S(&op)), ("head", V::I(i128::from(head.seq))), ("chain", V::Hex(&head.chain))],
         );
         if sel == Sel::Main(self.home) {
             self.sync_archive();
@@ -688,7 +717,8 @@ impl<'a> World<'a> {
         let reply = relay.create(now, &rsign_pk, &salt, &dev, &sign_pk, &f1);
         let tgen = reply.token_gen.unwrap_or(1);
         if let Err(e) = &reply.result {
-            self.violations.push(Violation { invariant: 0, line: 0, detail: format!("relay create refused: {}", e.code) });
+            // No board, so no device settles (§31.7 invariant 6); reported as such so the regression file parses (§31.8).
+            self.violations.push(Violation { invariant: 6, line: 0, detail: format!("relay create refused: {}", e.code) });
         }
         let door = relay.door();
         self.relays.push(relay);
@@ -765,7 +795,10 @@ impl<'a> World<'a> {
             last_b: (0, [0; 32]),
             alarms: Vec::new(),
             alarm_lines: Vec::new(),
-            rejoin_confirmed: false,
+            rejoin: None,
+            calls: 0,
+            pair_drops: Vec::new(),
+            pair_failed: Vec::new(),
             unloaded: false,
             asked: BTreeSet::new(),
             resubmit: None,
@@ -892,7 +925,7 @@ mod tests {
     //! exactly the invariant that fact belongs to.
     use super::*;
 
-    fn tampered(f: fn(&mut World<'_>)) -> Vec<u8> {
+    fn tampered(f: impl FnOnce(&mut World<'_>)) -> Vec<u8> {
         let cfg = SimConfig::named("quiet").expect("quiet");
         let mut w = World::new(3, &cfg, false);
         w.setup();
@@ -949,7 +982,13 @@ mod tests {
             vec![4]
         );
         assert_eq!(tampered(|w| w.idents[0].expect_alarm = Some((5, "a test".to_owned(), 3))), vec![4]);
-        assert_eq!(tampered(|w| w.injected_seqs.push((10, 5))), vec![4]);
+        assert_eq!(
+            tampered(|w| {
+                let c = w.archive[9].chain;
+                w.injected_seqs.push((10, c, 5));
+            }),
+            vec![4]
+        );
     }
 
     // Invariant 5: a truncation no rule explains.
@@ -957,6 +996,229 @@ mod tests {
     fn an_unexplained_truncation_breaks_no_deletion() {
         assert_eq!(tampered(|w| w.deletions.push((0, Deletion::Truncate(40, false), 100, 9))), vec![5]);
         assert_eq!(tampered(|w| w.deletions.push((0, Deletion::Roots(vec![1]), 100, 9))), vec![5]);
+    }
+
+    /// Runs seed `seed` of configuration `name`, applies `f`, returns the broken invariants.
+    fn tampered_in(name: &str, seed: u64, f: impl FnOnce(&mut World<'_>)) -> Vec<u8> {
+        let cfg = SimConfig::named(name).expect("named");
+        let mut w = World::new(seed, &cfg, false);
+        w.setup();
+        while let Some(s) = w.q.pop() {
+            w.t = s.t;
+            if matches!(s.ev, Ev::End) {
+                break;
+            }
+            w.step(s.ev);
+        }
+        f(&mut w);
+        let (r, _) = w.finish_run();
+        let mut invs: Vec<u8> = r.violations.iter().map(|v| v.invariant).collect();
+        invs.sort_unstable();
+        invs.dedup();
+        invs
+    }
+
+    // Invariant 5: an excuse matches the one deletion it explains. The drop of
+    // a pending root no device ever sealed is unexplained, also in a run with
+    // accepted epoch rotations (`revoke`).
+    #[test]
+    fn a_pending_root_drop_needs_its_own_rotation() {
+        let bogus = |w: &mut World<'_>| {
+            let b = w.archive.last().map_or(0, |r| r.seq);
+            w.deletions.push((0, Deletion::Pending(vec![[0xEE; 16]]), b, 9));
+        };
+        assert_eq!(tampered(bogus), vec![5]);
+        let mut checked = 0;
+        for seed in 100..106u64 {
+            if tampered_in("revoke", seed, |_| {}).is_empty() {
+                assert_eq!(tampered_in("revoke", seed, bogus), vec![5], "revoke seed {seed}");
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
+    }
+
+    /// An outbox record of identity `id` the quiet run put, to build test records from.
+    fn some_record(w: &World<'_>, id: usize) -> OutboxRecord {
+        w.idents[id]
+            .store
+            .outbox
+            .iter()
+            .find_map(|o| if let OutboxOp::Put(r) = o { Some(r.clone()) } else { None })
+            .expect("a record")
+    }
+
+    // Invariant 2 has no exemption (§31.7; the D2 brief): an acknowledged entry
+    // still in the outbox of a retired, halted or revoked device breaks it.
+    #[test]
+    fn a_lost_acknowledgement_is_never_excused() {
+        assert_eq!(
+            tampered(|w| {
+                let mut r = some_record(w, 1);
+                r.entry_id = [9; 16];
+                w.idents[1].store.outbox.push(OutboxOp::Put(r));
+                w.idents[1].retired = true;
+                w.acked.push(([9; 16], 1, 1, true));
+            }),
+            vec![2]
+        );
+    }
+
+    // Ruling 1 of the D2 brief: an acknowledged entry that only a rolled-back
+    // relay state held is reported as such, with the fault's line.
+    #[test]
+    fn an_entry_lost_to_a_rollback_is_named() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = World::new(3, &cfg, false);
+        w.setup();
+        while let Some(s) = w.q.pop() {
+            w.t = s.t;
+            if matches!(s.ev, Ev::End) {
+                break;
+            }
+            w.step(s.ev);
+        }
+        let roots: Vec<(u32, [u8; 32])> = w.roots.iter().map(|(e, r)| (*e, *r)).collect();
+        let led = check::ledger(&w.archive, w.template.as_ref(), &roots);
+        let eid = led.iter().rev().find(|l| l.accept).and_then(|l| l.entry_id).expect("an entry");
+        let seq = led.iter().rev().find(|l| l.entry_id == Some(eid)).map(|l| l.seq).expect("its seq");
+        w.branches.push(BranchLog { rows: w.archive.clone(), why: check::WHY_ROLLBACK, line: 77 });
+        w.archive.truncate(seq as usize - 1);
+        w.acked.push((eid, 0, 1, true));
+        let (r, _) = w.finish_run();
+        assert!(
+            r.violations.iter().any(|v| v.invariant == 2 && v.detail.contains("lost to a rolled-back relay state") && v.detail.contains("line 77")),
+            "{:?}",
+            r.violations.iter().map(|v| &v.detail).collect::<Vec<_>>()
+        );
+    }
+
+    // Invariant 3 (ruling 5): only the record dropped as a cancelled hold is accepted.
+    #[test]
+    fn an_edit_marked_cancelled_without_its_drop_is_not_excused() {
+        assert_eq!(tampered(|w| w.enqueued.push(([7; 16], 0, 1, 1))), vec![3]);
+        assert_eq!(
+            tampered(|w| {
+                w.enqueued.push(([7; 16], 0, 1, 1));
+                w.cancelled.insert([7; 16]);
+            }),
+            Vec::<u8>::new()
+        );
+    }
+
+    // Invariant 5: a confirmed rejoin explains its own truncation (§19.7 step 4:
+    // `TruncateLogBelow(S + 1, Some(C_S))` after a checkpoint at `S`) and one
+    // base deletion, once; nothing after it.
+    #[test]
+    fn a_rejoin_explains_only_its_own_deletions() {
+        let rejoin = |w: &mut World<'_>, twice: bool| {
+            let mut c = w.idents[1].store.checkpoint.clone().expect("a checkpoint");
+            c.board_seq = 39;
+            let chain = c.board_chain;
+            w.idents[1].rejoin = Some((BTreeMap::new(), false));
+            w.note_persist(1, &[PersistOp::WriteCheckpoint(c), PersistOp::DeleteBases(vec![1])], 9);
+            w.note_persist(1, &[PersistOp::TruncateLogBelow(40, Some(chain))], 9);
+            if twice {
+                w.note_persist(1, &[PersistOp::TruncateLogBelow(40, Some(chain)), PersistOp::DeleteBases(vec![2])], 9);
+            }
+        };
+        assert_eq!(tampered(|w| rejoin(w, false)), Vec::<u8>::new());
+        assert_eq!(tampered(|w| rejoin(w, true)), vec![5]);
+        // Without the confirmation, the same truncation is unexplained.
+        assert_eq!(
+            tampered(|w| {
+                let chain = w.idents[1].store.checkpoint.as_ref().expect("a checkpoint").board_chain;
+                w.note_persist(1, &[PersistOp::TruncateLogBelow(40, Some(chain))], 9);
+            }),
+            vec![5]
+        );
+    }
+
+    /// Puts `r` in identity 1's live outbox and drops it, as the engine would.
+    fn drop_record(w: &mut World<'_>, r: OutboxRecord) {
+        let eid = r.entry_id;
+        w.idents[1].live.insert(eid, r);
+        w.explain_drop(1, &eid, 0, 9);
+    }
+
+    fn unsent(w: &World<'_>, eid: u8) -> OutboxRecord {
+        let mut r = some_record(w, 1);
+        r.entry_id = [eid; 16];
+        (r.frame, r.frame_hash, r.ack, r.seen) = (None, None, None, None);
+        r
+    }
+
+    // Invariant 5 (ruling 2): a pairing's `DeviceAdded` dropped needs a
+    // `PairFailed` for that device in the same or the next call.
+    #[test]
+    fn a_register_drop_needs_its_pair_failed() {
+        let reg = |w: &World<'_>| {
+            let mut r = unsent(w, 0x51);
+            r.via = crate::Via::Register { dev: [0x44; 16], sign_pk: [0; 32] };
+            r
+        };
+        assert_eq!(
+            tampered(|w| {
+                let r = reg(w);
+                drop_record(w, r);
+            }),
+            vec![5]
+        );
+        assert_eq!(
+            tampered(|w| {
+                let r = reg(w);
+                drop_record(w, r);
+                let call = w.idents[1].calls + 1;
+                w.idents[1].pair_failed.push(([0x44; 16], call));
+            }),
+            Vec::<u8>::new()
+        );
+    }
+
+    // Invariant 5: a held record's drop is a cancelled hold only during the
+    // `Enqueue` of the `Forget` of its item (`Coalesce::CancelBoth`, §9.3).
+    #[test]
+    fn a_held_drop_needs_its_forget() {
+        let held = |w: &World<'_>| {
+            let mut r = unsent(w, 0x61);
+            r.hold = true;
+            r.body = Body::Cmd(ToyMachine::new(true).encode(&ToyCommand::Create { id: 5, name: 1 }));
+            r
+        };
+        assert_eq!(
+            tampered(|w| {
+                let r = held(w);
+                drop_record(w, r);
+            }),
+            vec![5]
+        );
+        assert_eq!(
+            tampered(|w| {
+                let r = held(w);
+                w.cur_forget = Some((1, 99, 5));
+                drop_record(w, r);
+                w.cur_forget = None;
+                assert!(w.cancelled.contains(&[0x61; 16]));
+            }),
+            Vec::<u8>::new()
+        );
+    }
+
+    // Invariant 6: in the last 1,800,000 ms only beats and duty entries are appended.
+    #[test]
+    fn a_late_append_of_an_edit_breaks_settling() {
+        let late = |w: &mut World<'_>, duty: bool| {
+            let f = w
+                .archive
+                .iter()
+                .find(|r| w.frames.get(&h(&r.frame)).is_some_and(|x| x.2 == duty))
+                .map(|r| r.frame.clone())
+                .expect("a frame");
+            w.t = w.t_end - 1_000;
+            w.settle_append(1, &[f], 9);
+        };
+        assert_eq!(tampered(|w| late(w, false)), vec![6]);
+        assert_eq!(tampered(|w| late(w, true)), Vec::<u8>::new());
     }
 
     // Invariant 6: a request outstanding too long, a device not caught up.
@@ -974,5 +1236,65 @@ mod tests {
             w.idents[2].proc = None;
         })
         .contains(&6));
+    }
+
+    // Invariant 4 (ruling 6 of the D2 brief): compare at every `B` the oracle
+    // has, also at a `B` between a Skip's target and the Skip. A wrong state
+    // sampled there is reported.
+    #[test]
+    fn a_wrong_state_between_a_skip_and_its_target_breaks_tampering() {
+        let mut checked = 0;
+        for seed in 100..106u64 {
+            let cfg = SimConfig::named("skip").expect("skip");
+            let mut w = World::new(seed, &cfg, false);
+            w.setup();
+            while let Some(s) = w.q.pop() {
+                w.t = s.t;
+                if matches!(s.ev, Ev::End) {
+                    break;
+                }
+                w.step(s.ev);
+            }
+            let roots: Vec<(u32, [u8; 32])> = w.roots.iter().map(|(e, r)| (*e, *r)).collect();
+            let led = check::ledger(&w.archive, w.template.as_ref(), &roots);
+            let between: BTreeSet<u64> =
+                led.iter().flat_map(|l| l.skip_targets.iter().flat_map(move |t| *t..l.seq)).collect();
+            let ref_chain: BTreeMap<u64, Hash32> = w.archive.iter().map(|r| (r.seq, r.chain)).collect();
+            let hit = w.idents.iter().enumerate().find_map(|(i, x)| {
+                x.samples
+                    .iter()
+                    .position(|s| s.0 > x.joined_at && between.contains(&s.0) && ref_chain.get(&s.0) == Some(&s.1))
+                    .map(|k| (i, k))
+            });
+            let Some((i, k)) = hit else { continue };
+            w.idents[i].samples[k].2 = [0xee; 32];
+            let (r, _) = w.finish_run();
+            assert!(r.violations.iter().any(|v| v.invariant == 4 && v.detail.contains("Skip")), "skip seed {seed}");
+            checked += 1;
+        }
+        assert!(checked > 0);
+    }
+
+    // Invariant 2, second half: every device whose B is past an acknowledged
+    // entry's seq has applied it exactly once (`counted` keeps what each
+    // device's confirmed state applied).
+    #[test]
+    fn an_entry_applied_twice_or_never_breaks_acknowledged_entries() {
+        fn twice(x: &mut [check::IdentFacts]) {
+            for f in x {
+                if let Some(&s) = f.applied.last() {
+                    f.applied.push(s);
+                }
+            }
+        }
+        fn never(x: &mut [check::IdentFacts]) {
+            for f in x {
+                if f.applied.len() > 1 {
+                    f.applied.pop();
+                }
+            }
+        }
+        assert_eq!(tampered(|w| w.tamper_facts = Some(twice)), vec![2]);
+        assert_eq!(tampered(|w| w.tamper_facts = Some(never)), vec![2]);
     }
 }
