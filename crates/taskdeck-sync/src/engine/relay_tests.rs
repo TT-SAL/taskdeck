@@ -969,7 +969,7 @@ fn diverged(n: &Node) -> bool {
     n.e.status().stops.iter().any(|s| s.kind == crate::StopKind::Divergence)
 }
 
-// spec: ENG-DIVERGE-001 ENG-DIVERGE-002 ENG-DIVERGE-003
+// spec: ENG-DIVERGE-001 ENG-DIVERGE-002 ENG-DIVERGE-003 ENG-DIVERGE-004
 #[test]
 fn the_minority_stops_and_adopts_with_a_typed_fingerprint() {
     const DAY: u64 = 86_400_000;
@@ -986,6 +986,7 @@ fn the_minority_stops_and_adopts_with_a_typed_fingerprint() {
     };
     grow(&mut net, &mut a, &mut b, 60);
     net.settle(&mut [&mut a, &mut b, &mut c]);
+    let old_membership = a.e.membership_bytes();
     // C's replica goes wrong (a build that computes differently): one value is off. C is away
     // while the other two pass seq 64, write its snapshot and exchange their beats.
     if let Some(state) = c.e.state.as_mut() {
@@ -1042,6 +1043,48 @@ fn the_minority_stops_and_adopts_with_a_typed_fingerprint() {
     assert!(matches!(op_result(&c, 7), Some(Err(_))));
     assert_eq!(net.calls.len(), calls);
     assert!(c.fx.iter().all(|f| !matches!(f, Effect::Blob { .. })));
+    // The other healthy device announces a snapshot whose membership bytes are not the board's
+    // membership at its seq (a faulty build): an adoption from it is refused, and C stays stopped.
+    {
+        use crate::Sealer;
+        let host = super::kit_tests::relay().host;
+        let y: &mut Node = if writer == a.dev() { &mut b } else { &mut a };
+        let mut material = super::rkit_tests::material_of(y);
+        let sm = crate::toy::ToyMachine::new(false);
+        // It claims seq 64 (the relay takes a snapshot only at an aligned seq).
+        material.seq = 64;
+        material.chain = y.e.chain_at(64).expect("the chain at 64");
+        material.membership = old_membership.clone();
+        material.state_hash = crate::state_hash(1, &crate::StateMachine::board_hash(&sm, y.e.confirmed().0), &material.membership);
+        let mk = y.e.mk.clone().expect("a membership");
+        let blob = y.e.sealer.seal_snapshot(&mk, &material).expect("sealed");
+        let info = crate::SnapInfo {
+            seq: material.seq,
+            hash: material.state_hash,
+            hash_version: 1,
+            blob: blob.id,
+            sha256: blob.sha256,
+            size: blob.bytes.len() as u64,
+            parts: blob.parts,
+            inflated: blob.inflated,
+            epoch: blob.epoch,
+        };
+        let cred = net.cred(&host, &y.dev());
+        let at = y.wall;
+        let up = net.relay().blob(at, &cred, &BlobRequest::Upload { purpose: 1, seq: material.seq, blob }).result;
+        assert!(up.is_ok(), "{up:?}");
+        y.e.enqueue_own(Kind::Snap, Body::Snap(info), Via::Append, None).expect("an entry id");
+        let out = std::mem::take(&mut y.e.out);
+        y.absorb(out);
+        y.feed(Event::Tick);
+        let (yd, yfp) = (y.dev(), c.e.status().devices.iter().find(|d| d.dev == y.dev()).expect("its row").key_fp.clone());
+        net.settle(&mut [&mut a, &mut b, &mut c]);
+        c.feed(Event::Op { ticket: 9, op: Operation::Adopt { dev: yd, typed_fp: yfp } });
+        net.settle(&mut [&mut a, &mut b, &mut c]);
+        assert!(matches!(op_result(&c, 9), Some(Err(_))), "{:?}", op_result(&c, 9));
+        assert!(diverged(&c));
+        assert_ne!(c.board_bytes(), a.board_bytes());
+    }
     c.feed(Event::Op { ticket: 8, op: Operation::Adopt { dev: writer, typed_fp: fp } });
     net.settle(&mut [&mut a, &mut b, &mut c]);
     assert_eq!(op_result(&c, 8), Some(Ok(())));
@@ -1236,4 +1279,58 @@ fn a_refused_request_is_not_repeated_before_the_next_welcome() {
     net.settle(&mut [&mut a, &mut b]);
     assert_eq!(op_result(&a, 9), Some(Ok(())));
     assert_eq!(status_of(&b, &c), DeviceStatus::Revoked);
+}
+
+// spec: ENG-BOOT-005
+#[test]
+fn a_skip_it_cannot_replay_makes_a_device_wait_for_a_snapshot() {
+    let (mut net, mut a) = board(421);
+    let mut b = pair(&mut net, &mut a, 422, "Laptop", 1);
+    b.set(1, 1, 5);
+    net.settle(&mut [&mut a, &mut b]);
+    let target = net.log_len();
+    // C bootstraps after the target: it holds no state from before it.
+    let mut c = pair(&mut net, &mut a, 423, "Phone", 2);
+    assert_eq!(c.e.confirmed().0.keys[&1].0, 5);
+    a.feed(Event::Op { ticket: 3, op: Operation::Skip { seq: target } });
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(op_result(&a, 3), Some(Ok(())));
+    // A and B replayed. C cannot: it does not apply the Skip, stops its board before it and keeps reading.
+    assert!(!a.e.confirmed().0.keys.contains_key(&1) && !b.e.confirmed().0.keys.contains_key(&1));
+    let st = c.e.status();
+    let skip_seq = st
+        .stops
+        .iter()
+        .find_map(|s| match s.kind {
+            crate::StopKind::Rebootstrap { after } => Some(after),
+            _ => None,
+        })
+        .expect("the stop rebootstrap");
+    assert!(skip_seq > target && skip_seq <= net.log_len());
+    assert_eq!(st.board_seq, skip_seq - 1);
+    assert_eq!(st.head.seq, net.log_len());
+    assert_eq!(c.e.confirmed().0.keys[&1].0, 5);
+    // The log passes an aligned seq; one of the others writes its snapshot and the other acknowledges it.
+    let mut k = 0u64;
+    while net.log_len() < 70 {
+        k += 1;
+        a.set(10 + k, (2 + k % 40) as u8, k as i64);
+        net.settle(&mut [&mut a, &mut b, &mut c]);
+    }
+    assert_eq!(c.e.status().board_seq, skip_seq - 1);
+    for _ in 0..3 {
+        for n in [&mut a, &mut b, &mut c] {
+            n.advance(86_400_000);
+        }
+        net.settle(&mut [&mut a, &mut b, &mut c]);
+    }
+    // C resumed from that snapshot, above the Skip, and applied what follows.
+    let st = c.e.status();
+    assert!(st.stops.is_empty(), "{:?}", st.stops);
+    assert_eq!(st.board_seq, net.log_len());
+    assert_eq!(c.board_bytes(), a.board_bytes());
+    assert!(!c.e.confirmed().0.keys.contains_key(&1));
+    c.set(900, 90, 9);
+    net.settle(&mut [&mut a, &mut b, &mut c]);
+    assert_eq!(a.e.confirmed().0.keys[&90].0, 9);
 }

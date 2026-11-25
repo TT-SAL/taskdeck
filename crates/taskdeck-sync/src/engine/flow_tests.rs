@@ -756,3 +756,82 @@ fn a_hold_that_timed_out_arms_no_timer() {
     let busy = a.fx.iter().filter(|f| matches!(f, Effect::ScheduleTick { at_mono_ms } if *at_mono_ms <= mono + 1)).count();
     assert_eq!(busy, 0);
 }
+
+// spec: ENG-SKIP-003
+#[test]
+fn a_skip_replay_replaces_the_hashes_and_forgets_the_older_reports() {
+    let (mut a, f1) = creator(431);
+    let mut hub = Hub::with_genesis(&a, &f1);
+    let mut b = join(&mut hub, &mut a, 432, "Laptop");
+    b.set(1, 1, 5);
+    hub.settle(&mut [&mut a, &mut b]);
+    let target = hub.log.len() as u64;
+    let mut k = 0u64;
+    while (hub.log.len() as u64) < 70 {
+        k += 1;
+        a.set(10 + k, (2 + k % 40) as u8, k as i64);
+        hub.settle(&mut [&mut a, &mut b]);
+    }
+    // Both report their hash at 64, which holds the target's effect.
+    a.advance(86_400_000);
+    b.advance(86_400_000);
+    hub.settle(&mut [&mut a, &mut b]);
+    let before = a.e.hashes[&64].hash;
+    assert_eq!(before, b.e.hashes[&64].hash);
+    assert!(a.e.registry.reports.iter().any(|r| r.seq == 64 && r.dev == b.dev() && r.hash == before));
+    let from = a.persists.len();
+    a.feed(Event::Op { ticket: 3, op: Operation::Skip { seq: target } });
+    hub.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 3), Some(Ok(())));
+    // The record at 64 is written again with the state that never held the target ...
+    let after = a.e.hashes[&64].hash;
+    assert_ne!(after, before);
+    assert_eq!(after, b.e.hashes[&64].hash);
+    let rewritten = a.persists[from..].iter().flatten().any(|op| matches!(op, PersistOp::AppendHashes(v) if v.iter().any(|h| h.seq == 64 && h.hash == after)));
+    assert!(rewritten);
+    // ... and B's report from before the Skip is no longer compared with it: no alarm, no stop.
+    assert!(a.e.registry.reports.iter().all(|r| !(r.seq == 64 && r.hash == before)));
+    for n in [&a, &b] {
+        let st = n.e.status();
+        assert!(st.alarms.is_empty() && st.stops.is_empty(), "{:?} {:?}", st.alarms.len(), st.stops);
+    }
+    // The next beats report the new hash, and still nothing is raised.
+    a.advance(86_400_000);
+    b.advance(86_400_000);
+    hub.settle(&mut [&mut a, &mut b]);
+    assert!(a.e.registry.reports.iter().any(|r| r.seq == 64 && r.dev == b.dev() && r.hash == after));
+    assert!(a.e.status().alarms.is_empty() && b.e.status().alarms.is_empty());
+}
+
+// spec: ENG-SEALER-003
+#[test]
+fn a_skip_target_frame_is_supplied_only_when_its_hash_fits() {
+    let (mut a, f1) = creator(441);
+    let mut hub = Hub::with_genesis(&a, &f1);
+    let mut b = join(&mut hub, &mut a, 442, "Laptop");
+    a.set(1, 1, 5);
+    hub.settle(&mut [&mut a, &mut b]);
+    let target = hub.log.len() as u64;
+    a.set(2, 2, 6);
+    hub.settle(&mut [&mut a, &mut b]);
+    // A's stored copy of the target is not the frame the log had (a damaged file).
+    let other = a.store.log[&(target + 1)].frame.clone();
+    a.store.log.get_mut(&target).expect("the record").frame = other;
+    b.feed(Event::Op { ticket: 3, op: Operation::Skip { seq: target } });
+    hub.settle(&mut [&mut b]);
+    assert_eq!(op_result(&b, 3), Some(Ok(())));
+    // A reads the Skip. Its own copy of the target does not hash to what the Skip names, so it
+    // is not handed to the sealer: the Skip is not accepted on a frame that was not checked,
+    // nothing is applied, and the engine stops with the fault of §17.2.
+    let skip_seq = hub.log.len() as u64;
+    for _ in 0..4 {
+        a.tick(30_000);
+        hub.serve(&mut a);
+    }
+    let st = a.e.status();
+    assert!(st.stops.iter().any(|x| x.kind == crate::StopKind::LocalFault { code: "engine/skip_unreachable".into() }), "{:?}", st.stops);
+    assert!(st.board_seq < skip_seq);
+    assert_eq!(a.e.confirmed().0.keys[&1].0, 5);
+    // B, whose copy is the frame the log had, accepted it.
+    assert!(!b.e.confirmed().0.keys.contains_key(&1));
+}
