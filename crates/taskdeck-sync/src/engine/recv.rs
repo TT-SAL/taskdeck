@@ -377,6 +377,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                             },
                         );
                     }
+                    // ENG-EVID-003: the evidence stop this raised persists nothing from the relay,
+                    // the entries before the cut included: they rest on a chain the relay has not
+                    // shown to be this device's (§21.2).
+                    out.clear();
                     break;
                 }
                 _ => {}

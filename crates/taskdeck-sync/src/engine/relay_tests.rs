@@ -1843,6 +1843,36 @@ fn a_pairing_reported_registered_is_never_reported_failed_after_a_start() {
     assert_eq!(a.e.status().queued, 0);
 }
 
+// spec: ENG-EVID-003 ENG-RECV-003
+#[test]
+fn a_page_whose_dry_run_raises_evidence_persists_nothing_of_it() {
+    // `gate` 5507, 5159, 5712, 5463: the dry run of a page met evidence at its second entry,
+    // and the entry before it was persisted and applied on this device's own chain, though the
+    // evidence stop (raised by that dry run) persists nothing from the relay.
+    let host = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(491);
+    let mut b = pair(&mut net, &mut a, 492, "Laptop", 1);
+    net.settle(&mut [&mut a, &mut b]);
+    // B seals a frame that does not reach the relay.
+    b.set(20, 20, 20);
+    b.fx.clear();
+    let frame = b.e.outbox.iter().find_map(|r| r.r.frame.clone()).expect("a sealed frame");
+    // A's entry at s, B's frame at s + 1, and the same frame again at s + 2: its counter again.
+    a.set(5, 5, 5);
+    net.settle(&mut [&mut a]);
+    let s = net.log_len();
+    let now = a.wall;
+    net.relay().inject_frame(now, frame.clone()).expect("stored");
+    net.relay().inject_frame(now, frame).expect("stored");
+    let cred = net.cred(&host, &b.dev());
+    let page = net.relays[&host].read(now, &cred, s - 1, 256).result.expect("a page");
+    assert_eq!(page.entries.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![s, s + 1, s + 2]);
+    b.feed(Event::Page { req: None, page });
+    assert!(b.e.status().stops.iter().any(|x| x.kind == crate::StopKind::Evidence), "{:?}", b.e.status().stops);
+    assert!(!b.store.log.contains_key(&s), "nothing of the page is persisted");
+    assert_eq!(b.e.status().head.seq, s - 1);
+}
+
 /// Serves a node's effects one by one until the next one is the admin call `name`, which stays unanswered.
 fn serve_until_admin(net: &mut super::rkit_tests::Net, n: &mut Node, name: &str) {
     for _ in 0..20_000 {
