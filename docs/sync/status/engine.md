@@ -25,7 +25,8 @@ in the order it happened; this file is the current truth and is rewritten, not a
   (125, 1002, 1065, 1066, 1073, 1093, 2019, 2082, 2167) and 3 a pairing's `DeviceAdded` refused
   after `register` (140, 1054, 2075) (question 3); 4 a crash halt on a Skip's target (1006, 2159,
   2207, 2236) (question 4). **No seed fails for any other cause.** Every named configuration
-  except `fork` passed 60 of 60 seeds at base 1000 on 84948a8 (to run again before the gate).
+  except `fork` (17 without rollback and fork, and `rollback`) passes 60 of 60 seeds at base 3000
+  on the engine of 98e31e3 (1,080 runs).
 - Reading a seed: `TD_SIM_ALL=1` prints every violation. A trace file written with `2>&1` holds
   the poison entries' backtraces, so its line numbers drift from the trace's: strip them first
   (the journal has the command).
