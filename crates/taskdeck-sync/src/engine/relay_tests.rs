@@ -1873,6 +1873,28 @@ fn a_page_whose_dry_run_raises_evidence_persists_nothing_of_it() {
     assert_eq!(b.e.status().head.seq, s - 1);
 }
 
+// spec: ENG-SESS-007
+#[test]
+fn a_device_closed_by_a_relay_that_lost_it_raises_the_alarm_first_when_it_held_acknowledged_entries() {
+    // `gate` 4662, 4884, 5243: a device paired through a relay state that a rollback later
+    // removed had entries the relay acknowledged; its sign-in was refused, it was closed with no
+    // alarm, and what only it held was lost silently (§11.9, the owner's decision of 2026-11-25).
+    let host = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(581);
+    net.settle(&mut [&mut a]);
+    let before = net.relays[&host].clone();
+    let mut b = pair(&mut net, &mut a, 582, "Laptop", 1);
+    b.set(30, 3, 3);
+    net.settle(&mut [&mut a, &mut b]);
+    assert!(b.e.membership().devices.iter().any(|d| d.dev == b.dev() && d.last_ctr > 0), "B's entry was acknowledged");
+    net.relays.get_mut(&host).expect("the relay").rollback_to(&before);
+    b.feed(Event::Disconnected { unreachable: false, paused_until_ms: None });
+    net.settle(&mut [&mut b]);
+    let st = b.e.status();
+    assert!(st.stops.iter().any(|s| s.kind == crate::StopKind::Closed && s.action == crate::StopAction::RePair), "{:?}", st.stops);
+    assert!(has_alarm(&b, crate::AlarmKind::RelayBehind), "{:?}", st.alarms);
+}
+
 /// Serves a node's effects one by one until the next one is the admin call `name`, which stays unanswered.
 fn serve_until_admin(net: &mut super::rkit_tests::Net, n: &mut Node, name: &str) {
     for _ in 0..20_000 {

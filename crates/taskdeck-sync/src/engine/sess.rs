@@ -567,7 +567,20 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.status_dirty = true;
             }
             (401, "relay/unauthorized") if connecting && !self.following() && self.at_home_relay() => {
-                // ENG-SESS-007: no member of the board there.
+                // ENG-SESS-007: no member of the board there. A relay that acknowledged this
+                // device's entries has lost them: the evidence first, so that no loss of those
+                // entries is silent (§11.9).
+                let ack = self.outbox.iter().filter_map(|r| r.r.ack).max_by_key(|a| a.0);
+                if self.me().is_some_and(|d| d.last_ctr > 0) || ack.is_some() {
+                    let local_head = self.log_head();
+                    self.raise_evidence(
+                        AlarmKind::RelayBehind,
+                        None,
+                        None,
+                        Some("relay/unauthorized"),
+                        Evidence::RelayBehind { relay_head: Head::default(), relay_last_ctr: None, local_head, ack },
+                    );
+                }
                 self.add_stop(StopKind::Closed, None);
             }
             (_, code) => {
