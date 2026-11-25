@@ -1,4 +1,4 @@
-# The simulator: how to run it (tasks D, D2, D3 and D4)
+# The simulator: how to run it (tasks D to D5)
 
 Module `taskdeck_sync::sim` (feature `sim`; the test targets get it from the crate's dev-dependency on itself).
 Spec: engine.md §31. Code: `src/sim.rs` (types), `src/sim/config.rs` (named configurations), `src/sim/world.rs` and
@@ -15,7 +15,8 @@ TD_SIM_CONFIG=quiet TD_SIM_BASE=1 SIM_SEEDS=200 cargo test -p taskdeck-sync --te
 ```
 
 `base` is `TD_SIM_BASE`, else the first 16 hex digits of the commit id (read from `.git`), ENG-SIM-004. The test
-prints `base`, each failing seed with its first five violations, and the JSON of its regression file. Use `--release`
+prints `base`, each failing seed with its first five violations (`TD_SIM_ALL=1`: every violation of every failing
+seed), and the JSON of its regression file. Use `--release`
 for many seeds (timings in task D's report).
 
 ## One seed and its trace
@@ -114,6 +115,9 @@ One JSON object per line, `t` (virtual ms) and `k` first:
   loosened invariant 4 (test `invariant_4_at_a_skip_window_is_judged_by_the_no_fault_oracle_only`, `script.rs`). A violation of a
   device whose storage held a crash halt on `t` (`IdentFacts::crash_halts`) ends with
   `; it crash-halted on the target t: ENG-HALT-004 against §31.7 invariant 4, a spec question (api-simulator.md)`.
+- 4, the alarms of §21.1 (task D5): a welcome or page contradicting the device's log owes an alarm, except a page
+  answering a request id its process did not issue as a `Read` or whose answer already reached its engine (a
+  duplicated answer after the first copy, ENG-EFFECT-002: the engine ignores it). A push and a read's first answer count.
 - 3: accepted once; or still in the outbox of a device halted or stopped with a persisted reason, or revoked (in
   its status or in the oracle's membership); or refused with a refusal record; or dropped as a cancelled hold. A
   record its device applied on a branch a rollback or fork removed reads `applied on a rolled-back relay state (…)`.
@@ -122,7 +126,12 @@ One JSON object per line, `t` (virtual ms) and `k` first:
   `TruncateLogBelow(S + 1, Some(C_S))` and one `DeleteBases`, then nothing; an identity write that drops a pending
   root of an own rotation needs that rotation's own entry, in the log the device followed there (the chain it holds
   at that seq), at or below the highest seq the same write makes durable (accepted: it reached the head; refused: a refused own rotation). Another device's rotation
-  excuses no pending root.
+  excuses no pending root. An unsent `snap` record's drop (no `Append` of the identity carried its frame) is
+  `Deletion::Snap`: explained by an accepted rotation to an epoch above its blob's at or below `B`, in the log the
+  device followed there, with no row of it carrying the entry (§19.4 step 5, ENG-SNAP-004; task D5).
+  Task D5: every deletion counts only once its write is applied to durable storage (`World::stage`, `wrote`); a write a
+  crash or an exit cut off, or still queued at the end, deletes nothing (`discard_unapplied`). A `Register` drop of a
+  call whose effects a crash cut off (`Ident::cut_calls`) is not held to the `PairFailed` rule.
 - 6: also no `Append` other than of beats, `snap` entries and the rules-upgrade proposal in the last 1,800,000 ms.
   3 and 6 name a device whose `DeviceAdded` only a rolled-back or forked state holds: `its pairing is only on …`.
 - Roots: every `(epoch, root)` any device held; two branches may rotate to one epoch with two roots, and each log is

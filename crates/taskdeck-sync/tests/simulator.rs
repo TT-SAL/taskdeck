@@ -5,7 +5,8 @@
 //!   the end of every run (ENG-SIM-002); `N` is `SIM_SEEDS` (50 when unset),
 //!   `base` is `TD_SIM_BASE` when set, else the first 16 hex digits of the
 //!   commit id read as a `u64` (ENG-SIM-004). It prints `base`, every failing
-//!   seed and, for each, the JSON of its regression file (§31.8, ENG-SIM-005).
+//!   seed with its first five violations (every one with `TD_SIM_ALL=1`)
+//!   and, for each, the JSON of its regression file (§31.8, ENG-SIM-005).
 //! - `same_seed_same_trace`: ENG-SIM-003.
 //! - `one_seed`: `TD_SIM_SEED=<seed> cargo test -p taskdeck-sync --test
 //!   simulator one_seed -- --nocapture` prints that seed's trace up to its
@@ -24,7 +25,8 @@
 use taskdeck_sync::sim::{self, SimConfig, SimReport};
 
 /// What the gate reads from its environment: `SIM_SEEDS`, `TD_SIM_BASE`,
-/// `TD_SIM_CONFIG`, `TD_SIM_SEED`, and the commit id from `.git`.
+/// `TD_SIM_CONFIG`, `TD_SIM_SEED`, `TD_SIM_FULL`, `TD_SIM_ALL`, and the
+/// commit id from `.git`.
 struct Env {
     seeds: u64,
     base: u64,
@@ -33,6 +35,9 @@ struct Env {
     seed: Option<u64>,
     /// `TD_SIM_FULL=1`: print the whole trace, not only up to the first violation.
     full: bool,
+    /// `TD_SIM_ALL=1`: `seeds_hold_every_invariant` prints every violation of
+    /// every failing seed, not only the first five (task D5).
+    all: bool,
 }
 
 /// The one place a test of this crate reads the environment and files: the
@@ -47,8 +52,9 @@ fn env() -> Env {
     let config = var("TD_SIM_CONFIG").unwrap_or_else(|| "gate".to_owned());
     let seed = var("TD_SIM_SEED").and_then(|v| v.trim().parse().ok());
     let full = var("TD_SIM_FULL").is_some();
+    let all = var("TD_SIM_ALL").is_some();
     if let Some(b) = var("TD_SIM_BASE").and_then(|v| v.trim().parse().ok()) {
-        return Env { seeds, base: b, base_from: "TD_SIM_BASE".to_owned(), config, seed, full };
+        return Env { seeds, base: b, base_from: "TD_SIM_BASE".to_owned(), config, seed, full, all };
     }
     // The commit id: walk up from the crate to `.git` (a directory, or a
     // worktree's file naming its git directory), follow HEAD.
@@ -69,8 +75,8 @@ fn env() -> Env {
         }
     };
     match commit.and_then(|c| c.get(..16).and_then(|h| u64::from_str_radix(h, 16).ok())) {
-        Some(b) => Env { seeds, base: b, base_from: "the commit id".to_owned(), config, seed, full },
-        None => Env { seeds, base: 0, base_from: "no commit id found".to_owned(), config, seed, full },
+        Some(b) => Env { seeds, base: b, base_from: "the commit id".to_owned(), config, seed, full, all },
+        None => Env { seeds, base: 0, base_from: "no commit id found".to_owned(), config, seed, full, all },
     }
 }
 
@@ -121,7 +127,8 @@ fn seeds_hold_every_invariant() {
         let r = sim::run(seed, &config);
         if !r.violations.is_empty() {
             println!("failing seed {seed}:");
-            for v in r.violations.iter().take(5) {
+            let shown = if e.all { usize::MAX } else { 5 };
+            for v in r.violations.iter().take(shown) {
                 println!("  invariant {} at trace line {}: {}", v.invariant, v.line, v.detail);
             }
             println!("  tests/regress/{seed}.json: {}", regression_json(&e.config, &config, &r));

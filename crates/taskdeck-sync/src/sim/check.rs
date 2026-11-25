@@ -662,6 +662,29 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
                 };
                 ids.iter().all(|e| at.get(e).is_some_and(|s| s <= b))
             }
+            // Task D5 (§19.4 step 5, ENG-SNAP-004): a `snap` record never
+            // sent, dropped at or after an accepted rotation that ended the
+            // epoch its blob was sealed under, in the log the device followed
+            // there (the reference log, or the branch whose chain it holds at
+            // B), where no row carries its entry. Nothing wider: no rotation,
+            // a refused one, one above B, or one to an epoch no later than
+            // the blob's explains nothing.
+            Deletion::Snap(eid, epoch, chain) => {
+                let k = chain
+                    .filter(|c| ref_chain.get(b) != Some(c))
+                    .and_then(|c| f.branches.iter().position(|br| br.rows.iter().any(|r| r.seq == *b && r.chain == c)));
+                let on_branch: Vec<Ledger>;
+                let on: &[Ledger] = match k {
+                    None => &led,
+                    Some(k) => {
+                        on_branch = ledger(&f.branches[k].rows, f.template, &f.roots);
+                        &on_branch
+                    }
+                };
+                // Never sent: no row of that log carries its entry.
+                !on.iter().any(|l| l.entry_id == Some(*eid))
+                    && on.iter().any(|l| l.accept && l.seq <= *b && l.new_epoch.is_some_and(|n| n > *epoch))
+            }
         };
         if !ok {
             v.push((5, *line, format!("dev {dev}: {d:?} with B = {b} is not explained by §31.7 invariant 5")));

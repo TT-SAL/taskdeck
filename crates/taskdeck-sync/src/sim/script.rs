@@ -679,4 +679,47 @@ mod tests {
             assert_eq!(c.check(), vec![(5, 9, text)]);
         }
     }
+
+    // Invariant 5, task D5 (§19.4 step 5, ENG-SNAP-004): an unsent `snap`
+    // record whose blob epoch is no longer the current epoch must be dropped.
+    // The drop is explained by an accepted rotation to a later epoch at or
+    // below the B of the drop, in the log the device followed there, for an
+    // entry no row of that log carries; nothing wider: the drop below the
+    // rotation, a blob sealed under the current epoch, an entry the log
+    // holds (it was sent), or a rotation only another branch holds explain
+    // nothing.
+    #[test]
+    fn an_unsent_snap_dropped_after_a_rotation_is_explained() {
+        let (mut reference, mut fork) = forked(|l| {
+            l.set(0, 1);
+        });
+        let (r, _) = reference.rotate();
+        let (_, sent) = reference.set(1, 1);
+        fork.desk.new_entry_id().expect("an entry id");
+        fork.set(2, 2);
+        let (q, _) = fork.set(3, 3);
+        let mut c = Case::of(&reference);
+        c.idents.push(settled(reference.desk_dev(), 0, Vec::new()));
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        let new = led.iter().find(|l| l.seq == r && l.accept).and_then(|l| l.new_epoch).expect("the rotation at r is accepted with a new epoch");
+        let old = new - 1;
+        let fork_rows = fork.rows();
+        assert!(check::ledger(&fork_rows, Some(&c.template), &c.roots).iter().all(|l| l.new_epoch.is_none()), "the fork rotates nothing");
+        assert_ne!(c.reference.get(q as usize - 1).map(|x| x.chain), Some(fork_rows[q as usize - 1].chain), "the fork differs at {q}");
+        c.branches.push(BranchLog { rows: fork_rows.clone(), why: check::WHY_FORK, line: 77 });
+        let snap = |eid: [u8; 16], epoch: u32, ch: Option<Hash32>, b: u64| (0usize, Deletion::Snap(eid, epoch, ch), b, 9u64);
+        let unsent = [0x5a; 16];
+        c.deletions = vec![snap(unsent, old, None, r), snap(unsent, old, None, r + 1)];
+        assert_eq!(c.check(), Vec::new());
+        for d in [
+            snap(unsent, old, None, r - 1),
+            snap(unsent, new, None, r + 1),
+            snap(sent, old, None, r + 1),
+            snap(unsent, old, Some(fork_rows[q as usize - 1].chain), q),
+        ] {
+            let text = format!("dev 0: {:?} with B = {} is not explained by §31.7 invariant 5", d.1, d.2);
+            c.deletions = vec![d];
+            assert_eq!(c.check(), vec![(5, 9, text)]);
+        }
+    }
 }

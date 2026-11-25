@@ -229,6 +229,22 @@ struct Proc {
     outstanding: BTreeMap<u64, (u64, &'static str)>,
     exiting: bool,
     hello_no: u64,
+    /// The `Read`s this process emitted whose answer has not reached its
+    /// engine yet: a page with another request id is one the engine ignores
+    /// (ENG-EFFECT-002), so it is no relay head the device saw (task D5).
+    reads_open: BTreeSet<u64>,
+}
+
+/// One `Persist` of one process: (identity, process number, persist id).
+pub(super) type WriteKey = (usize, u32, u64);
+
+/// What a deletion of invariant 5 tells the checks, held until the write
+/// that carries it is applied to durable storage (task D5): a write that a
+/// crash or an exit cut off before it was applied deletes nothing.
+pub(super) enum Staged {
+    Deletion((usize, Deletion, u64, u64)),
+    Violation(Violation),
+    Cancelled([u8; 16]),
 }
 
 /// A test's change to the end-of-run facts (`World::tamper_facts`).
@@ -270,8 +286,14 @@ pub(crate) struct Ident {
     rejoin: Option<(BTreeMap<u64, Hash32>, bool)>,
     /// Calls delivered to this identity's engine (the pairing ruling counts them).
     calls: u64,
-    /// Register records dropped and not yet explained: (dev, call, line).
-    pair_drops: Vec<(Dev, u64, u64)>,
+    /// Register records dropped and not yet explained: (dev, call, line, the
+    /// write that drops it).
+    pair_drops: Vec<(Dev, u64, u64, Option<WriteKey>)>,
+    /// Calls whose effects a crash cut off before the runtime performed them
+    /// all (task D5: "the same or the next call" is not asked of them).
+    cut_calls: BTreeSet<u64>,
+    /// The hashes of the frames this identity's `Append`s carried (any process).
+    sent: BTreeSet<Hash32>,
     /// `PairFailed` notifications: (dev, call).
     pair_failed: Vec<(Dev, u64)>,
     /// The engine loaded no replica at a `Start` (it refused it).
@@ -387,6 +409,12 @@ pub(crate) struct World<'a> {
     fork_line: u64,
     /// The identity each completed pairing ticket started (`PairRegistered`).
     paired: BTreeMap<u64, usize>,
+    /// The `Persist` whose operations are being noted (`note_persist`).
+    cur_write: Option<WriteKey>,
+    /// Writes emitted and not yet applied to durable storage.
+    unapplied: BTreeSet<WriteKey>,
+    /// What those writes tell invariant 5 once applied.
+    staged: Vec<(WriteKey, Staged)>,
 }
 
 /// A deletion a device emitted, to be explained (§31.7 invariant 5).
@@ -400,6 +428,11 @@ pub(crate) enum Deletion {
     /// followed there: a fork's copy can sequence a rotation the reference
     /// log never holds).
     Pending(Vec<[u8; 16]>, Option<Hash32>),
+    /// An unsent `snap` record dropped (§19.4 step 5, ENG-SNAP-004): its
+    /// entry id, the epoch its blob was sealed under, and the chain the
+    /// device holds at `B` (which log it followed there). Explained only by
+    /// an accepted rotation to a later epoch at or below `B` (task D5).
+    Snap([u8; 16], u32, Option<Hash32>),
 }
 
 fn h(b: &[u8]) -> Hash32 {
@@ -628,6 +661,9 @@ impl<'a> World<'a> {
             pair_devs: BTreeMap::new(),
             fork_line: 0,
             paired: BTreeMap::new(),
+            cur_write: None,
+            unapplied: BTreeSet::new(),
+            staged: Vec::new(),
         };
         for i in 0..n {
             w.machines.push(Machine { ident: usize::MAX, awake: true, phone: i + 1 == n && n > 2, repairing: false });
@@ -816,6 +852,8 @@ impl<'a> World<'a> {
             rejoin: None,
             calls: 0,
             pair_drops: Vec::new(),
+            cut_calls: BTreeSet::new(),
+            sent: BTreeSet::new(),
             pair_failed: Vec::new(),
             unloaded: false,
             asked: BTreeSet::new(),
@@ -1305,5 +1343,178 @@ mod tests {
         }
         w.down(0, proc, conn, Down::Sock(SockMsg::Push(page)));
         assert_eq!(pages(&w), before + 1, "a push before the login's answer");
+    }
+
+    /// Notes `ops` as identity 1's write `k`, not yet applied (task D5).
+    fn unapplied_write(w: &mut World<'_>, ops: &[PersistOp]) -> WriteKey {
+        let k = (1, w.proc_no(1).unwrap_or(0), 1 << 40);
+        w.unapplied.insert(k);
+        w.cur_write = Some(k);
+        w.note_persist(1, ops, 9);
+        w.cur_write = None;
+        k
+    }
+
+    // Invariant 5, task D5: a deletion counts only when its write was
+    // applied. The same unexplained truncation, unsent drop and pairing's
+    // drop break invariant 5 once their write is applied, and nothing when a
+    // crash cut the write off before it was (the process ended with it in
+    // the queue) or when the run ends with it still there.
+    #[test]
+    fn a_deletion_counts_only_when_its_write_is_applied() {
+        let truncate = |w: &mut World<'_>| unapplied_write(w, &[PersistOp::TruncateLogBelow(40, None)]);
+        let unsent_drop = |w: &mut World<'_>| {
+            let r = unsent(w, 0x71);
+            w.idents[1].live.insert(r.entry_id, r);
+            unapplied_write(w, &[PersistOp::Outbox(vec![OutboxOp::Drop([0x71; 16])])])
+        };
+        let pair_drop = |w: &mut World<'_>| {
+            let mut r = unsent(w, 0x72);
+            r.via = crate::Via::Register { dev: [0x45; 16], sign_pk: [0; 32] };
+            w.idents[1].live.insert(r.entry_id, r);
+            unapplied_write(w, &[PersistOp::Outbox(vec![OutboxOp::Drop([0x72; 16])])])
+        };
+        type Make<'f> = &'f dyn Fn(&mut World<'_>) -> WriteKey;
+        let cases: [(&str, Make<'_>); 3] = [("truncate", &truncate), ("unsent drop", &unsent_drop), ("pairing's drop", &pair_drop)];
+        for (name, make) in cases {
+            assert_eq!(
+                tampered(|w| {
+                    let k = make(w);
+                    w.wrote(k);
+                }),
+                vec![5],
+                "{name}, applied"
+            );
+            assert_eq!(
+                tampered(|w| {
+                    let k = make(w);
+                    w.discard_unapplied(k.0, k.1);
+                }),
+                Vec::<u8>::new(),
+                "{name}, cut off by a crash"
+            );
+            assert_eq!(
+                tampered(|w| {
+                    make(w);
+                }),
+                Vec::<u8>::new(),
+                "{name}, still queued at the end"
+            );
+        }
+    }
+
+    // Invariant 5, task D5: "in the same or the next call" is not asked of
+    // a call whose effects a crash cut off before the runtime performed
+    // them (its `PairFailed` may be among them); a call that was not cut is
+    // still held to it.
+    #[test]
+    fn a_pairing_drop_in_a_call_a_crash_cut_is_not_judged() {
+        let drop_reg = |w: &mut World<'_>| {
+            let mut r = unsent(w, 0x73);
+            r.via = crate::Via::Register { dev: [0x46; 16], sign_pk: [0; 32] };
+            drop_record(w, r);
+        };
+        assert_eq!(tampered(drop_reg), vec![5]);
+        assert_eq!(
+            tampered(|w| {
+                drop_reg(w);
+                let call = w.idents[1].calls;
+                w.idents[1].cut_calls.insert(call);
+            }),
+            Vec::<u8>::new()
+        );
+        assert_eq!(
+            tampered(|w| {
+                drop_reg(w);
+                let call = w.idents[1].calls;
+                w.idents[1].cut_calls.insert(call + 2);
+            }),
+            vec![5]
+        );
+    }
+
+    // Invariant 4, task D5 (ENG-EFFECT-002): a page that answers a read the
+    // engine already received an answer to (a duplicated answer delivered
+    // after the first copy), or one it never issued, is no relay head the
+    // device saw: it owes no alarm of §21.1. A push and the first answer to
+    // a read still count.
+    #[test]
+    fn a_duplicated_answer_to_a_read_is_no_relay_head() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = World::new(3, &cfg, false);
+        w.setup();
+        let ready = |w: &World<'_>| {
+            w.idents[0].proc.as_ref().and_then(|p| p.conn.as_ref()).is_some_and(|c| c.welcomed_t.is_some())
+                && w.idents[0].store.head().is_some_and(|(l, _)| l >= 2)
+        };
+        while let Some(s) = w.q.pop() {
+            w.t = s.t;
+            if matches!(s.ev, Ev::End) {
+                break;
+            }
+            w.step(s.ev);
+            if w.t > 600_000 && ready(&w) {
+                break;
+            }
+        }
+        assert!(ready(&w), "device 0 is welcomed with a log of two entries");
+        let (l, chain) = w.idents[0].store.head().expect("a log");
+        let below = w.idents[0].store.chain_at(l - 1).expect("the chain below the head");
+        let page = |seq: u64, chain: Hash32| Page { head: Head { seq, chain }, relay_now: 0, floor: 0, purge_floor: 0, more: false, truncated: false, fenced: false, entries: vec![] };
+        let stale = |req: Option<u64>| Event::Page { req, page: page(l - 1, below) };
+        // An id far above any the engine issued in this run.
+        let r = 1u64 << 50;
+        assert!(w.contradiction(0, &stale(None)).is_some(), "a push below the log head");
+        assert!(w.contradiction(0, &stale(Some(r))).is_none(), "an answer to a read never issued");
+        w.idents[0].proc.as_mut().expect("running").reads_open.insert(r);
+        assert!(w.contradiction(0, &stale(Some(r))).is_some(), "the first answer to a read");
+        // The first copy (at the log head) reaches the engine; the second, below it, answers nothing.
+        w.deliver(0, Event::Page { req: Some(r), page: page(l, chain) });
+        assert!(w.contradiction(0, &stale(Some(r))).is_none(), "a second answer to the same read");
+        assert!(w.contradiction(0, &stale(None)).is_some(), "a push below the log head, still");
+    }
+
+    // Invariant 5, task D5 (§19.4 step 5): an outbox drop of a `snap` record
+    // no `Append` carried is handed to the check as `Deletion::Snap` (with
+    // its blob's epoch), judged against the log's rotations at the end
+    // (`script.rs`); the drop of one an `Append` carried stays a violation.
+    #[test]
+    fn an_unsent_snap_drop_is_judged_by_the_rotations() {
+        let snap = |w: &World<'_>, eid: u8| {
+            let mut r = unsent(w, eid);
+            r.kind = Kind::Snap;
+            r.frame = Some(vec![eid; 40]);
+            r.body = Body::Snap(crate::SnapInfo {
+                seq: 1,
+                hash: [0; 32],
+                hash_version: 1,
+                blob: [eid; 16],
+                sha256: [0; 32],
+                size: 1,
+                parts: 1,
+                inflated: 1,
+                epoch: 7,
+            });
+            r
+        };
+        assert_eq!(
+            tampered(|w| {
+                let r = snap(w, 0x81);
+                let before = w.violations.len();
+                drop_record(w, r);
+                assert_eq!(w.violations.len(), before, "no violation at the drop");
+                assert!(matches!(w.deletions.last(), Some((1, Deletion::Snap(e, 7, _), 0, 9)) if *e == [0x81; 16]), "{:?}", w.deletions.last());
+            }),
+            vec![5],
+            "no rotation in a quiet run explains it"
+        );
+        let sent = |w: &mut World<'_>| {
+            let r = snap(w, 0x82);
+            w.idents[1].sent.insert(h(r.frame.as_ref().expect("a frame")));
+            let before = (w.violations.len(), w.deletions.len());
+            drop_record(w, r);
+            assert_eq!((w.violations.len(), w.deletions.len()), (before.0 + 1, before.1), "a sent snap's drop is a violation");
+        };
+        assert_eq!(tampered(sent), vec![5]);
     }
 }
