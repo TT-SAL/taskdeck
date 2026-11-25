@@ -189,6 +189,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.dead || !self.on {
             return;
         }
+        if self.sess.wait_welcome {
+            // §11.9: after a whole-request refusal nothing is repeated until the next welcome.
+            return;
+        }
         self.shred_step();
         self.fence_lookup();
         self.repair_step();

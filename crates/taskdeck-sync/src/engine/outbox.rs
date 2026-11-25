@@ -254,7 +254,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// When the hold of the last record times out, if it is held.
     pub(crate) fn hold_deadline(&self) -> Option<u64> {
         let r = self.outbox.last()?;
-        if r.r.hold { r.held_at.map(|t| t + super::lim::HOLD_MS) } else { None }
+        // Only while it is still ahead: a hold that has timed out arms no timer.
+        if r.r.hold { r.held_at.map(|t| t + super::lim::HOLD_MS).filter(|t| *t > self.mono) } else { None }
     }
 
     /// `Merge(m)`: `m` takes the held record's place (ENG-HOLD-002).

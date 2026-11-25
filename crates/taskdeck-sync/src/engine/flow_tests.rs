@@ -735,3 +735,24 @@ fn the_status_names_who_blocks_a_newer_rules_version() {
     assert_eq!(overrides, 1);
     assert_eq!(a.board_bytes(), b.board_bytes());
 }
+
+// spec: ENG-HOLD-004 ENG-EFFECT-002
+// Found by the simulator (seed 1 of `quiet`): a hold that had timed out while its record
+// could not be sent kept asking for a tick one millisecond ahead, forever.
+#[test]
+fn a_hold_that_timed_out_arms_no_timer() {
+    let (mut a, f1) = creator(401);
+    let mut hub = Hub::with_genesis(&a, &f1);
+    hub.settle(&mut [&mut a]);
+    a.feed(Event::Disconnected { unreachable: true, paused_until_ms: None });
+    a.enqueue(1, ToyCommand::Create { id: (1u64 << 40) | 1, name: 5 });
+    assert_eq!(a.e.status().queued, 1);
+    a.tick(31_000);
+    a.fx.clear();
+    for _ in 0..5 {
+        a.tick(1);
+    }
+    let mono = a.mono;
+    let busy = a.fx.iter().filter(|f| matches!(f, Effect::ScheduleTick { at_mono_ms } if *at_mono_ms <= mono + 1)).count();
+    assert_eq!(busy, 0);
+}

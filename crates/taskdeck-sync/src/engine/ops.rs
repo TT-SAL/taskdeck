@@ -316,6 +316,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     /// Looks at every operation's stage again.
     fn drive_ops(&mut self) {
+        if self.sess.wait_welcome {
+            // §11.9: after a whole-request refusal nothing is repeated until the next welcome.
+            return;
+        }
         let tickets: Vec<u64> = self.meta.ops.iter().map(|o| o.ticket).collect();
         for t in tickets {
             if !self.op_ready(t) {

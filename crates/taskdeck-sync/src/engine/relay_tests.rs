@@ -1214,3 +1214,26 @@ fn a_recovery_key_change_is_registered_by_the_engine_only_in_a_repair() {
     net.settle(&mut [&mut a, &mut b]);
     assert!(a.e.status().stops.is_empty() && b.e.status().stops.is_empty());
 }
+
+// engine.md §11.9, the row "any other".
+// Found by the simulator (seed 310 of `gate`): after a whole-request refusal the engine sent
+// the same admin request again at once, 736,000 times. §11.9: not before the next welcome.
+#[test]
+fn a_refused_request_is_not_repeated_before_the_next_welcome() {
+    let (mut net, mut a) = board(411);
+    let mut b = pair(&mut net, &mut a, 412, "Laptop", 1);
+    let c = pair(&mut net, &mut a, 413, "Phone", 2);
+    net.settle(&mut [&mut a, &mut b]);
+    a.feed(Event::Op { ticket: 9, op: Operation::Revoke { dev: c.dev(), replace: false } });
+    let (req, _) = take_admin(&mut a);
+    a.feed(Event::RelayRefused { req: Some(req), refusal: refusal(500, "relay/slow") });
+    for _ in 0..5 {
+        a.tick(1);
+    }
+    assert!(a.fx.iter().all(|f| !matches!(f, Effect::Admin { .. })), "nothing is sent again yet");
+    assert!(has_alarm(&a, crate::AlarmKind::RelayProtocol));
+    // The next poll's welcome lets it go on, and the operation ends.
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    assert_eq!(status_of(&b, &c), DeviceStatus::Revoked);
+}
