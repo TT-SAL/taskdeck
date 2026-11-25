@@ -194,6 +194,11 @@ pub struct Engine<SM: StateMachine, S: Sealer> {
     pub(crate) pq: VecDeque<Pending>,
     pub(crate) durable: u64,
     pub(crate) last_pid: u64,
+    /// The latest write of a base or of log records: a local read is emitted only once it is
+    /// durable, because the runtime's reads do not wait for its writes (ENG-EFFECT-001).
+    pub(crate) read_gate: u64,
+    /// Local reads waiting for `read_gate`.
+    pub(crate) read_wait: Vec<Effect>,
 
     // ---- records (§7)
     pub(crate) meta: Meta,
@@ -280,6 +285,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             pq: VecDeque::new(),
             durable: 0,
             last_pid: 0,
+            read_gate: 0,
+            read_wait: Vec::new(),
             meta: Meta::default(),
             meta_dirty: false,
             meta_pid: 0,
@@ -418,6 +425,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     }
 
     pub(crate) fn fx(&mut self, e: Effect) {
+        if matches!(e, Effect::ReadBase { .. } | Effect::ReadLog { .. }) && !self.is_durable(self.read_gate) {
+            self.read_wait.push(e);
+            return;
+        }
         self.out.push(e);
     }
 
@@ -437,6 +448,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 PersistOp::RewriteOutbox(v) => self.outbox_ops = v.len(),
                 PersistOp::Notices(v) => self.notice_ops += v.len(),
                 PersistOp::RewriteNotices(v) => self.notice_ops = v.len(),
+                PersistOp::WriteBase(_) | PersistOp::AppendLog(_) => self.read_gate = id,
                 _ => {}
             }
         }
@@ -487,6 +499,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         if let Some(p) = self.pq.pop_front() {
             self.durable = id;
+            if !self.read_wait.is_empty() && self.is_durable(self.read_gate) {
+                let reads = std::mem::take(&mut self.read_wait);
+                self.out.extend(reads);
+            }
             if let Some(m) = p.marker {
                 self.pipe.marker = m;
             }

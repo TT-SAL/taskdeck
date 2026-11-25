@@ -15,11 +15,13 @@ fn genesis_start_builds_the_board() {
     assert_eq!(st.head.seq, 1);
     assert_eq!(n.e.view_version(), 1);
     assert_eq!(n.e.device_no(), Some(1));
-    // AppendLog[1], a checkpoint and a base at 1, in one write.
+    // The first Meta (with the relay target), AppendLog[1], a checkpoint and a base at 1, in one
+    // write: a crash cannot leave a checkpoint without a relay to go to.
     let first = &n.persists[0];
-    assert!(matches!(first[0], PersistOp::AppendLog(ref v) if v.len() == 1 && v[0].seq == 1));
-    assert!(matches!(first[1], PersistOp::WriteCheckpoint(ref c) if c.board_seq == 1));
-    assert!(matches!(first[2], PersistOp::WriteBase(ref c) if c.board_seq == 1));
+    assert!(matches!(first[0], PersistOp::WriteMeta(ref m) if !m.relay.host.is_empty()));
+    assert!(matches!(first[1], PersistOp::AppendLog(ref v) if v.len() == 1 && v[0].seq == 1));
+    assert!(matches!(first[2], PersistOp::WriteCheckpoint(ref c) if c.board_seq == 1));
+    assert!(matches!(first[3], PersistOp::WriteBase(ref c) if c.board_seq == 1));
     assert_eq!(n.store.meta.as_ref().map(|m| m.last_beat_ms), Some(0));
     assert!(n.fx.iter().any(|f| matches!(f, Effect::Connect { .. })));
     assert!(st.stops.is_empty() && st.halt.is_none());
@@ -258,9 +260,10 @@ fn two_devices_converge() {
     let mut hub = Hub::with_genesis(&a, &f1);
     let mut b = join(&mut hub, &mut a, 9, "Laptop");
     assert_eq!(b.e.device_no(), Some(2));
-    // The join wrote the checkpoint and the base in one write, then the truncation.
-    let i = b.persists.iter().position(|p| matches!(p[0], PersistOp::WriteCheckpoint(_))).unwrap();
-    assert!(matches!(b.persists[i][1], PersistOp::WriteBase(_)));
+    // The join wrote its first Meta, the checkpoint and the base in one write, then the truncation.
+    let i = b.persists.iter().position(|p| p.iter().any(|op| matches!(op, PersistOp::WriteCheckpoint(_)))).unwrap();
+    assert!(matches!(b.persists[i][0], PersistOp::WriteMeta(ref m) if !m.relay.host.is_empty()));
+    assert!(matches!(b.persists[i][2], PersistOp::WriteBase(_)));
     assert!(b.persists[i + 1..].iter().any(|p| matches!(p[0], PersistOp::TruncateLogBelow(_, Some(_)))));
     assert!(b.store.hashes.iter().all(|h| h.seq > b.store.log_floor - 1));
     // The new device shows a banner about its own addition; the author does not.
