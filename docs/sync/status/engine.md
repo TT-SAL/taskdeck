@@ -415,6 +415,17 @@ tail of a move), which are sent again; harmless.
   shared picture is uploaded again after a move.
 - Left open by `seal` (Q79): nothing binds the log between the bundle's head and `added_seq`; the
   remedy (the bundle carries the chain value at `added_seq`) is `engine`'s choice.
+- **Asked of the owner (2026-11-25), after D6 and the fixes of 1022, 1073, 2154:** (Q7) a device
+  the user retires (revoked with replace, re-paired) while it is cut off: on a fork's copy its
+  entries only the copy acknowledged are lost with no alarm (`gate` 128, 1019, 2041, 2111, 2124,
+  2155, 2240, 2245, 2277, 2295); shown a stale view, it never sees and never reports its own
+  entry's refusal (`gate` 104). Options: accept as a known limit (recommended), hold the export
+  until the device caught up, or export unconfirmed edits. (Q8) a rollback-dropped seq above the
+  reference log's final head whose lower dropped seqs other entries took (`gate` 2272): count it
+  as removed (recommended). Every named configuration passes 30 of 30 at base 3000 on a24bcb6.
+- To change by the lead in the next spec pull request (no owner question): a page from a relay
+  that an accepted `Fence` moved the board away from is not taken above that `Fence`, and the
+  relay's head counts as the `Fence`'s seq (§12.3, §28.3; found with `gate` 2154's test).
 
 ## What the next stages need to know
 
