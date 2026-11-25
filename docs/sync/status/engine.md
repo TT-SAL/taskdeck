@@ -19,9 +19,10 @@ in the order it happened; this file is the current truth and is rewritten, not a
   follow-up task D2 (brief `engine/briefs/d2-simulator-followup.md`).
 - The engine under the simulator: 100 quiet seeds pass. The writer reported engine defects with
   seeds (see the journal entry of 2026-11-25); each is the lead's to fix with a regression file.
-- Left to test (9 clauses): ENG-SEALER-003, ENG-SKIP-003, ENG-BOOT-005, ENG-DIVERGE-004, and
-  ENG-SIM-002 to 005 (cited by the simulator's tests once they are in). Then: the simulator in
-  `ci.sh`, `bash scripts/gate.sh engine`, the one round of checks, the exit pull request.
+- Every clause is cited (234 of 234), `unimplemented!()`: 0. What keeps the gate from passing is
+  the simulator: its `gate` seeds still fail (see the journal), so `cargo test -p taskdeck-sync`
+  is red and TT-SAL/taskdeck#30 cannot merge yet. Then: `bash scripts/gate.sh engine`, the one
+  round of checks, the exit pull request.
 - One question waits for the owner: the divergence rule (see "Open threads").
 
 1. Read this file, then the last 40 lines of `engine/journal.md`. Do not read `engine.md` (the
@@ -100,8 +101,8 @@ The tests' own relay (`Hub` in `kit_tests.rs`) answers only Connect, Hello, Read
 
 Numbers at the start (2026-11-24, day-planner `99b510e`): `spec-coverage.sh engine` 233 clauses
 owned, 2 cited; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
-Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **225 of 234
-cited, 9 uncovered, 0 bad** (on `park/engine`). 132 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
+Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **234 of 234
+cited, 0 uncovered, 0 bad**. 145 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
 B's seven families pass.
 
 ## Map of the code (`crates/taskdeck-sync/`)
