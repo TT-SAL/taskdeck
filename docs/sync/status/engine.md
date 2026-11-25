@@ -222,35 +222,25 @@ only commit in a pull request of its own; then work goes on.
 
 ## Spec changes to make
 
-- **The second spec change is written** and waits as `engine/spec-change-2.patch` (a `git diff` on
-  day-planner e38d44e; also the local branch `spec-change-2` in `/home/user/wt/spec`, 0a68151;
-  `spec-lint` ok, 965 clauses). Apply it with `git apply`. It holds:
-  - the fields of `FaultSet`, `OpSet`, `SimStats`; ENG-SESS-011 (a `Hello` per 600,000 ms on a push
-    session); §11.9 fenced row; §19.2 item 3; §28.4 after a `Start` (`engine/pair_interrupted`,
-    ENG-OPS-012, and ENG-OPS-013: a sealed `Register` record found after a `Start` ends with a
-    report); D11; D12 (a page's alarms are written before a checkpoint above it);
-  - §28.3: `UserAction::OldRelayGone`, the seed check before the fence, `first_seq` above a skipped
-    frame, `last_seq = f`, `engine/move_tail`, ENG-MOVE-010, ENG-MOVE-011, ENG-MOVE-003 reworded;
-    a move across a `Start` and a lost answer (what is read back, `OpRecord.mark`, a `seed-tail`
-    sent again, `relay/target` and `relay/exists` read as an open board, stage 7 written with the
-    report), ENG-MOVE-012;
-  - **ENG-MOVE-009 reworded** ("exactly once, and once more after each `Start` that finds the
-    report written and the move not ended"): a MUST's wording, so it waits for the owner's word
-    (question 5); without it a process that ends between the write of stage 7 and the
-    notification loses the move code (gate 1016);
-  - §17.1 step 2 (no second Skip of a target whose Skip is in the outbox); §17.3 and ENG-SKIP-005
-    (reports from before a Skip are not compared by a device that knows the Skip); §16.4 (a
-    halted device sends the frames sealed before the halt ahead of its Skip).
-- It goes in a pull request of its own. The stage has one branch, so: park the engine's work on a
-  local branch, make the branch day-planner plus that one commit, pull request, CI, merge, rebase
-  the engine's work back, push (as done for TT-SAL/taskdeck#29). **Do it once, together with what
-  the owner decides about §31.7** (questions 2 to 4 below), not twice.
-- After it merges: the tests cite the new clauses (`a_duty_that_waits...` ENG-SESS-011;
-  `a_move_starts_its_seed...` ENG-MOVE-010; `a_move_whose_relay_is_away...` ENG-MOVE-011;
-  `a_pairing_cut_off_by_a_restart...` ENG-OPS-012; `a_seed_tail_nobody_answered_is_sent_again`
-  and `a_move_whose_last_tail_answer_was_lost...` ENG-MOVE-012;
-  `reports_from_before_a_skip_are_not_compared...` ENG-SKIP-005;
-  `a_pairing_found_after_a_start_still_ends_with_a_report` ENG-OPS-013).
+- **Two spec changes are written, and go in two pull requests** (plan §3.3: a gate that is wrong
+  is changed in a pull request of its own, with the reason):
+  - **the behaviour change**: `engine/spec-change-2.patch`, a `git diff` on day-planner e38d44e;
+    also the local branch `spec-change-2` in `/home/user/wt/spec`, 6dea15c; spec-lint ok, 967
+    clauses. It holds everything listed below plus the owner's decisions 1, the sign-in rule of
+    2, the extra of 3 and 5: §22.2 (the beat under the divergence stop, ENG-DIVERGE-002 reworded,
+    ENG-DIVERGE-005), §29.1 item 2, §11.9 and ENG-SESS-007 (a board never moved; not while
+    following), §17.1 and ENG-SKIP-006 (a Skip whose target was skipped first ends `Ok`), §28.8;
+  - **the gate change**: `engine/spec-gate.patch`, a `git diff` on top of the first; local branch
+    `spec-gate`, 6313575: §31.7 ("removed relay state", invariants 2, 3 and 4 as the owner
+    decided), SYNC_PLAN.md §6.5 gate item 2, a CHANGES.md row.
+  - With both texts, `spec-coverage engine` on the engine branch gives 243 of 243 owned clauses
+    cited, 0 bad (the lead's run); on the branch alone it reports the new ids as bad citations.
+- The stage has one branch, so: close TT-SAL/taskdeck#30 (its content stays on the engine branch),
+  park the engine's work on a local branch, make the branch day-planner plus the behaviour
+  commit, pull request, CI, merge; then day-planner plus the gate commit, pull request, CI, merge;
+  then rebase the engine's work onto day-planner, push, and open the engine's pull request again
+  (as done for TT-SAL/taskdeck#29).
+- The tests already cite the new clauses (commit e643665).
 - Not yet in any spec text: the simulator's rulings on ticks (delivered at the time asked), the
   runtime renewing a stale token itself, how a poison entry is produced; the 14 questions of
   `tests/vectors/README.md` and those of `api-fake-toy.md`, `api-model-relay.md`,
@@ -274,6 +264,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_1623f41a-09b | D4 simulator tests, first attempt | `engine/briefs/d4-sim-tests.md` | lost: the container restarted nine minutes into the writer (54 turns); its 16 uncommitted lines were discarded | nothing kept | not reported (about 55,000 output tokens) |
 | wf_a03961da-e96 | D4 (second attempt) simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | done, applied to the branch as a patch from `wt/d4` 32a1637 (the lead ran its gate) | `src/sim/script.rs` (hand-built logs for the check), `src/sim/world.rs`, `api-simulator.md`; reported: gate 116 (a pairing refused after a restart dropped without `PairFailed`), 1021 (the crash-halt question again) | 471,311 |
 | wf_fc162934-033 | D5 three check faults; every violation printed | `engine/briefs/d5-check-faults.md` | done, applied to the branch as a patch from `wt/d5` a868350 (the lead ran its gate) | `src/sim/{check,script,world}.rs`, `src/sim/world/rt.rs`, `tests/simulator.rs` (`TD_SIM_ALL`), `api-simulator.md`; one low: the crash-cut exemption for a pairing drop covers the drop's own call, not the next | 327,558 |
+| (id in the journal) | D6 the simulator's checks carry the owner's decisions (§31.7 invariants 2, 3, 4) | `engine/briefs/d6-decided-invariants.md` | running since 2026-11-25 in `/home/user/wt/d6` (branch `wt/d6`) | | |
 
 ## Open threads
 
