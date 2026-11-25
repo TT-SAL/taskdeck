@@ -11,17 +11,27 @@ in the order it happened; this file is the current truth and is rewritten, not a
 - Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the first spec
   change). Open, draft: TT-SAL/taskdeck#30 (everything since); the branch
   `claude/cool-franklin-c6e6um` is pushed.
-- Tests on the branch: 178 unit tests, `regressions` (10 files), `relay_conformance` (16),
+- Tests on the branch: 179 unit tests, `regressions` (10 files), `relay_conformance` (16),
   clippy, the wasm check pass; every clause is cited (234 of 234); `unimplemented!()`: 0. Task D4
   rebuilt the simulator's own tests on hand-built logs (`src/sim/script.rs`), so none depends on
   what the engine does at a seed. The `simulator` target (50 `gate` seeds) fails, so CI of
   TT-SAL/taskdeck#30 is red.
-- The simulator after the fixes (the lead's runs): `gate` at base 100, 50 seeds: 26 fail, every one
-  only with "lost to a rolled-back relay state" (question 2). `gate` at base 1000, 100 seeds: 59
-  fail: 57 only for that; 1018 a pairing's `DeviceAdded` refused after `register` (question 3);
-  1098 a crash halt on a Skip's target (question 4). **Nothing else fails: what is left is the
-  owner's questions.** Every named configuration except `fork` (17 without rollback and fork, and
-  `rollback`) passes 60 of 60 seeds at base 1000 on this engine (1,080 runs, the lead's run).
+- The simulator after the fixes (the lead's runs, every violation of every failing seed read,
+  not only the five the gate prints): `gate` at base 100, 50 seeds: 26 fail, 25 only with "lost to
+  a rolled-back relay state" (question 2), and 134 (a simulator fault, below). `gate` at base
+  1000, 100 seeds: 59 fail: 56 only for question 2; 1018 a pairing's `DeviceAdded` refused after
+  `register` (question 3); 1021 and 1098 a crash halt on a Skip's target (question 4). **Nothing
+  else fails: what is left is the owner's questions and one simulator fault.** Every named
+  configuration except `fork` (17 without rollback and fork, and `rollback`) passes 60 of 60 seeds
+  at base 1000 (1,080 runs, the lead's run on 84948a8).
+- **For the next simulator task (an agent's, together with what the owner decides):** `gate` seed
+  134, invariant 4 "dev 4: applied seq 198 after a relay head 196 below its log head 197 without
+  an alarm", reported at trace line 10817, which is before dev 4's first line (11094): the line
+  is wrong, and the page is a duplicate (fault `duplication` at 11107) of the answer to the read
+  at 11106, delivered again at 11143 after dev 4's log head had reached 197. The engine ignores an
+  answer to a request already answered (ENG-EFFECT-002), so no alarm is owed: the check must not
+  count such a page. Also open from D4: no test fails when a Skip replay overwrites the oracle's
+  first state at a `B`.
 - Fixed in the engine on 2026-11-25 after D3 (each with a test that failed before; journal):
   a `SeedTail` nobody answered is sent again (regression file 1099); a move reads back after a
   `Start` what its durable records say (door, generation, Fence seq) and goes on from its stage;
@@ -30,7 +40,9 @@ in the order it happened; this file is the current truth and is rewritten, not a
   (`OpRecord.mark`, a new field); stage 7 is written with the report, and a `Start` that finds
   stage 7 emits the code and the report again; the move's snapshot is sealed again after a `Start`
   in stage 6; reports from before a Skip are not compared by a device that already knows the
-  Skip; a second Skip of a target whose Skip is still in this device's outbox is refused.
+  Skip; a second Skip of a target whose Skip is still in this device's outbox is refused; a pairing's
+  sealed `Register` record found after a `Start` ends with a report however it ends (D4's
+  finding, `gate` 116: refused after the restart, it was dropped without `PairFailed`).
 - Next: task D4; the owner's answers; then the spec change (one pull request: the patch plus the
   additions listed under "Spec changes to make" plus what the owner decides), the simulator's
   checks adapted by an agent, task E (scenario and trace vectors), `bash scripts/gate.sh engine`,
@@ -206,11 +218,12 @@ only commit in a pull request of its own; then work goes on.
 ## Spec changes to make
 
 - **The second spec change is written** and waits as `engine/spec-change-2.patch` (a `git diff` on
-  day-planner e38d44e; also the local branch `spec-change-2` in `/home/user/wt/spec`, 609e1c7;
-  `spec-lint` ok, 964 clauses). Apply it with `git apply`. It holds:
+  day-planner e38d44e; also the local branch `spec-change-2` in `/home/user/wt/spec`, 52fa10c;
+  `spec-lint` ok, 965 clauses). Apply it with `git apply`. It holds:
   - the fields of `FaultSet`, `OpSet`, `SimStats`; ENG-SESS-011 (a `Hello` per 600,000 ms on a push
     session); §11.9 fenced row; §19.2 item 3; §28.4 after a `Start` (`engine/pair_interrupted`,
-    ENG-OPS-012); D11;
+    ENG-OPS-012, and ENG-OPS-013: a sealed `Register` record found after a `Start` ends with a
+    report); D11;
   - §28.3: `UserAction::OldRelayGone`, the seed check before the fence, `first_seq` above a skipped
     frame, `last_seq = f`, `engine/move_tail`, ENG-MOVE-010, ENG-MOVE-011, ENG-MOVE-003 reworded;
     a move across a `Start` and a lost answer (what is read back, `OpRecord.mark`, a `seed-tail`
@@ -230,7 +243,8 @@ only commit in a pull request of its own; then work goes on.
   `a_move_starts_its_seed...` ENG-MOVE-010; `a_move_whose_relay_is_away...` ENG-MOVE-011;
   `a_pairing_cut_off_by_a_restart...` ENG-OPS-012; `a_seed_tail_nobody_answered_is_sent_again`
   and `a_move_whose_last_tail_answer_was_lost...` ENG-MOVE-012;
-  `reports_from_before_a_skip_are_not_compared...` ENG-SKIP-005).
+  `reports_from_before_a_skip_are_not_compared...` ENG-SKIP-005;
+  `a_pairing_found_after_a_start_still_ends_with_a_report` ENG-OPS-013).
 - Not yet in any spec text: the simulator's rulings on ticks (delivered at the time asked), the
   runtime renewing a stale token itself, how a poison entry is produced; the 14 questions of
   `tests/vectors/README.md` and those of `api-fake-toy.md`, `api-model-relay.md`,
