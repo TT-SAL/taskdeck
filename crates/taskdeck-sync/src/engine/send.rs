@@ -576,11 +576,21 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 }
                 (_, code) => {
                     let code = intern(code);
-                    if let Some(i) = self.rec_index(&id) {
+                    let gone = self.rec_index(&id).map(|i| {
                         let rec = self.outbox.remove(i);
                         self.persist(vec![PersistOp::Outbox(vec![OutboxOp::Drop(rec.r.entry_id)])]);
+                        (rec.r.via, rec.r.op)
+                    });
+                    let live = self.opx.pair.as_ref().is_some_and(|p| p.entry == Some(id));
+                    match gone {
+                        Some((Via::Register { .. }, ticket)) if !live => {
+                            // A pairing from before a `Start` (§28.4): reported failed, in the call
+                            // that drops its record, under the ticket the record kept.
+                            self.opx.orphans.retain(|x| *x != id);
+                            self.notify(crate::Notification::PairFailed { ticket: ticket.unwrap_or(0), code });
+                        }
+                        _ => self.carried_done(&id, Err(code)),
                     }
-                    self.carried_done(&id, Err(code));
                 }
             },
         }

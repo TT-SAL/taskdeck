@@ -1727,3 +1727,67 @@ fn a_move_report_written_but_never_shown_is_made_again_after_a_start() {
     assert_eq!(move_reports(&a), vec![(f, true)]);
     assert!(a.has_note(|x| matches!(x, crate::Notification::MoveCode { .. })));
 }
+
+// spec: ENG-OPS-004 ENG-OPS-006
+#[test]
+fn a_pairing_found_after_a_start_still_ends_with_a_report() {
+    let (mut net, mut a) = board(501);
+    let mut b = pair(&mut net, &mut a, 502, "Laptop", 1);
+    let d = pair(&mut net, &mut a, 503, "Tablet", 2);
+    net.settle(&mut [&mut a, &mut b]);
+    let host = super::kit_tests::relay().host;
+    // A pairing whose DeviceAdded is sealed and on its way when the process dies.
+    let begin = |net: &mut super::rkit_tests::Net, a: &mut Node, ticket: u64, device: crate::NewDevice, reseed: u64| {
+        a.feed(Event::PairRegister { ticket, device });
+        let (req, op) = take_blob(a);
+        let cred = net.cred(&host, &a.dev());
+        let result = net.relay().blob(a.wall, &cred, &op).result;
+        a.feed(Event::BlobResult { req, result });
+        let (_, register) = take_admin(a);
+        assert!(matches!(register, AdminRequest::Register { .. }));
+        a.restart(reseed);
+    };
+    let failed = |n: &Node, t: u64| {
+        n.notes.iter().find_map(|x| match x {
+            crate::Notification::PairFailed { ticket, code } if *ticket == t => Some(*code),
+            _ => None,
+        })
+    };
+
+    // The relay refuses the register that is sent again: dropped, and reported in the same call.
+    begin(&mut net, &mut a, 10, new_device(510, "One"), 504);
+    serve_until_admin(&mut net, &mut a, "admin:register");
+    let (req, _) = take_admin(&mut a);
+    a.feed(Event::AdminResult { req, result: Err(refusal(403, "relay/forbidden")) });
+    assert_eq!(failed(&a, 10), Some("relay/forbidden"));
+    assert!(a.e.outbox.is_empty());
+    net.settle(&mut [&mut a, &mut b]);
+
+    // The relay stores it and the entry is accepted: the device is a member, and the pairing
+    // nobody waits for any more is reported interrupted.
+    let two = new_device(511, "Two");
+    begin(&mut net, &mut a, 11, two.clone(), 505);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(failed(&a, 11), Some("engine/pair_interrupted"));
+    assert!(a.e.status().devices.iter().any(|r| r.dev == two.dev && r.status == DeviceStatus::Current));
+
+    // The epoch moves before the relay stores it: the entry is refused in the log, the device
+    // is revoked at the relay, then the failure is reported (§28.4 step 4).
+    let three = new_device(512, "Three");
+    begin(&mut net, &mut a, 12, three.clone(), 506);
+    serve_until_admin(&mut net, &mut a, "admin:register");
+    let (req, register) = take_admin(&mut a);
+    b.feed(Event::Op { ticket: 21, op: Operation::Revoke { dev: d.dev(), replace: false } });
+    net.settle(&mut [&mut b]);
+    assert_eq!(op_result(&b, 21), Some(Ok(())));
+    let cred = net.cred(&host, &a.dev());
+    let reply = net.relay().admin(a.wall, &cred, &a.dev(), &register);
+    assert!(reply.result.is_ok());
+    a.feed(Event::AdminResult { req, result: reply.result });
+    let calls = net.calls.len();
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(failed(&a, 12), Some("seal/stale_epoch"));
+    assert!(net.calls[calls..].iter().any(|c| c.0 == a.dev() && c.1 == "admin:revoke"));
+    assert!(a.e.status().devices.iter().all(|r| r.dev != three.dev || r.status != DeviceStatus::Current));
+    assert!(a.e.outbox.is_empty());
+}

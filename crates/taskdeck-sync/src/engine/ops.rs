@@ -42,6 +42,9 @@ pub(crate) struct Pair {
 pub(crate) struct Ops {
     pub mem: Vec<OpMem>,
     pub pair: Option<Pair>,
+    /// The `Register` records found at the `Start` that no relay had acknowledged: pairings whose
+    /// machine ended with the process (§28.4). Each still ends with one `PairFailed`.
+    pub orphans: Vec<[u8; 16]>,
     pub purge_day: i64,
     pub purge_busy: bool,
     pub mv: super::movement::MoveState,
@@ -806,6 +809,25 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.opx.pair.as_ref().is_some_and(|p| p.ticket == ticket) {
             return self.pair_entry_done(code);
         }
+        if let Via::Register { dev, .. } = r.via {
+            // A pairing from before a `Start`: nobody waits for it, and it is still reported.
+            let open = self.opx.orphans.contains(&r.entry_id);
+            self.opx.orphans.retain(|x| *x != r.entry_id);
+            match code {
+                Some(c) => {
+                    // ENG-OPS-004: the relay drops the row and token `register` made, then the failure.
+                    if self.can_call() {
+                        let req = self.id();
+                        self.fx(Effect::Admin { req, op: AdminRequest::Revoke { dev } });
+                    }
+                    self.notify(Notification::PairFailed { ticket, code: c });
+                }
+                // Accepted, and never acknowledged to the machine that asked for it.
+                None if open => self.notify(Notification::PairFailed { ticket, code: "engine/pair_interrupted" }),
+                None => {}
+            }
+            return;
+        }
         let Some(op) = self.op_rec(ticket).map(|o| o.op.clone()) else { return };
         match (&op, code) {
             (Operation::Revoke { dev, .. }, None) => self.revoke_finish(ticket, *dev),
@@ -1019,6 +1041,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 // A pairing this process does not know (a Start in between): the record goes
                 // unsent, and the pairing is reported failed under the ticket the record kept.
                 let ticket = self.outbox[i].r.op.unwrap_or(0);
+                self.opx.orphans.retain(|x| *x != id);
                 self.outbox.remove(i);
                 self.persist(vec![PersistOp::Outbox(vec![OutboxOp::Drop(id)])]);
                 self.notify(Notification::PairFailed { ticket, code: "engine/pair_interrupted" });

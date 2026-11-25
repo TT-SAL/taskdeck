@@ -154,6 +154,13 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
         }
         self.outbox.sort_by_key(|r| r.r.order);
+        // §28.4: a pairing does not go on after a `Start`; its record still ends with a report.
+        self.opx.orphans = self
+            .outbox
+            .iter()
+            .filter(|x| matches!(x.r.via, crate::Via::Register { .. }) && x.r.ack.is_none())
+            .map(|x| x.r.entry_id)
+            .collect();
 
         // The notice and refusal records with their dismissed flags (§7.7).
         self.notice_ops = notices.len();
