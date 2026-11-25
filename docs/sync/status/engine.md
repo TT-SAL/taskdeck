@@ -211,40 +211,31 @@ only commit in a pull request of its own; then work goes on.
 ## Spec changes to make
 
 - **The second spec change is written** and waits as `engine/spec-change-2.patch` (a `git diff` on
-  day-planner e38d44e; also the local branch `spec-change-2` in `/home/user/wt/spec`, 9c1fcf9;
-  `spec-lint` ok, 962 clauses). Apply it with `git apply`. It holds: the fields of `FaultSet`,
-  `OpSet`, `SimStats`; ENG-SESS-011 (a `Hello` per 600,000 ms on a push session); §11.9 fenced row;
-  §28.3 (`UserAction::OldRelayGone`, the seed check before the fence, `first_seq` above a skipped
-  frame, `last_seq = f`, `engine/move_tail`, ENG-MOVE-010, ENG-MOVE-011, ENG-MOVE-003 reworded);
-  §19.2 item 3; §28.4 after a `Start` (`engine/pair_interrupted`, ENG-OPS-012); D11.
+  day-planner e38d44e; also the local branch `spec-change-2` in `/home/user/wt/spec`, 609e1c7;
+  `spec-lint` ok, 964 clauses). Apply it with `git apply`. It holds:
+  - the fields of `FaultSet`, `OpSet`, `SimStats`; ENG-SESS-011 (a `Hello` per 600,000 ms on a push
+    session); §11.9 fenced row; §19.2 item 3; §28.4 after a `Start` (`engine/pair_interrupted`,
+    ENG-OPS-012); D11;
+  - §28.3: `UserAction::OldRelayGone`, the seed check before the fence, `first_seq` above a skipped
+    frame, `last_seq = f`, `engine/move_tail`, ENG-MOVE-010, ENG-MOVE-011, ENG-MOVE-003 reworded;
+    a move across a `Start` and a lost answer (what is read back, `OpRecord.mark`, a `seed-tail`
+    sent again, `relay/target` and `relay/exists` read as an open board, stage 7 written with the
+    report), ENG-MOVE-012;
+  - **ENG-MOVE-009 reworded** ("exactly once, and once more after each `Start` that finds the
+    report written and the move not ended"): a MUST's wording, so it waits for the owner's word
+    (question 5); without it a process that ends between the write of stage 7 and the
+    notification loses the move code (gate 1016);
+  - §17.1 step 2 (no second Skip of a target whose Skip is in the outbox); §17.3 and ENG-SKIP-005
+    (reports from before a Skip are not compared by a device that knows the Skip).
 - It goes in a pull request of its own. The stage has one branch, so: park the engine's work on a
   local branch, make the branch day-planner plus that one commit, pull request, CI, merge, rebase
   the engine's work back, push (as done for TT-SAL/taskdeck#29). **Do it once, together with what
-  the owner decides about §31.7** (questions 2 and 3 below), not twice.
-- **Additions since the patch was written (not in the patch yet; write them into the same spec
-  change):**
-  - §28 `OpRecord` gains `mark: u64` ("for a `Move` from stage 5 on, the seed's `last_seq`;
-    otherwise 0"), also in the §37 skeleton.
-  - §28.3, what a `Start` does to a move: its door, generation and Fence seq are read back from
-    the Fence record in the outbox, from the Fence in `M_K`, or from `meta.relay` (stage 6 on);
-    when none names the door, `Door` is asked again with the stage kept. Stage 4: a `SeedTail`
-    without an answer is sent again; `409 relay/target` for the repeated last request means the
-    tail is stored and the board open. After a `Start` in stage 4 the device seeds again as in
-    stage 3; `409 relay/exists` for a seed after an earlier one means the earlier tail was whole
-    and the board is open: on to stage 5. Stage 6 after a `Start`: sealed again unless a `snap`
-    record of this device at `S` exists. Stage 7 is persisted with the report.
-  - **ENG-MOVE-009 says "exactly one" `MoveReport`.** A process that dies between the write of
-    stage 7 and the notification would lose the move code for good (gate 1016), so the engine
-    emits the code and the report again when a `Start` finds stage 7. The clause needs "exactly
-    one per `Start`": a MUST's wording, so the owner confirms it (question 5).
-  - §17.1 step 2: also "not the target of a Skip record in this device's outbox".
-  - §17.3: a report for a seq at or above a Skip's target that arrives in an entry below the Skip
-    is neither registered nor compared once the Skip is committed to `M_K` (new clause
-    ENG-SKIP-005); it covers the device that never applied the target (step 1), which
-    ENG-SKIP-003 ("after a Skip replay") does not.
+  the owner decides about §31.7** (questions 2 to 4 below), not twice.
 - After it merges: the tests cite the new clauses (`a_duty_that_waits...` ENG-SESS-011;
   `a_move_starts_its_seed...` ENG-MOVE-010; `a_move_whose_relay_is_away...` ENG-MOVE-011;
-  `a_pairing_cut_off_by_a_restart...` ENG-OPS-012).
+  `a_pairing_cut_off_by_a_restart...` ENG-OPS-012; `a_seed_tail_nobody_answered_is_sent_again`
+  and `a_move_whose_last_tail_answer_was_lost...` ENG-MOVE-012;
+  `reports_from_before_a_skip_are_not_compared...` ENG-SKIP-005).
 - Not yet in any spec text: the simulator's rulings on ticks (delivered at the time asked), the
   runtime renewing a stale token itself, how a poison entry is produced; the 14 questions of
   `tests/vectors/README.md` and those of `api-fake-toy.md`, `api-model-relay.md`,
@@ -265,7 +256,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_70e5dcc6-438 | D simulator | `engine/briefs/d-simulator.md` | written and checked; the fix pass was cut off by the usage limit; applied to the branch as a patch | `src/sim.rs`, `src/sim/{config,store,trace,check,world}.rs`, `world/{rt,load,end}.rs`, `tests/simulator.rs`, `tests/regressions.rs`, `engine/api-simulator.md`; three helpers in the fake; quiet: 1,000 seeds pass (40 s release, 228 s debug); gate: 154 of 200 seeds failed against the engine of 7a764c7; 7 engine defects reported with seeds; 10 spec questions; the checker found 4 or more high defects in the invariants | 893,600 |
 | wf_fbed9968-73a | D2 simulator follow-up (the check's findings, the lead's rulings, what still fails) | `engine/briefs/d2-simulator-followup.md` | done, applied to the branch as a patch (the lead ran its gate) | invariants read strictly, `sim/counted.rs`, regression files 1, 102, 111, 116, 200, a report of what still fails by cause (the journal, 2026-11-25) | 977,242 |
 | wf_0eb7fcfb-f49 | D3 what still fails under `gate`, seed by seed (diagnosis; simulator faults fixed, engine faults reported) | `engine/briefs/d3-gate-seeds.md` | done, applied to the branch as a patch (the lead ran its gate) | `src/sim/{check,world}.rs`, `src/sim/world/{rt,load,end}.rs`, `api-simulator.md`; gate base 1000: 61 of 100 fail, base 100: 27 of 50 | 827,210 |
-| (id in the journal) | D4 simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | running since 2026-11-25 in `/home/user/wt/d4` (branch `wt/d4`) | | |
+| wf_1623f41a-09b | D4 simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | running since 2026-11-25 in `/home/user/wt/d4` (branch `wt/d4`, from c6354ae); task id w30693e7r | | |
 
 ## Open threads
 
