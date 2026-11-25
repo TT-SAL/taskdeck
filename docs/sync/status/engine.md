@@ -198,19 +198,26 @@ Agents' files: `src/fake.rs`, `src/fake/**`, `src/toy.rs`, `src/sim/splitmix.rs`
 Order (L4, L5): #28 merges; the branch restarts from day-planner; the spec change is the branch's
 only commit in a pull request of its own; then work goes on.
 
-## Spec changes to make (one pull request, after #28)
+## Spec changes to make
 
-1. `Loaded.chains` carries τ: `Vec<(u64, Hash32, i64)>` (the code is ahead of §37).
-2. `Sealer::membership_zero(&self) -> Self::Membership` (the code is ahead of §37).
-3. `classify` may be called again for a seq and answers the same.
-4. A `Hello` on a push session when a duty waits only for a fresh head (§29.1's 600,000 ms).
-5. Fields of `FaultSet`, `OpSet`, `SimStats` (proposed by task D's writer).
-6. Code `engine/restore_target` for a refused `RestoreTo` (§33 has none).
-7. Wording: `registry.restored` ("persisted in the next WriteMeta" but Registry lives in the
-   checkpoint); `meta.prev_session`; §6.1 history against the rows of `export_identity`;
-   SEAL-FRAME-005 against re-sealing a freed counter; ENG-REF-001 for an own beat, snap or ctl.
-8. The 14 questions of `tests/vectors/README.md` and those of `api-fake-toy.md`.
-Still to decide: E2 (may need a change under `relay/`, a pull request of its own), T21, Q79.
+- **The second spec change is written** and waits as `engine/spec-change-2.patch` (a `git diff` on
+  day-planner e38d44e; also the local branch `spec-change-2` in `/home/user/wt/spec`, 9c1fcf9;
+  `spec-lint` ok, 962 clauses). Apply it with `git apply`. It holds: the fields of `FaultSet`,
+  `OpSet`, `SimStats`; ENG-SESS-011 (a `Hello` per 600,000 ms on a push session); §11.9 fenced row;
+  §28.3 (`UserAction::OldRelayGone`, the seed check before the fence, `first_seq` above a skipped
+  frame, `last_seq = f`, `engine/move_tail`, ENG-MOVE-010, ENG-MOVE-011, ENG-MOVE-003 reworded);
+  §19.2 item 3; §28.4 after a `Start` (`engine/pair_interrupted`, ENG-OPS-012); D11.
+- It goes in a pull request of its own. The stage has one branch, so: park the engine's work on a
+  local branch, make the branch day-planner plus that one commit, pull request, CI, merge, rebase
+  the engine's work back, push (as done for TT-SAL/taskdeck#29). **Do it once, together with what
+  the owner decides about §31.7** (questions 2 and 3 below), not twice.
+- After it merges: the tests cite the new clauses (`a_duty_that_waits...` ENG-SESS-011;
+  `a_move_starts_its_seed...` ENG-MOVE-010; `a_move_whose_relay_is_away...` ENG-MOVE-011;
+  `a_pairing_cut_off_by_a_restart...` ENG-OPS-012).
+- Not yet in any spec text: the simulator's rulings on ticks (delivered at the time asked), the
+  runtime renewing a stale token itself, how a poison entry is produced; the 14 questions of
+  `tests/vectors/README.md` and those of `api-fake-toy.md`, `api-model-relay.md`,
+  `api-simulator.md`. Still to decide: E2, T21, Q79.
 
 ## Workflows (agents)
 
@@ -225,9 +232,42 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_6790fa34-60e | C model relay, first attempt | `engine/briefs/c-model-relay.md` | lost: the owner's usage limit cut the writer off | nothing kept beyond commit 678fdc2 on `wt/c` | 265,340 |
 | wf_e736e661-ee0 | C model relay, second attempt | `engine/briefs/c-model-relay.md` | done, merged (the lead ran its gate: 16 conformance tests pass) | `src/sim/relay.rs` + `relay/{seq,admin,blobs,socket,util}.rs`, `tests/relay_conformance.rs` (11 families of `relay/test/vectors/`, about 575 steps; 7 families left out with reasons in the file header), `engine/api-model-relay.md`; check: no findings; 8 questions on relay.md; asks the fake for an accessor of the genesis `rsign_pk` and `salt` | 532,591 |
 | wf_70e5dcc6-438 | D simulator | `engine/briefs/d-simulator.md` | written and checked; the fix pass was cut off by the usage limit; applied to the branch as a patch | `src/sim.rs`, `src/sim/{config,store,trace,check,world}.rs`, `world/{rt,load,end}.rs`, `tests/simulator.rs`, `tests/regressions.rs`, `engine/api-simulator.md`; three helpers in the fake; quiet: 1,000 seeds pass (40 s release, 228 s debug); gate: 154 of 200 seeds failed against the engine of 7a764c7; 7 engine defects reported with seeds; 10 spec questions; the checker found 4 or more high defects in the invariants | 893,600 |
-| wf_fbed9968-73a | D2 simulator follow-up (the check's findings, the lead's rulings, what still fails) | `engine/briefs/d2-simulator-followup.md` | running since 2026-11-25 01:50 UTC in `/home/user/wt/d2` (branch `wt/d2`); task id wuy58twth | | |
+| wf_fbed9968-73a | D2 simulator follow-up (the check's findings, the lead's rulings, what still fails) | `engine/briefs/d2-simulator-followup.md` | done, applied to the branch as a patch (the lead ran its gate) | invariants read strictly, `sim/counted.rs`, regression files 1, 102, 111, 116, 200, a report of what still fails by cause (the journal, 2026-11-25) | 977,242 |
 
 ## Open threads
+
+### Decisions the owner must make (they change §31.7 or a MUST; the gate cannot pass without 2 and 3)
+
+1. **Divergence (§22.2, ENG-DIVERGE-001/002)**: as written the stop can halt the healthy majority
+   (details in the next paragraph). Proposal: a stopped device still sends its beat, and the stop
+   also ends at the seq where it began once its group is strictly larger.
+2. **What the gate promises when the relay itself misbehaves (rollback, fork).** §31.7 invariant 2
+   says every acknowledged entry is in the final log, invariant 3 that every enqueued edit is
+   accepted, held by a stopped device or refused. A relay that rolls back, or serves a forked copy,
+   acknowledges entries that the reference log never holds; the devices that hold them raise
+   evidence and stop, but the entries are gone (and a record a device already applied on the lost
+   branch is no longer in its outbox). 26 of 50 `gate` seeds at base 100 fail only for this (fork:
+   22, rollback: 4; seed 127 also invariant 1 for a device on the fork). The same holds for a
+   device paired through the forked copy (the real relay never heard of it: `401` for good), and
+   for a restore tail that holds a frame the relay made up (`relay.md` §12.9 refuses it, so the
+   rolled-back entries above it cannot be restored). SYNC_PLAN.md §6.5 words the gate as "tampering
+   alarms without a state change", which the lead reads as: for these faults the promise is the
+   alarm. Proposal: invariants 2 and 3 except an entry whose only acknowledgements came from a
+   relay state that a rollback or fork removed from the reference branch, when a device holding it
+   raised §21.1 evidence; invariants 1 and 6 already except stopped devices, and would also except
+   a device that joined on a removed branch.
+3. **Invariant 2 against a final refusal the spec itself defines.** A pairing's `DeviceAdded` that
+   `register` acknowledged and a racing rotation made stale is refused and not sealed again
+   (§28.4 step 4: revoke, `PairFailed`, pair again). Invariant 2 as written demands `Accept` for
+   every acknowledged entry; invariant 3 already allows "finally refused with a refusal record".
+   Seed 108 of `gate`. Proposal: invariant 2 allows what invariant 3 allows, and names §28.4
+   step 4.
+4. For information, no decision needed now: a board whose log holds a frame the relay made up can
+   move only once a snapshot lies above that frame (the engine now makes one due at the next
+   aligned seq), and a frame injected in the seconds between the move's check and its Fence still
+   strands the board read-only on the old relay. Curing either fully needs `relay.md` §12.7/§12.9
+   to accept such a frame in a tail, which weakens a relay MUST.
+
 
 **For the owner (a MUST would change, so the lead does not decide it): the divergence stop can
 halt the healthy majority.** §22.2 and ENG-DIVERGE-001 make a device stop when, among the reports
