@@ -1871,3 +1871,39 @@ fn the_alarm_of_a_made_up_frame_is_durable_before_a_checkpoint_above_it() {
     assert!(b.e.meta.alarms.iter().any(|al| al.kind == crate::AlarmKind::SkippedFrame && al.seq == Some(x)));
     assert_eq!(b.board_bytes(), a.board_bytes());
 }
+
+// spec: ENG-RECON-007 ENG-HALT-006
+#[test]
+fn a_halted_device_fills_the_counter_gap_below_its_skip() {
+    let (mut net, mut a) = board(531);
+    let mut b = pair(&mut net, &mut a, 532, "Laptop", 1);
+    net.settle(&mut [&mut a, &mut b]);
+    // B seals an edit; its append is lost on the way, and nothing answers it yet.
+    b.set(1, 1, 5);
+    let i = b.fx.iter().position(|f| matches!(f, Effect::Append { .. })).expect("the append");
+    b.fx.remove(i);
+    // A's poison entry lands; B reads it and crash-halts with its sealed edit still unsent.
+    super::flow_tests::poison(&mut a);
+    net.settle(&mut [&mut a]);
+    let p = net.log_len();
+    net.settle(&mut [&mut b]);
+    assert_eq!(b.e.status().halt.map(|h| h.seq), Some(p));
+    // The session drops: the append is known lost, and B connects again, halted.
+    b.feed(Event::Disconnected { unreachable: false, paused_until_ms: None });
+    net.settle(&mut [&mut b]);
+    assert_eq!(net.log_len(), p, "a halted device sends no edit by itself");
+    // B skips the poison. The Skip's frame has the counter after the edit's, so the relay
+    // answers `gap` until the edit is there: B sends the edit again, then the Skip.
+    let calls = net.calls.len();
+    b.feed(Event::Op { ticket: 7, op: Operation::Skip { seq: p } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&b, 7), Some(Ok(())));
+    let appends = net.calls[calls..].iter().filter(|c| c.0 == b.dev() && c.1 == "append").count();
+    assert!(appends <= 4, "{appends} appends");
+    for n in [&a, &b] {
+        assert!(n.e.status().halt.is_none());
+        assert_eq!(n.e.status().board_seq, net.log_len());
+    }
+    assert_eq!(a.board_bytes(), b.board_bytes());
+    assert_eq!(a.e.confirmed().0.keys[&1].0, 5);
+}

@@ -82,6 +82,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             return; // ENG-HALT-006: only a crash-halted device sends, and only its Skip
         }
         let is_skip = |b: &Body| matches!(b, Body::Ctl(CtlIntent::Skip { .. }));
+        // A Skip's frame carries the next counter, and the relay stores no frame above a gap
+        // (§11.4): the frames sealed before the halt that the relay does not hold go first,
+        // identical. Nothing but the Skip is sealed (ENG-HALT-006).
+        let skip_waits =
+            halted && self.outbox.iter().any(|x| is_skip(&x.r.body) && x.r.ack.is_none() && x.r.seen.is_none());
         // Step 1.
         let relay_ctr = self.send.relay_ctr;
         let r: Vec<usize> = (0..self.outbox.len())
@@ -89,7 +94,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 let x = &self.outbox[i].r;
                 x.ack.is_none()
                     && x.seen.is_none()
-                    && (!halted || is_skip(&x.body))
+                    && (!halted || is_skip(&x.body) || (skip_waits && x.frame.is_some()))
                     && !(x.frame.is_some() && x.ctr.is_some_and(|c| relay_ctr.is_some_and(|rc| c <= rc)))
             })
             .collect();

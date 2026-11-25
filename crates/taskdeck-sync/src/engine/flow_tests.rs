@@ -11,7 +11,7 @@ use crate::{
 
 /// A poison entry: the device seals the toy's `Panic` without the trial apply of
 /// §9.1 (a build with a fault would; an honest engine refuses it at `Enqueue`).
-fn poison(n: &mut Node) {
+pub(crate) fn poison(n: &mut Node) {
     let payload = ToyMachine::new(false).encode(&ToyCommand::Panic);
     n.e.enqueue_own(Kind::Cmd, Body::Cmd(payload), Via::Append, None).expect("an entry id");
     let out = std::mem::take(&mut n.e.out);
