@@ -54,7 +54,12 @@ in the order it happened; this file is the current truth and is rewritten, not a
   goes on right after a control entry at the relay's head sends that entry's repairs first,
   since this device cannot know whether they succeeded (a lost answer, a restart; the relay
   answers a repeated repair as done) (`gate` 1022: the repair of a restored `DeviceAdded` was
-  lost with the connection, and every later request was refused `relay/unknown_author`).
+  lost with the connection, and every later request was refused `relay/unknown_author`); a
+  pairing whose `DeviceAdded` is refused in the log is reported failed in the call that sends
+  the revoke, not after the revoke's answer (`gate` 1073: the process stopped in between, the
+  record had already left the outbox, and the pairing was never reported; ENG-OPS-004 asks
+  only that the revoke is sent first, and `a_pairing_that_cannot_stand_is_dropped_or_undone`
+  now checks that).
 - Next: task D6 (the simulator's checks carry the decided invariants) integrated and the gate run
   at 1,000 seeds; the engine's pull request green and merged "(stage in progress, not the exit)";
   task E (scenario and trace vectors); `bash scripts/gate.sh engine`; the one round of checks;

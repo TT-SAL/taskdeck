@@ -288,14 +288,67 @@ fn a_pairing_that_cannot_stand_is_dropped_or_undone() {
     a.feed(Event::AdminResult { req, result: reply.result });
     // The relay stored it: the pairing is reported registered (§28.4 step 3) ...
     assert!(matches!(pair_result(&a, 12), Some(Ok(_))));
-    // ... and then the entry is refused in A's log (step 4): revoke at the relay first, then the failure.
+    // ... and then the entry is refused in A's log (step 4): the revoke goes to the relay, and the
+    // failure is reported in the same call after it (not after its answer: a process that stops in
+    // between would never report the pairing, `gate` 1073).
     let failed = |n: &Node| {
         n.notes.iter().find_map(|x| match x {
             crate::Notification::PairFailed { ticket: 12, code } => Some(*code),
             _ => None,
         })
     };
+    let revoke = |f: &Effect| matches!(f, Effect::Admin { op: AdminRequest::Revoke { dev }, .. } if *dev == three.dev);
     let mut revoked_first = false;
+    for _ in 0..200 {
+        if a.fx.is_empty() {
+            a.tick(30_000);
+        }
+        let Some(fx) = a.fx.pop_front() else { continue };
+        assert!(!revoke(&fx) || failed(&a).is_some(), "the failure in the call that sends the revoke");
+        net.answer(&mut a, fx);
+        if failed(&a).is_some() {
+            revoked_first = a.fx.iter().any(revoke);
+            break;
+        }
+    }
+    assert!(revoked_first);
+    assert_eq!(failed(&a), Some("seal/stale_epoch"));
+    assert!(a.e.status().devices.iter().all(|r| r.dev != three.dev || r.status != DeviceStatus::Current));
+}
+
+// spec: ENG-OPS-004
+#[test]
+fn a_pairing_refused_in_the_log_is_reported_though_the_device_stops_before_the_revoke_is_answered() {
+    // `gate` 1073: the `DeviceAdded` was refused (a rotation raced it), the device sent the
+    // revoke and stopped before its answer; the record had left the outbox, and after the restart
+    // the pairing was never reported.
+    let (mut net, mut a) = board(291);
+    let mut b = pair(&mut net, &mut a, 292, "Laptop", 1);
+    let d = pair(&mut net, &mut a, 293, "Tablet", 2);
+    net.settle(&mut [&mut a, &mut b]);
+    let host = super::kit_tests::relay().host;
+    let cred = net.cred(&host, &a.dev());
+    let three = new_device(294, "Three");
+    a.feed(Event::PairRegister { ticket: 12, device: three.clone() });
+    let (req, op) = take_blob(&mut a);
+    let result = net.relay().blob(a.wall, &cred, &op).result;
+    a.feed(Event::BlobResult { req, result });
+    let (req, register) = take_admin(&mut a);
+    b.feed(Event::Op { ticket: 21, op: Operation::Revoke { dev: d.dev(), replace: false } });
+    net.settle(&mut [&mut b]);
+    assert_eq!(op_result(&b, 21), Some(Ok(())));
+    let reply = net.relay().admin(a.wall, &cred, &a.dev(), &register);
+    assert!(reply.result.is_ok());
+    a.feed(Event::AdminResult { req, result: reply.result });
+    assert!(matches!(pair_result(&a, 12), Some(Ok(_))));
+    // A reads the page that refuses its entry and sends the revoke; it stops before the answer.
+    let failed = |n: &Node| {
+        n.notes.iter().find_map(|x| match x {
+            crate::Notification::PairFailed { ticket: 12, code } => Some(*code),
+            _ => None,
+        })
+    };
+    let mut sent = false;
     for _ in 0..200 {
         if a.fx.is_empty() {
             a.tick(30_000);
@@ -303,17 +356,16 @@ fn a_pairing_that_cannot_stand_is_dropped_or_undone() {
         let Some(fx) = a.fx.pop_front() else { continue };
         if let Effect::Admin { op: AdminRequest::Revoke { dev }, .. } = &fx {
             assert_eq!(*dev, three.dev);
-            assert_eq!(failed(&a), None);
-            revoked_first = true;
-        }
-        net.answer(&mut a, fx);
-        if failed(&a).is_some() {
+            sent = true;
             break;
         }
+        net.answer(&mut a, fx);
     }
-    assert!(revoked_first);
+    assert!(sent);
+    a.restart(295);
+    net.settle(&mut [&mut a, &mut b]);
     assert_eq!(failed(&a), Some("seal/stale_epoch"));
-    assert!(a.e.status().devices.iter().all(|r| r.dev != three.dev || r.status != DeviceStatus::Current));
+    assert_eq!(a.e.status().queued, 0);
 }
 
 fn members(n: &Node) -> Vec<(u16, DeviceStatus, String)> {

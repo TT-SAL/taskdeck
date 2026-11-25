@@ -902,7 +902,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         match w {
             Want::OpAdmin(t) => self.op_admin(t, result),
             Want::PurgeDuty => self.purge_result(result),
-            Want::PairRevoke => self.pair_revoked(),
             _ => {}
         }
     }
@@ -940,10 +939,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             Want::PairUpload => {
                 self.pair_fail("engine/not_eligible");
                 "blob"
-            }
-            Want::PairRevoke => {
-                self.pair_revoked();
-                "admin/revoke"
             }
             _ => "local",
         }
@@ -1103,15 +1098,17 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         match code {
             None => self.opx.pair = None,
             Some(c) => {
-                // `revoke` for the new device first, so that the relay drops its row and token.
+                // `revoke` for the new device first, so that the relay drops its row and token
+                // (an answer `relay/target` is already done); the failure follows in this call,
+                // before the record's `Drop` is written, so that no stop of the process between
+                // the two leaves a pairing that is never reported.
                 p.fail = Some(c);
                 let dev = p.device.dev;
                 if self.can_call() {
-                    let req = self.want(Want::PairRevoke);
+                    let req = self.id();
                     self.fx(Effect::Admin { req, op: AdminRequest::Revoke { dev } });
-                } else {
-                    self.pair_revoked();
                 }
+                self.pair_revoked();
             }
         }
     }

@@ -133,7 +133,6 @@ pub(crate) enum Want {
     FenceFrame(u64),
     PurgeDuty,
     PairUpload,
-    PairRevoke,
     /// Restore tail (repair.rs): the frames from the log, the request, a repair call.
     RestoreChunk,
     RestoreCall,
