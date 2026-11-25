@@ -27,6 +27,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use sha2::Digest;
+
 use super::relay::LogRow;
 use super::store::Store;
 use super::world::Sel;
@@ -34,7 +36,8 @@ use crate::fake::{FakeMembership, FakeSealer};
 use crate::toy::{ToyCommand, ToyMachine, ToyState};
 use crate::{
     AdminOk, AlarmKind, Bootstrap, Class, ClassifyInput, Config, Ctx, CtlItem, Dev, DeviceStatus, Effect, Engine, Event, Hash32, Head, Input,
-    Kind, LocalReadResult, MembershipView, Page, PageEntry, RelayRefusal, RelayTarget, Sealer, StateMachine, Welcome,
+    Kind, LocalReadResult, MembershipView, Notification, Page, PageEntry, RelayRefusal, RelayTarget, Sealer, StateMachine, UserAction,
+    Welcome,
 };
 
 /// `BranchLog::why` of a rollback's lost tail and of a fork's copy.
@@ -83,6 +86,22 @@ pub(crate) struct Ledger {
     pub rules: u32,
     /// An accepted `ResetTo` item (§28.1).
     pub reset: bool,
+    /// The host a `Fence` item of the entry names (§28.3).
+    pub fence_host: Option<String>,
+}
+
+/// A frame a relay made up and showed (the `injected frame` fault of §31.6).
+#[derive(Clone, Debug)]
+pub(crate) struct Injected {
+    pub seq: u64,
+    /// The relay's chain at `seq` with it.
+    pub chain: Hash32,
+    /// The trace line of the fault.
+    pub line: u64,
+    /// Its hash.
+    pub frame: Hash32,
+    /// The host of the relay that showed it.
+    pub host: String,
 }
 
 fn class_name(c: &Class) -> &'static str {
@@ -189,6 +208,7 @@ fn ledger_with(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u
             based_on: 0,
             rules: view.rules,
             reset: false,
+            fence_host: None,
         };
         let Ok(rc) = s.classify(&input) else {
             out.push(l);
@@ -218,6 +238,7 @@ fn ledger_with(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u
                     CtlItem::Skip { seq, .. } => l.skip_targets.push(*seq),
                     CtlItem::DeviceAdded { dev, .. } => l.added.push(*dev),
                     CtlItem::ResetTo { .. } => l.reset = true,
+                    CtlItem::Fence { host, .. } => l.fence_host = Some(host.clone()),
                     _ => {}
                 }
             }
@@ -257,6 +278,9 @@ pub(crate) struct OracleRun {
     pub boards: BTreeMap<u64, ToyState>,
     /// The seqs of the crash halts it had (an entry whose `apply` panics, §15, §16.2).
     pub halts: BTreeSet<u64>,
+    /// The seq of each accepted `Fence` whose move code its user typed, in
+    /// order, with the result the engine gave (`MoveCodeResult`, ENG-MOVE-008).
+    pub moves: Vec<(u64, Option<Result<(), &'static str>>)>,
 }
 
 /// Keeps the first value seen at `b` (§31.7: the oracle's state at each `B` is
@@ -286,9 +310,30 @@ pub(crate) fn oracle_full(rows: &[LogRow], template: Option<&FakeSealer>, roots:
     oracle_run(rows, template, &pick_roots(rows, template, roots), board, relay)
 }
 
-/// Replays `rows` from seq 1 with a fresh engine and no faults (§31.7).
+/// The move code the oracle's user types (§31.7, task D7): when the engine
+/// has accepted a `Fence` that awaits one (its status shows `move_pending`,
+/// `Status::moving`) and the user has not typed one for that `Fence` yet,
+/// `Sealer::move_code(f, H(Fence frame))` of the `Fence` at `f` in `rows`, as
+/// a device's user types it (§28.3 "On every other device" item 2). The
+/// relay the oracle reads is fenced at `f` until then (§12.2, ENG-RECV-007).
+fn pending_move(eng: &Engine<ToyMachine, FakeSealer>, rows: &[LogRow], typed: &[(u64, Option<Result<(), &'static str>>)]) -> Option<(u64, String)> {
+    let f = eng.status().moving?.fence_seq;
+    if typed.iter().any(|(s, _)| *s == f) {
+        return None;
+    }
+    let row = rows.binary_search_by_key(&f, |r| r.seq).ok().map(|i| &rows[i])?;
+    let fh: Hash32 = sha2::Sha256::digest(&row.frame).into();
+    Some((f, eng.sealer().move_code(f, &fh)))
+}
+
+/// Replays `rows` from seq 1 with a fresh engine and no faults (§31.7). Its
+/// user types the move code of each accepted `Fence` that awaits one
+/// (`pending_move`), and the `Connect` that follows is answered as the first
+/// one: the session goes on with the same rows, so that the oracle follows
+/// every move in the log (task D7).
 fn oracle_run(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8; 32])], board: &[u8], relay: &RelayTarget) -> OracleRun {
-    let mut run = OracleRun { states: OracleStates::new(), revoked: BTreeSet::new(), boards: BTreeMap::new(), halts: BTreeSet::new() };
+    let mut run =
+        OracleRun { states: OracleStates::new(), revoked: BTreeSet::new(), boards: BTreeMap::new(), halts: BTreeSet::new(), moves: Vec::new() };
     let Some(first) = rows.first() else { return run };
     let Some(sealer) = template.and_then(|t| t.observer(0x0a1c_1e00, roots)) else { return run };
     let identity = sealer.export_identity().to_vec();
@@ -377,6 +422,11 @@ fn oracle_run(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8
                     Effect::Append { req, .. } => q.push_back(Event::RelayRefused { req: Some(req), refusal: refused() }),
                     Effect::Admin { req, .. } => q.push_back(Event::AdminResult { req, result: Err::<AdminOk, _>(refused()) }),
                     Effect::Blob { req, .. } => q.push_back(Event::BlobResult { req, result: Err(refused()) }),
+                    Effect::Notify(Notification::MoveCodeResult { result }) => {
+                        if let Some(m) = run.moves.last_mut() {
+                            m.1 = Some(result);
+                        }
+                    }
                     Effect::Disconnect | Effect::ScheduleTick { .. } | Effect::Notify(_) => {}
                 }
             }
@@ -388,6 +438,13 @@ fn oracle_run(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8
                 keep_first(&mut run.states, head.seq, || (head.chain, bh, sh));
                 keep_first(&mut run.boards, head.seq, || st.clone());
             }
+        }
+        // §28.3 "On every other device" item 2: the user types the move code
+        // of an accepted `Fence` that awaits one, before the next entry.
+        if let Some((f, text)) = pending_move(&eng, rows, &run.moves) {
+            run.moves.push((f, None));
+            q.push_back(Event::User(UserAction::MoveCode { text }));
+            continue;
         }
         if served >= rows.len() {
             break;
@@ -732,7 +789,7 @@ pub(crate) struct Facts<'a> {
     /// The operation each entry's outbox record belongs to (`OutboxRecord.op`): (ident, ticket).
     pub entry_ops: &'a BTreeMap<[u8; 16], (usize, u64)>,
     pub cancelled: &'a BTreeSet<[u8; 16]>,
-    pub injected: &'a [(u64, Hash32, u64)],
+    pub injected: &'a [Injected],
     /// The frames the relay made up (`injected_frame`, §31.6), by hash.
     pub made_up: &'a BTreeMap<Hash32, MadeUp>,
     /// Every restore tail a device sent.
@@ -749,6 +806,15 @@ pub(crate) struct IdentFacts {
     pub dev: Dev,
     pub desc: String,
     pub retired: bool,
+    /// The trace line at which the user retired it, re-pairing its machine as
+    /// a new device after `ReplaceReady` (§24.5, §28.5 step 3; task D7).
+    pub retired_at: Option<u64>,
+    /// The highest trace line at which a relay state of the reference log (a
+    /// relay, not a fork's copy) produced a welcome, page or answer that
+    /// reached it; 0 for none.
+    pub met_reference: u64,
+    /// The highest seq its log reached (an `AppendLog` or a checkpoint).
+    pub log_reach: u64,
     /// Live, joined, current, unhalted, with no stop: invariant 1 applies.
     pub converges: bool,
     pub live: bool,
@@ -766,6 +832,9 @@ pub(crate) struct IdentFacts {
     /// since it was last loaded from bytes (`counted`), oldest first.
     pub applied: Vec<u64>,
     pub alarms: Vec<(u64, AlarmKind, Option<u64>, u64)>,
+    /// The frames a relay made up that its engine took into its log (an
+    /// `AppendLog` that carried one): (seq, frame hash, trace line).
+    pub took: Vec<(u64, Hash32, u64)>,
     /// Its durable alarms of `is_evidence`'s kinds.
     pub evidence: Vec<EvidenceAlarm>,
     pub outbox: Vec<([u8; 16], u64)>,
@@ -871,8 +940,18 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
     // it, for a made-up frame above it). A seq a request that carried it was
     // refused for a made-up frame over could be brought back by no other
     // request either (every request from a head below it carries both).
+    // Task D7 (§31.7 as amended): a dropped seq the reference log holds none
+    // at, above its final head, is also removed when a lower seq that the
+    // same rollback dropped holds a different entry in the reference log (no
+    // restore tail can bring back a frame whose chain no longer leads to
+    // it), and no restore tail could have brought it back before that
+    // (the general rule: such a seq is not removed). Nothing wider: one with
+    // no such lower seq is held to the rules above.
     let mut logs: Vec<&[LogRow]> = vec![reference];
     logs.extend(f.branches.iter().map(|b| b.rows.as_slice()));
+    let overwritten_below = |b: &'_ BranchLog, q: u64| -> bool {
+        q > head.seq && b.rows.iter().any(|r| r.seq >= b.removed_from && r.seq < q && ref_frame.get(&r.seq).is_some_and(|h| *h != r.hash))
+    };
     let seq_removed = |b: &'_ BranchLog, a: &AckFact| -> (bool, Option<&RestoreTry>) {
         let after: Vec<&RestoreTry> = f.restore_tails.iter().chain(f.owed).filter(|x| x.sel == Sel::Main(0) && x.line > b.line).collect();
         // A refusal for a frame the relay made up on `b`'s tail, at its seq.
@@ -884,7 +963,10 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
             .find(|x| (x.answer == Answer::Stored || !blocked) && could_restore(x, b, a.seq, &a.frame, f.made_up, &logs));
         let removed = match ref_frame.get(&a.seq) {
             Some(h) => *h != a.frame && could.is_none(),
-            None => could.is_none() && after.iter().any(|x| made_up_on_b(x).is_some_and(|p| p <= a.seq || x.carries(a.seq, &a.frame))),
+            None => {
+                could.is_none()
+                    && (after.iter().any(|x| made_up_on_b(x).is_some_and(|p| p <= a.seq || x.carries(a.seq, &a.frame))) || overwritten_below(b, a.seq))
+            }
         };
         (removed, could)
     };
@@ -939,7 +1021,7 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
                         (Some(_), Some(x)) => format!("another entry took {}, but {}", a.seq, x.could_text(a.seq)),
                         (None, Some(x)) => format!("the reference log holds nothing at {}, and {}", a.seq, x.could_text(a.seq)),
                         (_, None) => format!(
-                            "the reference log holds nothing at {}, and no restore tail that would have brought it back was refused for a frame the relay made up",
+                            "the reference log holds nothing at {}, nor another entry at a lower seq the rollback dropped, and no restore tail that would have brought it back was refused for a frame the relay made up",
                             a.seq
                         ),
                     };
@@ -963,19 +1045,23 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
     // or emitted, after the relay sequenced it, the `PairFailed` of the
     // pairing whose `DeviceAdded` it is (§28.4 step 4) or the `OpDone` of the
     // operation its outbox record belonged to (§17.1).
+    // The devices an entry is acknowledged to: its device (invariant 2).
+    let devs_of = |eid: &[u8; 16]| -> BTreeSet<usize> {
+        acks_of(eid).map(|a| a.ident).chain(f.acked.iter().filter(|x| x.0 == *eid).map(|x| x.1)).collect()
+    };
     let reported = |eid: &[u8; 16], q: u64, delivered: u64| -> bool {
         let given = acks_of(eid).filter(|a| a.seq == q).map(|a| a.line).min().unwrap_or(delivered);
-        let devs: BTreeSet<usize> = acks_of(eid).map(|a| a.ident).chain(f.acked.iter().filter(|x| x.0 == *eid).map(|x| x.1)).collect();
-        devs.iter().filter_map(|d| f.idents.get(*d).map(|x| (*d, x))).any(|(d, x)| {
+        devs_of(eid).iter().filter_map(|d| f.idents.get(*d).map(|x| (*d, x))).any(|(d, x)| {
             x.refusal_seqs.contains(&q)
                 || f.registered.get(eid).is_some_and(|pd| x.pair_failed.iter().any(|(p, l)| p == pd && *l > given))
                 || f.entry_ops.get(eid).is_some_and(|(od, t)| *od == d && x.op_done.iter().any(|(tt, l)| tt == t && *l > given))
         })
     };
 
-    // 2. Acknowledged entries. One of the three outcomes of §31.7, read
+    // 2. Acknowledged entries. One of the four outcomes of §31.7, read
     // strictly: accepted exactly once; held once, finally refused, and
-    // reported by its device; never lost silently.
+    // reported by its device; never lost silently; its device retired while
+    // cut off.
     let mut by_id: BTreeMap<[u8; 16], Vec<&Ledger>> = BTreeMap::new();
     for l in &led {
         if let Some(e) = l.entry_id {
@@ -983,6 +1069,55 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
         }
     }
     let accepted_once = |e: &[u8; 16]| by_id.get(e).map_or(0, |ls| ls.iter().filter(|l| l.accept).count());
+    // "Its device was retired while cut off" (§31.7 invariant 2, last
+    // outcome; the owner's decision of 2026-11-25, task D7): every device of
+    // `devs` (the entry's device) was retired, its machine re-paired as a new
+    // device after a `ReplaceReady` that named it (§24.5, §28.5 step 3), and
+    // before that it had not met what became of the entry: every
+    // acknowledgement of it came from a removed relay state (at least one, as
+    // for "never lost silently") and the device met no relay state of the
+    // reference log after the fault that removed it (the earliest such
+    // fault: no welcome, page or answer that a relay, not a fork's copy, gave
+    // from that fault on, `IdentFacts::met_reference`); or the reference log
+    // holds it once, finally refused, at a seq the device's log never reached
+    // (`IdentFacts::log_reach`). Nothing wider: a device not retired so, one
+    // that met the reference relay after the fault, one whose log reached the
+    // refusal's seq is held to the other outcomes. `Err` says why not, for a
+    // retired device (empty for one that was not retired at all).
+    let retired_cut_off = |eid: &[u8; 16], devs: &BTreeSet<usize>| -> Result<(), String> {
+        let xs: Vec<(usize, &IdentFacts)> = devs.iter().filter_map(|d| f.idents.get(*d).map(|x| (*d, x))).collect();
+        if xs.is_empty() || xs.len() != devs.len() || xs.iter().any(|(_, x)| !x.retired) {
+            return Err(String::new());
+        }
+        if let Some((d, _)) = xs.iter().find(|(_, x)| x.retired_at.is_none()) {
+            return Err(format!("; its device (dev {d}) was retired, but not after a ReplaceReady that named it"));
+        }
+        let rows: &[&Ledger] = by_id.get(eid).map_or(&[], Vec::as_slice);
+        match rows {
+            [l] if l.class == "refuse" => match xs.iter().find(|(_, x)| x.log_reach >= l.seq) {
+                None => Ok(()),
+                Some((d, x)) => Err(format!("; its device (dev {d}) was retired, but its log reached {} (the refusal is at {})", x.log_reach, l.seq)),
+            },
+            [] => {
+                let mut first: Option<u64> = None;
+                for a in acks_of(eid) {
+                    let Fate::Removed(b) = fate(a) else {
+                        return Err(format!("; its device was retired, but the relay acknowledged it at {} (trace line {}) from a relay state no fault removed", a.seq, a.line));
+                    };
+                    first = Some(first.map_or(b.line, |l| l.min(b.line)));
+                }
+                let Some(first) = first else { return Err("; its device was retired, but no relay acknowledged it".to_owned()) };
+                match xs.iter().find(|(_, x)| x.met_reference >= first) {
+                    None => Ok(()),
+                    Some((d, x)) => Err(format!(
+                        "; its device (dev {d}) was retired, but met a relay state of the reference log (trace line {}) after the fault at trace line {first}",
+                        x.met_reference
+                    )),
+                }
+            }
+            _ => Err(String::new()),
+        }
+    };
     let mut seen_ack = BTreeSet::new();
     for (eid, dev, line, _) in f.acked {
         if !seen_ack.insert(*eid) {
@@ -999,6 +1134,7 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
             if reported(eid, rows[0].seq, *line) {
                 continue;
             }
+            let Err(retired) = retired_cut_off(eid, &devs_of(eid)) else { continue };
             let what = if f.registered.contains_key(eid) {
                 "a pairing's DeviceAdded refused after register (§28.4 step 4), "
             } else if f.entry_ops.contains_key(eid) {
@@ -1007,7 +1143,7 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
                 ""
             };
             v.push((2, *line, format!(
-                "{base}: {what}finally refused at {}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it",
+                "{base}: {what}finally refused at {}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it{retired}",
                 rows[0].seq
             )));
             continue;
@@ -1015,7 +1151,10 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
         if n == 0 && rows.is_empty() {
             match quiet(eid) {
                 Ok(()) => {}
-                Err(why) => v.push((2, *line, format!("{base}: {why}"))),
+                Err(why) => {
+                    let Err(retired) = retired_cut_off(eid, &devs_of(eid)) else { continue };
+                    v.push((2, *line, format!("{base}: {why}{retired}")));
+                }
             }
             continue;
         }
@@ -1085,7 +1224,11 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
         // Never lost silently, as invariant 2 states it (task D6).
         let quiet = if n == 0 { quiet(eid) } else { Err(String::new()) };
         let Err(why) = quiet else { continue };
+        // Its device retired while cut off, as invariant 2 states it (task D7).
+        let retired = if n == 0 { retired_cut_off(eid, &BTreeSet::from([*dev])) } else { Err(String::new()) };
+        let Err(retired) = retired else { continue };
         let mut why = if why.is_empty() { String::new() } else { format!(": {why}") };
+        why.push_str(&retired);
         // Task D3: a record its device applied on a relay state that a
         // rollback or a fork later removed from the reference branch is
         // named as such, with the fault's trace line.
@@ -1179,21 +1322,53 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
             v.push((4, *line, format!("dev {i}: {what}, and no alarm was raised")));
         }
     }
-    for (s, chain, line) in f.injected {
+    // Injected frames (§31.7 invariant 4 as amended, task D7): every one
+    // raised `SkippedFrame`, except one above a `Fence` that the relay
+    // showing it sequenced (an accepted `Fence`, below the frame in that
+    // relay's log, that moves the board to another relay: the relay it
+    // fenced, §12.2), which no device takes (§12.3 step 5, ENG-RECV-007). Such
+    // a frame is checked instead to be in no device's log: a device that took
+    // it broke ENG-RECV-007. Its log is the one that holds it at its seq with
+    // its chain (the reference log; the old relay's after a move; a
+    // rollback's lost tail).
+    let mut inj_ledgers: BTreeMap<usize, Vec<Ledger>> = BTreeMap::new();
+    for inj in f.injected {
+        let (s, line) = (inj.seq, inj.line);
+        let fenced_at = {
+            let on: Option<&[Ledger]> = if ref_chain.get(&s) == Some(&inj.chain) {
+                Some(led.as_slice())
+            } else {
+                f.branches
+                    .iter()
+                    .position(|b| chain_in(&b.rows, s) == Some(inj.chain))
+                    .map(|k| inj_ledgers.entry(k).or_insert_with(|| ledger(&f.branches[k].rows, f.template, &f.roots)).as_slice())
+            };
+            on.and_then(|l| l.iter().find(|l| l.accept && l.seq < s && l.fence_host.as_ref().is_some_and(|h| *h != inj.host)).map(|l| l.seq))
+        };
+        if let Some(fs) = fenced_at {
+            for (i, x) in f.idents.iter().enumerate() {
+                if let Some((_, _, at)) = x.took.iter().find(|t| t.1 == inj.frame) {
+                    v.push((4, *at, format!(
+                        "dev {i}: took the injected frame at {s} into its log, above the Fence at {fs} that fenced the relay showing it (ENG-RECV-007)"
+                    )));
+                }
+            }
+            continue;
+        }
         // Only a frame the reference log still holds (a rollback may have removed it).
-        if ref_chain.get(s) != Some(chain) {
+        if ref_chain.get(&s) != Some(&inj.chain) {
             continue;
         }
         for (i, x) in f.idents.iter().enumerate() {
             // A device that confirmed a seq at or past the frame on the
             // reference branch has received it (one on another branch there
             // never saw it).
-            let passed = x.samples.iter().any(|(b, c, _, _)| b >= s && ref_chain.get(b) == Some(c));
-            if x.joined_at >= *s || !passed || x.retired {
+            let passed = x.samples.iter().any(|(b, c, _, _)| *b >= s && ref_chain.get(b) == Some(c));
+            if x.joined_at >= s || !passed || x.retired {
                 continue;
             }
-            if !x.alarms.iter().any(|a| a.1 == AlarmKind::SkippedFrame && a.2 == Some(*s)) {
-                v.push((4, *line, format!("dev {i}: the injected frame at {s} raised no SkippedFrame")));
+            if !x.alarms.iter().any(|a| a.1 == AlarmKind::SkippedFrame && a.2 == Some(s)) {
+                v.push((4, line, format!("dev {i}: the injected frame at {s} raised no SkippedFrame")));
             }
         }
     }

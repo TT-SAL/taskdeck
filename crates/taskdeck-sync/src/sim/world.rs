@@ -115,7 +115,8 @@ enum Down {
 #[derive(Clone, Debug)]
 enum Ev {
     ToRelay { id: usize, proc: u32, conn: u64, sel: Sel, call: Call },
-    Down { id: usize, proc: u32, conn: u64, msg: Down },
+    /// `from`: the relay state that produced the message, and the trace line then.
+    Down { id: usize, proc: u32, conn: u64, msg: Down, from: (Sel, u64) },
     PersistDone { id: usize, proc: u32, crash: Option<CrashAt> },
     Local { id: usize, proc: u32, ev: LocalAsk },
     Tick { id: usize, proc: u32, tgen: u64 },
@@ -341,6 +342,24 @@ pub(crate) struct Ident {
     last_pending: BTreeSet<[u8; 16]>,
     unsent: Option<(Vec<Vec<u8>>, u16)>,
     repair_started: bool,
+    /// A device's `ReplaceReady` named this identity (§28.5 step 3) before
+    /// its machine was re-paired (task D7).
+    replace_ready: bool,
+    /// The trace line at which the simulated user retired this identity,
+    /// re-pairing its machine as a new device after `ReplaceReady` (§24.5);
+    /// none when it was not retired, or retired otherwise (task D7).
+    pub(crate) retired_at: Option<u64>,
+    /// The highest trace line at which a relay state of the reference log (a
+    /// relay, not a fork's copy) produced a message that then reached this
+    /// identity's engine (a welcome, page or answer: any event but the
+    /// runtime's own `Disconnected`); 0 for none (task D7).
+    pub(crate) met_reference: u64,
+    /// The highest seq its log reached: of an `AppendLog` or a checkpoint it
+    /// emitted (task D7).
+    pub(crate) log_reach: u64,
+    /// The frames a relay made up that its engine took into its log: (seq,
+    /// frame hash, trace line of the `Persist`) (task D7).
+    pub(crate) took: Vec<(u64, Hash32, u64)>,
     pub(crate) last_status: Option<crate::Status>,
 }
 
@@ -437,7 +456,7 @@ pub(crate) struct World<'a> {
     /// epoch with two roots: `check::pick_roots`).
     pub(crate) roots: BTreeSet<(u32, [u8; 32])>,
     /// Injected frames: (seq, chain there, line).
-    pub(crate) injected_seqs: Vec<(u64, Hash32, u64)>,
+    pub(crate) injected_seqs: Vec<check::Injected>,
     move_code: Option<String>,
     moved: bool,
     seed: u64,
@@ -932,6 +951,11 @@ impl<'a> World<'a> {
             last_pending: pending,
             unsent: None,
             repair_started: false,
+            replace_ready: false,
+            retired_at: None,
+            met_reference: 0,
+            log_reach: 0,
+            took: Vec::new(),
             last_status: None,
         });
         self.machines[machine].ident = id;
@@ -1122,8 +1146,8 @@ mod tests {
         assert_eq!(tampered(|w| w.idents[0].expect_alarm = Some((5, "a test".to_owned(), 3))), vec![4]);
         assert_eq!(
             tampered(|w| {
-                let c = w.archive[9].chain;
-                w.injected_seqs.push((10, c, 5));
+                let (chain, frame) = (w.archive[9].chain, w.archive[9].hash);
+                w.injected_seqs.push(check::Injected { seq: 10, chain, line: 5, frame, host: HOSTS[0].to_owned() });
             }),
             vec![4]
         );
@@ -1733,11 +1757,26 @@ mod tests {
         let mut w = quiet_world(&cfg, 3_600_000);
         assert!(w.made_up.is_empty());
         w.fault(FaultEv::Inject(1));
-        let (seq, _, _) = *w.injected_seqs.last().expect("an injected frame");
-        assert_eq!(w.made_up, BTreeMap::from([(w.archive[seq as usize - 1].hash, MadeUp::OtherBoard)]));
+        let x = w.injected_seqs.last().expect("an injected frame").clone();
+        assert_eq!(w.made_up, BTreeMap::from([(w.archive[x.seq as usize - 1].hash, MadeUp::OtherBoard)]));
+        // Task D7: with its hash, its chain there and the host of the relay that showed it.
+        assert_eq!((x.frame, x.chain, x.host.as_str()), (w.archive[x.seq as usize - 1].hash, w.archive[x.seq as usize - 1].chain, HOSTS[0]));
         w.fault(FaultEv::Inject(0));
-        let (seq, _, _) = *w.injected_seqs.last().expect("an injected frame");
+        let seq = w.injected_seqs.last().expect("an injected frame").seq;
         assert_eq!(w.made_up.get(&w.archive[seq as usize - 1].hash), Some(&MadeUp::BadSignature));
+        // Task D7: an `AppendLog` that carries a made-up frame is recorded as
+        // taken into that identity's log, with its trace line; one that
+        // carries a device's frame is not.
+        let row = |q: u64| {
+            let r = &w.archive[q as usize - 1];
+            crate::LogRecord { seq: r.seq, chain: r.chain, tau: 0, frame: r.frame.clone() }
+        };
+        let (made, honest) = (row(x.seq), row(x.seq - 1));
+        let before = w.idents[1].took.clone();
+        w.note_persist(1, &[PersistOp::AppendLog(vec![honest, made])], 97);
+        let mut want = before;
+        want.push((x.seq, x.frame, 97));
+        assert_eq!(w.idents[1].took, want);
     }
 
     // Task D6: what reports a final refusal, as a run records it: every
@@ -1757,6 +1796,56 @@ mod tests {
         r.op = Some(33);
         w.note_persist(1, &[PersistOp::Outbox(vec![OutboxOp::Put(r)])], 9);
         assert_eq!(w.entry_ops.get(&[0x91; 16]), Some(&(1, 33)));
+    }
+
+    // Task D7: what invariant 2's last outcome ("its device was retired while
+    // cut off") reads, as a run records it. An event a relay produced reaches
+    // an engine: its identity met a relay state of the reference log at the
+    // trace line the relay produced it (`met_reference`); not for a fork's
+    // copy, nor for the runtime's own `Disconnected`. How far its log reached
+    // (`log_reach`): the highest seq of an `AppendLog` or checkpoint it
+    // emitted. A retirement after a `ReplaceReady` that named the identity
+    // (`retired_at`, §24.5, §28.5 step 3), and none for a re-pair otherwise.
+    #[test]
+    fn what_a_retirement_while_cut_off_reads_is_recorded() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, u64::MAX);
+        for (i, x) in w.idents.iter().enumerate() {
+            assert!(x.met_reference > 0 && x.met_reference <= w.trace.lines(), "dev {i} met relay 0 ({})", x.met_reference);
+            assert!(x.log_reach > 0 && x.log_reach >= x.store.head().map_or(0, |h| h.0), "dev {i}'s log reached its head ({})", x.log_reach);
+            assert_eq!(x.retired_at, None, "dev {i}");
+        }
+        let p = w.idents[1].proc.as_ref().expect("running");
+        let (proc, conn) = (p.no, p.conn_no);
+        let (seq, chain) = w.idents[1].store.head().expect("a log");
+        let page = Page { head: Head { seq, chain }, relay_now: 0, floor: 0, purge_floor: 0, more: false, truncated: false, fenced: false, entries: vec![] };
+        let before = w.idents[1].met_reference;
+        let late = w.trace.lines() + 1_000;
+        w.down(1, proc, conn, Down::Sock(SockMsg::Push(page.clone())), (Sel::Fork, late));
+        assert_eq!(w.idents[1].met_reference, before, "a fork's copy is no relay state of the reference log");
+        w.down(1, proc, conn, Down::Sock(SockMsg::Push(page)), (Sel::Main(0), late));
+        assert_eq!(w.idents[1].met_reference, late, "relay 0's push");
+        let p = w.idents[1].proc.as_ref().expect("running");
+        let (proc, conn) = (p.no, p.conn_no);
+        w.down(1, proc, conn, Down::Answer(1 << 50, Event::Disconnected { unreachable: true, paused_until_ms: None }), (Sel::Main(0), late + 1));
+        assert_eq!(w.idents[1].met_reference, late, "the runtime's Disconnected");
+        let mut r = w.idents[1].store.log.values().next_back().cloned().expect("a row");
+        r.seq = 1 << 30;
+        w.note_persist(1, &[PersistOp::AppendLog(vec![r])], 9);
+        assert_eq!(w.idents[1].log_reach, 1 << 30, "an AppendLog");
+        let mut c = w.idents[1].store.checkpoint.clone().expect("a checkpoint");
+        c.board_seq = 1 << 31;
+        w.note_persist(1, &[PersistOp::WriteCheckpoint(c)], 9);
+        assert_eq!(w.idents[1].log_reach, 1 << 31, "a checkpoint");
+        w.workload_on = true;
+        let replaced = w.idents[2].dev;
+        w.on_notify(0, Notification::ReplaceReady { dev: replaced }, 93);
+        w.begin_repair(2);
+        assert!(w.idents[2].retired);
+        assert_eq!(w.idents[2].retired_at, Some(w.trace.lines()), "retired after ReplaceReady");
+        w.begin_repair(1);
+        assert!(w.idents[1].retired);
+        assert_eq!(w.idents[1].retired_at, None, "re-paired with no ReplaceReady");
     }
 
     // Invariant 3 (ruling 5): only the record dropped as a cancelled hold is accepted.
@@ -1956,12 +2045,12 @@ mod tests {
         let p = w.idents[0].proc.as_ref().expect("running");
         let (proc, conn) = (p.no, p.conn_no);
         let before = pages(&w);
-        w.down(0, proc, conn, Down::Sock(SockMsg::Push(page.clone())));
+        w.down(0, proc, conn, Down::Sock(SockMsg::Push(page.clone())), (Sel::Main(0), w.trace.lines()));
         assert_eq!(pages(&w), before + 1, "a push on a session whose login was answered");
         if let Some(c) = w.idents[0].proc.as_mut().and_then(|p| p.conn.as_mut()) {
             c.welcomed_t = None;
         }
-        w.down(0, proc, conn, Down::Sock(SockMsg::Push(page)));
+        w.down(0, proc, conn, Down::Sock(SockMsg::Push(page)), (Sel::Main(0), w.trace.lines()));
         assert_eq!(pages(&w), before + 1, "a push before the login's answer");
     }
 

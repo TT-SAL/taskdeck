@@ -1,7 +1,7 @@
-# The simulator: how to run it (tasks D to D6)
+# The simulator: how to run it (tasks D to D7)
 
 Module `taskdeck_sync::sim` (feature `sim`; the test targets get it from the crate's dev-dependency on itself).
-Spec: engine.md §31, §31.7 as the owner amended it on 2026-11-25 (task D6). Code: `src/sim.rs` (types),
+Spec: engine.md §31, §31.7 as the owner amended it on 2026-11-25 (tasks D6, D7). Code: `src/sim.rs` (types),
 `src/sim/config.rs` (named configurations), `src/sim/world.rs` and `src/sim/world/` (model runtime, network,
 workload, faults), `src/sim/store.rs` (durable storage), `src/sim/check.rs` (ledger, oracle, the six invariants),
 `src/sim/trace.rs` (§31.9), `src/sim/script.rs` (hand-built logs for the simulator's own tests).
@@ -105,7 +105,18 @@ kind `RelayBehind`, `Fork`, `Counter`, `Unechoed` or `Withheld` once its `WriteM
 device's durable log and live outbox held then (`IdentFacts::evidence`: the kinds whose response in §21.1 is the
 evidence stop, SYNC.md §4.8's evidence); every `PairFailed` and `OpDone`; the operation each outbox record belongs
 to (`OutboxRecord.op`); each move of a device's board within a process with its class head `K`, the durable log head
-(`IdentFacts::crossings`).
+(`IdentFacts::crossings`). Task D7: the relay state that produced each message a device's engine got (a relay, or the
+fork's copy) and the trace line then, so `IdentFacts::met_reference` is the last line at which a relay produced a
+welcome, page or answer that reached it (the runtime's own `Disconnected` is none); a retirement after a
+`ReplaceReady` that named the identity (`retired_at`, the user's export and re-pair of §24.5; a re-pair for another
+reason has none); how far its log reached (`log_reach`: its `AppendLog`s and checkpoints); each injected frame with
+its hash and the host of the relay that showed it (`check::Injected`); each made-up frame an `AppendLog` of an
+identity carried (`IdentFacts::took`).
+
+**The oracle** (task D7) types the move code of each accepted `Fence` that awaits one (`Status::moving`,
+`Sealer::move_code(f, H(frame))`, §28.3 "On every other device" item 2) and answers the `Connect` that follows as its
+first one, so it follows every move to the reference log's final head (a relay fenced at a `Fence`, ENG-RECV-007,
+would hold it there). `OracleRun::moves` lists the `Fence`s it followed, with the engine's `MoveCodeResult`.
 
 - **Removed relay state.** An acknowledgement comes from one when the fork's copy gave it, or when relay 0 gave it
   before a rollback whose lost tail held that frame at that seq, after the settle the reference log holds another
@@ -130,19 +141,26 @@ to (`OutboxRecord.op`); each move of a device's board within a process with its 
   refused at its first frame, refused `relay/chain_mismatch`, sent with a wrong `chain_before`, or lost on the way,
   `rollback` fails 12 of 12 (task D6); with none ever sent, 299 of seeds 100..399 (355 loses nothing: its second
   rollback returns the relay to its state before the first).
+  Task D7: a dropped seq the reference log holds none at, above its final head, is also removed when a lower seq the
+  same rollback dropped holds another frame in the reference log; read strictly, not when a restore tail could have
+  brought it back (the general rule). With no such lower seq it is held to the rules above.
 - **Never lost silently** (2 and 3): at least one relay acknowledgement, every one from a removed state, and an
   evidence alarm raised after that fault (the rollback's or the fork's `fault` line) by a device that held an
   acknowledged frame of it then.
 - 2: an acknowledged `entry_id` is accepted exactly once; or held once, class `Refuse`, and reported, after the relay
   sequenced it, by a device it was acknowledged to: a refusal record at its seq, the `PairFailed` of the pairing
-  whose `DeviceAdded` it is (`World::registered`), or the `OpDone` of its record's operation; or never lost silently.
+  whose `DeviceAdded` it is (`World::registered`), or the `OpDone` of its record's operation; or never lost silently;
+  or (task D7) its device, every device it was acknowledged to, was retired after `ReplaceReady` while cut off: every
+  acknowledgement came from a removed state (at least one) and no relay produced a message that reached it at or after
+  the earliest such fault's trace line, or the reference log holds it once, refused, above the device's `log_reach`.
   Otherwise the text names the outcome that failed (`lost to a removed relay state (…), and no device that held its
   frame raised an alarm …`, `lost to a rolled-back relay state that is not removed (…)`, `acknowledged at … by a
   relay state no rollback or fork removed`, `… finally refused at …, and its device reported no …`). Second half as
   before: every device whose final `B` is past the seq applied it exactly once (`CountedToy`, `src/sim/counted.rs`),
   read on the log it followed; an entry an accepted Skip at or below `B` targets is expected 0 times.
 - 3: accepted once; or still in the outbox of a device halted or stopped with a persisted reason, or revoked; or
-  refused with a refusal record; or dropped as a cancelled hold; or never lost silently.
+  refused with a refusal record; or dropped as a cancelled hold; or never lost silently; or its device (the one that
+  enqueued it) retired while cut off, as 2 reads it.
 - 4: the confirmed state at every sampled `B` past the device's join against the oracle's first state at `B` on the
   log it followed (`check::oracle`: a fresh engine, no faults; `keep_first`), except between a Skip's target `t` and
   the Skip `s`: a state whose device last crossed `t` (before that state, on that log) with `K ≥ s` there is that of
@@ -153,7 +171,10 @@ to (`OutboxRecord.op`); each move of a device's board within a process with its 
   ran agrees with the oracle. A `B` in `t..s` that no expected value covers is a violation (ruling 6). The toy stamps
   each key with the seq that set it: the log without `t` keeps the seqs (a twin whose `t` is a `Fail`), it is not a
   log one entry shorter. Alarms of §21.1 for contradicting welcomes and pages, `SkippedFrame` for injected frames,
-  and the duplicated answer of a read (task D5) as before.
+  and the duplicated answer of a read (task D5) as before. Task D7: an injected frame above an accepted `Fence` that
+  names another host than the relay that showed it (that `Fence` fenced it), in the log that holds the frame (the
+  reference log, or a branch such as the old relay after a move), owes no `SkippedFrame`; instead no identity's
+  `AppendLog` may have carried it (`took`, ENG-RECV-007).
 - 5: deletions explained as listed in §31.7 and tasks D2 to D5 (a `Register` drop needs its `PairFailed` in the same or
   the next call, not asked when a crash cut either call, task D6); a deletion counts once its write is applied.
 - 6: also no `Append` other than of beats, `snap` entries and the rules-upgrade proposal in the last 1,800,000 ms.
@@ -171,7 +192,8 @@ line that a run happened to produce. In this order of preference:
   the engine something.
 - **A hand-built log** (`src/sim/script.rs`): `HandLog` creates a board with the creator's fake ("Desk"), seals
   Desk's commands, `DeviceAdded` (also one entry sealed twice), beats, rules upgrades and rotations, seals Skips as
-  the recovery identity, has the model relay make up a frame (`inject`), and sequences them; two `HandLog`s of one
+  the recovery identity, has the model relay make up a frame (`inject`), moves the board (`move_to`: the relay sequences
+  Desk's `Fence`, a new relay is seeded, the old one is handed back), and sequences them; two `HandLog`s of one
   seed built with the same first steps are a fork or a rollback's lost tail (the second draws one entry id it never
   seals). `Case` holds the facts `check::check` is handed. No engine runs except the §31.7 oracle; where a test leans
   on what it confirms, it asserts that as a premise.
@@ -182,18 +204,14 @@ line that a run happened to produce. In this order of preference:
   they are recorded or sent: an engine that sends none, or never resumes. Premises are asserted.
 - A bounded seed search only for a situation nothing else can build; none is needed.
 
-Each test fails when its rule is removed (task D6 removed each rule in turn and ran the tests). D4's open item: no oracle run can tell
+Each test fails when its rule is removed (tasks D6 and D7 removed or widened each rule in turn and ran the tests). D4's open item: no oracle run can tell
 `keep_first` from an overwrite, because the oracle's confirmed head never returns to a seq it passed (a Skip replay
 is not shown through `confirmed`); `the_oracle_keeps_its_first_state_at_each_b` tests the rule itself.
 
-## Open readings (task D6, for the owner)
+## Open reading (task D6, for the owner)
 
-- A device alone on a fork's copy, revoked with `replace` and paired again (§28.5 step 3) before it meets the
-  reference relay, takes the entries only the copy acknowledged with it: no device that held them raises an alarm.
-  Read strictly, a silent loss (invariant 2).
-- A dropped seq above the reference log's final head, whose lower dropped seqs other devices overwrote, is neither
-  removed (the text names a different entry or a made-up frame) nor repaired (no restore tail could bring it back);
-  read strictly, not removed.
+The owner decided task D6's other two (a device retired while cut off; a dropped seq above the final head): task D7.
+
 - A restore tail owed (D6's second fix pass): the check gives a device in session `RESTORE_DUE` (the response
   timeout, 20,000 ms) to send it once the relay shows a head below its log on its chain. One sent within that time
   is judged by what it met (another device's entry first: the race, removed); none sent by then is owed, judged by

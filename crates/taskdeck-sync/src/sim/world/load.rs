@@ -231,6 +231,7 @@ impl World<'_> {
             }
             Notification::ReplaceReady { dev } => {
                 if let Some(o) = self.idents.iter().position(|i| i.dev == dev && !i.retired) {
+                    self.idents[o].replace_ready = true;
                     self.at(self.t + 1, Ev::Repair { id: o });
                 }
             }
@@ -323,8 +324,10 @@ impl World<'_> {
     }
 
     /// Re-pair and resubmit (§24.5): export the unsent edits, retire the old
-    /// identity, pair the machine again as a new device.
-    fn begin_repair(&mut self, o: usize) {
+    /// identity, pair the machine again as a new device. After a
+    /// `ReplaceReady` that named it (§28.5 step 3), the retirement is the one
+    /// §31.7 invariant 2's last outcome names (`retired_at`, task D7).
+    pub(super) fn begin_repair(&mut self, o: usize) {
         if self.idents[o].repair_started || self.idents[o].retired || !self.workload_on {
             return;
         }
@@ -334,6 +337,9 @@ impl World<'_> {
         }
         self.stop_proc(o);
         self.idents[o].retired = true;
+        if self.idents[o].replace_ready {
+            self.idents[o].retired_at = Some(self.trace.lines());
+        }
         let m = self.idents[o].machine;
         self.machines[m].repairing = true;
         self.at(self.t + 60_000, Ev::Pair { machine: m, replaces: Some(o) });
@@ -802,7 +808,7 @@ impl World<'_> {
                 let Some((head, outs)) = self.relay(sel).inject_frame(now, frame) else { return };
                 self.made_up.insert(made_up, how);
                 let line = self.fault_line("injected_frame", ("r", self.home as i128), &[head.seq as i64, i64::from(i % 2)]);
-                self.injected_seqs.push((head.seq, head.chain, line));
+                self.injected_seqs.push(check::Injected { seq: head.seq, chain: head.chain, line, frame: made_up, host: HOSTS[self.home].to_owned() });
                 self.route(sel, outs);
                 self.relay_line(sel, "inject");
             }

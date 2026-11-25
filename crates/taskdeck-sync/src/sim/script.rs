@@ -15,12 +15,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
 
-use super::check::{self, AckFact, BranchLog, Facts, IdentFacts, MadeUp, RestoreTry};
-use super::relay::{Cred, LogRow, ModelRelay};
+use super::check::{self, AckFact, BranchLog, Facts, IdentFacts, Injected, MadeUp, RestoreTry};
+use super::relay::{AdminOp, Cred, LogRow, ModelRelay};
 use super::world::WALL0;
 use crate::fake::{FakeMembership, FakeSealer};
 use crate::toy::{ToyCommand, ToyMachine};
-use crate::{AppendResult, Body, ClassifyInput, CtlIntent, Dev, Hash32, Head, PlainEntry, RelayTarget, Sealer, StateMachine};
+use crate::{
+    AppendResult, Body, ClassifyInput, CtlIntent, Dev, DeviceStatus, Hash32, Head, PlainEntry, RelayTarget, SeedDevice, Sealer, StateMachine,
+};
 
 /// One board's log, built entry by entry.
 pub(crate) struct HandLog {
@@ -205,6 +207,53 @@ impl HandLog {
     pub(crate) fn frame_at(&self, seq: u64) -> Hash32 {
         self.relay.log().get(&seq).expect("a row").hash
     }
+
+    /// Desk moves the board to a new relay at `host` (§28.3, the first case
+    /// of stage 2: the relay the board is on sequences the `Fence`). Desk
+    /// seals `Fence { host, door, home_gen: M.home_gen + 1 }` and sends it with
+    /// the `fence` admin operation (`relay.md` §12.6), which fences that relay
+    /// at the `Fence`'s seq `f`; then it seeds the new relay (`relay_key`
+    /// gives its door) with every device and recovery identity of the
+    /// membership and the frames from seq 1 to `f` (`first_seq = 1`, so every
+    /// counter below it is 0; `last_seq = f`, §28.3 stage 3), and the log goes
+    /// on there. Returns `f` and the relay it fenced, which still shows what it
+    /// held (a test may make up a frame above `f` there).
+    pub(crate) fn move_to(&mut self, host: &str, relay_key: [u8; 32]) -> (u64, ModelRelay) {
+        let mut new = ModelRelay::new(self.relay.board_id(), relay_key);
+        let door = new.door();
+        let home_gen = self.desk.view(&self.m).home_gen + 1;
+        let entry = self.entry(Body::Ctl(CtlIntent::Fence { host: host.to_owned(), door, home_gen }));
+        let me = self.desk.own_dev();
+        let ctr = self.desk.view(&self.m).devices.iter().find(|d| d.dev == me).expect("Desk is a member").last_ctr + 1;
+        let sealed = self.desk.seal(&self.m, ctr, &entry).expect("Desk seals");
+        let cred = Cred::Token { dev: me, generation: self.tgen };
+        let op = AdminOp::Fence { host: host.to_owned(), door, home_gen, frame: Some(sealed.frame) };
+        let reply = self.relay.op(self.at, &cred, &me, &op);
+        let f = reply.result.unwrap_or_else(|e| panic!("the relay refused the fence: {}", e.code)).seq.expect("the Fence's seq");
+        self.classify_last();
+        let rows = self.rows();
+        let view = self.desk.view(&self.m);
+        assert_eq!(view.home_gen, home_gen, "the Fence at {f} is accepted");
+        let mut devices: Vec<SeedDevice> = view
+            .devices
+            .iter()
+            .map(|d| SeedDevice { dev: d.dev, sign_pk: d.sign_pk, role: 1, status: if d.status == DeviceStatus::Current { 1 } else { 2 }, last_ctr: 0 })
+            .chain(view.recovery.iter().map(|r| SeedDevice { dev: r.dev_r, sign_pk: r.sign_pk, role: 2, status: if r.until_seq == 0 { 1 } else { 2 }, last_ctr: 0 }))
+            .collect();
+        devices.sort_by_key(|d| d.dev);
+        let chain_last = rows.last().expect("the Fence").chain;
+        let seed = AdminOp::Seed { home_gen, first_seq: 1, chain_before: self.desk.chain_zero(), last_seq: f, chain_last, blob_id: [0x5e; 16], devices };
+        let reply = new.op(self.at, &Cred::Create, &me, &seed);
+        assert!(reply.result.is_ok(), "the new relay takes the seed: {:?}", reply.result.err().map(|e| e.code));
+        let tgen = reply.token_gen.unwrap_or(1);
+        let frames: Vec<Vec<u8>> = rows.iter().map(|r| r.frame.clone()).collect();
+        let reply = new.seed_tail(self.at, &Cred::Token { dev: me, generation: tgen }, 1, &frames);
+        assert_eq!(reply.result.map(|ok| ok.head.map(|h| h.seq)).map_err(|e| e.code), Ok(Some(f)), "the new relay takes the seed tail");
+        let same = |r: &LogRow| (r.seq, r.hash, r.chain);
+        assert!(new.log().values().map(same).eq(rows.iter().map(same)), "the new relay holds the log up to the Fence");
+        self.tgen = tgen;
+        (f, std::mem::replace(&mut self.relay, new))
+    }
 }
 
 /// What a test hands the checks (`check::Facts`, owned).
@@ -223,6 +272,7 @@ pub(crate) struct Case {
     pub entry_ops: BTreeMap<[u8; 16], (usize, u64)>,
     pub cancelled: BTreeSet<[u8; 16]>,
     pub made_up: BTreeMap<Hash32, MadeUp>,
+    pub injected: Vec<Injected>,
     pub restore_tails: Vec<RestoreTry>,
     pub owed: Vec<RestoreTry>,
     pub deletions: Vec<(usize, super::world::Deletion, u64, u64)>,
@@ -246,6 +296,7 @@ impl Case {
             entry_ops: BTreeMap::new(),
             cancelled: BTreeSet::new(),
             made_up: BTreeMap::new(),
+            injected: Vec::new(),
             restore_tails: Vec::new(),
             owed: Vec::new(),
             deletions: Vec::new(),
@@ -273,7 +324,7 @@ impl Case {
             registered: &self.registered,
             entry_ops: &self.entry_ops,
             cancelled: &self.cancelled,
-            injected: &[],
+            injected: &self.injected,
             made_up: &self.made_up,
             restore_tails: &self.restore_tails,
             owed: &self.owed,
@@ -291,6 +342,9 @@ pub(crate) fn settled(dev: Dev, joined_at: u64, samples: Vec<(u64, Hash32, Hash3
         dev,
         desc: "a hand-built identity".to_owned(),
         retired: false,
+        retired_at: None,
+        met_reference: 0,
+        log_reach: 0,
         converges: false,
         live: true,
         halted_or_stopped_persisted: false,
@@ -303,6 +357,7 @@ pub(crate) fn settled(dev: Dev, joined_at: u64, samples: Vec<(u64, Hash32, Hash3
         crash_halts: BTreeSet::new(),
         applied: Vec::new(),
         alarms: Vec::new(),
+        took: Vec::new(),
         evidence: Vec::new(),
         outbox: Vec::new(),
         refusal_seqs: BTreeSet::new(),
@@ -337,6 +392,7 @@ mod tests {
     use crate::AlarmKind;
     use crate::sim::check::{Answer, Crossing, EvidenceAlarm};
     use crate::sim::world::{Deletion, Sel};
+    use crate::toy::ToyState;
 
     const SEED: u64 = 41;
 
@@ -672,6 +728,144 @@ mod tests {
         check::keep_first(&mut m, 5, || 2);
         check::keep_first(&mut m, 6, || 3);
         assert_eq!(m, BTreeMap::from([(5, 1), (6, 3)]));
+    }
+
+    /// A board Desk moves `moves` times (§28.3, the first case of stage 2:
+    /// the relay the board is on sequences each `Fence`), with Desk's edits
+    /// before, between and after the moves: the log and the `Fence`s' seqs.
+    /// With `twin`, a beat stands where each `Fence` stands (the same commands
+    /// at the same seqs: the run without a move).
+    fn moved_board(moves: usize, twin: bool) -> (HandLog, Vec<u64>) {
+        let mut log = HandLog::new(SEED);
+        for k in 0..3u8 {
+            log.set(k, 10 + i64::from(k));
+        }
+        let mut fences = Vec::new();
+        for m in 0..moves {
+            let f = if twin {
+                log.beat(&check::ORACLE_RULES).0
+            } else {
+                let host = ["relay-b.example", "relay-c.example"][m];
+                log.move_to(host, [2 + m as u8; 32]).0
+            };
+            fences.push(f);
+            for k in 0..3u8 {
+                log.set(k, 20 + 10 * m as i64 + i64::from(k));
+            }
+        }
+        (log, fences)
+    }
+
+    /// The oracle on a board Desk moved `moves` times (§31.7, task D7): its
+    /// user typed each `Fence`'s move code and the engine took it (§28.3 "On
+    /// every other device" item 2, ENG-MOVE-008), and it reached the final
+    /// head, which a relay fenced at a `Fence` would not let it read past
+    /// (§12.2, ENG-RECV-007). Its board at every B is the toy's replay of the
+    /// accepted commands (no engine), on the reference chain, and the board it
+    /// has on the same log with a beat in place of each `Fence` (the run
+    /// without a move, where its user types nothing); an honest device that
+    /// followed the moves holds every invariant.
+    fn the_oracle_follows(moves: usize) {
+        let (log, fences) = moved_board(moves, false);
+        let mut c = Case::of(&log);
+        let head = log.head().seq;
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        for f in &fences {
+            assert!(led[*f as usize - 1].accept && *f < head, "the premise: the Fence at {f} is accepted, below the final head {head}");
+        }
+        let run = check::oracle_full(&c.reference, Some(&c.template), &c.roots, &c.board, &c.relay);
+        let typed: Vec<(u64, Option<Result<(), &str>>)> = fences.iter().map(|f| (*f, Some(Ok(())))).collect();
+        assert_eq!(run.moves, typed, "the oracle's user typed each Fence's move code once, and the engine took it");
+        assert_eq!(run.states.keys().next_back(), Some(&head), "the oracle reached the final head");
+        let genesis = ToyState { rules: 1, keys: BTreeMap::new(), items: BTreeMap::new(), marks: BTreeMap::new() };
+        assert_eq!(run.boards.get(&1), Some(&genesis), "the premise: the board starts empty, at rules 1");
+        let toy = check::replay_without(&led, &genesis, 1, head, &BTreeSet::new());
+        for b in 2..=head {
+            let (chain, bh, _) = run.states.get(&b).unwrap_or_else(|| panic!("the oracle confirmed B = {b}"));
+            assert_eq!(*chain, c.reference[b as usize - 1].chain, "the oracle's chain at {b} is the reference log's");
+            assert_eq!(Some(bh), toy.get(&b), "the oracle's board at {b} is the toy's replay");
+        }
+        let (twin, beats) = moved_board(moves, true);
+        assert_eq!(beats, fences, "the premise: the beats stand at the Fences' seqs");
+        let tc = Case::of(&twin);
+        let trun = check::oracle_full(&tc.reference, Some(&tc.template), &tc.roots, &tc.board, &tc.relay);
+        assert!(trun.moves.is_empty(), "no move code is typed on a log without a Fence");
+        for b in 2..=head {
+            assert_eq!(trun.states.get(&b).map(|s| s.1), Some(run.states[&b].1), "the board at {b} is the one on the run without a move");
+        }
+        c.idents.push(settled(dev(0xd1), 1, honest(&run.states, 2..=head)));
+        assert_eq!(c.check(), Vec::new());
+    }
+
+    #[test]
+    fn the_oracle_follows_one_move_to_the_final_head() {
+        the_oracle_follows(1);
+    }
+
+    #[test]
+    fn the_oracle_follows_two_moves_to_the_final_head() {
+        the_oracle_follows(2);
+    }
+
+    // §31.7 invariant 4 as amended (task D7): a frame a relay made up above a
+    // `Fence` that relay sequenced (the relay that `Fence` fenced, §12.2) is
+    // taken by no device (§12.3 step 5, ENG-RECV-007), so it owes no
+    // `SkippedFrame`; a device that took it into its log breaks the
+    // invariant, with the alarm or without. Every other made-up frame still
+    // owes one: here one the new relay showed above the same `Fence`, which
+    // moved the board to it (it fenced no relay that shows it). On a move
+    // that ended (the old relay's log is a branch) and on one the board never
+    // left (the old relay's log is the reference log, which the oracle
+    // follows past the `Fence`).
+    #[test]
+    fn a_made_up_frame_above_a_fence_its_relay_sequenced_owes_no_alarm_and_is_taken_by_no_device() {
+        let mut log = HandLog::new(SEED);
+        for k in 0..3u8 {
+            log.set(k, i64::from(k));
+        }
+        let (f, mut old) = log.move_to("relay-b.example", [2; 32]);
+        let other = FakeSealer::create_at(0x07e4, "Other", WALL0).1;
+        let fh: Hash32 = Sha256::digest(&other).into();
+        let (above, _) = old.inject_frame(WALL0 + 90_000, other).expect("the fenced relay stores what it makes up");
+        assert_eq!(above.seq, f + 1, "the premise: the made-up frame lies just above the Fence at {f}");
+        log.set(4, 4);
+        let (s, sh) = log.inject(0x07e5);
+        log.set(5, 5);
+        let mut c = Case::of(&log);
+        let old_rows: Vec<LogRow> = old.log().values().cloned().collect();
+        c.branches.push(BranchLog { rows: old_rows.clone(), why: "the old relay after a move", line: 30, removed_from: 1 });
+        c.made_up = BTreeMap::from([(fh, MadeUp::OtherBoard), (sh, MadeUp::OtherBoard)]);
+        let fenced = Injected { seq: f + 1, chain: above.chain, line: 60, frame: fh, host: "relay-a.example".to_owned() };
+        let shown = Injected { seq: s, chain: c.reference[s as usize - 1].chain, line: 61, frame: sh, host: "relay-b.example".to_owned() };
+        c.injected = vec![fenced.clone(), shown];
+        let o = c.oracle();
+        assert!(o.contains_key(&s) && o.contains_key(&log.head().seq), "the premise: the oracle passes the new relay's made-up frame at {s}");
+        let mut x = settled(dev(0xd1), 1, honest(&o, o.keys().copied().filter(|b| *b >= 2)));
+        x.alarms = vec![(1, AlarmKind::SkippedFrame, Some(s), 0)];
+        c.idents = vec![x.clone()];
+        assert_eq!(c.check(), Vec::new(), "no device took the frame above the Fence, and the new relay's raised SkippedFrame");
+        let took = vec![(4, 70, format!(
+            "dev 0: took the injected frame at {} into its log, above the Fence at {f} that fenced the relay showing it (ENG-RECV-007)",
+            f + 1
+        ))];
+        c.idents[0].took = vec![(f + 1, fh, 70)];
+        assert_eq!(c.check(), took, "a device took it");
+        c.idents[0].alarms.push((2, AlarmKind::SkippedFrame, Some(f + 1), 0));
+        assert_eq!(c.check(), took, "a device took it and raised SkippedFrame");
+        x.alarms.clear();
+        c.idents = vec![x];
+        assert_eq!(c.check(), vec![(4, 61, format!("dev 0: the injected frame at {s} raised no SkippedFrame"))], "the new relay's made-up frame");
+
+        // The move never ended: the old relay's log is the reference log.
+        c.reference = old_rows;
+        c.branches.clear();
+        c.injected = vec![fenced];
+        let o = c.oracle();
+        assert!(o.contains_key(&(f + 1)), "the premise: the oracle follows the Fence past it");
+        c.idents = vec![settled(dev(0xd1), 1, honest(&o, 2..=f))];
+        assert_eq!(c.check(), Vec::new(), "no device took it");
+        c.idents[0].took = vec![(f + 1, fh, 70)];
+        assert_eq!(c.check(), took, "a device took it");
     }
 
     // §31.7 invariant 2, second outcome (task D6): an entry the reference log
@@ -1091,7 +1285,10 @@ mod tests {
             "dev 0: acknowledged entry {} is accepted 0 times in the reference log (classes there: []): lost to a rolled-back relay state that is not removed (the relay before a rollback, fault at trace line 77): the reference log holds nothing at {q}, and ",
             check::hexs(&e)
         );
-        let repaired = format!("{lost}no restore tail that would have brought it back was refused for a frame the relay made up");
+        let repaired = format!(
+            "dev 0: acknowledged entry {} is accepted 0 times in the reference log (classes there: []): lost to a rolled-back relay state that is not removed (the relay before a rollback, fault at trace line 77): the reference log holds nothing at {q}, nor another entry at a lower seq the rollback dropped, and no restore tail that would have brought it back was refused for a frame the relay made up",
+            check::hexs(&e)
+        );
         assert_eq!(c.check(), vec![(2, 51, repaired.clone())], "no restore tail");
         let tail = |line: u64, answer: Answer| tail_try(line, q, vec![frame, xh], answer, prefix, holds);
         c.restore_tails = vec![tail(85, refused("relay/wrong_board", Some(1)))];
@@ -1199,6 +1396,92 @@ mod tests {
         );
     }
 
+    /// A relay rollback (§31.6) that dropped Desk's entries at `q1` and at
+    /// `q2 = q1 + 1` (the lost tail), and the reference log after the settle:
+    /// the prefix to `q1 − 1`, then at `q1` another device's entry (`over`
+    /// `Some(true)`), Desk's dropped frame again (`Some(false)`), or nothing
+    /// (`None`), so that `q2` lies above its final head. The relay
+    /// acknowledged Desk's entry `e` at `q2` at trace line 50 (delivered at
+    /// 51); the fault is at line 77; Desk (identity 0) raised an alarm with
+    /// evidence holding its frame at line 80. Returns the case, `e`, `q1`,
+    /// `q2` and the lost tail.
+    fn rolled_above_head(over: Option<bool>) -> (Case, [u8; 16], u64, u64, Vec<LogRow>) {
+        let (mut after, mut lost) = forked(|l| {
+            for k in 0..3u8 {
+                l.set(k, i64::from(k));
+            }
+        });
+        // Both Desks draw entry ids from one seed: the lost one draws one it never seals.
+        lost.desk.new_entry_id().expect("an entry id");
+        let (q1, _) = lost.set(5, 5);
+        let (q2, e) = lost.set(7, 7);
+        let rows = lost.rows();
+        if over == Some(true) {
+            after.set(6, 6);
+        }
+        let mut case = Case::of(&after);
+        if over == Some(false) {
+            case.reference = rows[..q1 as usize].to_vec();
+        }
+        let frame = lost.frame_at(q2);
+        case.branches.push(BranchLog { rows: rows.clone(), why: check::WHY_ROLLBACK, line: 77, removed_from: q1 });
+        case.acks.push(AckFact { eid: e, ident: 0, sel: Sel::Main(0), seq: q2, frame, line: 50 });
+        case.acked.push((e, 0, 51, true));
+        case.idents.push(settled(after.desk_dev(), 0, Vec::new()));
+        case.idents[0].evidence = vec![alarm(80, AlarmKind::RelayBehind, &[frame])];
+        (case, e, q1, q2, rows)
+    }
+
+    // §31.7 as amended (the owner's decision of 2026-11-25, task D7): after a
+    // rollback, a dropped seq the reference log holds nothing at, above its
+    // final head, is removed when a lower seq that the same rollback dropped
+    // holds a different entry in the reference log (no restore tail can
+    // bring back a frame whose chain no longer leads to it): the entry lost
+    // there is never lost silently with an alarm with evidence, and is lost
+    // silently without one. Nothing wider: with no such lower seq (the
+    // reference log ends below the rollback's first dropped seq), or with
+    // that lower seq holding the dropped frame again, the seq is held to the
+    // other rules (here a plain rollback, not excused); and a seq that a
+    // restore tail could have brought back is not removed (the general rule,
+    // read strictly: here one lost on the way while the relay still held the
+    // tail's prefix).
+    #[test]
+    fn a_dropped_seq_above_the_final_head_is_removed_only_above_an_overwritten_one() {
+        let (mut c, e, q1, q2, rows) = rolled_above_head(Some(true));
+        assert_eq!(c.reference.len() as u64, q1, "the premise: the reference log ends at {q1}, below {q2}");
+        assert_ne!(c.reference[q1 as usize - 1].hash, rows[q1 as usize - 1].hash, "the premise: another entry took {q1}");
+        assert_eq!(c.check(), Vec::new(), "removed: never lost silently");
+        let base = format!("dev 0: acknowledged entry {} is accepted 0 times in the reference log (classes there: [])", check::hexs(&e));
+        c.idents[0].evidence.clear();
+        assert_eq!(
+            c.check(),
+            vec![(2, 51, format!(
+                "{base}: lost to a removed relay state (the relay before a rollback, fault at trace line 77), and no device that held its frame raised an alarm of §21.1 with evidence after it"
+            ))],
+            "removed, and no alarm"
+        );
+        c.idents[0].evidence = vec![alarm(80, AlarmKind::RelayBehind, &[rows[q2 as usize - 1].hash])];
+        let at = |s: u64| Head { seq: s, chain: rows[s as usize - 1].chain };
+        let frames = vec![rows[q1 as usize - 1].hash, rows[q2 as usize - 1].hash];
+        c.restore_tails = vec![tail_try(85, q1, frames, Answer::Unanswered, at(q1 - 1), Some((1, at(q2))))];
+        assert_eq!(
+            c.check(),
+            vec![(2, 51, format!(
+                "{base}: lost to a rolled-back relay state that is not removed (the relay before a rollback, fault at trace line 77): the reference log holds nothing at {q2}, and a restore tail could have brought back {q2} (trace line 85: one sent while the relay was at {} on that tail never reached it)",
+                q1 - 1
+            ))],
+            "a restore tail could have brought it back"
+        );
+        let plain = format!(
+            "{base}: lost to a rolled-back relay state that is not removed (the relay before a rollback, fault at trace line 77): the reference log holds nothing at {q2}, nor another entry at a lower seq the rollback dropped, and no restore tail that would have brought it back was refused for a frame the relay made up"
+        );
+        for (over, name) in [(None, "no lower seq taken"), (Some(false), "the lower seq holds the dropped frame again")] {
+            let (c, e2, _, _, _) = rolled_above_head(over);
+            assert_eq!(e2, e, "one entry");
+            assert_eq!(c.check(), vec![(2, 51, plain.clone())], "{name}");
+        }
+    }
+
     // §31.7 (task D6): in a run with a fork, every branch the oracle does not
     // name is a removed relay state: an acknowledgement the fork's copy gave
     // comes from one. The entry lost with it is excused, in invariants 2 and
@@ -1231,6 +1514,135 @@ mod tests {
         assert_eq!(c.check(), Vec::new());
         c.idents[0].evidence = vec![alarm(30, AlarmKind::Fork, &[frame])];
         assert_eq!(c.check(), both, "an alarm before the fork");
+    }
+
+    /// `x` was retired at trace line `at`, after a `ReplaceReady` that named
+    /// it (`after_replace`) or otherwise, having met a relay state of the
+    /// reference log last at trace line `met`, its log having reached `reach`.
+    fn retire(x: &mut IdentFacts, at: u64, after_replace: bool, met: u64, reach: u64) {
+        x.retired = true;
+        x.retired_at = after_replace.then_some(at);
+        x.met_reference = met;
+        x.log_reach = reach;
+    }
+
+    // §31.7 invariants 2 and 3, last outcome (the owner's decision of
+    // 2026-11-25, task D7; task D6's open reading): an entry lost with a
+    // removed relay state, its frame held by no device that raised an alarm,
+    // is excused when its device was retired while cut off: its machine
+    // re-paired as a new device after a `ReplaceReady` that named it (§24.5,
+    // §28.5 step 3), with no relay state of the reference log met from the
+    // fault that removed the entry on. Here a device alone on a fork's copy,
+    // and one whose entry a rollback dropped under another device's. Not
+    // excused: a device not retired; one retired otherwise (it saw its own
+    // revocation); one that met a relay state of the reference log after the
+    // fault (a message the relay produced at the fault's trace line or
+    // later); an entry one more acknowledgement of came from a state no fault
+    // removed.
+    #[test]
+    fn a_loss_to_a_removed_state_is_excused_only_for_a_device_retired_while_cut_off() {
+        let (mut reference, mut fork) = forked(|l| {
+            for k in 0..3u8 {
+                l.set(k, i64::from(k));
+            }
+        });
+        fork.desk.new_entry_id().expect("an entry id");
+        let (q, e) = fork.set(5, 5);
+        reference.set(6, 6);
+        let frame = fork.frame_at(q);
+        let mut c = Case::of(&reference);
+        c.branches.push(BranchLog { rows: fork.rows(), why: check::WHY_FORK, line: 40, removed_from: q });
+        c.acks.push(AckFact { eid: e, ident: 0, sel: Sel::Fork, seq: q, frame, line: 50 });
+        c.acked.push((e, 0, 51, true));
+        c.enqueued.push((e, 0, 0, 8));
+        c.idents.push(settled(reference.desk_dev(), 0, Vec::new()));
+        let silent = "lost to a removed relay state (the forked copy of the relay, fault at trace line 40), and no device that held its frame raised an alarm of §21.1 with evidence after it";
+        let both = |tail: &str| {
+            vec![
+                (2, 51, format!("dev 0: acknowledged entry {} is accepted 0 times in the reference log (classes there: []): {silent}{tail}", check::hexs(&e))),
+                (3, 8, format!("dev 0: enqueued entry {} is accepted 0 times and not held or refused (in its outbox: false): {silent}{tail}", check::hexs(&e))),
+            ]
+        };
+        assert_eq!(c.check(), both(""), "not retired");
+        retire(&mut c.idents[0], 100, true, 39, q);
+        assert_eq!(c.check(), Vec::new(), "retired after ReplaceReady, cut off from the fork on");
+        retire(&mut c.idents[0], 100, true, 40, q);
+        assert_eq!(
+            c.check(),
+            both("; its device (dev 0) was retired, but met a relay state of the reference log (trace line 40) after the fault at trace line 40"),
+            "it met the reference relay after the fault"
+        );
+        retire(&mut c.idents[0], 100, false, 39, q);
+        assert_eq!(c.check(), both("; its device (dev 0) was retired, but not after a ReplaceReady that named it"), "retired otherwise");
+        retire(&mut c.idents[0], 100, true, 39, q);
+        c.acks.push(AckFact { eid: e, ident: 0, sel: Sel::Main(0), seq: q, frame, line: 60 });
+        let v = c.check();
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(
+            v.iter().all(|x| x.2.ends_with(&format!(
+                "acknowledged at {q} (trace line 60) by a relay state no rollback or fork removed; its device was retired, but the relay acknowledged it at {q} (trace line 60) from a relay state no fault removed"
+            ))),
+            "{v:?}"
+        );
+
+        // A rollback: the overwritten seq is removed (no restore tail could
+        // have brought it back), the fault at trace line 77.
+        let Rolled { case: mut c, e, .. } = rolled(true, None);
+        c.enqueued.push((e, 0, 0, 8));
+        assert_eq!(c.check().len(), 2, "not retired");
+        retire(&mut c.idents[0], 100, true, 76, 0);
+        assert_eq!(c.check(), Vec::new(), "retired after ReplaceReady, cut off from the rollback on");
+        retire(&mut c.idents[0], 100, true, 80, 0);
+        let v = c.check();
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(v.iter().all(|x| x.2.ends_with("(trace line 80) after the fault at trace line 77")), "{v:?}");
+    }
+
+    // §31.7 invariants 2 and 3, last outcome (task D7): an entry the
+    // reference log holds once, finally refused, that its device reported
+    // in no way, is excused when the device was retired (re-paired as a new
+    // device after a `ReplaceReady` that named it, §24.5) and its log never
+    // reached the refusal's seq: it never met what became of the entry. Not
+    // excused: a device not retired; one whose log reached that seq; one
+    // retired otherwise. A device retired while cut off excuses no
+    // acknowledged entry of another device.
+    #[test]
+    fn a_final_refusal_is_excused_only_for_a_retired_device_whose_log_never_reached_it() {
+        let mut log = HandLog::new(SEED);
+        log.set(0, 1);
+        let (_, first, added) = log.add_device(9);
+        let (r, again, _) = log.add_device(9);
+        log.set(1, 2);
+        let mut c = Case::of(&log);
+        let led = check::ledger(&c.reference, Some(&c.template), &c.roots);
+        assert_eq!(led[r as usize - 1].class, "refuse", "the premise: the second DeviceAdded of one device is refused at {r}");
+        c.acks = vec![AckFact { eid: again, ident: 0, sel: Sel::Main(0), seq: r, frame: log.frame_at(r), line: 5 }];
+        c.acked = vec![(first, 0, 4, true), (again, 0, 6, true)];
+        c.registered = BTreeMap::from([(first, added), (again, added)]);
+        c.enqueued = vec![(again, 0, 0, 3)];
+        c.idents = vec![settled(log.desk_dev(), 0, Vec::new()), settled(dev(0xd9), 0, Vec::new())];
+        let both = |tail: &str| {
+            vec![
+                (2, 6, format!(
+                    "dev 0: acknowledged entry {} is accepted 0 times in the reference log (classes there: [\"refuse\"]): a pairing's DeviceAdded refused after register (§28.4 step 4), finally refused at {r}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it{tail}",
+                    check::hexs(&again)
+                )),
+                (3, 3, format!(
+                    "dev 0: enqueued entry {} is accepted 0 times and not held or refused (in its outbox: false): acknowledged at {r} (trace line 5) by a relay state no rollback or fork removed{tail}",
+                    check::hexs(&again)
+                )),
+            ]
+        };
+        assert_eq!(c.check(), both(""), "not retired");
+        retire(&mut c.idents[0], 100, true, 99, r - 1);
+        assert_eq!(c.check(), Vec::new(), "retired after ReplaceReady, its log below the refusal's seq");
+        retire(&mut c.idents[0], 100, true, 99, r);
+        assert_eq!(c.check(), both(&format!("; its device (dev 0) was retired, but its log reached {r} (the refusal is at {r})")), "its log reached it");
+        retire(&mut c.idents[0], 100, false, 99, r - 1);
+        assert_eq!(c.check(), both("; its device (dev 0) was retired, but not after a ReplaceReady that named it"), "retired otherwise");
+        c.idents[0] = settled(log.desk_dev(), 0, Vec::new());
+        retire(&mut c.idents[1], 100, true, 0, 0);
+        assert_eq!(c.check(), both(""), "another device retired");
     }
 
     // §31.7 invariant 3 (task D6): "never lost silently as invariant 2

@@ -13,7 +13,7 @@ impl World<'_> {
     pub(super) fn step(&mut self, ev: Ev) {
         match ev {
             Ev::ToRelay { id, proc, conn, sel, call } => self.at_relay(id, proc, conn, sel, call),
-            Ev::Down { id, proc, conn, msg } => self.down(id, proc, conn, msg),
+            Ev::Down { id, proc, conn, msg, from } => self.down(id, proc, conn, msg, from),
             Ev::PersistDone { id, proc, crash } => self.persist_done(id, proc, crash),
             Ev::Local { id, proc, ev } => {
                 if self.proc_is(id, proc) {
@@ -716,6 +716,27 @@ impl World<'_> {
             .filter_map(|o| if let PersistOp::AppendLog(rs) = o { rs.iter().map(|r| r.seq).max() } else { None })
             .max()
             .map_or(b, |s| s.max(b));
+        // Task D7: how far its log reached (an `AppendLog`, or a checkpoint
+        // that sets the log past the seqs it never held, §19.7, §19.8).
+        let reach = ops.iter().filter_map(|o| match o {
+            PersistOp::AppendLog(rs) => rs.iter().map(|r| r.seq).max(),
+            PersistOp::WriteCheckpoint(c) => Some(c.board_seq),
+            _ => None,
+        });
+        let ident = &mut self.idents[id];
+        ident.log_reach = reach.fold(ident.log_reach, u64::max);
+        // Task D7: a frame a relay made up, taken into its log (invariant 4:
+        // none above a `Fence` that fenced the relay showing it, ENG-RECV-007).
+        for o in ops {
+            if let PersistOp::AppendLog(rs) = o {
+                for r in rs {
+                    let fh = h(&r.frame);
+                    if self.made_up.contains_key(&fh) {
+                        self.idents[id].took.push((r.seq, fh, line));
+                    }
+                }
+            }
+        }
         for op in ops {
             match op {
                 PersistOp::Outbox(xs) => {
@@ -1048,10 +1069,12 @@ impl World<'_> {
     }
 
     /// Sends a message down to a device; socket messages keep their order.
-    fn send_down(&mut self, id: usize, proc: u32, conn: u64, msg: Down, socket: bool) {
+    /// `from` is the relay state that produced it, now.
+    fn send_down(&mut self, id: usize, proc: u32, conn: u64, msg: Down, socket: bool, from: Sel) {
         if self.lost(id) {
             return;
         }
+        let from = (from, self.trace.lines());
         let copies = if self.dup(id) { 2 } else { 1 };
         for _ in 0..copies {
             let mut at = self.t + self.net_delay();
@@ -1060,11 +1083,22 @@ impl World<'_> {
                     at = at.max(c.sock_t + 1);
                     c.sock_t = at;
                 }
-            self.at(at, Ev::Down { id, proc, conn, msg: msg.clone() });
+            self.at(at, Ev::Down { id, proc, conn, msg: msg.clone(), from });
         }
     }
 
-    pub(super) fn down(&mut self, id: usize, proc: u32, conn: u64, msg: Down) {
+    /// §31.7 invariant 2, last outcome (task D7): an event that a relay state
+    /// of the reference log produced (a relay, not a fork's copy) reaches the
+    /// engine: the identity met that relay state then (`met_reference`). The
+    /// runtime's own `Disconnected` is no message of a relay.
+    fn note_met(&mut self, id: usize, from: (Sel, u64), ev: &Event<ToyCommand>) {
+        if matches!(from.0, Sel::Main(_)) && !matches!(ev, Event::Disconnected { .. }) {
+            let m = &mut self.idents[id].met_reference;
+            *m = (*m).max(from.1);
+        }
+    }
+
+    pub(super) fn down(&mut self, id: usize, proc: u32, conn: u64, msg: Down, from: (Sel, u64)) {
         let Some(p) = self.idents[id].proc.as_mut() else { return };
         // An answer to a request still outstanding is delivered even when it
         // was sent before the current session began (a request emitted while
@@ -1091,6 +1125,7 @@ impl World<'_> {
                     if !self.proc_is(id, proc) {
                         return;
                     }
+                    self.note_met(id, from, &e);
                     self.deliver(id, e);
                 }
             }
@@ -1106,6 +1141,7 @@ impl World<'_> {
                 if let Event::Disconnected { unreachable, .. } = ev {
                     self.close_conn(id, unreachable);
                 }
+                self.note_met(id, from, &ev);
                 self.deliver(id, ev);
             }
             Down::Sock(m) => {
@@ -1135,6 +1171,7 @@ impl World<'_> {
                     }
                     SockMsg::Welcome(_) | SockMsg::Result { .. } | SockMsg::Page { .. } | SockMsg::Error { .. } => return,
                 };
+                self.note_met(id, from, &ev);
                 self.deliver(id, ev);
             }
         }
@@ -1178,7 +1215,7 @@ impl World<'_> {
                 }
             let p = self.idents[id].proc.as_ref().expect("running");
             let (proc, conn) = (p.no, p.conn_no);
-            self.send_down(id, proc, conn, Down::Sock(msg), true);
+            self.send_down(id, proc, conn, Down::Sock(msg), true, sel);
         }
     }
 
@@ -1284,7 +1321,7 @@ impl World<'_> {
                         Event::Disconnected { unreachable: false, paused_until_ms: None },
                     ],
                 };
-                self.send_down(id, proc, conn, Down::Events(evs), true);
+                self.send_down(id, proc, conn, Down::Events(evs), true, sel);
             }
             Call::Hello => {
                 let reply = self.relay(sel).hello(now, &cred);
@@ -1298,7 +1335,7 @@ impl World<'_> {
                     }
                     Err(r) => whole(None, r),
                 };
-                self.send_down(id, proc, conn, Down::Answer(key, ev), false);
+                self.send_down(id, proc, conn, Down::Answer(key, ev), false, sel);
             }
             Call::Read { req, after, limit } => {
                 let reply = self.relay(sel).read(now, &cred, after, limit);
@@ -1309,7 +1346,7 @@ impl World<'_> {
                     }
                     Err(r) => whole(Some(req), r),
                 };
-                self.send_down(id, proc, conn, Down::Answer(req, ev), false);
+                self.send_down(id, proc, conn, Down::Answer(req, ev), false, sel);
             }
             Call::Append { req, frames } => {
                 let reply = self.relay(sel).append(now, &cred, &frames);
@@ -1332,7 +1369,7 @@ impl World<'_> {
                     }
                     Err(r) => whole(Some(req), r),
                 };
-                self.send_down(id, proc, conn, Down::Answer(req, ev), false);
+                self.send_down(id, proc, conn, Down::Answer(req, ev), false, sel);
             }
             Call::Admin { req, op } => {
                 let (cred, ridx) = match &op {
@@ -1409,7 +1446,7 @@ impl World<'_> {
                     Err(r) if is_whole_admin(&r) => Event::RelayRefused { req: Some(req), refusal: r },
                     Err(r) => Event::AdminResult { req, result: Err(r) },
                 };
-                self.send_down(id, proc, conn, Down::Answer(req, ev), false);
+                self.send_down(id, proc, conn, Down::Answer(req, ev), false, sel);
             }
             Call::Blob { req, op } => {
                 let reply = self.relay(sel).blob(now, &cred, &op);
@@ -1419,7 +1456,7 @@ impl World<'_> {
                     Err(r) if is_whole_admin(&r) => Event::RelayRefused { req: Some(req), refusal: r },
                     Err(r) => Event::BlobResult { req, result: Err(r) },
                 };
-                self.send_down(id, proc, conn, Down::Answer(req, ev), false);
+                self.send_down(id, proc, conn, Down::Answer(req, ev), false, sel);
             }
         }
         if self.relay(sel).head() != before {

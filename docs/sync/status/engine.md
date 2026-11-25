@@ -281,7 +281,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_a03961da-e96 | D4 (second attempt) simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | done, applied to the branch as a patch from `wt/d4` 32a1637 (the lead ran its gate) | `src/sim/script.rs` (hand-built logs for the check), `src/sim/world.rs`, `api-simulator.md`; reported: gate 116 (a pairing refused after a restart dropped without `PairFailed`), 1021 (the crash-halt question again) | 471,311 |
 | wf_fc162934-033 | D5 three check faults; every violation printed | `engine/briefs/d5-check-faults.md` | done, applied to the branch as a patch from `wt/d5` a868350 (the lead ran its gate) | `src/sim/{check,script,world}.rs`, `src/sim/world/rt.rs`, `tests/simulator.rs` (`TD_SIM_ALL`), `api-simulator.md`; one low: the crash-cut exemption for a pairing drop covers the drop's own call, not the next | 327,558 |
 | wf_791ac2d4-7d3 | D6 the simulator's checks carry the owner's decisions (§31.7 invariants 2, 3, 4) | `engine/briefs/d6-decided-invariants.md` | done (write, two checks, two fix passes); applied to the branch as a patch from `wt/d6` b20dadf (the lead runs its gate) | `src/sim/{check,script,store,world}.rs`, `src/sim/world/{end,load,rt}.rs`, `api-simulator.md`: removed relay state from recorded acknowledgements, restore tails (sent, answered, owed) and made-up frames; never lost silently (an evidence alarm, durable, by a device holding the frame); a final refusal reported; the Skip window compared with a replay without t. Reported: `gate` 14 of 450 fail (fork plus re-pair ×10, 2272, engine 1022, 1073, 2154). Lows: `api-simulator.md` 204 lines (limit 100, 180 before); `relay/bad_signature` counts as a made-up frame's code (8 seeds) | 2,562,299 (5 agents, 819 tool uses, 5.3 h) |
-| wf_1db629f6-355 | D7 a device retired while cut off; the dropped seq above the final head; invariant 4's injected frame above a Fence; the oracle follows every move (ENG-RECV-007) | `engine/briefs/d7-retired-oracle.md` | running since 2026-11-25 in `/home/user/wt/d7` (branch `wt/d7`, from da66151 on `engine-recv`); task id wp39szf6z | | |
+| wf_1db629f6-355 | D7 a device retired while cut off; the dropped seq above the final head; invariant 4's injected frame above a Fence; the oracle follows every move (ENG-RECV-007) | `engine/briefs/d7-retired-oracle.md` | done (write, one check: no high or medium); applied to the branch as a patch from `wt/d7` 22872ab (the lead ran its gate) | `src/sim/{check,script,world}.rs`, `src/sim/world/{end,load,rt}.rs`, `api-simulator.md`: the oracle types each move code; retired while cut off (`retired_at` after a `ReplaceReady` naming the identity, `met_reference`, `log_reach`); `overwritten_below`; made-up frames above a Fence taken by no device. Reported: `gate` 0 of 450 fail, every configuration passes, all 13 regression files pass. One low (below) | 816,176 (2 agents, 309 tool uses, 61 min) |
 
 ## Open threads
 
@@ -415,6 +415,15 @@ A session's `Disconnected` also drops requests in flight to another relay (the d
 tail of a move), which are sent again; harmless.
 
 ## Spec questions met
+
+- From task D7 (each read strictly, none changes a seed today): (a) a re-pair after the device's
+  own `Revoked` stop with no `ReplaceReady` is not "retired" (§31.7 invariant 2's last bullet says
+  "after `ReplaceReady`"); (b) a rejoin to a snapshot above a refused entry's seq counts as the
+  log having reached that seq; (c) a seq above the final head that a restore tail could have
+  brought back is not removed even above an overwritten lower seq. Low (D7's check): invariant 4's
+  exception for a made-up frame above a `Fence` also takes a `Fence` the showing relay never
+  sequenced (a board moved twice: a frame the final relay makes up is excused by the first
+  `Fence`); unreachable in the gate (every move goes to the same second host).
 
 - E2 (left open by `seal`): an own `Fence` that loses a rotation race leaves the old relay fenced
   with no accepted `Fence` (§28.3, §28.7). To decide when step 9 is built; may need a change under
