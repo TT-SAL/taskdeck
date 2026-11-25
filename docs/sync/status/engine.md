@@ -235,6 +235,10 @@ only commit in a pull request of its own; then work goes on.
     decided), SYNC_PLAN.md §6.5 gate item 2, a CHANGES.md row.
   - With both texts, `spec-coverage engine` on the engine branch gives 243 of 243 owned clauses
     cited, 0 bad (the lead's run); on the branch alone it reports the new ids as bad citations.
+- **In progress (2026-11-25):** TT-SAL/taskdeck#30 is closed; the remote branch holds the
+  behaviour change alone, as TT-SAL/taskdeck#31; the engine's work is parked on the local branch
+  `park/engine-2` (worktree `/home/user/wt/engine`; its last pushed head d4901dc is also the last
+  head of TT-SAL/taskdeck#30). Next: #31 merged, then the gate change, then rebase and push.
 - The stage has one branch, so: close TT-SAL/taskdeck#30 (its content stays on the engine branch),
   park the engine's work on a local branch, make the branch day-planner plus the behaviour
   commit, pull request, CI, merge; then day-planner plus the gate commit, pull request, CI, merge;
