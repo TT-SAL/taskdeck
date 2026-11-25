@@ -1677,6 +1677,55 @@ fn a_frame_a_fenced_relay_shows_above_its_fence_is_taken_by_no_device() {
     assert_eq!(a.board_bytes(), b.board_bytes());
 }
 
+// spec: ENG-MOVE-003
+#[test]
+fn a_move_seeds_from_a_seq_whose_chain_the_device_holds() {
+    // `gate` 5459: the mover's log began at its floor and it no longer held the chain value below
+    // it (§7.10); its seed started at the floor anyway, anchored on the chain of seq 0, and the
+    // new relay refused the tail `relay/chain_mismatch` after the old relay was fenced.
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(471);
+    a.set(1, 1, 1);
+    net.settle(&mut [&mut a]);
+    let mut b = pair(&mut net, &mut a, 472, "Laptop", 1);
+    let mut k = 1u64;
+    while net.log_len() < 70 {
+        k += 1;
+        a.set(k, (k % 50) as u8, k as i64);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    for _ in 0..3 {
+        a.advance(86_400_000);
+        b.advance(86_400_000);
+        net.settle(&mut [&mut a, &mut b]);
+    }
+    let floor = b.store.log_floor;
+    assert!(floor > 1 && b.store.bases.keys().any(|s| *s < floor));
+    // B no longer holds the chain value below its floor (§7.10: "when the device holds it").
+    b.store.floor_chain = None;
+    b.restart(473);
+    net.settle(&mut [&mut a, &mut b]);
+    net.add_relay(NEW);
+    let admins = net.admins.len();
+    b.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&b, 9), Some(Ok(())));
+    let (first_seq, chain_before, last_seq) = net.admins[admins..]
+        .iter()
+        .find_map(|(_, op)| match op {
+            AdminRequest::Seed { first_seq, chain_before, last_seq, .. } => Some((*first_seq, *chain_before, *last_seq)),
+            _ => None,
+        })
+        .expect("the seed");
+    // The seed's anchor is the chain this device holds there (its index, or a base at that seq).
+    assert!(first_seq >= floor);
+    assert_eq!(chain_before, net.relays[&old].log()[&(first_seq - 1)].chain);
+    for seq in first_seq..=last_seq {
+        assert_eq!(net.relays[NEW].log()[&seq].frame, net.relays[&old].log()[&seq].frame, "{seq}");
+    }
+}
+
 /// Serves a node's effects one by one until the next one is the admin call `name`, which stays unanswered.
 fn serve_until_admin(net: &mut super::rkit_tests::Net, n: &mut Node, name: &str) {
     for _ in 0..20_000 {

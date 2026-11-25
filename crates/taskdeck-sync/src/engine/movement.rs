@@ -625,14 +625,29 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
             first = x + 1;
         }
-        while first > 1 && first <= s + 1 && self.base_at_or_below(first - 1).is_none() {
+        // The seed's `chain_before` is `C_{first_seq-1}`: a seq whose chain this device holds.
+        while first > 1
+            && first <= s + 1
+            && (self.base_at_or_below(first - 1).is_none() || self.chain_held(first - 1).is_none())
+        {
             first += 1;
         }
         // Before seq 1 there is nothing to rebuild (`M_0`, every counter zero): no base is needed for it.
-        if first > s + 1 || (first > 1 && self.base_at_or_below((first - 1).min(s)).is_none()) {
+        if first > s + 1
+            || (first > 1 && (self.base_at_or_below((first - 1).min(s)).is_none() || self.chain_held(first - 1).is_none()))
+        {
             return Err("engine/local_fault");
         }
         Ok((s, first))
+    }
+
+    /// `C_x` as this device holds it: from its chain index, or from a base at `x` (§7.10); `C_0`
+    /// for the seq before the first.
+    fn chain_held(&self, x: u64) -> Option<crate::Hash32> {
+        if x == 0 {
+            return Some(self.sealer.chain_zero());
+        }
+        self.chain_at(x).or_else(|| self.bases.iter().find(|b| b.0 == x).map(|b| b.1))
     }
 
     fn move_seed(&mut self, ticket: u64, host: String) {
@@ -761,7 +776,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     epoch: blob.epoch,
                 });
                 self.opx.mv.blob = Some(blob);
-                let chain_before = self.chain_at(first - 1).unwrap_or_else(|| self.sealer.chain_zero());
+                let Some(chain_before) = self.chain_held(first - 1) else { return fail(self) };
                 self.opx.mv.seed = Some((chain_before, devices));
             }
         }
