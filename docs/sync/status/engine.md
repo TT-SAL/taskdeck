@@ -48,10 +48,10 @@ in the order it happened; this file is the current truth and is rewritten, not a
   frames it had sealed before the halt (`gate` 122: the Skip's counter lay above an unsent
   frame's, the relay answered `gap`, and the device sent the Skip again 318 times until its next
   reconnect).
-- Next: task D4; the owner's answers; then the spec change (one pull request: the patch plus the
-  additions listed under "Spec changes to make" plus what the owner decides), the simulator's
-  checks adapted by an agent, task E (scenario and trace vectors), `bash scripts/gate.sh engine`,
-  the one round of checks, the exit pull request.
+- Next: task D6 (the simulator's checks carry the decided invariants) integrated and the gate run
+  at 1,000 seeds; the engine's pull request green and merged "(stage in progress, not the exit)";
+  task E (scenario and trace vectors); `bash scripts/gate.sh engine`; the one round of checks;
+  the exit pull request.
 
 1. Read this file, then the last 40 lines of `engine/journal.md`. Do not read `engine.md` (the
    spec) in full again: use the clause index
@@ -220,35 +220,16 @@ Agents' files: `src/fake.rs`, `src/fake/**`, `src/toy.rs`, `src/sim/splitmix.rs`
 Order (L4, L5): #28 merges; the branch restarts from day-planner; the spec change is the branch's
 only commit in a pull request of its own; then work goes on.
 
-## Spec changes to make
+## Spec changes
 
-- **Two spec changes are written, and go in two pull requests** (plan §3.3: a gate that is wrong
-  is changed in a pull request of its own, with the reason):
-  - **the behaviour change**: `engine/spec-change-2.patch`, a `git diff` on day-planner e38d44e;
-    also the local branch `spec-change-2` in `/home/user/wt/spec`, 6dea15c; spec-lint ok, 967
-    clauses. It holds everything listed below plus the owner's decisions 1, the sign-in rule of
-    2, the extra of 3 and 5: §22.2 (the beat under the divergence stop, ENG-DIVERGE-002 reworded,
-    ENG-DIVERGE-005), §29.1 item 2, §11.9 and ENG-SESS-007 (a board never moved; not while
-    following), §17.1 and ENG-SKIP-006 (a Skip whose target was skipped first ends `Ok`), §28.8;
-  - **the gate change**: `engine/spec-gate.patch`, a `git diff` on top of the first; local branch
-    `spec-gate`, 6313575: §31.7 ("removed relay state", invariants 2, 3 and 4 as the owner
-    decided), SYNC_PLAN.md §6.5 gate item 2, a CHANGES.md row.
-  - With both texts, `spec-coverage engine` on the engine branch gives 243 of 243 owned clauses
-    cited, 0 bad (the lead's run); on the branch alone it reports the new ids as bad citations.
-- **In progress (2026-11-25):** TT-SAL/taskdeck#30 is closed; the remote branch holds the
-  behaviour change alone, as TT-SAL/taskdeck#31; the engine's work is parked on the local branch
-  `park/engine-2` (worktree `/home/user/wt/engine`; its last pushed head d4901dc is also the last
-  head of TT-SAL/taskdeck#30). TT-SAL/taskdeck#31 (the behaviour change) merged on 2026-11-25 as
-  day-planner 5b999eb, CI green on every job that ran. TT-SAL/taskdeck#32 (the gate change,
-  d0cdc98 on day-planner 5b999eb) is open. Next: #32 merged, then
-  `git rebase --onto origin/day-planner e38d44e park/engine-2`, the branch set to it and pushed
-  (lease on d0cdc98), the engine's pull request opened again.
-- The stage has one branch, so: close TT-SAL/taskdeck#30 (its content stays on the engine branch),
-  park the engine's work on a local branch, make the branch day-planner plus the behaviour
-  commit, pull request, CI, merge; then day-planner plus the gate commit, pull request, CI, merge;
-  then rebase the engine's work onto day-planner, push, and open the engine's pull request again
-  (as done for TT-SAL/taskdeck#29).
-- The tests already cite the new clauses (commit e643665).
+- **Merged on 2026-11-25** (both from this branch, each a pull request of its own, CI green on
+  every job that ran): TT-SAL/taskdeck#31, the behaviour change (day-planner 5b999eb), and
+  TT-SAL/taskdeck#32, the gate change (day-planner fc18f4c: §31.7 "removed relay state",
+  invariants 2, 3 and 4, SYNC_PLAN.md §6.5 item 2). The engine's work was rebased onto fc18f4c
+  (43 commits, no conflict); `spec-coverage engine`: 243 of 243 owned clauses cited, 0 bad.
+- The parking cycle, for the next spec change: close the engine's pull request, park the engine's
+  work on a local branch, make the branch day-planner plus the spec commit, pull request, CI,
+  merge, rebase the engine's work onto day-planner, push, open the engine's pull request again.
 - Not yet in any spec text: the simulator's rulings on ticks (delivered at the time asked), the
   runtime renewing a stale token itself, how a poison entry is produced; the 14 questions of
   `tests/vectors/README.md` and those of `api-fake-toy.md`, `api-model-relay.md`,
