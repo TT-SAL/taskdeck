@@ -435,6 +435,15 @@ tail of a move), which are sent again; harmless.
   shared picture is uploaded again after a move.
 - Left open by `seal` (Q79): nothing binds the log between the bundle's head and `added_seq`; the
   remedy (the bundle carries the chain value at `added_seq`) is `engine`'s choice.
+- **Decided by the owner (2026-11-25, after D8): Q9 "Duty going on counts" (an own `snap` entry
+  or beat refused with a re-sealable code is reported by its duty going on; 5049, 5346, 5434), Q10
+  "Alarm, then close" (a device closed because the relay holds no row for it first raises
+  `relay_behind` when it holds an own entry a relay acknowledged; 4662, 4884, 5243).** Spec text:
+  local branches `spec-change-4` 0e12d17 (behaviour: Q10; an evidence cut persists nothing of its
+  page, ENG-CLASS-003; §21.3 step 5 echo; §28.3 stage 3 chain held; §28.4 step 3 acknowledgement
+  durable; §28.8 `OpDone` in the ending call) and `spec-gate-3` b958be6 (Q9), each its own pull
+  request; then the engine changes (the evidence cut, kept as a patch, and Q10) and task D9 (Q9's
+  check).
 - **Decided by the owner (2026-11-25): Q7 "Accept as known limit", Q8 "Count it as removed".**
   Spec text: local branches `spec-change-3` 183e016 (behaviour: ENG-RECV-007 a fenced relay is
   read up to its Fence only; §21.3 step 1 repairs again; §28.4 step 4 `PairFailed` with the
