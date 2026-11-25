@@ -70,10 +70,11 @@ in the order it happened; this file is the current truth and is rewritten, not a
   built on the local branch `engine-recv` 7a946dd (worktree `/home/user/wt/engine`, target dir
   `/home/user/wt/target-e`), with the test of `gate` 2154 rewritten for it: 221 unit tests,
   conformance, clippy and wasm pass, but `regressions` fails until task D7, because the oracle
-  stops at the first `Fence` (its user types no move code). TT-SAL/taskdeck#33 merged as
-  day-planner 561d084; the gate change is TT-SAL/taskdeck#34 (stage branch 9bbb75d, subscribed).
-  The engine's work is on the local branch `engine-recv` (from `park/engine-3`), to be rebased
-  onto day-planner once #34 merges.
+  stops at the first `Fence` (its user types no move code). TT-SAL/taskdeck#33 and #34 merged
+  (day-planner 561d084, then d96b360). The engine's work is rebased onto d96b360 and pushed as
+  the stage branch (without ENG-RECV-007: every test passes there, and spec-coverage lacks only
+  ENG-RECV-007); ENG-RECV-007 is the local commit dc885b8 on `engine-recv` above it, to land
+  with task D7's work.
 - Next: task D6 (the simulator's checks carry the decided invariants) integrated and the gate run
   at 1,000 seeds; the engine's pull request green and merged "(stage in progress, not the exit)";
   task E (scenario and trace vectors); `bash scripts/gate.sh engine`; the one round of checks;
