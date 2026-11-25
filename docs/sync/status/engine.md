@@ -6,49 +6,40 @@ in the order it happened; this file is the current truth and is rewritten, not a
 
 ## Resuming: read this first
 
-**Where things stand (2026-11-25, after task D2):**
+**Where things stand (2026-11-25, after task D3 and the lead's fixes that followed it):**
 
 - Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the first spec
   change). Open, draft: TT-SAL/taskdeck#30 (everything since); the branch
   `claude/cool-franklin-c6e6um` is pushed.
-- The simulator is on the branch with task D2's fix pass (invariants read strictly). Every clause
-  is cited (234 of 234), `unimplemented!()`: 0. Unit tests, `regressions` (9 files) and
-  `relay_conformance` pass; the `simulator` target (50 `gate` seeds by default) does not yet, so
-  CI of TT-SAL/taskdeck#30 is red.
-- What still fails under the simulator, by cause (D2's report, base 100), and whose it is:
-  - **A** a move's seed tail that carries an injected frame is refused by the new relay
-    (`relay.md` §12.7 against `engine.md` §28.3): the lead's, a spec change (the seed starts above
-    such a frame, checked before the fence) and then the engine. Not done yet.
-  - **A'**, **C**, **C'** entries lost to a relay rollback or fork, a restore tail refused for an
-    injected frame, a device paired through a forked copy: §31.7 as written cannot hold; **the
-    owner's decision** (see "Open threads", questions 2 and 3).
-  - **G** a pairing's `DeviceAdded` acknowledged and then refused (§28.4 step 4) against invariant
-    2: the owner's decision (question 3).
-  - **B**, **D**, **E**, **H**: engine, fixed on 2026-11-25 (see the journal); regression files
-    103, 115, 118, 137.
-- The second spec change (a pull request of its own, see "Spec changes to make") must merge before
-  TT-SAL/taskdeck#30 can be green: it needs the branch for itself, so the engine's work is parked
-  on a local branch for the time of that pull request's CI, as for TT-SAL/taskdeck#29.
-- Task D3 is done and applied (the lead ran its gate: 165 unit tests, regressions, conformance,
-  clippy, wasm). It fixed three simulator faults (one root per epoch; a push before the login
-  answer; violation texts that name a rollback or fork) and reported, for the lead:
-  - engine faults in the move: **A** the move goes on after a `SeedTail` nobody answered (gate
-    1009, 1099); **B** after a restart that follows the Fence the move sends `Door` again and never
-    seeds (gate 1021); **C** the seed sent again after a restart says `home_gen 0, first_seq 1` and
-    is refused `relay/bad_args` (gate 1095); **D** a device that applies its own Skip raises
-    mismatch alarms for seqs at or above the target (gate 1014, §17.3 last paragraph).
-  - spec questions: two devices skip the same target and the second Skip is acknowledged, then
-    refused `seal/ctl_target` for good (gate 1017, 1029, 108, 104) against invariant 2; a device
-    that crash-halted on a Skip's target confirms states between the target and the Skip without
-    the target, the no-fault oracle has it applied (gate 1014, 1098) against invariant 4; a device
-    whose pairing existed only on a rolled-back or forked relay state is answered
-    `relay/unauthorized` at every hourly login and never stops (1019, 1062, 1074, 1081, 1097); a
-    restore tail that holds an injected frame is refused `relay/wrong_board` every time (1074).
-  - No gate seed at base 100 or 1000 is a refused pairing (§28.4 step 4): seed 108, which D2 took
-    for one, is the Skip race.
-- Then, once the owner has decided questions 2 and 3: the spec change (one pull request), task E
-  (scenario and trace vectors), `bash scripts/gate.sh engine`, the one round of checks, the exit
-  pull request.
+- Tests on the branch: 170 unit tests pass and **4 fail, all four the simulator's own**
+  (`sim::world::tests::a_device_that_applied_the_skip_target_is_held_to_the_oracle`,
+  `…a_pairing_lost_with_a_fork_is_named_and_a_raced_skip_is_not_a_pairing`,
+  `…a_refused_entry_register_acknowledged_is_named_a_pairing`,
+  `…invariant_4_at_a_skip_window_is_judged_by_the_no_fault_oracle_only`): they assert what `gate`
+  seeds 1014 and 1017 did before the engine's fixes, and those seeds now run differently. Task D4
+  (agents) rewrites them so that no simulator test depends on what the engine does at a seed.
+  `regressions` (10 files), `relay_conformance` (16), clippy, the wasm check pass; every clause is
+  cited (234 of 234); `unimplemented!()`: 0. The `simulator` target (50 `gate` seeds) fails, so CI
+  of TT-SAL/taskdeck#30 is red.
+- The simulator after the fixes (the lead's runs): `gate` at base 100, 50 seeds: 26 fail, every one
+  only with "lost to a rolled-back relay state" (question 2). `gate` at base 1000, 100 seeds: 59
+  fail: 57 only for that; 1018 a pairing's `DeviceAdded` refused after `register` (question 3);
+  1098 a crash halt on a Skip's target (question 4). **Nothing else fails: what is left is the
+  owner's four questions.** The configurations without rollback and fork passed 60 of 60 before
+  these fixes and are to be run again after D4.
+- Fixed in the engine on 2026-11-25 after D3 (each with a test that failed before; journal):
+  a `SeedTail` nobody answered is sent again (regression file 1099); a move reads back after a
+  `Start` what its durable records say (door, generation, Fence seq) and goes on from its stage;
+  a `Start` in stage 4 seeds again, and `relay/exists` (repeated seed) or `relay/target` (repeated
+  last tail) means the board is open; the seed's `last_seq` is kept in the operation's record
+  (`OpRecord.mark`, a new field); stage 7 is written with the report, and a `Start` that finds
+  stage 7 emits the code and the report again; the move's snapshot is sealed again after a `Start`
+  in stage 6; reports from before a Skip are not compared by a device that already knows the
+  Skip; a second Skip of a target whose Skip is still in this device's outbox is refused.
+- Next: task D4; the owner's answers; then the spec change (one pull request: the patch plus the
+  additions listed under "Spec changes to make" plus what the owner decides), the simulator's
+  checks adapted by an agent, task E (scenario and trace vectors), `bash scripts/gate.sh engine`,
+  the one round of checks, the exit pull request.
 
 1. Read this file, then the last 40 lines of `engine/journal.md`. Do not read `engine.md` (the
    spec) in full again: use the clause index
@@ -230,6 +221,27 @@ only commit in a pull request of its own; then work goes on.
   local branch, make the branch day-planner plus that one commit, pull request, CI, merge, rebase
   the engine's work back, push (as done for TT-SAL/taskdeck#29). **Do it once, together with what
   the owner decides about §31.7** (questions 2 and 3 below), not twice.
+- **Additions since the patch was written (not in the patch yet; write them into the same spec
+  change):**
+  - §28 `OpRecord` gains `mark: u64` ("for a `Move` from stage 5 on, the seed's `last_seq`;
+    otherwise 0"), also in the §37 skeleton.
+  - §28.3, what a `Start` does to a move: its door, generation and Fence seq are read back from
+    the Fence record in the outbox, from the Fence in `M_K`, or from `meta.relay` (stage 6 on);
+    when none names the door, `Door` is asked again with the stage kept. Stage 4: a `SeedTail`
+    without an answer is sent again; `409 relay/target` for the repeated last request means the
+    tail is stored and the board open. After a `Start` in stage 4 the device seeds again as in
+    stage 3; `409 relay/exists` for a seed after an earlier one means the earlier tail was whole
+    and the board is open: on to stage 5. Stage 6 after a `Start`: sealed again unless a `snap`
+    record of this device at `S` exists. Stage 7 is persisted with the report.
+  - **ENG-MOVE-009 says "exactly one" `MoveReport`.** A process that dies between the write of
+    stage 7 and the notification would lose the move code for good (gate 1016), so the engine
+    emits the code and the report again when a `Start` finds stage 7. The clause needs "exactly
+    one per `Start`": a MUST's wording, so the owner confirms it (question 5).
+  - §17.1 step 2: also "not the target of a Skip record in this device's outbox".
+  - §17.3: a report for a seq at or above a Skip's target that arrives in an entry below the Skip
+    is neither registered nor compared once the Skip is committed to `M_K` (new clause
+    ENG-SKIP-005); it covers the device that never applied the target (step 1), which
+    ENG-SKIP-003 ("after a Skip replay") does not.
 - After it merges: the tests cite the new clauses (`a_duty_that_waits...` ENG-SESS-011;
   `a_move_starts_its_seed...` ENG-MOVE-010; `a_move_whose_relay_is_away...` ENG-MOVE-011;
   `a_pairing_cut_off_by_a_restart...` ENG-OPS-012).
@@ -256,33 +268,51 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 
 ## Open threads
 
-### Decisions the owner must make (they change §31.7 or a MUST; the gate cannot pass without 2 and 3)
+### Decisions the owner must make (they change §31.7 or a MUST; the gate cannot pass without 2, 3 and 4)
 
 1. **Divergence (§22.2, ENG-DIVERGE-001/002)**: as written the stop can halt the healthy majority
    (details in the next paragraph). Proposal: a stopped device still sends its beat, and the stop
-   also ends at the seq where it began once its group is strictly larger.
+   also ends at the seq where it began once its group is strictly larger. Does not block the gate.
 2. **What the gate promises when the relay itself misbehaves (rollback, fork).** §31.7 invariant 2
    says every acknowledged entry is in the final log, invariant 3 that every enqueued edit is
    accepted, held by a stopped device or refused. A relay that rolls back, or serves a forked copy,
    acknowledges entries that the reference log never holds; the devices that hold them raise
    evidence and stop, but the entries are gone (and a record a device already applied on the lost
-   branch is no longer in its outbox). 26 of 50 `gate` seeds at base 100 fail only for this (fork:
-   22, rollback: 4; seed 127 also invariant 1 for a device on the fork). The same holds for a
-   device paired through the forked copy (the real relay never heard of it: `401` for good), and
-   for a restore tail that holds a frame the relay made up (`relay.md` §12.9 refuses it, so the
-   rolled-back entries above it cannot be restored). SYNC_PLAN.md §6.5 words the gate as "tampering
-   alarms without a state change", which the lead reads as: for these faults the promise is the
-   alarm. Proposal: invariants 2 and 3 except an entry whose only acknowledgements came from a
-   relay state that a rollback or fork removed from the reference branch, when a device holding it
+   branch is no longer in its outbox). After every engine fix, 26 of 50 `gate` seeds at base 100
+   and 57 of 100 at base 1000 fail only for this. Three cases ride on the same answer:
+   - a device paired through the lost branch: the real relay never heard of it and answers
+     `401 relay/unauthorized` at each hourly login, for good. §11.9's row for that answer names
+     only a board that was moved (the relay of the latest `Fence`). Proposal: the row also holds
+     for a board never moved, so the device stops with `Closed` and offers re-pair;
+   - a restore tail that holds a frame the relay made up: `relay.md` §12.9 refuses it
+     (`relay/wrong_board`), so the rolled-back entries above it cannot be restored;
+   - SYNC_PLAN.md §6.5 words the gate as "tampering alarms without a state change", which the
+     lead reads as: for these faults the promise is the alarm.
+   Proposal: invariants 2 and 3 except an entry whose only acknowledgements came from a relay
+   state that a rollback or fork removed from the reference branch, when a device holding it
    raised §21.1 evidence; invariants 1 and 6 already except stopped devices, and would also except
    a device that joined on a removed branch.
-3. **Invariant 2 against a final refusal the spec itself defines.** A pairing's `DeviceAdded` that
-   `register` acknowledged and a racing rotation made stale is refused and not sealed again
-   (§28.4 step 4: revoke, `PairFailed`, pair again). Invariant 2 as written demands `Accept` for
-   every acknowledged entry; invariant 3 already allows "finally refused with a refusal record".
-   Seed 108 of `gate`. Proposal: invariant 2 allows what invariant 3 allows, and names §28.4
-   step 4.
-4. For information, no decision needed now: a board whose log holds a frame the relay made up can
+3. **Invariant 2 against a final refusal the spec itself defines.** Invariant 2 demands `Accept`
+   for every acknowledged entry; invariant 3 already allows "finally refused with a refusal
+   record". Two cases the spec makes final: a pairing's `DeviceAdded` that `register` acknowledged
+   and a racing rotation made stale (§28.4 step 4: revoke, `PairFailed`, pair again; `gate` 1018),
+   and the second of two Skips of one target composed by two devices at once (the sealer refuses
+   it with `seal/ctl_target`; before the engine's fixes moved the seeds: `gate` 108, 1017, 1029).
+   Proposal: invariant 2 allows what invariant 3 allows.
+4. **Invariant 4 between a Skip's target and the Skip.** A device that crash-halted on the target
+   `t` (or first reached `t` with the Skip already in its log) never applies `t`; the states it
+   confirms from `t` up to the Skip are the log without `t`, which is what ENG-SKIP-002 and
+   ENG-HALT-004 ask of it. The oracle of §31.7 replays with no faults, applies `t` and replays
+   again at the Skip, so its states in that window have `t` applied, and invariant 4 ("no
+   confirmed state differs from the oracle's at the same `B`") fails by design (`gate` 1098, 1014
+   before the fixes). §17.3 already says reports from that window "describe the state before the
+   Skip". Proposal: invariant 4 compares a device that never applied `t` with the log replayed
+   without `t` in that window (an expected value computed without the engine under test).
+5. **ENG-MOVE-009 "exactly one `MoveReport`".** See "Spec changes to make": after a crash between
+   the durable write and the notification, the engine emits the code and the report again at the
+   next `Start`, or the code is lost and nobody can follow the move. Proposal: "exactly one per
+   `Start`". The engine does this now; say so if it should not.
+6. For information, no decision needed now: a board whose log holds a frame the relay made up can
    move only once a snapshot lies above that frame (the engine now makes one due at the next
    aligned seq), and a frame injected in the seconds between the move's check and its Fence still
    strands the board read-only on the old relay. Curing either fully needs `relay.md` §12.7/§12.9

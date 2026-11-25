@@ -515,8 +515,23 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let Some(flight) = self.pipe.flight.take() else { return };
         let Some(first) = flight.entries.first().map(|e| e.seq) else { return };
         let mut last = first;
+        let b = self.b;
+        self.pipe.skip_at.retain(|x| x.1 > b);
         for e in flight.entries {
             last = e.seq;
+            if e.class == Class::Accept
+                && let Some(o) = e.opened.as_ref()
+            {
+                // An accepted Skip: what is reported below it for its target's seq or a later one
+                // is the state before the Skip (§17.3).
+                for item in &o.items {
+                    if let crate::CtlItem::Skip { seq: t, .. } = item
+                        && !self.pipe.skip_at.contains(&(*t, e.seq))
+                    {
+                        self.pipe.skip_at.push((*t, e.seq));
+                    }
+                }
+            }
             if !flight.from_log || e.seq > self.l {
                 self.push_chain(e.seq, e.chain, e.tau);
                 self.l = e.seq;
