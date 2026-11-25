@@ -6,27 +6,22 @@ in the order it happened; this file is the current truth and is rewritten, not a
 
 ## Resuming: read this first
 
-**Where things stand (2026-11-24 about 22:10 UTC, the owner's usage limit reached):**
+**Where things stand (2026-11-25 01:30 UTC):**
 
-- TT-SAL/taskdeck#28 is merged (squash d21e05e). TT-SAL/taskdeck#29 (the spec change, the remote
-  branch's only commit 1d19960) is open, its CI was running. When it is green: merge it (squash),
-  nothing else is needed for it.
-- **The engine's newest work is only local**: branch `park/engine` in `/home/user/taskdeck`, on top
-  of the spec commit. After #29 has merged: `git fetch origin day-planner`,
-  `git rebase --onto origin/day-planner 1d19960 park/engine`,
-  `git checkout -B claude/cool-franklin-c6e6um park/engine`, `bash scripts/ci/reads.sh`,
-  push (force-with-lease: the remote then holds only merged history), open the next pull request
-  titled "... (stage in progress, not the exit)". If the container was replaced and `park/engine`
-  is gone, that work (the tests of `relay_tests.rs` from the move on, the last of `flow_tests.rs`,
-  five engine fixes, this file) must be redone from the journal.
-- Task D (the simulator), workflow wf_70e5dcc6-438, was running in `/home/user/wt/d` (branch
-  `wt/d`, commits up to fa9dfda seen at 22:03). If no completion notice exists, look at the
-  working copy: commits there are work to check and integrate, not to redo. It was written
-  against the engine of 7a764c7: merge `park/engine` into it (or it into the branch) and run its
-  seeds again before reading any failing seed.
+- Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the spec
+  change). Open, draft: TT-SAL/taskdeck#30 (operations against the model relay, six fixes); the
+  branch `claude/cool-franklin-c6e6um` is pushed and holds everything up to the simulator's merge.
+- Task D (the simulator) is applied to the branch as a patch (`git diff 7a764c7 wt/d`, because a
+  merge across the squashes conflicts). Its writer and its checker finished; its fix pass was cut
+  off by the usage limit. The checker's findings (several high: invariant 6 not fully checked,
+  invariants 2 and 5 excuse too much) are in the workflow's journal
+  (`.../subagents/workflows/wf_70e5dcc6-438/journal.jsonl`, the second `result` line) and go to a
+  follow-up task D2 (brief `engine/briefs/d2-simulator-followup.md`).
+- The engine under the simulator: 100 quiet seeds pass. The writer reported engine defects with
+  seeds (see the journal entry of 2026-11-25); each is the lead's to fix with a regression file.
 - Left to test (9 clauses): ENG-SEALER-003, ENG-SKIP-003, ENG-BOOT-005, ENG-DIVERGE-004, and
-  ENG-SIM-002 to 005 (task D's). Then: the simulator under `ci.sh`, `bash scripts/gate.sh engine`,
-  the one round of checks, the exit pull request.
+  ENG-SIM-002 to 005 (cited by the simulator's tests once they are in). Then: the simulator in
+  `ci.sh`, `bash scripts/gate.sh engine`, the one round of checks, the exit pull request.
 - One question waits for the owner: the divergence rule (see "Open threads").
 
 1. Read this file, then the last 40 lines of `engine/journal.md`. Do not read `engine.md` (the
@@ -222,7 +217,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_4e7bb2da-24b | A2 fake follow-up | `engine/briefs/a2-fake-followup.md` | done, merged | `seal` no longer returns a stored frame for a reused counter unless entry and epoch are the same; `membership_zero`, `restore` | 341,974 |
 | wf_6790fa34-60e | C model relay, first attempt | `engine/briefs/c-model-relay.md` | lost: the owner's usage limit cut the writer off | nothing kept beyond commit 678fdc2 on `wt/c` | 265,340 |
 | wf_e736e661-ee0 | C model relay, second attempt | `engine/briefs/c-model-relay.md` | done, merged (the lead ran its gate: 16 conformance tests pass) | `src/sim/relay.rs` + `relay/{seq,admin,blobs,socket,util}.rs`, `tests/relay_conformance.rs` (11 families of `relay/test/vectors/`, about 575 steps; 7 families left out with reasons in the file header), `engine/api-model-relay.md`; check: no findings; 8 questions on relay.md; asks the fake for an accessor of the genesis `rsign_pk` and `salt` | 532,591 |
-| wf_70e5dcc6-438 | D simulator | `engine/briefs/d-simulator.md` | running since 2026-11-24 20:50 UTC in `/home/user/wt/d` (branch `wt/d`, target `/home/user/wt/target-d`); task id wddgelgx0 | | |
+| wf_70e5dcc6-438 | D simulator | `engine/briefs/d-simulator.md` | written and checked; the fix pass was cut off by the usage limit; applied to the branch as a patch | `src/sim.rs`, `src/sim/{config,store,trace,check,world}.rs`, `world/{rt,load,end}.rs`, `tests/simulator.rs`, `tests/regressions.rs`, `engine/api-simulator.md`; three helpers in the fake; quiet: 1,000 seeds pass (40 s release, 228 s debug); gate: 154 of 200 seeds failed against the engine of 7a764c7; 7 engine defects reported with seeds; 10 spec questions; the checker found 4 or more high defects in the invariants | 893,600 |
 
 ## Open threads
 
