@@ -59,7 +59,13 @@ in the order it happened; this file is the current truth and is rewritten, not a
   the revoke, not after the revoke's answer (`gate` 1073: the process stopped in between, the
   record had already left the outbox, and the pairing was never reported; ENG-OPS-004 asks
   only that the revoke is sent first, and `a_pairing_that_cannot_stand_is_dropped_or_undone`
-  now checks that).
+  now checks that); a move's seed is planned with the Skip frames up to its `last_seq` only
+  (`gate` 2154: a frame the fenced relay made up above the move's Fence ended the move with
+  `engine/move_tail`, and the board stayed fenced with no new home). **Open (spec change
+  needed):** the frame above the Fence stays in the mover's log (and a follower's); on the new
+  relay its head reads as `RelayBehind`, the restore tail of the made-up frame is refused, and
+  the device stays in the evidence stop with the move in stage 7. Proposed: a page from a relay
+  that an accepted `Fence` moved the board away from is not taken above that `Fence`.
 - Next: task D6 (the simulator's checks carry the decided invariants) integrated and the gate run
   at 1,000 seeds; the engine's pull request green and merged "(stage in progress, not the exit)";
   task E (scenario and trace vectors); `bash scripts/gate.sh engine`; the one round of checks;

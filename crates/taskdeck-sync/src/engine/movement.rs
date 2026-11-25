@@ -607,14 +607,16 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         // The frames this device holds, and a base at or below the seq before the first.
         first = first.max(self.floor);
         // A frame this device classified `Skip` is one the new relay refuses in a seed tail
-        // (`relay.md` §12.7): the tail starts above the newest of them.
+        // (`relay.md` §12.7): the tail starts above the newest of them. The tail ends at this
+        // move's Fence when the old relay sequenced it, and what lies above is never carried.
+        let last = self.opx.mv.fence_seq.filter(|_| self.opx.mv.old_answered).unwrap_or(self.l);
         let unverified = self
             .meta
             .alarms
             .iter()
             .filter(|a| a.kind == crate::AlarmKind::SkippedFrame)
             .filter_map(|a| a.seq)
-            .filter(|x| *x >= first && *x <= self.l)
+            .filter(|x| *x >= first && *x <= last)
             .max();
         if let Some(x) = unverified {
             if x > s {

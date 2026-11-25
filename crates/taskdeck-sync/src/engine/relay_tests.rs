@@ -1617,6 +1617,47 @@ fn a_move_starts_its_seed_above_a_frame_the_relay_made_up() {
     }
 }
 
+// spec: ENG-MOVE-010
+#[test]
+fn a_made_up_frame_above_the_moves_fence_does_not_end_the_move() {
+    // `gate` 2154: the old relay sequenced the move's Fence at f and showed a frame above it,
+    // which the device classified Skip; the move ended with `engine/move_tail` though that frame
+    // is never carried, and the board stayed fenced with no new home.
+    const NEW: &str = "relay2.test";
+    let old = super::kit_tests::relay().host;
+    let (mut net, mut a) = board(461);
+    let mut b = pair(&mut net, &mut a, 462, "Laptop", 1);
+    for k in 1..=4u64 {
+        a.set(k, k as u8, k as i64);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    net.add_relay(NEW);
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    serve_until_admin(&mut net, &mut a, "admin:fence");
+    let fence = a.fx.pop_front().expect("the fence");
+    net.answer(&mut a, fence);
+    let f = net.relays[&old].head().expect("a head").seq;
+    // The fenced relay shows a frame nobody signed above the Fence.
+    let mut frame = net.relays[&old].log()[&f].frame.clone();
+    *frame.last_mut().expect("a byte") ^= 1;
+    let now = a.wall;
+    net.relays.get_mut(&old).expect("the relay").inject_frame(now, frame).expect("stored");
+    // A reads up to that frame, classifies it Skip, and seeds the new relay up to its Fence.
+    serve_until_admin(&mut net, &mut a, "admin:seed");
+    assert!(has_alarm(&a, crate::AlarmKind::SkippedFrame));
+    assert!(a.e.status().head.seq > f);
+    let (first_seq, last_seq) = match a.fx.front() {
+        Some(Effect::Admin { op: AdminRequest::Seed { first_seq, last_seq, .. }, .. }) => (*first_seq, *last_seq),
+        _ => panic!("the seed"),
+    };
+    assert_eq!(last_seq, f, "the tail ends at the Fence");
+    net.settle(&mut [&mut a, &mut b]);
+    assert_ne!(op_result(&a, 9), Some(Err("engine/move_tail")));
+    for seq in first_seq..=last_seq {
+        assert_eq!(net.relays[NEW].log()[&seq].frame, net.relays[&old].log()[&seq].frame, "{seq}");
+    }
+}
+
 /// Serves a node's effects one by one until the next one is the admin call `name`, which stays unanswered.
 fn serve_until_admin(net: &mut super::rkit_tests::Net, n: &mut Node, name: &str) {
     for _ in 0..20_000 {
