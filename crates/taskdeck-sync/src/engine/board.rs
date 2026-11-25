@@ -257,6 +257,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
     }
 
+    /// The notices and outbox `Drop`s of the entries applied so far in a batch, written before a
+    /// checkpoint or base that covers them; the batch's `ClearMarker` still comes at its end.
+    fn flush_settled(&mut self) {
+        if !self.pipe.adds.is_empty() || !self.pipe.drops.is_empty() {
+            self.flush_batch_records(false);
+        }
+    }
+
     /// Writes the notice and refusal records and the outbox drops the applies
     /// produced, with `ClearMarker` when the marker's entries are all applied.
     fn flush_batch_records(&mut self, clear: bool) {
@@ -854,6 +862,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.bases.iter().any(|b| b.0 == self.b) {
             return self.last_pid;
         }
+        self.flush_settled();
         let Some(c) = self.checkpoint() else {
             self.fault("engine/local_fault");
             return 0;
@@ -865,6 +874,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     /// Writes the checkpoint at `B` (§18.1) and returns its write.
     pub(crate) fn write_checkpoint(&mut self) -> u64 {
+        // Nothing at or below a checkpoint is settled again after a `Start`: the notices and the
+        // outbox `Drop`s of the entries already applied go first (§7.12 D12, D13).
+        self.flush_settled();
         let Some(c) = self.checkpoint() else {
             self.fault("engine/local_fault");
             return 0;

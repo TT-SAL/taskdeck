@@ -439,6 +439,37 @@ fn identity_writes(n: &Node, from: usize) -> usize {
     n.persists[from..].iter().flatten().filter(|op| matches!(op, PersistOp::WriteIdentity(_))).count()
 }
 
+// spec: ENG-PERSIST-006
+#[test]
+fn a_checkpoint_comes_after_the_settlement_of_the_entries_it_covers() {
+    // `gate` 5024: the purge's own rotation was applied and the purge wrote its base and a
+    // checkpoint at that seq before the batch wrote the rotation record's `Drop`; the process
+    // stopped between the two, and after the restart (above the entry) the record was never
+    // settled: it stayed acknowledged and unseen, and the device sealed nothing again.
+    let (mut net, mut a) = board(161);
+    let mut b = pair(&mut net, &mut a, 162, "Laptop", 1);
+    for k in 1..=6u64 {
+        a.set(k, k as u8, k as i64);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    b.set(20, 20, 1);
+    net.settle(&mut [&mut a, &mut b]);
+    for k in 7..=9u64 {
+        a.set(k, k as u8, k as i64);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    let from = a.persists.len();
+    a.feed(Event::Op { ticket: 4, op: Operation::Purge });
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 4), Some(Ok(())));
+    // The write that drops A's rotation record comes before every checkpoint at or above it.
+    let r = a.e.membership().epoch_seq;
+    let drop = position(&a, from, |op| matches!(op, PersistOp::Outbox(v) if v.iter().any(|x| matches!(x, crate::OutboxOp::Drop(_)))))
+        .expect("the rotation record dropped");
+    let ckpt = position(&a, from, |op| matches!(op, PersistOp::WriteCheckpoint(c) if c.board_seq >= r)).expect("a checkpoint at the rotation");
+    assert!(drop < ckpt, "the Drop at write {drop}, the checkpoint at write {ckpt}");
+}
+
 // spec: ENG-PURGE-001 ENG-PURGE-002 ENG-PURGE-003 ENG-PURGE-004
 #[test]
 fn a_purge_leaves_no_current_device_behind() {
