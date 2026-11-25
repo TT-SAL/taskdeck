@@ -18,6 +18,8 @@ impl World<'_> {
         }
         for id in 0..self.idents.len() {
             self.check_pair_drops(id, true);
+            // A restore tail still owed at the end (task D6).
+            self.owe_end(id);
         }
         let home_head = self.relays[self.home].head();
         let mut facts_idents = Vec::new();
@@ -91,11 +93,15 @@ impl World<'_> {
                 caught_up,
                 joined_at: ident.joined_at,
                 samples: ident.samples.clone(),
+                crossings: ident.crossings.clone(),
                 crash_halts: ident.crash_halts.clone(),
                 applied,
                 alarms: ident.alarms.clone(),
+                evidence: ident.evidence.clone(),
                 outbox,
                 refusal_seqs,
+                pair_failed: ident.pair_failed_log.clone(),
+                op_done: ident.op_done.clone(),
                 expect_alarm: ident.expect_alarm.as_ref().map(|(l, w, _)| (*l, w.clone())),
                 last_line,
             });
@@ -119,10 +125,15 @@ impl World<'_> {
                 relay,
                 idents: facts_idents,
                 acked: &self.acked,
+                acks: &self.acks,
                 enqueued: &self.enqueued,
                 registered: &self.registered,
+                entry_ops: &self.entry_ops,
                 cancelled: &self.cancelled,
                 injected: &self.injected_seqs,
+                made_up: &self.made_up,
+                restore_tails: &self.restore_tails,
+                owed: &self.owed,
                 deletions: &self.deletions,
                 t_f: self.t_f,
             };

@@ -116,6 +116,11 @@ impl World<'_> {
         }
         ident.nproc += 1;
         let no = ident.nproc;
+        // The board seq the process loads: its checkpoint's, or a join's snapshot's.
+        let b_from = ident.store.checkpoint.as_ref().map(|c| c.board_seq).unwrap_or(match &ident.store.bootstrap {
+            Some(Bootstrap::Join { material, .. }) => material.seq,
+            _ => 0,
+        });
         ident.proc = Some(Proc {
             no,
             engine,
@@ -133,6 +138,8 @@ impl World<'_> {
             exiting: false,
             hello_no: 0,
             reads_open: BTreeSet::new(),
+            b_from,
+            owe: None,
         });
         self.stats.starts += 1;
         self.trace.line(self.t, "start", &[("dev", V::I(id as i128)), ("attempt", V::I(i128::from(no)))]);
@@ -148,6 +155,7 @@ impl World<'_> {
 
     /// The process ends: a crash, a kill after `Shutdown`, a retirement.
     pub(super) fn stop_proc(&mut self, id: usize) {
+        self.owe_end(id);
         let Some(p) = self.idents[id].proc.take() else { return };
         self.discard_unapplied(id, p.no);
         for (e, r) in p.engine.sealer().roots() {
@@ -243,6 +251,64 @@ impl World<'_> {
         self.check_pair_drops(id, false);
         if self.idents[id].proc.is_some() {
             self.sample(id);
+            self.owe_from(id);
+        }
+    }
+
+    /// §31.7 (task D6): "a dropped seq ... that a restore tail could have
+    /// brought back, is not removed". The restore tails a device sent are
+    /// `restore_tails`; this records the ones it owed and did not send.
+    /// After a call, a process in session with the home relay (relay 0, never
+    /// moved: the one a rollback rolls back) owes it a restore tail from the
+    /// relay's head + 1 when the relay's head is below its durable log head on
+    /// its chain (§21.3: the relay is a prefix of its log, a plain rollback,
+    /// "as any device does that holds more than the relay"; ENG-EVID-004),
+    /// no restore tail of its is on its way (one sent and not answered), and
+    /// it is not halted (§16.4: a halted device takes no restore tail). The
+    /// debt runs from then, with the relay's head and the device's durable
+    /// log then, until the process sends a restore tail, its session or the
+    /// process ends, or the run ends (`owe_end`).
+    pub(super) fn owe_from(&mut self, id: usize) {
+        if self.moved {
+            return;
+        }
+        let ident = &self.idents[id];
+        let Some(p) = ident.proc.as_ref() else { return };
+        if p.owe.is_some() || !p.conn.as_ref().is_some_and(|c| c.sel == Sel::Main(0) && c.welcomed_t.is_some()) {
+            return;
+        }
+        if p.outstanding.keys().any(|k| self.restore_sent.contains_key(&(id, p.no, *k))) {
+            return;
+        }
+        if ident.store.meta.as_ref().is_some_and(|m| m.halt.is_some()) {
+            return;
+        }
+        let (Some(h), Some((l, _))) = (self.relays[0].head(), ident.store.head()) else { return };
+        if h.seq >= l || ident.store.chain_at(h.seq) != Some(h.chain) {
+            return;
+        }
+        let holds = ident.store.run_head();
+        let x = RestoreTry {
+            sel: Sel::Main(0),
+            line: self.trace.lines(),
+            first_seq: h.seq + 1,
+            frames: Vec::new(),
+            answer: Answer::Owed,
+            head: Some(h),
+            holds,
+        };
+        let t = self.t;
+        if let Some(p) = self.idents[id].proc.as_mut() {
+            p.owe = Some((t, x));
+        }
+    }
+
+    /// The debt `owe_from` opened ends now: a restore tail sent, a session or
+    /// process ended, the run's end. Owed when it ran `RESTORE_DUE` or longer.
+    pub(super) fn owe_end(&mut self, id: usize) {
+        let Some((t0, x)) = self.idents[id].proc.as_mut().and_then(|p| p.owe.take()) else { return };
+        if self.t >= t0 + RESTORE_DUE {
+            self.owed.push(x);
         }
     }
 
@@ -256,7 +322,9 @@ impl World<'_> {
     /// (one still in the persist queue is judged when it is; one a crash or
     /// an exit cut off deletes nothing, `discard_unapplied`), and the rule is
     /// not asked of a call whose effects a crash cut off before the runtime
-    /// performed them (its `PairFailed` may be among those never performed).
+    /// performed them (its `PairFailed` may be among those never performed),
+    /// nor when the next call was cut so (task D6: its `PairFailed` may be due
+    /// there).
     pub(super) fn check_pair_drops(&mut self, id: usize, all: bool) {
         let ident = &mut self.idents[id];
         let calls = ident.calls;
@@ -264,7 +332,7 @@ impl World<'_> {
         let cut = ident.cut_calls.clone();
         let mut bad = Vec::new();
         ident.pair_drops.retain(|(dev, call, line, key)| {
-            if failed.iter().any(|(d, c)| d == dev && *c >= *call && *c <= call + 1) || cut.contains(call) {
+            if failed.iter().any(|(d, c)| d == dev && *c >= *call && *c <= call + 1) || cut.contains(call) || cut.contains(&(call + 1)) {
                 return false;
             }
             if all || calls > call + 1 {
@@ -299,6 +367,10 @@ impl World<'_> {
             Staged::Violation(v) => self.violations.push(v),
             Staged::Cancelled(e) => {
                 self.cancelled.insert(e);
+            }
+            Staged::Alarm(id, kind, line) => {
+                let held = self.idents[id].store.held_frames();
+                self.idents[id].evidence.push(EvidenceAlarm { line, kind, held });
             }
         }
     }
@@ -345,7 +417,18 @@ impl World<'_> {
             }
             return;
         };
-        if (head.seq, head.chain) == self.idents[id].last_b {
+        // Invariant 4 (task D6): how the board moved within this process, with
+        // its class head then (`K` is the last persisted seq, §12.3 step 9).
+        let k = self.idents[id].store.head().unwrap_or((0, [0; 32]));
+        let line = self.trace.lines();
+        let ident = &mut self.idents[id];
+        if let Some(p) = ident.proc.as_mut()
+            && p.b_from != head.seq
+        {
+            ident.crossings.push(Crossing { from: p.b_from, to: head.seq, to_chain: head.chain, k: k.0, k_chain: k.1, line });
+            p.b_from = head.seq;
+        }
+        if (head.seq, head.chain) == ident.last_b {
             return;
         }
         let line = self.trace.lines();
@@ -655,6 +738,7 @@ impl World<'_> {
                     }
                 }
                 PersistOp::WriteMeta(meta) => {
+                    let mut evidence = Vec::new();
                     for a in &meta.alarms {
                         if a.id > self.idents[id].max_alarm {
                             self.idents[id].max_alarm = a.id;
@@ -670,7 +754,13 @@ impl World<'_> {
                             ident.alarms.push((a.id, a.kind, a.seq, t));
                             ident.alarm_lines.push(l);
                             ident.expect_alarm = None;
+                            if check::is_evidence(a.kind) {
+                                evidence.push((a.kind, l));
+                            }
                         }
+                    }
+                    for (kind, l) in evidence {
+                        self.stage(Staged::Alarm(id, kind, l));
                     }
                 }
                 PersistOp::WriteCheckpoint(c) => {
@@ -747,6 +837,9 @@ impl World<'_> {
         self.cancelled.remove(&r.entry_id);
         self.staged.retain(|(_, s)| !matches!(s, Staged::Cancelled(e) if *e == r.entry_id));
         self.first_put.entry(r.entry_id).or_insert(self.t);
+        if let Some(ticket) = r.op {
+            self.entry_ops.insert(r.entry_id, (id, ticket));
+        }
         if let Some(fr) = &r.frame {
             let duty = matches!(
                 (&r.kind, &r.body),
@@ -843,6 +936,7 @@ impl World<'_> {
     /// Ends the current session: closes the socket at the relay; answers still
     /// in flight are discarded (`device.md` §10.5 `Disconnect`).
     pub(super) fn close_conn(&mut self, id: usize, failure: bool) {
+        self.owe_end(id);
         let t = self.t;
         let ident = &mut self.idents[id];
         let Some(p) = ident.proc.as_mut() else { return };
@@ -906,7 +1000,16 @@ impl World<'_> {
         false
     }
 
-    fn send_up(&mut self, id: usize, call: Call, key: u64, bytes: usize) {
+    /// A restore tail device `id` sends to `sel` now, not yet answered: the
+    /// relay's head and the device's durable log now (task D6, §31.7).
+    fn restore_try(&mut self, id: usize, sel: Sel, first_seq: u64, frames: &[Vec<u8>]) -> RestoreTry {
+        let head = self.relay(sel).head();
+        let holds = self.idents[id].store.run_head();
+        let line = self.trace.lines();
+        RestoreTry { sel, line, first_seq, frames: frames.iter().map(|f| h(f)).collect(), answer: Answer::Unanswered, head, holds }
+    }
+
+    pub(super) fn send_up(&mut self, id: usize, call: Call, key: u64, bytes: usize) {
         let Some(p) = self.idents[id].proc.as_ref() else { return };
         let (proc, conn) = (p.no, p.conn_no);
         let host_sel = match &call {
@@ -922,6 +1025,17 @@ impl World<'_> {
         let timeout = TIMEOUT + (bytes as u64 * 1_000).div_ceil(65_536);
         self.at(self.t + timeout, Ev::Timeout { id, proc, conn, key });
         let Some(sel) = sel else { return };
+        if let Call::Admin { op: AdminRequest::RestoreTail { first_seq, frames, .. }, .. } = &call {
+            #[cfg(test)]
+            if self.drop_restore_tails.as_ref().is_some_and(|f| f(id, *first_seq)) {
+                return;
+            }
+            let x = self.restore_try(id, sel, *first_seq, frames);
+            self.restore_sent.insert((id, proc, key), self.restore_tails.len());
+            self.restore_tails.push(x);
+            // It pays what this process owed (`owe_from`), late or not.
+            self.owe_end(id);
+        }
         if self.lost(id) {
             return;
         }
@@ -1091,7 +1205,7 @@ impl World<'_> {
         Some(Head { seq: r.seq, chain: r.chain })
     }
 
-    fn at_relay(&mut self, id: usize, proc: u32, conn: u64, sel: Sel, call: Call) {
+    pub(super) fn at_relay(&mut self, id: usize, proc: u32, conn: u64, sel: Sel, call: Call) {
         if sel == Sel::Fork && self.fork.is_none() {
             return;
         }
@@ -1204,9 +1318,11 @@ impl World<'_> {
                     Ok(results) => {
                         let mut acks = Vec::new();
                         for (f, r) in frames.iter().zip(&results) {
-                            if matches!(r, AppendResult::New { .. } | AppendResult::Dup { .. })
+                            if let AppendResult::New { seq, .. } | AppendResult::Dup { seq, .. } = r
                                 && let Some((eid, _, _)) = self.frames.get(&h(f)) {
                                     acks.push((*eid, sel == Sel::Main(self.home)));
+                                    let line = self.trace.lines();
+                                    self.acks.push(AckFact { eid: *eid, ident: id, sel, seq: *seq, frame: h(f), line });
                                 }
                         }
                         if !acks.is_empty() {
@@ -1243,20 +1359,51 @@ impl World<'_> {
                         _ => {}
                     }
                 }
-                let register = matches!(op, AdminRequest::Register { .. });
+                let registers = match &op {
+                    AdminRequest::Register { dev: d, .. } => Some(*d),
+                    _ => None,
+                };
                 let carried = match &op {
                     AdminRequest::Register { frame, .. } => Some(frame.clone()),
                     AdminRequest::Fence { frame: Some(f), .. } => Some(f.clone()),
                     _ => None,
                 };
                 if let (Some(f), Ok(ok)) = (carried, &reply.result)
-                    && ok.seq.is_some()
+                    && let Some(seq) = ok.seq
                         && let Some((eid, _, _)) = self.frames.get(&h(&f)) {
-                            if register {
-                                self.registered.insert(*eid);
+                            let eid = *eid;
+                            if let Some(d) = registers {
+                                self.registered.insert(eid, d);
                             }
-                            self.pending_acks.insert((id, proc, req), vec![(*eid, sel == Sel::Main(self.home))]);
+                            self.pending_acks.insert((id, proc, req), vec![(eid, sel == Sel::Main(self.home))]);
+                            let line = self.trace.lines();
+                            self.acks.push(AckFact { eid, ident: id, sel, seq, frame: h(&f), line });
                         }
+                // `relay.md` §12.9: how the relay first answered each restore
+                // tail, and its head then (task D6). A second copy of one
+                // request (`duplication`) is no other restore tail.
+                if let AdminRequest::RestoreTail { first_seq, frames, .. } = &op {
+                    let answer = match &reply.result {
+                        Ok(_) => Answer::Stored,
+                        Err(r) => Answer::Refused(r.code.clone(), r.index),
+                    };
+                    let fh: Vec<Hash32> = frames.iter().map(|f| h(f)).collect();
+                    let sent = self.restore_sent.get(&(id, proc, req)).copied();
+                    let i = match sent.filter(|i| self.restore_tails[*i].first_seq == *first_seq && self.restore_tails[*i].frames == fh) {
+                        Some(i) => i,
+                        None => {
+                            let x = self.restore_try(id, sel, *first_seq, frames);
+                            self.restore_sent.insert((id, proc, req), self.restore_tails.len());
+                            self.restore_tails.push(x);
+                            self.restore_tails.len() - 1
+                        }
+                    };
+                    let line = self.trace.lines();
+                    let x = &mut self.restore_tails[i];
+                    if x.answer == Answer::Unanswered {
+                        (x.answer, x.line, x.head) = (answer, line, before);
+                    }
+                }
                 let ev = match reply.result {
                     Ok(ok) => Event::AdminResult { req, result: Ok(ok) },
                     Err(r) if is_whole_admin(&r) => Event::RelayRefused { req: Some(req), refusal: r },
@@ -1292,7 +1439,7 @@ impl World<'_> {
         let old: Vec<LogRow> = self.archive.iter().filter(|x| x.seq >= first_seq).cloned().collect();
         if !old.is_empty() {
             let line = self.trace.lines();
-            self.branches.push(BranchLog { rows: self.archive.clone(), why: "the old relay after a move", line });
+            self.branches.push(BranchLog { rows: self.archive.clone(), why: "the old relay after a move", line, removed_from: first_seq });
         }
         self.archive.truncate(first_seq.saturating_sub(1) as usize);
         self.home = r;

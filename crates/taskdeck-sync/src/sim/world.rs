@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 
 use sha2::{Digest, Sha256};
 
-use super::check::{self, BranchLog, Facts};
+use super::check::{self, AckFact, Answer, BranchLog, Crossing, EvidenceAlarm, Facts, MadeUp, RestoreTry};
 use super::counted::CountedToy;
 use super::relay::{Cred, LogRow, ModelRelay, Out, SockMsg, SocketId};
 use super::store::Store;
@@ -50,6 +50,13 @@ const SETTLE: u64 = 7_200_000;
 const HOSTS: [&str; 2] = ["relay-a.example", "relay-b.example"];
 /// The response timeout of `device.md` §10.10 (headers after the request).
 const TIMEOUT: u64 = 20_000;
+/// How long a device stays in session with a relay that holds a prefix of its
+/// durable log, with no restore tail sent or on its way, before the restore
+/// tail §21.3 has it send counts as owed (`World::owed`, task D6): the
+/// response timeout, the time a request it sent then would have had to be
+/// answered. An engine that sends one at once (ENG-EVID-004, ENG-EFFECT-001:
+/// a `ReadLog`, then the request) takes milliseconds.
+const RESTORE_DUE: u64 = TIMEOUT;
 /// The base one-way latency of a message, before the drawn delay.
 const LATENCY: u64 = 5;
 const KEY_HELLO: u64 = 1 << 63;
@@ -233,6 +240,13 @@ struct Proc {
     /// engine yet: a page with another request id is one the engine ignores
     /// (ENG-EFFECT-002), so it is no relay head the device saw (task D5).
     reads_open: BTreeSet<u64>,
+    /// The confirmed `B` this process last showed (at its `Start`, the board
+    /// seq it loaded): where its next `Crossing` starts (task D6).
+    b_from: u64,
+    /// Since when this process owes the home relay a restore tail (§21.3,
+    /// `World::owe_from`), and that restore tail as it would have met the
+    /// relay then (task D6).
+    owe: Option<(u64, RestoreTry)>,
 }
 
 /// One `Persist` of one process: (identity, process number, persist id).
@@ -245,6 +259,9 @@ pub(super) enum Staged {
     Deletion((usize, Deletion, u64, u64)),
     Violation(Violation),
     Cancelled([u8; 16]),
+    /// An alarm of `check::is_evidence`'s kinds: (identity, kind, its trace
+    /// line). It counts once durable, with the frames held then (task D6).
+    Alarm(usize, AlarmKind, u64),
 }
 
 /// A test's change to the end-of-run facts (`World::tamper_facts`).
@@ -272,13 +289,18 @@ pub(crate) struct Ident {
     pub(crate) joined_at: u64,
     /// Samples of the confirmed state: (B, C_B, board hash, line).
     pub(crate) samples: Vec<(u64, Hash32, Hash32, u64)>,
-    /// The seqs of the crash halts this identity's storage held (§16.2): the
-    /// one kind of device that may confirm a `B` in `t..s` without `t`.
+    /// How its confirmed head moved within each process, with the class head
+    /// then (§31.7 invariant 4: whether it applied a Skip's target, task D6).
+    pub(crate) crossings: Vec<Crossing>,
+    /// The seqs of the crash halts this identity's storage held (§16.2).
     pub(crate) crash_halts: BTreeSet<u64>,
     last_b: (u64, Hash32),
     /// Alarms raised: (id, kind, seq, time).
     pub(crate) alarms: Vec<(u64, AlarmKind, Option<u64>, u64)>,
     alarm_lines: Vec<u64>,
+    /// Its durable alarms with evidence of a relay state, and the frames it
+    /// held then (§31.7 "never lost silently", task D6).
+    pub(crate) evidence: Vec<EvidenceAlarm>,
     /// A confirmed rejoin in progress (§19.7): the checkpoints written since
     /// `ConfirmRejoin` (seq → chain), and whether its base deletion was used.
     /// It explains exactly the rejoin's own `TruncateLogBelow(S + 1, Some(C_S))`
@@ -296,6 +318,11 @@ pub(crate) struct Ident {
     sent: BTreeSet<Hash32>,
     /// `PairFailed` notifications: (dev, call).
     pair_failed: Vec<(Dev, u64)>,
+    /// Every `PairFailed`: (the device its pairing adds, trace line); and
+    /// every `OpDone`: (ticket, trace line). A final refusal's report (§31.7
+    /// invariant 2, task D6).
+    pub(crate) pair_failed_log: Vec<(Dev, u64)>,
+    pub(crate) op_done: Vec<(u64, u64)>,
     /// The engine loaded no replica at a `Start` (it refused it).
     unloaded: bool,
     asked: BTreeSet<String>,
@@ -366,17 +393,39 @@ pub(crate) struct World<'a> {
     pub(crate) branches: Vec<BranchLog>,
     /// Frame hash → (entry id, kind, duty entry).
     frames: BTreeMap<Hash32, ([u8; 16], Kind, bool)>,
-    /// Entry ids a relay acknowledged: (entry id, ident, line, from the reference branch).
+    /// Entry ids a relay acknowledged, as the answer reached the device:
+    /// (entry id, ident, line, from the reference branch).
     pub(crate) acked: Vec<([u8; 16], usize, u64, bool)>,
+    /// Every acknowledgement a relay gave, delivered or not, with the relay
+    /// state, seq and frame (§31.7: where it came from, task D6).
+    pub(crate) acks: Vec<AckFact>,
+    /// Every `restore_tail` a device sent, with the relay's first answer or
+    /// none (`relay.md` §12.9, task D6).
+    pub(crate) restore_tails: Vec<RestoreTry>,
+    /// The restore tail each request (ident, process, request id) is.
+    restore_sent: BTreeMap<(usize, u32, u64), usize>,
+    /// Every restore tail a device owed and did not send (`owe_from`,
+    /// `RESTORE_DUE`): `Answer::Owed`, as it would have met the relay when it
+    /// fell due (task D6).
+    pub(crate) owed: Vec<RestoreTry>,
+    /// The frames the relay made up (`injected_frame`), by hash, with how.
+    pub(crate) made_up: BTreeMap<Hash32, MadeUp>,
+    /// The operation each outbox record belongs to: entry id → (ident, ticket).
+    pub(crate) entry_ops: BTreeMap<[u8; 16], (usize, u64)>,
     /// `Enqueued` with an entry id: (entry id, ident, time, line).
     pub(crate) enqueued: Vec<([u8; 16], usize, u64, u64)>,
     pub(crate) cancelled: BTreeSet<[u8; 16]>,
     /// The entry ids of pairings' `DeviceAdded` frames that a relay's
-    /// `register` acknowledged with a seq (§28.4 step 3).
-    pub(crate) registered: BTreeSet<[u8; 16]>,
+    /// `register` acknowledged with a seq (§28.4 step 3), with the device each adds.
+    pub(crate) registered: BTreeMap<[u8; 16], Dev>,
     /// A test's change to the end-of-run facts of each identity, before the checks.
     #[cfg(test)]
     pub(crate) tamper_facts: Option<TamperFacts>,
+    /// A test's stand-in for an engine that sends no restore tail: a
+    /// `restore_tail` of the identity and first seq this names is dropped
+    /// before it is recorded or reaches a relay.
+    #[cfg(test)]
+    pub(crate) drop_restore_tails: Option<Box<dyn Fn(usize, u64) -> bool>>,
     /// The first time an entry id was put in an outbox.
     pub(crate) first_put: BTreeMap<[u8; 16], u64>,
     /// Deletions to explain at the end (invariant 5): (ident, what, B then, line).
@@ -405,8 +454,10 @@ pub(crate) struct World<'a> {
     cur_forget: Option<(usize, u64, u64)>,
     /// The device each pairing ticket registers (kept after the ticket ends).
     pair_devs: BTreeMap<u64, Dev>,
-    /// The trace line of the current fork's `relay_fork` fault.
+    /// The trace line of the current fork's `relay_fork` fault, and the
+    /// relay head when it started.
     fork_line: u64,
+    fork_at: u64,
     /// The identity each completed pairing ticket started (`PairRegistered`).
     paired: BTreeMap<u64, usize>,
     /// The `Persist` whose operations are being noted (`note_persist`).
@@ -636,11 +687,19 @@ impl<'a> World<'a> {
             branches: Vec::new(),
             frames: BTreeMap::new(),
             acked: Vec::new(),
+            acks: Vec::new(),
+            restore_tails: Vec::new(),
+            restore_sent: BTreeMap::new(),
+            owed: Vec::new(),
+            made_up: BTreeMap::new(),
+            entry_ops: BTreeMap::new(),
             enqueued: Vec::new(),
             cancelled: BTreeSet::new(),
             #[cfg(test)]
             tamper_facts: None,
-            registered: BTreeSet::new(),
+            #[cfg(test)]
+            drop_restore_tails: None,
+            registered: BTreeMap::new(),
             first_put: BTreeMap::new(),
             deletions: Vec::new(),
             violations: Vec::new(),
@@ -660,6 +719,7 @@ impl<'a> World<'a> {
             cur_forget: None,
             pair_devs: BTreeMap::new(),
             fork_line: 0,
+            fork_at: 0,
             paired: BTreeMap::new(),
             cur_write: None,
             unapplied: BTreeSet::new(),
@@ -845,16 +905,20 @@ impl<'a> World<'a> {
             next_n: 1,
             joined_at,
             samples: Vec::new(),
+            crossings: Vec::new(),
             crash_halts: BTreeSet::new(),
             last_b: (0, [0; 32]),
             alarms: Vec::new(),
             alarm_lines: Vec::new(),
+            evidence: Vec::new(),
             rejoin: None,
             calls: 0,
             pair_drops: Vec::new(),
             cut_calls: BTreeSet::new(),
             sent: BTreeSet::new(),
             pair_failed: Vec::new(),
+            pair_failed_log: Vec::new(),
+            op_done: Vec::new(),
             unloaded: false,
             asked: BTreeSet::new(),
             resubmit: None,
@@ -1110,12 +1174,9 @@ mod tests {
         );
     }
 
-    // Ruling 1 of the D2 brief: an acknowledged entry that only a rolled-back
-    // relay state held is reported as such, with the fault's line.
-    #[test]
-    fn an_entry_lost_to_a_rollback_is_named() {
-        let cfg = SimConfig::named("quiet").expect("quiet");
-        let mut w = World::new(3, &cfg, false);
+    /// Quiet seed 3 run until virtual time `until` (to its end for `u64::MAX`), not finished.
+    fn quiet_world(cfg: &SimConfig, until: u64) -> World<'_> {
+        let mut w = World::new(3, cfg, false);
         w.setup();
         while let Some(s) = w.q.pop() {
             w.t = s.t;
@@ -1123,20 +1184,579 @@ mod tests {
                 break;
             }
             w.step(s.ev);
+            if w.t >= until {
+                break;
+            }
         }
+        w
+    }
+
+    /// The last accepted entry of `w`'s reference log: (entry id, seq, frame hash).
+    fn last_entry(w: &World<'_>) -> ([u8; 16], u64, Hash32) {
         let roots: Vec<(u32, [u8; 32])> = w.roots.iter().copied().collect();
         let led = check::ledger(&w.archive, w.template.as_ref(), &roots);
-        let eid = led.iter().rev().find(|l| l.accept).and_then(|l| l.entry_id).expect("an entry");
-        let seq = led.iter().rev().find(|l| l.entry_id == Some(eid)).map(|l| l.seq).expect("its seq");
-        w.branches.push(BranchLog { rows: w.archive.clone(), why: check::WHY_ROLLBACK, line: 77 });
-        w.archive.truncate(seq as usize - 1);
-        w.acked.push((eid, 0, 1, true));
+        let l = led.iter().rev().find(|l| l.accept && l.entry_id.is_some()).expect("an entry");
+        (l.entry_id.expect("an entry id"), l.seq, w.archive[l.seq as usize - 1].hash)
+    }
+
+    /// The violations of invariant 2 that name `eid`, at the end of `w`.
+    fn naming(w: World<'_>, eid: &[u8; 16]) -> Vec<String> {
         let (r, _) = w.finish_run();
+        r.violations.into_iter().filter(|v| v.invariant == 2 && v.detail.contains(&check::hexs(eid))).map(|v| v.detail).collect()
+    }
+
+    // §31.7 (task D6): a plain rollback is repaired, not excused. Quiet seed
+    // 3 with its last accepted entry dropped by a rollback (the reference log
+    // truncated below it, the relay before the rollback as the branch) and
+    // acknowledged by the relay before the fault: no restore tail brought it
+    // back and no other entry took its seq, so its seq is not removed and its
+    // loss breaks invariant 2 although a device that held its frame raised an
+    // alarm with evidence after the fault.
+    #[test]
+    fn an_entry_lost_to_a_plain_rollback_is_not_excused() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, u64::MAX);
+        let (eid, seq, frame) = last_entry(&w);
+        w.branches.push(BranchLog { rows: w.archive.clone(), why: check::WHY_ROLLBACK, line: 77, removed_from: seq });
+        w.archive.truncate(seq as usize - 1);
+        w.acks.retain(|a| a.eid != eid);
+        w.acks.push(AckFact { eid, ident: 0, sel: Sel::Main(0), seq, frame, line: 50 });
+        w.acked.push((eid, 0, 51, true));
+        w.idents[0].evidence.push(EvidenceAlarm { line: 80, kind: AlarmKind::RelayBehind, held: BTreeSet::from([frame]) });
+        let v = naming(w, &eid);
         assert!(
-            r.violations.iter().any(|v| v.invariant == 2 && v.detail.contains("lost to a rolled-back relay state") && v.detail.contains("line 77")),
-            "{:?}",
-            r.violations.iter().map(|v| &v.detail).collect::<Vec<_>>()
+            v.iter().any(|d| d.contains("lost to a rolled-back relay state that is not removed") && d.contains("line 77")),
+            "{v:?}"
         );
+    }
+
+    /// Steps `w`'s events for `ms` of virtual time.
+    fn run_for(w: &mut World<'_>, ms: u64) {
+        let until = w.t + ms;
+        while let Some(s) = w.q.pop() {
+            if s.t > until {
+                w.q.push(s);
+                break;
+            }
+            w.t = s.t;
+            w.step(s.ev);
+        }
+        w.t = until;
+    }
+
+    /// Steps `w`'s events, at most `ms` of virtual time, until `done` holds after one: whether it did.
+    fn run_until(w: &mut World<'_>, ms: u64, done: impl Fn(&World<'_>) -> bool) -> bool {
+        let until = w.t + ms;
+        while let Some(s) = w.q.pop() {
+            if s.t > until {
+                w.q.push(s);
+                return false;
+            }
+            w.t = s.t;
+            w.step(s.ev);
+            if done(w) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Identity `id` enqueues `Set { key, value }` (a user's edit): its entry id.
+    fn edit(w: &mut World<'_>, id: usize, key: u8, value: i64) -> [u8; 16] {
+        let n = w.enqueued.len();
+        let at_ms = w.wall(w.idents[id].machine);
+        let ticket = (1 << 40) + n as u64;
+        w.deliver(id, Event::Enqueue { ticket, command: ToyCommand::Set { key, value }, at_ms, origin_state: vec![0; 8], hold: false });
+        assert!(run_until(w, 5_000, |w| w.enqueued.len() > n), "the premise: dev {id} queued the edit");
+        assert_eq!(w.enqueued[n].1, id, "the premise: dev {id}'s edit");
+        w.enqueued[n].0
+    }
+
+    /// Quiet seed 3 at its end, its three identities running and holding the
+    /// relay's head, then a relay rollback by hand (§31.6): `down` stopped
+    /// first, the relay's state marked, Desk (identity 0) appends `n` edits,
+    /// the relay rolls back to the mark. Returns the world, the mark's head and
+    /// the edits' entry ids and frames, which Desk holds at the seqs after it.
+    fn rolled_world<'a>(cfg: &'a SimConfig, down: &[usize], n: u8) -> (World<'a>, Head, Vec<([u8; 16], Hash32)>) {
+        let mut w = quiet_world(cfg, u64::MAX);
+        let head = w.relays[0].head().expect("a board");
+        assert_eq!(w.idents.len(), 3, "the premise: three identities");
+        for (i, x) in w.idents.iter().enumerate() {
+            assert!(x.proc.is_some() && x.store.head() == Some((head.seq, head.chain)), "the premise: dev {i} runs and holds the relay's head");
+        }
+        for id in down {
+            w.stop_proc(*id);
+        }
+        // The quiet configuration's fault rates are all zero: only the faults
+        // this test injects happen.
+        w.faults_on = true;
+        w.fault(FaultEv::RollbackMark(9));
+        let mut edits = Vec::new();
+        for k in 0..n {
+            let eid = edit(&mut w, 0, k, 70 + i64::from(k));
+            run_for(&mut w, 5_000);
+            let q = head.seq + 1 + u64::from(k);
+            let frame = w.archive.get(q as usize - 1).map(|r| r.hash).expect("the relay sequenced the edit");
+            assert!(w.acks.iter().any(|a| a.eid == eid && a.seq == q && a.frame == frame), "the premise: the relay acknowledged the edit at {q}");
+            assert!(w.acked.iter().any(|a| a.0 == eid && a.1 == 0), "the premise: the acknowledgement reached Desk");
+            assert_eq!(w.idents[0].store.log_hash.get(&q), Some(&frame), "the premise: Desk holds {q}");
+            edits.push((eid, frame));
+        }
+        w.fault(FaultEv::Rollback(9));
+        assert_eq!(w.relays[0].head(), Some(head), "the premise: the relay rolled back to the mark");
+        (w, head, edits)
+    }
+
+    // The reproduction of D6's second fix pass (§31.7: "a dropped seq ...
+    // that a restore tail could have brought back, is not removed: a plain
+    // rollback is repaired"; §21.3, ENG-EVID-004). A rollback drops Desk's
+    // edit, which Laptop holds too; both raise `RelayBehind` and stay
+    // connected while the relay holds the lost tail's prefix, and every
+    // restore tail they emit is dropped before it is recorded or sent (an
+    // engine that never sends one); then the phone, down through all of it,
+    // starts and its own edit takes the dropped seq. That loss is no removed
+    // relay state: a restore tail could have brought the seq back, and its
+    // device's alarm does not excuse it.
+    #[test]
+    fn a_plain_rollback_no_restore_tail_was_sent_for_is_not_excused() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let (mut w, head, edits) = rolled_world(&cfg, &[2], 1);
+        let (eid, frame) = edits[0];
+        let q = head.seq + 1;
+        assert_eq!(w.idents[1].store.log_hash.get(&q), Some(&frame), "the premise: Laptop holds {q}");
+        w.drop_restore_tails = Some(Box::new(|id, _| id < 2));
+        let fault = w.branches.last().expect("the rollback's branch").line;
+        run_for(&mut w, 120_000);
+        assert!(
+            w.idents[..2].iter().any(|x| x.evidence.iter().any(|e| e.kind == AlarmKind::RelayBehind && e.line > fault && e.held.contains(&frame))),
+            "the premise: a device that held {q} raised RelayBehind after the rollback"
+        );
+        assert_eq!(w.relays[0].head(), Some(head), "the premise: no restore tail reached the relay");
+        w.start_proc(2);
+        run_for(&mut w, 70_000);
+        edit(&mut w, 2, 9, 9);
+        run_for(&mut w, 10_000);
+        assert!(w.archive.get(q as usize - 1).is_some_and(|r| r.hash != frame), "the premise: the phone's edit took {q}");
+        let v = naming(w, &eid);
+        let owed = format!("another entry took {q}, but a restore tail could have brought back {q} (trace line ");
+        let at = format!(": its device owed one while the relay was at {} on that tail, and sent none in time)", head.seq);
+        assert!(
+            v.iter().any(|d| d.contains("lost to a rolled-back relay state that is not removed") && d.contains(&owed) && d.ends_with(&at)),
+            "{v:?}"
+        );
+    }
+
+    // The same reproduction for a restore tail refused `relay/not_next` with
+    // the relay's head at its first seq (another device restored that seq
+    // first): §21.3 step 3 has the device resume from the head + 1, and it
+    // never does (each later restore tail of Desk's is dropped). Desk alone
+    // holds both dropped edits; Laptop's restore of the first reaches the
+    // relay while Desk's request is on its way. The phone's edit then takes
+    // the second seq: no removed relay state either.
+    #[test]
+    fn a_seq_no_restore_tail_resumed_for_after_relay_not_next_is_not_excused() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let (mut w, head, edits) = rolled_world(&cfg, &[1, 2], 2);
+        let q = head.seq + 1;
+        w.drop_restore_tails = Some(Box::new(move |id, first| id == 0 && first > q));
+        let n = w.restore_tails.len();
+        assert!(run_until(&mut w, 60_000, |w| w.restore_tails.len() > n), "the premise: Desk sends a restore tail");
+        assert_eq!(w.restore_tails[n].first_seq, q, "the premise: from {q}");
+        let lost = w.branches.last().expect("the rollback's branch").rows[q as usize - 1].frame.clone();
+        let call = Call::Admin { req: 1 << 52, op: AdminRequest::RestoreTail { first_seq: q, chain_before: head.chain, frames: vec![lost] } };
+        w.at_relay(1, 0, 0, Sel::Main(0), call);
+        assert_eq!(w.relays[0].head().map(|h| h.seq), Some(q), "the premise: Laptop's restore tail brought back {q}");
+        run_for(&mut w, 60_000);
+        assert_eq!(
+            (w.restore_tails[n].answer.clone(), w.restore_tails[n].head.map(|h| h.seq)),
+            (Answer::Refused("relay/not_next".to_owned(), None), Some(q)),
+            "the premise: Desk's restore tail was refused relay/not_next with the relay's head at its first seq"
+        );
+        w.start_proc(2);
+        run_for(&mut w, 70_000);
+        edit(&mut w, 2, 9, 9);
+        run_for(&mut w, 10_000);
+        let (eid, frame) = edits[1];
+        assert!(w.archive.get(q as usize).is_some_and(|r| r.hash != frame), "the premise: the phone's edit took {}", q + 1);
+        let v = naming(w, &eid);
+        let owed = format!("another entry took {0}, but a restore tail could have brought back {0} (trace line ", q + 1);
+        let at = format!(": its device owed one while the relay was at {q} on that tail, and sent none in time)");
+        assert!(
+            v.iter().any(|d| d.contains("lost to a rolled-back relay state that is not removed") && d.contains(&owed) && d.ends_with(&at)),
+            "{v:?}"
+        );
+    }
+
+    /// Whether identity `id`'s process owes a restore tail now (`owe_from`).
+    fn owes(w: &World<'_>, id: usize) -> bool {
+        w.idents[id].proc.as_ref().is_some_and(|p| p.owe.is_some())
+    }
+
+    /// Identity `id`'s session ends (the `disconnection` fault's effect); it
+    /// connects again with no backoff.
+    fn disconnect(w: &mut World<'_>, id: usize) {
+        w.close_conn(id, true);
+        w.idents[id].failures = 0;
+        w.deliver(id, Event::Disconnected { unreachable: true, paused_until_ms: None });
+    }
+
+    /// Whether identity `id` is in session (`Some(true)`: welcomed) or connecting (`Some(false)`).
+    fn session(w: &World<'_>, id: usize) -> Option<bool> {
+        w.idents[id].proc.as_ref().and_then(|p| p.conn.as_ref()).map(|c| c.welcomed_t.is_some())
+    }
+
+    // Task D6 (§21.3, ENG-EVID-004): what a restore tail owed is. After a
+    // rollback below Desk's log (Desk alone runs), each restore tail Desk
+    // emits dropped: a session that showed Desk the relay's head below its
+    // log, on its chain, opens a debt with the relay's head and Desk's
+    // durable log then; a debt whose session ends before `RESTORE_DUE` is
+    // none, one that runs to it is owed (here when the dropped request's
+    // timeout ends the session); none opens while Desk is halted (§16.4: a
+    // halted device takes no restore tail), once the board moved, before the
+    // session is welcomed, or in a session with another relay. Desk's
+    // restore tail, no longer dropped, pays its debt at once and brings the
+    // seq back.
+    #[test]
+    fn a_restore_tail_is_owed_when_none_is_sent_in_time() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let (mut w, head, edits) = rolled_world(&cfg, &[1, 2], 1);
+        let q = head.seq + 1;
+        let frame = edits[0].1;
+        w.drop_restore_tails = Some(Box::new(|id, _| id == 0));
+        assert!(run_until(&mut w, 60_000, |w| owes(w, 0)), "Desk owes a restore tail once in session");
+        let (t0, x) = w.idents[0].proc.as_ref().and_then(|p| p.owe.clone()).expect("a debt");
+        let holds = w.idents[0].store.run_head();
+        assert_eq!(holds.map(|(lo, top)| (lo <= q, top.seq)), Some((true, q)), "the premise: Desk's log runs through {q}");
+        assert_eq!((x.sel, x.first_seq, x.frames.len(), x.answer.clone(), x.head, x.holds), (Sel::Main(0), q, 0, Answer::Owed, Some(head), holds));
+        assert!(x.line > w.branches.last().expect("the rollback").line);
+        // The session ends before the restore tail falls due: nothing owed.
+        run_for(&mut w, 1_000);
+        assert!(owes(&w, 0) && w.t < t0 + RESTORE_DUE);
+        disconnect(&mut w, 0);
+        assert!(!owes(&w, 0) && w.owed.is_empty(), "a debt whose session ended early is none");
+        // The next session runs until the dropped request's timeout ends it.
+        assert!(run_until(&mut w, 120_000, |w| !w.owed.is_empty()), "a debt that ran to RESTORE_DUE is owed");
+        assert_eq!((w.owed[0].first_seq, w.owed[0].answer.clone(), w.owed[0].head), (q, Answer::Owed, Some(head)));
+        // Halted, Desk owes none (§16.4); unhalted, it owes again.
+        let halt = crate::HaltRecord { kind: crate::HaltKind::Commitment, seq: q, author: w.idents[0].dev, since_ms: 0, code: "test".to_owned() };
+        let meta = w.idents[0].store.meta.clone().expect("a meta");
+        w.idents[0].store.meta = Some(crate::Meta { halt: Some(halt), ..meta.clone() });
+        disconnect(&mut w, 0);
+        assert!(run_until(&mut w, 60_000, |w| session(w, 0) == Some(true)), "Desk is in session again");
+        run_for(&mut w, 1_000);
+        assert!(!owes(&w, 0), "a halted device owes no restore tail");
+        w.idents[0].store.meta = Some(meta);
+        assert!(run_until(&mut w, 60_000, |w| owes(w, 0)), "unhalted, it owes one again");
+        // Once the board moved, the old relay is owed nothing.
+        disconnect(&mut w, 0);
+        w.moved = true;
+        assert!(run_until(&mut w, 60_000, |w| session(w, 0) == Some(true)), "Desk is in session again");
+        run_for(&mut w, 1_000);
+        assert!(!owes(&w, 0), "no restore tail is owed after a move");
+        w.moved = false;
+        // Not before the session is welcomed (the device has not seen the
+        // relay's head), nor in a session with another relay.
+        disconnect(&mut w, 0);
+        assert!(run_until(&mut w, 60_000, |w| session(w, 0) == Some(false)), "Desk connects again");
+        w.owe_from(0);
+        assert!(!owes(&w, 0), "no debt before the session is welcomed");
+        assert!(run_until(&mut w, 60_000, |w| session(w, 0) == Some(true)) && owes(&w, 0), "welcomed, Desk owes one");
+        let p = w.idents[0].proc.as_mut().expect("running");
+        p.owe = None;
+        p.conn.as_mut().expect("a session").sel = Sel::Fork;
+        w.owe_from(0);
+        assert!(!owes(&w, 0), "no debt to a relay that is not the home relay");
+        w.idents[0].proc.as_mut().and_then(|p| p.conn.as_mut()).expect("a session").sel = Sel::Main(0);
+        w.owe_from(0);
+        assert!(owes(&w, 0));
+        // Sent, the restore tail pays at once and brings the seq back.
+        w.drop_restore_tails = None;
+        let n = w.owed.len();
+        assert!(run_until(&mut w, 60_000, |w| w.relays[0].head().is_some_and(|h| h.seq == q)), "Desk restores {q}");
+        assert_eq!(w.archive.get(q as usize - 1).map(|r| r.hash), Some(frame));
+        assert!(!owes(&w, 0) && w.owed.len() == n, "a restore tail sent at once pays its debt");
+    }
+
+    // Task D6: a plain rollback an engine repairs owes nothing. Desk's edit
+    // dropped by a rollback while Laptop and the phone are down: Desk sends
+    // its restore tail at once, no restore tail is owed, the reference log
+    // holds the edit again, and nothing is lost.
+    #[test]
+    fn a_plain_rollback_the_engine_repairs_owes_no_restore_tail() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let (mut w, head, edits) = rolled_world(&cfg, &[1, 2], 1);
+        let (eid, frame) = edits[0];
+        run_for(&mut w, 120_000);
+        assert_eq!(w.archive.get(head.seq as usize).map(|r| r.hash), Some(frame), "Desk's restore tail brought the edit back");
+        assert!(w.restore_tails.iter().any(|x| x.answer == Answer::Stored), "Desk sent one and the relay stored it");
+        assert!(w.owed.is_empty(), "{:?}", w.owed);
+        assert_eq!(naming(w, &eid), Vec::<String>::new());
+    }
+
+    // Task D6: a debt also ends with its process and with the run, owed when
+    // it ran `RESTORE_DUE` by then. Desk's edit dropped by a rollback and
+    // Desk's first debt (`carry` puts it on a process, opened `ago` ms
+    // before); the phone's edit takes the seq while Desk is down; a debt
+    // still open at the run's end is owed, and the loss is no removed state.
+    #[test]
+    fn a_debt_ends_with_its_process_and_with_the_run() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let (mut w, head, edits) = rolled_world(&cfg, &[1, 2], 1);
+        let (eid, frame) = edits[0];
+        let q = head.seq + 1;
+        w.drop_restore_tails = Some(Box::new(|id, _| id == 0));
+        assert!(run_until(&mut w, 60_000, |w| owes(w, 0)), "Desk owes a restore tail");
+        let debt = w.idents[0].proc.as_ref().and_then(|p| p.owe.clone()).expect("a debt").1;
+        let carry = |w: &mut World<'_>, ago: u64| {
+            let t = w.t;
+            w.idents[0].proc.as_mut().expect("running").owe = Some((t - ago, debt.clone()));
+        };
+        carry(&mut w, RESTORE_DUE - 1);
+        w.stop_proc(0);
+        assert!(w.owed.is_empty(), "a process that ended before its restore tail fell due owed none");
+        w.start_proc(0);
+        carry(&mut w, RESTORE_DUE);
+        w.stop_proc(0);
+        assert_eq!(w.owed.len(), 1, "a process that ended once its restore tail fell due owed one");
+        w.owed.clear();
+        w.start_proc(2);
+        run_for(&mut w, 70_000);
+        edit(&mut w, 2, 9, 9);
+        run_for(&mut w, 10_000);
+        assert!(w.archive.get(q as usize - 1).is_some_and(|r| r.hash != frame), "the premise: the phone's edit took {q}");
+        w.start_proc(0);
+        carry(&mut w, RESTORE_DUE);
+        let v = naming(w, &eid);
+        let at = format!(": its device owed one while the relay was at {} on that tail, and sent none in time)", head.seq);
+        assert!(v.iter().any(|d| d.contains("lost to a rolled-back relay state that is not removed") && d.ends_with(&at)), "{v:?}");
+    }
+
+    // Task D6 (§21.3: the race): a relay whose head is another device's
+    // entry is no prefix of the device's log, and is owed no restore tail.
+    // Desk's two edits dropped by a rollback; Desk is down while the phone's
+    // edit takes the first dropped seq; Desk starts again and meets the
+    // relay's head below its own on another chain.
+    #[test]
+    fn a_relay_on_another_chain_is_owed_no_restore_tail() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let (mut w, head, edits) = rolled_world(&cfg, &[1, 2], 2);
+        let q = head.seq + 1;
+        w.stop_proc(0);
+        w.start_proc(2);
+        run_for(&mut w, 70_000);
+        edit(&mut w, 2, 9, 9);
+        run_for(&mut w, 10_000);
+        let top = w.relays[0].head().expect("a board");
+        assert!(top.seq == q && w.archive[q as usize - 1].hash != edits[0].1, "the premise: the phone's edit took {q}");
+        w.idents[0].failures = 0;
+        w.start_proc(0);
+        assert!(run_until(&mut w, 60_000, |w| session(w, 0) == Some(true)), "the premise: Desk meets the relay");
+        assert!(!run_until(&mut w, 60_000, |w| owes(w, 0)), "no debt to a relay on another chain");
+        assert!(w.idents[0].store.head().is_some_and(|(l, _)| l > top.seq), "the premise: Desk's log is above the relay's head");
+        assert!(w.owed.is_empty(), "{:?}", w.owed);
+    }
+
+    // §31.7 (task D6), end to end through the run's facts: quiet seed 3 with
+    // its last accepted entry lost to a fork's copy (the reference log
+    // truncated below it, the copy as the branch, the acknowledgement the
+    // copy's) breaks invariant 2, and is excused once a device that held its
+    // frame raised an alarm with evidence after the fork began.
+    #[test]
+    fn a_loss_to_a_forks_copy_is_excused_by_an_alarm_of_a_device_that_held_it() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let lost = |alarm: bool| {
+            let mut w = quiet_world(&cfg, u64::MAX);
+            let (eid, seq, frame) = last_entry(&w);
+            w.branches.push(BranchLog { rows: w.archive.clone(), why: check::WHY_FORK, line: 40, removed_from: seq });
+            w.archive.truncate(seq as usize - 1);
+            w.acks.retain(|a| a.eid != eid);
+            w.acks.push(AckFact { eid, ident: 1, sel: Sel::Fork, seq, frame, line: 50 });
+            if alarm {
+                w.idents[2].evidence.push(EvidenceAlarm { line: 80, kind: AlarmKind::Fork, held: BTreeSet::from([frame]) });
+            }
+            naming(w, &eid)
+        };
+        let v = lost(false);
+        assert!(v.iter().any(|d| d.contains("lost to a removed relay state (the forked copy of the relay, fault at trace line 40)")), "{v:?}");
+        assert_eq!(lost(true), Vec::<String>::new());
+    }
+
+    // Task D6: every acknowledgement that reached a device is one a relay
+    // gave (`World::acks`), before it was delivered, with the relay state
+    // that gave it and a seq where the reference log holds its frame (a quiet
+    // run has no rollback, fork or move).
+    #[test]
+    fn a_relay_acknowledgement_records_its_relay_state_seq_and_frame() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let w = quiet_world(&cfg, u64::MAX);
+        assert!(!w.acked.is_empty(), "the quiet run acknowledges entries");
+        for (eid, id, line, _) in &w.acked {
+            let a = w.acks.iter().find(|a| a.eid == *eid && a.ident == *id).unwrap_or_else(|| panic!("no relay acknowledgement of {}", check::hexs(eid)));
+            assert_eq!(a.sel, Sel::Main(0));
+            assert!(a.line < *line, "given at {} before delivered at {line}", a.line);
+            assert_eq!(w.archive[a.seq as usize - 1].hash, a.frame, "seq {}", a.seq);
+        }
+    }
+
+    // Task D6: an alarm with evidence of a relay state counts once its
+    // `WriteMeta` is durable, with the frames its device held then (its
+    // log's and its live outbox's, here with a record its write puts there);
+    // an alarm of another kind counts as none.
+    #[test]
+    fn an_evidence_alarm_counts_once_durable_with_the_frames_held() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, u64::MAX);
+        let mut m = w.idents[1].store.meta.clone().expect("a meta");
+        let id = w.idents[1].max_alarm;
+        let record = |id: u64, kind: AlarmKind, evidence: crate::Evidence| crate::AlarmRecord {
+            id,
+            kind,
+            raised_ms: 0,
+            seq: None,
+            author: None,
+            code: None,
+            evidence,
+            resolved: false,
+        };
+        let behind = crate::Evidence::RelayBehind { relay_head: Head::default(), relay_last_ctr: None, local_head: Head::default(), ack: None };
+        m.alarms.push(record(id + 1, AlarmKind::RelayBehind, behind));
+        m.alarms.push(record(id + 2, AlarmKind::SkippedFrame, crate::Evidence::Frame { frame_hash: None }));
+        let before = w.idents[1].evidence.len();
+        let mut framed = unsent(&w, 0x92);
+        framed.frame = Some(vec![0x92; 700]);
+        let ops = [PersistOp::Outbox(vec![OutboxOp::Put(framed)]), PersistOp::WriteMeta(m)];
+        let k = unapplied_write(&mut w, &ops);
+        assert_eq!(w.idents[1].evidence.len(), before, "not durable yet");
+        w.idents[1].store.apply(&ops, None);
+        w.wrote(k);
+        let st = &w.idents[1].store;
+        let held: BTreeSet<Hash32> =
+            st.log.values().map(|r| h(&r.frame)).chain(st.live_outbox().iter().filter_map(|r| r.frame.as_ref().map(|f| h(f)))).collect();
+        assert!(st.log.len() > 1 && st.live_outbox().iter().any(|r| r.frame.is_some()), "the device holds frames in its log and its outbox");
+        let new: Vec<(AlarmKind, &BTreeSet<Hash32>)> = w.idents[1].evidence[before..].iter().map(|e| (e.kind, &e.held)).collect();
+        assert_eq!(new, vec![(AlarmKind::RelayBehind, &held)]);
+    }
+
+    // Task D6 (§31.7 invariant 4): each move of a device's board within a
+    // process is recorded with its class head then, the durable log head,
+    // which is never below the board (the board applies only what was
+    // classified and persisted, §12.3 step 9, §12.4), but at the creator's
+    // first move: its board is at the genesis entry from the bootstrap
+    // (§19.8) before the log write is durable.
+    #[test]
+    fn a_crossing_records_each_move_of_the_board_with_its_class_head() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let w = quiet_world(&cfg, u64::MAX);
+        for (i, x) in w.idents.iter().enumerate() {
+            assert!(!x.crossings.is_empty(), "dev {i}'s board moved");
+            for c in &x.crossings {
+                assert!(c.from != c.to && (c.k >= c.to || c.from == 0 && c.to == 1), "dev {i}: {c:?}");
+            }
+            let (b, ch, _, _) = x.samples.last().expect("a sample");
+            assert!(x.crossings.iter().any(|c| c.to == *b && c.to_chain == *ch), "dev {i}: its last sample at {b} ends a crossing");
+        }
+    }
+
+    // Task D6: a restore tail a relay answered is recorded with what it
+    // carried, how the relay answered (`relay.md` §12.9): refused before its
+    // frames (`relay/not_next`: no index), or at a frame (another board's
+    // frame: `relay/wrong_board` at its index), and the relay's head then.
+    #[test]
+    fn a_restore_tail_records_how_the_relay_answered() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, u64::MAX);
+        let head = w.relays[0].head().expect("a board");
+        let p = w.idents[0].proc.as_ref().expect("running");
+        let (proc, conn) = (p.no, p.conn_no);
+        let mine = w.archive[1].frame.clone();
+        let other = FakeSealer::create_at(77, "Other", WALL0).1;
+        let tail = |first_seq: u64, frames: Vec<Vec<u8>>| Call::Admin {
+            req: 1 << 50,
+            op: AdminRequest::RestoreTail { first_seq, chain_before: head.chain, frames },
+        };
+        let n = w.restore_tails.len();
+        w.at_relay(0, proc, conn, Sel::Main(0), tail(head.seq, vec![mine.clone()]));
+        w.at_relay(0, proc, conn, Sel::Main(0), tail(head.seq + 1, vec![other.clone()]));
+        type Answered = (Sel, u64, Vec<Hash32>, Answer, Option<Head>);
+        let got: Vec<Answered> = w.restore_tails[n..].iter().map(|x| (x.sel, x.first_seq, x.frames.clone(), x.answer.clone(), x.head)).collect();
+        assert_eq!(
+            got,
+            vec![
+                (Sel::Main(0), head.seq, vec![h(&mine)], Answer::Refused("relay/not_next".to_owned(), None), Some(head)),
+                (Sel::Main(0), head.seq + 1, vec![h(&other)], Answer::Refused("relay/wrong_board".to_owned(), Some(0)), Some(head)),
+            ]
+        );
+    }
+
+    // Task D6 (§31.7: "a restore tail could have brought back"): a restore
+    // tail is recorded when it is sent, with the relay's head and the
+    // sender's durable log then (`Store::run_head`), unanswered (a request
+    // lost on the way stays so); the relay's first answer, with its head
+    // then, completes it, and a second copy of the request (`duplication`)
+    // is no other restore tail.
+    #[test]
+    fn a_restore_tail_is_recorded_when_sent_and_completed_by_its_first_answer() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, u64::MAX);
+        let head = w.relays[0].head().expect("a board");
+        let p = w.idents[0].proc.as_ref().expect("running");
+        let (proc, conn) = (p.no, p.conn_no);
+        let holds = w.idents[0].store.run_head();
+        let (lo, top) = holds.expect("a durable log");
+        assert!(lo < top.seq && w.idents[0].store.chain_at(top.seq) == Some(top.chain), "a run of rows {lo}..={}", top.seq);
+        let req = 1 << 51;
+        let call = Call::Admin { req, op: AdminRequest::RestoreTail { first_seq: head.seq + 1, chain_before: head.chain, frames: vec![w.archive[1].frame.clone()] } };
+        let n = w.restore_tails.len();
+        let sent = w.trace.lines();
+        w.send_up(0, call.clone(), req, 0);
+        let got = |w: &World<'_>| w.restore_tails[n..].iter().map(|x| (x.line, x.answer.clone(), x.head, x.holds)).collect::<Vec<_>>();
+        assert_eq!(got(&w), vec![(sent, Answer::Unanswered, Some(head), holds)]);
+        w.at_relay(0, proc, conn, Sel::Main(0), call.clone());
+        let answered = w.trace.lines();
+        let first = w.restore_tails[n].answer.clone();
+        assert!(matches!(&first, Answer::Refused(_, Some(0))), "refused at its frame (an old counter): {first:?}");
+        assert_eq!(got(&w), vec![(answered, first.clone(), Some(head), holds)]);
+        // The relay's head moves on; a second copy of the request meets it there.
+        let now = w.relay_now(0);
+        w.relays[0].inject_frame(now, FakeSealer::create_at(78, "Other", WALL0).1).expect("a board");
+        assert_ne!(w.relays[0].head(), Some(head));
+        w.at_relay(0, proc, conn, Sel::Main(0), call);
+        assert_eq!(got(&w), vec![(answered, first, Some(head), holds)], "a second copy");
+    }
+
+    // Task D6: a frame the relay makes up (`injected_frame`, §31.6) is
+    // recorded as made up: its hash is the frame the reference log holds at
+    // the seq the fault names.
+    #[test]
+    fn an_injected_frame_is_recorded_as_made_up() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, 3_600_000);
+        assert!(w.made_up.is_empty());
+        w.fault(FaultEv::Inject(1));
+        let (seq, _, _) = *w.injected_seqs.last().expect("an injected frame");
+        assert_eq!(w.made_up, BTreeMap::from([(w.archive[seq as usize - 1].hash, MadeUp::OtherBoard)]));
+        w.fault(FaultEv::Inject(0));
+        let (seq, _, _) = *w.injected_seqs.last().expect("an injected frame");
+        assert_eq!(w.made_up.get(&w.archive[seq as usize - 1].hash), Some(&MadeUp::BadSignature));
+    }
+
+    // Task D6: what reports a final refusal, as a run records it: every
+    // `PairFailed` with the device its pairing adds, every `OpDone` with its
+    // ticket, at their trace lines; and the operation an outbox record
+    // belongs to (`OutboxRecord.op`).
+    #[test]
+    fn reports_and_operations_are_recorded() {
+        let cfg = SimConfig::named("quiet").expect("quiet");
+        let mut w = quiet_world(&cfg, u64::MAX);
+        w.pair_devs.insert(1 << 40, [0x44; 16]);
+        w.on_notify(1, Notification::PairFailed { ticket: 1 << 40, code: "engine/pair_interrupted" }, 91);
+        w.on_notify(1, Notification::OpDone { ticket: 33, result: Ok(()) }, 92);
+        assert_eq!(w.idents[1].pair_failed_log.last(), Some(&([0x44; 16], 91)));
+        assert_eq!(w.idents[1].op_done.last(), Some(&(33, 92)));
+        let mut r = unsent(&w, 0x91);
+        r.op = Some(33);
+        w.note_persist(1, &[PersistOp::Outbox(vec![OutboxOp::Put(r)])], 9);
+        assert_eq!(w.entry_ops.get(&[0x91; 16]), Some(&(1, 33)));
     }
 
     // Invariant 3 (ruling 5): only the record dropped as a cancelled hold is accepted.
@@ -1405,8 +2025,8 @@ mod tests {
 
     // Invariant 5, task D5: "in the same or the next call" is not asked of
     // a call whose effects a crash cut off before the runtime performed
-    // them (its `PairFailed` may be among them); a call that was not cut is
-    // still held to it.
+    // them (its `PairFailed` may be among them), nor of one whose next call
+    // was cut so (task D6); a drop with neither call cut is still held to it.
     #[test]
     fn a_pairing_drop_in_a_call_a_crash_cut_is_not_judged() {
         let drop_reg = |w: &mut World<'_>| {
@@ -1420,6 +2040,16 @@ mod tests {
                 drop_reg(w);
                 let call = w.idents[1].calls;
                 w.idents[1].cut_calls.insert(call);
+            }),
+            Vec::<u8>::new()
+        );
+        // Task D6 (D5's low finding): nor of a drop whose next call a crash
+        // cut, where its `PairFailed` may have been due.
+        assert_eq!(
+            tampered(|w| {
+                drop_reg(w);
+                let call = w.idents[1].calls;
+                w.idents[1].cut_calls.insert(call + 1);
             }),
             Vec::<u8>::new()
         );

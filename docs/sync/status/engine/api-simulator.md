@@ -1,10 +1,10 @@
-# The simulator: how to run it (tasks D to D5)
+# The simulator: how to run it (tasks D to D6)
 
 Module `taskdeck_sync::sim` (feature `sim`; the test targets get it from the crate's dev-dependency on itself).
-Spec: engine.md §31. Code: `src/sim.rs` (types), `src/sim/config.rs` (named configurations), `src/sim/world.rs` and
-`src/sim/world/` (model runtime, network, workload, faults), `src/sim/store.rs` (durable storage), `src/sim/check.rs`
-(ledger, oracle, the six invariants), `src/sim/trace.rs` (§31.9), `src/sim/script.rs` (hand-built logs for the
-simulator's own tests).
+Spec: engine.md §31, §31.7 as the owner amended it on 2026-11-25 (task D6). Code: `src/sim.rs` (types),
+`src/sim/config.rs` (named configurations), `src/sim/world.rs` and `src/sim/world/` (model runtime, network,
+workload, faults), `src/sim/store.rs` (durable storage), `src/sim/check.rs` (ledger, oracle, the six invariants),
+`src/sim/trace.rs` (§31.9), `src/sim/script.rs` (hand-built logs for the simulator's own tests).
 
 ## Run seeds
 
@@ -16,8 +16,7 @@ TD_SIM_CONFIG=quiet TD_SIM_BASE=1 SIM_SEEDS=200 cargo test -p taskdeck-sync --te
 
 `base` is `TD_SIM_BASE`, else the first 16 hex digits of the commit id (read from `.git`), ENG-SIM-004. The test
 prints `base`, each failing seed with its first five violations (`TD_SIM_ALL=1`: every violation of every failing
-seed), and the JSON of its regression file. Use `--release`
-for many seeds (timings in task D's report).
+seed), and the JSON of its regression file. Use `--release` for many seeds (450 `gate` seeds take about 35 s).
 
 ## One seed and its trace
 
@@ -38,7 +37,7 @@ From code: `sim::run(seed, &SimConfig::named("gate").unwrap())`, or `sim::run_tr
 | `loss`, `dup`, `delay`, `disconnect`, `crash`, `skew`, `rollback`, `fork`, `withhold`, `inject` | one fault at the top of its range |
 | `revoke`, `purge`, `restore`, `move`, `recovery` | one operation |
 | `skip`, `poison` | one poison entry, the Skip offer answered |
-| `rules` | the rules build update, with machine 0 (the creator) on a rules-2 build; a machine that pairs onto a board at rules 2 gets the rules-2 build first (ruling 9) |
+| `rules` | the rules build update, machine 0 on a rules-2 build; a machine that pairs onto a board at rules 2 gets the rules-2 build first (ruling 9) |
 
 Every run: machine 0 creates the board, the others pair through an engine device one minute apart; the last
 machine of three or more is the phone. `T_f = days`; then 7,200,000 ms of settle (faults off, no workload, every
@@ -47,13 +46,11 @@ machine awake).
 ## Add a regression file (§31.8, ENG-SIM-005)
 
 Copy the JSON the gate printed into `crates/taskdeck-sync/tests/regress/<seed>.json`, with the fix that makes it
-pass: `invariant`, `trace_sha256` and `first_bad_line` are of the failing run, never of the fixed one. When the fix is
-already in, rebuild the failing run (this simulator over the engine before the fix) and copy what it prints; 102, 111
-and 116 record their runs with the engine before 2139a96. Seeds 1 (`quiet`) and 200 (`move`) pass over that engine too,
-with this simulator and with task D's (3f657f7), so no failing run is known for them: their three fields are not of
-one. With a shared `CARGO_TARGET_DIR`, a second copy of the crate
-reuses the first copy's binary unless one of the first copy's sources is newer: check the `Compiling` line. Add no file for a seed that still fails. `cargo test -p taskdeck-sync --test regressions` runs every file and requires every invariant; a file that does
-not parse (unknown field, wrong `spec`, invariant outside 1..6) fails it. `config` is `SimConfig::to_json`.
+pass: `invariant`, `trace_sha256` and `first_bad_line` are of the failing run, never of the fixed one (102, 111 and
+116 record runs with the engine before 2139a96; 1 and 200 have no known failing run). With a shared
+`CARGO_TARGET_DIR`, a second copy of the crate reuses the first copy's binary unless one of its sources is newer:
+check the `Compiling` line. Add no file for a seed that still fails. `--test regressions` runs every file and
+requires every invariant; a file that does not parse fails it. `config` is `SimConfig::to_json`.
 
 ## Read a trace (§31.9)
 
@@ -79,102 +76,129 @@ One JSON object per line, `t` (virtual ms) and `k` first:
   writes, plus the write in progress at a `during` crash half the time. Restart delay 1–31 s.
 - Messages: 5 ms plus the drawn delay; socket messages keep their order; HTTPS answers do not. A request with no
   answer after 20,000 ms (plus 1 s per 64 KiB) ends the session as unreachable (`device.md` §10.10).
-- Every `Connect` logs in, opens a socket and says hello; backoff as DEV-BACKOFF-001. Nothing the relay sends on that
-  socket reaches the engine before the login's answer has (D3: a lost answer left pushes flowing to a connecting engine).
-- Ticks are delivered at the time asked (now, when it has passed); `SimStats.ticks_due_now` counts `ScheduleTick`s
-  that asked for a tick within 1 ms.
-- `relay/token_stale` never reaches the engine: the runtime logs in again and sends the request with the new token
-  (§11.9, `SimStats.token_renewals`); a refused login reaches it as `RelayRefused { req: None }`, then `Disconnected`.
-- An answer to a request still outstanding is delivered even when the request was sent while connecting; a
-  disconnect discards every outstanding request.
-- The simulated user answers prompts again after a restart and after a refused move code.
-- Sleep is `Shutdown` then exit; wake is a new process (`Start`).
-- Withholding shows one device a stale view (head at the seq, nothing above it); a rollback restores the tables and
-  ends every session; a fork serves a subset of devices from a copy until it ends.
+- Every `Connect` logs in, opens a socket and says hello (DEV-BACKOFF-001); nothing the relay sends on that socket
+  reaches the engine before the login's answer has. Ticks come at the time asked (now, when it has passed).
+- `relay/token_stale` never reaches the engine: the runtime logs in again (§11.9); a refused login reaches it as
+  `RelayRefused { req: None }`, then `Disconnected`. A disconnect discards every outstanding request.
+- The simulated user answers prompts again after a restart; on `ReplaceReady` (§28.5 step 3) it exports the revoked
+  machine's unsent edits, retires that identity and pairs the machine again. Sleep is `Shutdown` then exit.
+- Withholding shows one device a stale view; a rollback restores the tables and ends every session; a fork serves
+  a subset of devices from a copy until it ends.
 
-## The invariants as checked (§31.7, strict readings)
+## The invariants as checked (§31.7 as amended, strict readings)
 
-- 2: every acknowledged `entry_id` once with class `Accept` in the reference log, whatever became of its device; one
-  that only a rolled-back or forked relay state held reads `lost to a rolled-back relay state (…, fault at trace line N)`;
-  a refused entry that a relay's `register` acknowledged with a seq (a pairing's `DeviceAdded`; a refused frame
-  carries no items, so the check tells it by the `register`, `World::registered`) reads
-  `a pairing's DeviceAdded refused after register (§28.4 step 4)`.
-  And every device whose final `B` is past that seq has applied it exactly once: the devices run `CountedToy`
-  (`src/sim/counted.rs`), the toy with a trail of the seqs `apply` ran for on each state value's lineage since its
-  last load from bytes (invisible to the engine: not in the bytes, the hash or any decision). It is read on the log
-  the device followed (the reference log, or the branch with its chain at `B`), for `Cmd` entries from the first seq
-  the trail holds; an entry an accepted Skip at or below `B` targets is expected 0 times (ENG-SKIP-002). A violation
-  reads `B = … is past seq … of acknowledged entry …, which it applied n times (expected m)`.
-- 4: the confirmed state at every sampled `B` past the device's join, against the oracle's on the branch it followed,
-  a `B` between a Skip's target `t` and the Skip `s` included (ruling 6; such a violation names the Skip). The oracle
-  is the one of §31.7 only (`check::oracle`): a fresh engine replaying the log from seq 1 with no faults, its first
-  state at each `B` (a Skip replay does not overwrite it). A `B` in `t..s` it never confirmed is reported too.
-  Task D3 had added a second history, the oracle replayed with its process killed while `t` was under a marker
-  until it crash-halted on `t`, open to a device that crash-halted on `t`; the D3 fix pass removed it: those states
-  come from the engine under test run under faults, not from an independent expected value, and accepting them
-  loosened invariant 4 (test `invariant_4_at_a_skip_window_is_judged_by_the_no_fault_oracle_only`, `script.rs`). A violation of a
-  device whose storage held a crash halt on `t` (`IdentFacts::crash_halts`) ends with
-  `; it crash-halted on the target t: ENG-HALT-004 against §31.7 invariant 4, a spec question (api-simulator.md)`.
-- 4, the alarms of §21.1 (task D5): a welcome or page contradicting the device's log owes an alarm, except a page
-  answering a request id its process did not issue as a `Read` or whose answer already reached its engine (a
-  duplicated answer after the first copy, ENG-EFFECT-002: the engine ignores it). A push and a read's first answer count.
-- 3: accepted once; or still in the outbox of a device halted or stopped with a persisted reason, or revoked (in
-  its status or in the oracle's membership); or refused with a refusal record; or dropped as a cancelled hold. A
-  record its device applied on a branch a rollback or fork removed reads `applied on a rolled-back relay state (…)`.
-- 5: a `Drop` reached the board head, or is the held `Create` of the `Forget` being enqueued, or a `Register`
-  record with a `PairFailed` for its device in the same or the next call; a `ConfirmRejoin` explains its own
-  `TruncateLogBelow(S + 1, Some(C_S))` and one `DeleteBases`, then nothing; an identity write that drops a pending
-  root of an own rotation needs that rotation's own entry, in the log the device followed there (the chain it holds
-  at that seq), at or below the highest seq the same write makes durable (accepted: it reached the head; refused: a refused own rotation). Another device's rotation
-  excuses no pending root. An unsent `snap` record's drop (no `Append` of the identity carried its frame) is
-  `Deletion::Snap`: explained by an accepted rotation to an epoch above its blob's at or below `B`, in the log the
-  device followed there, with no row of it carrying the entry (§19.4 step 5, ENG-SNAP-004; task D5).
-  Task D5: every deletion counts only once its write is applied to durable storage (`World::stage`, `wrote`); a write a
-  crash or an exit cut off, or still queued at the end, deletes nothing (`discard_unapplied`). A `Register` drop of a
-  call whose effects a crash cut off (`Ident::cut_calls`) is not held to the `PairFailed` rule.
+What a run records for them (task D6): every acknowledgement a relay gave, delivered or not (`World::acks`: the
+relay state, home relay or the fork's copy, its seq, frame and trace line); every `restore_tail` a device sent
+(`World::restore_tails`, recorded when sent): its frames, the relay's first answer (stored, or refused with the code
+and the index of the frame a refusal names; none when the request was lost on the way; a duplicated copy is no
+other request), the relay's head when the request met it (when it was sent, if it never did) and the sender's
+durable log then (`Store::run_head`: its head and the first seq of the unbroken run of rows that ends there);
+every restore tail a device owed and did not send (`World::owed`, `Answer::Owed`): after a call, a process in a
+welcomed session with relay 0 (the home a rollback rolls back, never moved) whose head is below the device's durable
+log head on its chain, not halted (§16.4), with no restore tail of its on its way, owes one from that head (§21.3:
+"as any device does that holds more than the relay", ENG-EVID-004) until it sends one, its session or process ends,
+or the run ends; owed when that took `RESTORE_DUE` (20,000 ms, the response timeout) or longer, recorded with the
+relay's head and the device's durable log when it fell due (a correct engine sends a `ReadLog` and then the request
+within milliseconds: no seed of `gate`, `rollback` or the named configurations changed its verdict); the
+frames the relay made up, each with how (`World::made_up`: a bad signature, another board's frame); each alarm of
+kind `RelayBehind`, `Fork`, `Counter`, `Unechoed` or `Withheld` once its `WriteMeta` is durable, with every frame its
+device's durable log and live outbox held then (`IdentFacts::evidence`: the kinds whose response in §21.1 is the
+evidence stop, SYNC.md §4.8's evidence); every `PairFailed` and `OpDone`; the operation each outbox record belongs
+to (`OutboxRecord.op`); each move of a device's board within a process with its class head `K`, the durable log head
+(`IdentFacts::crossings`).
+
+- **Removed relay state.** An acknowledgement comes from one when the fork's copy gave it, or when relay 0 gave it
+  before a rollback whose lost tail held that frame at that seq, after the settle the reference log holds another
+  frame there, or none and the relay refused a restore tail for a frame it made up at or below that seq or one that
+  carried it, and no restore tail could have brought it back. One could have (`check::could_restore`, read by the
+  relay's state when a request met it, not by the request's answer) when it stored that frame there, or when, not
+  refused for a frame the relay made up, it met the relay holding a prefix of the lost tail below the seq (or was
+  sent then and lost), with no made-up frame between, from a device that held the lost tail from that head to the
+  seq: refused as a whole (a wrong `chain_before` or `first_seq`), at a frame the relay did not make up (a missing
+  repair), or never answered, it leaves every later seq that device held to the restore tail (§21.3 steps 1 and 2),
+  not to another device's entry. Not a request refused `relay/not_next` with the relay's head at or past its first
+  seq (another device restored those seqs first, §21.3 step 3: the device resumes from that head, and its next
+  request is judged on its own), nor one that met another device's entry at the head (the race); a seq a request that
+  carried it was refused over for a made-up frame comes back with no request. A restore tail owed and never sent is
+  judged as one that never reached the relay, by the relay's state when it fell due: a seq is not left to another
+  device's entry because the device that held it sent nothing, stopped after a `relay/not_next` it should have
+  resumed from, or after a stored request it should have continued.
+  "Refused for a frame the relay made up" is a refusal at that frame with the code the relay gives what it made up
+  (`check::MadeUp`): `relay/wrong_board` for another board's frame (the code brief D6 names), `relay/bad_signature`
+  for a bad signature (§31.6 makes up both; gate 107, 1047, 1062 and 2282 have it); any other code there refused the
+  request for something else. Anything else is a plain rollback, repaired, not removed: with every restore tail
+  refused at its first frame, refused `relay/chain_mismatch`, sent with a wrong `chain_before`, or lost on the way,
+  `rollback` fails 12 of 12 (task D6); with none ever sent, 299 of seeds 100..399 (355 loses nothing: its second
+  rollback returns the relay to its state before the first).
+- **Never lost silently** (2 and 3): at least one relay acknowledgement, every one from a removed state, and an
+  evidence alarm raised after that fault (the rollback's or the fork's `fault` line) by a device that held an
+  acknowledged frame of it then.
+- 2: an acknowledged `entry_id` is accepted exactly once; or held once, class `Refuse`, and reported, after the relay
+  sequenced it, by a device it was acknowledged to: a refusal record at its seq, the `PairFailed` of the pairing
+  whose `DeviceAdded` it is (`World::registered`), or the `OpDone` of its record's operation; or never lost silently.
+  Otherwise the text names the outcome that failed (`lost to a removed relay state (…), and no device that held its
+  frame raised an alarm …`, `lost to a rolled-back relay state that is not removed (…)`, `acknowledged at … by a
+  relay state no rollback or fork removed`, `… finally refused at …, and its device reported no …`). Second half as
+  before: every device whose final `B` is past the seq applied it exactly once (`CountedToy`, `src/sim/counted.rs`),
+  read on the log it followed; an entry an accepted Skip at or below `B` targets is expected 0 times.
+- 3: accepted once; or still in the outbox of a device halted or stopped with a persisted reason, or revoked; or
+  refused with a refusal record; or dropped as a cancelled hold; or never lost silently.
+- 4: the confirmed state at every sampled `B` past the device's join against the oracle's first state at `B` on the
+  log it followed (`check::oracle`: a fresh engine, no faults; `keep_first`), except between a Skip's target `t` and
+  the Skip `s`: a state whose device last crossed `t` (before that state, on that log) with `K ≥ s` there is that of
+  a device that never applied `t` (§12.4 step 1, §17.3 step 1; a crash halt on `t` holds the board below `t` until
+  the Skip clears it) and is compared with `check::replay_without`: the toy applying the ledger's accepted `cmd`
+  entries from the oracle's first state at `t − 1` with `t` left out, upgraded where the membership activates a rules
+  version, stopping at a `Panic`, a `ResetTo` or a Skip; it counts only as far as the same replay run as the oracle
+  ran agrees with the oracle. A `B` in `t..s` that no expected value covers is a violation (ruling 6). The toy stamps
+  each key with the seq that set it: the log without `t` keeps the seqs (a twin whose `t` is a `Fail`), it is not a
+  log one entry shorter. Alarms of §21.1 for contradicting welcomes and pages, `SkippedFrame` for injected frames,
+  and the duplicated answer of a read (task D5) as before.
+- 5: deletions explained as listed in §31.7 and tasks D2 to D5 (a `Register` drop needs its `PairFailed` in the same or
+  the next call, not asked when a crash cut either call, task D6); a deletion counts once its write is applied.
 - 6: also no `Append` other than of beats, `snap` entries and the rules-upgrade proposal in the last 1,800,000 ms.
-  3 and 6 name a device whose `DeviceAdded` only a rolled-back or forked state holds: `its pairing is only on …`.
-- Roots: every `(epoch, root)` any device held; two branches may rotate to one epoch with two roots, and each log is
-  classified with the choice per epoch that opens it furthest (`check::pick_roots`; D3, gate seeds 1019 and 1058).
+- Roots: every `(epoch, root)` any device held; each log is classified with the choice per epoch that opens it
+  furthest (`check::pick_roots`).
 
 ## The simulator's own tests (task D4)
 
 A test of the simulator holds whatever the engine does at a seed: no test names a seq, a device number or a trace
-line that a run happened to produce (every engine fix moves seeds). They are built in this order of preference:
+line that a run happened to produce. In this order of preference:
 
-- **A quiet `World`** (no fault, no operation): `world.rs` runs quiet seed 3 to its end, changes one fact (an archive
-  row, a sample, an acknowledgement, a deletion, `tamper_facts`), and asserts which invariants the change breaks,
-  counting only the violations the untampered run does not have. `a_quiet_run_holds_every_invariant` is the one unit
-  test that asks the engine something (that run holds every invariant).
+- **A quiet `World`** (no fault, no operation): `world.rs` runs quiet seed 3, changes one fact (an archive row, a
+  sample, an acknowledgement, a deletion, `tamper_facts`), and asserts which invariants the change breaks; it also
+  checks that the run records the facts above. `a_quiet_run_holds_every_invariant` is the one unit test that asks
+  the engine something.
 - **A hand-built log** (`src/sim/script.rs`): `HandLog` creates a board with the creator's fake ("Desk"), seals
-  Desk's commands, `DeviceAdded` and rotations, seals Skips as the board's recovery identity (`seal.md` §13.6: a
-  device may not skip its own frame), and has the model relay sequence them; two `HandLog`s of one seed built with the
-  same first steps are a fork (both Desks draw entry ids from the seed, so a test that needs the fork's entries to
-  carry ids of their own has the fork's Desk draw one id it never seals). `Case` holds the facts `check::check` is handed (reference log, branches, identities,
-  acknowledgements, deletions), `settled` and `honest` build identities whose samples are the oracle's. No engine runs
-  except the §31.7 oracle; where a test leans on what the oracle confirms, it asserts that as a premise with its own
-  message (for example: the oracle halts on a second poison entry inside a Skip's window, ENG-POISON-003).
-- A bounded seed search (at most 40 runs, the first seed that shows a pattern, a failure naming the pattern) only for
-  a situation nothing else can build; none is needed today.
+  Desk's commands, `DeviceAdded` (also one entry sealed twice), beats, rules upgrades and rotations, seals Skips as
+  the recovery identity, has the model relay make up a frame (`inject`), and sequences them; two `HandLog`s of one
+  seed built with the same first steps are a fork or a rollback's lost tail (the second draws one entry id it never
+  seals). `Case` holds the facts `check::check` is handed. No engine runs except the §31.7 oracle; where a test leans
+  on what it confirms, it asserts that as a premise.
+- **A rollback scripted on a quiet `World`** (`world.rs`, `rolled_world`): quiet seed 3 at its end, some identities
+  stopped, the relay's state marked, Desk's edits appended, the relay rolled back to the mark by the fault's own
+  code (the quiet fault rates are zero, so only these faults happen); then sessions, starts and edits by hand.
+  `World::drop_restore_tails` (tests only) drops the restore tails of the identities and first seqs it names before
+  they are recorded or sent: an engine that sends none, or never resumes. Premises are asserted.
+- A bounded seed search only for a situation nothing else can build; none is needed.
 
-Each test of `script.rs` fails when its rule is removed from `check.rs` (task D4 tried each by hand; the fix pass added
-`a_pending_root_drop_on_a_fork_is_judged_by_the_forks_log` for invariant 5's `Deletion::Pending` with a chain, which
-the rewrite of the epoch-rotation test had left without one). The files under
-`tests/regress/` are exempt: they record failing runs. `tests/simulator.rs` is the gate itself (seeds of a range,
-determinism, one seed's trace).
+Each test fails when its rule is removed (task D6 removed each rule in turn and ran the tests). D4's open item: no oracle run can tell
+`keep_first` from an overwrite, because the oracle's confirmed head never returns to a seq it passed (a Skip replay
+is not shown through `confirmed`); `the_oracle_keeps_its_first_state_at_each_b` tests the rule itself.
 
-## Spec question (task D3): a device that crash-halted on a Skip's target, against invariant 4
+## Open readings (task D6, for the owner)
 
-Gate seed 1014 (1098 likewise: device 0, target 200, Skip at 201): device 2 crash-halts on the healthy entry 192 (§15.2, two hard aborts while 192 is under
-its marker), every other device applies it, and device 2's Skip of 192 is accepted at 197. After the Skip clears the
-halt device 2 applies 192 as skipped and the entries after it (§17.3 step 1, ENG-HALT-004), so its confirmed state
-at 192, 195 and 196 lacks 192 (ENG-SKIP-002). The §31.7 oracle applied 192 when it reached it and has it at each of
-those `B`. The check reports three invariant-4 violations; they stay failing until the owner decides.
-
-- Reading A (invariant 4 as written): "no device's confirmed state at any moment differs from the oracle's at the
-  same `B`" with the oracle a fault-free replay. Device 2's states differ: either the engine is wrong (ENG-HALT-004
-  should not let a device confirm a `B` in `t..s` without `t` when the oracle has `t` there, for example by
-  confirming nothing below `s` after the Skip) or the invariant is violated by design.
-- Reading B (ENG-HALT-004 and ENG-SKIP-002 as written): a device that crash-halted on `t` legitimately confirms the
-  `B`s of `t..s` without `t`; invariant 4 then needs an expected value for those `B`s that is derived independently
-  (for instance the log replayed with `t` excluded), stated in §31.7. The check does not choose one.
+- A device alone on a fork's copy, revoked with `replace` and paired again (§28.5 step 3) before it meets the
+  reference relay, takes the entries only the copy acknowledged with it: no device that held them raises an alarm.
+  Read strictly, a silent loss (invariant 2).
+- A dropped seq above the reference log's final head, whose lower dropped seqs other devices overwrote, is neither
+  removed (the text names a different entry or a made-up frame) nor repaired (no restore tail could bring it back);
+  read strictly, not removed.
+- A restore tail owed (D6's second fix pass): the check gives a device in session `RESTORE_DUE` (the response
+  timeout, 20,000 ms) to send it once the relay shows a head below its log on its chain. One sent within that time
+  is judged by what it met (another device's entry first: the race, removed); none sent by then is owed, judged by
+  the relay's state when it fell due, also when a request it did send (a repair of §21.3 step 2) was lost on the way,
+  as a lost restore tail is. A debt that a session's or process's end cuts before it falls due is none. Every device
+  that holds more than the relay on its chain owes one, whatever other evidence it holds (§21.3: "as any device does
+  that holds more than the relay"), except a halted one (§16.4). This replaces the reading that took a device that
+  sent no next request after a stored one, or none after `relay/not_next`, for the race.

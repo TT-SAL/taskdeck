@@ -9,17 +9,32 @@
 //! held (`FakeSealer::observer`), its runtime confirms every write at once and
 //! serves the log one entry per push, so that its confirmed state is seen at
 //! every seq it passes. The **ledger** is the reference log classified once by
-//! the same kind of sealer: class, entry id, purge rotations.
+//! the same kind of sealer: class, entry id, purge rotations, and what the
+//! board apply of each entry needs.
+//!
+//! Task D6 (§31.7 as the owner amended it on 2026-11-25): an entry lost with a
+//! **removed relay state** (a fork's copy; a rolled-back seq that the
+//! reference log holds otherwise after the settle, or not at all because every
+//! restore tail that would have brought it back was refused for a frame the
+//! relay made up; not one a restore tail could have brought back, sent, or
+//! owed by a device that held it and never sent) is an outcome when every
+//! acknowledgement of it came from such a state and a device that held its
+//! frame raised an alarm with evidence (`never lost silently`); a final
+//! refusal its device reported is an outcome of invariant 2; and between a
+//! Skip's target `t` and the Skip, a device that never applied `t` is
+//! compared with the log replayed without `t` (`replay_without`: the toy on
+//! the ledger, no engine).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use super::relay::LogRow;
 use super::store::Store;
+use super::world::Sel;
 use crate::fake::{FakeMembership, FakeSealer};
-use crate::toy::{ToyCommand, ToyMachine};
+use crate::toy::{ToyCommand, ToyMachine, ToyState};
 use crate::{
-    AdminOk, AlarmKind, Bootstrap, Class, ClassifyInput, Config, CtlItem, Dev, DeviceStatus, Effect, Engine, Event, Hash32, Head, Input, Kind,
-    LocalReadResult, Page, PageEntry, RelayRefusal, RelayTarget, Sealer, StateMachine, Welcome,
+    AdminOk, AlarmKind, Bootstrap, Class, ClassifyInput, Config, Ctx, CtlItem, Dev, DeviceStatus, Effect, Engine, Event, Hash32, Head, Input,
+    Kind, LocalReadResult, MembershipView, Page, PageEntry, RelayRefusal, RelayTarget, Sealer, StateMachine, Welcome,
 };
 
 /// `BranchLog::why` of a rollback's lost tail and of a fork's copy.
@@ -34,6 +49,10 @@ pub(crate) struct BranchLog {
     pub why: &'static str,
     /// The trace line of the fault (or move) that made it a branch.
     pub line: u64,
+    /// The first seq the fault took from the reference log: a rollback's
+    /// first dropped seq (the rows from here on are the ones it dropped), the
+    /// first seq after a fork's point.
+    pub removed_from: u64,
 }
 
 /// One classified entry of a log.
@@ -52,6 +71,18 @@ pub(crate) struct Ledger {
     /// only: a refused one carries no items).
     pub added: Vec<Dev>,
     pub tau: i64,
+    /// What the board apply of an accepted `cmd` entry needs (§13.1): its
+    /// payload, and `Ctx { seq, d_author, at_ms, based_on }` with `d_author`
+    /// the author's `device_no` in `M_{seq−1}`.
+    pub payload: Vec<u8>,
+    pub d_author: u16,
+    pub at_ms: i64,
+    pub based_on: u64,
+    /// The active rules version in `M_seq` (one that a `RulesUpgrade`
+    /// activates is `SM::upgrade`d before the next entry, §14.1).
+    pub rules: u32,
+    /// An accepted `ResetTo` item (§28.1).
+    pub reset: bool,
 }
 
 fn class_name(c: &Class) -> &'static str {
@@ -120,6 +151,9 @@ fn ledger_with(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u
     let mut out = Vec::new();
     let Some(mut s) = template.and_then(|t| t.observer(0x0b5e_77e7, roots)) else { return out };
     let mut m: FakeMembership = s.membership_zero();
+    // The membership after the last accepted entry: device numbers and the
+    // rules version change only with accepted entries.
+    let mut view: MembershipView = s.view(&m);
     let mut prev = s.chain_zero();
     let chains: BTreeMap<u64, Hash32> = rows.iter().map(|r| (r.seq, r.chain)).collect();
     let frames: BTreeMap<u64, &[u8]> = rows.iter().map(|r| (r.seq, r.frame.as_slice())).collect();
@@ -138,62 +172,72 @@ fn ledger_with(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u
             own_sealed: &own,
             skip_targets: &skip,
         };
+        let mut l = Ledger {
+            seq: r.seq,
+            accept: false,
+            class: "error",
+            entry_id: None,
+            cmd: false,
+            purge_before: None,
+            new_epoch: None,
+            skip_targets: vec![],
+            added: vec![],
+            tau,
+            payload: Vec::new(),
+            d_author: 0,
+            at_ms: 0,
+            based_on: 0,
+            rules: view.rules,
+            reset: false,
+        };
         let Ok(rc) = s.classify(&input) else {
-            out.push(Ledger {
-                seq: r.seq,
-                accept: false,
-                class: "error",
-                entry_id: None,
-                cmd: false,
-                purge_before: None,
-                new_epoch: None,
-                skip_targets: vec![],
-                added: vec![],
-                tau,
-            });
+            out.push(l);
             prev = r.chain;
             continue;
         };
-        let mut purge_before = None;
-        let mut new_epoch = None;
-        let mut skip_targets = Vec::new();
-        let mut added = Vec::new();
-        let mut entry_id = None;
-        let mut cmd = false;
+        l.accept = rc.class == Class::Accept;
+        l.class = class_name(&rc.class);
         if let Some(o) = &rc.opened {
-            entry_id = Some(o.entry_id);
-            cmd = o.kind == Kind::Cmd;
-            if rc.class == Class::Accept {
+            l.entry_id = Some(o.entry_id);
+            l.cmd = o.kind == Kind::Cmd;
+            l.at_ms = o.at_ms;
+            l.based_on = o.based_on.seq;
+            if l.accept {
                 tau = tau.max(o.at_ms);
+                if l.cmd {
+                    l.payload = o.payload.clone();
+                    l.d_author = view.devices.iter().find(|d| d.dev == rc.author).map_or(0, |d| d.device_no);
+                }
             }
             for it in &o.items {
                 match it {
                     CtlItem::EpochRotated { epoch, purge_before: p } => {
-                        new_epoch = Some(*epoch);
-                        purge_before = *p;
+                        l.new_epoch = Some(*epoch);
+                        l.purge_before = *p;
                     }
-                    CtlItem::Skip { seq, .. } => skip_targets.push(*seq),
-                    CtlItem::DeviceAdded { dev, .. } => added.push(*dev),
+                    CtlItem::Skip { seq, .. } => l.skip_targets.push(*seq),
+                    CtlItem::DeviceAdded { dev, .. } => l.added.push(*dev),
+                    CtlItem::ResetTo { .. } => l.reset = true,
                     _ => {}
                 }
             }
         }
-        out.push(Ledger {
-            seq: r.seq,
-            accept: rc.class == Class::Accept,
-            class: class_name(&rc.class),
-            entry_id,
-            cmd,
-            purge_before,
-            new_epoch,
-            skip_targets,
-            added,
-            tau,
-        });
+        l.tau = tau;
         m = rc.membership;
+        if l.accept {
+            view = s.view(&m);
+            l.rules = view.rules;
+        }
+        out.push(l);
         prev = r.chain;
     }
     out
+}
+
+/// The ledger entry at `q`.
+fn ledger_at(led: &[Ledger], q: u64) -> Option<&Ledger> {
+    let i = usize::try_from(q).ok()?.checked_sub(1)?;
+    led.get(i).filter(|l| l.seq == q).or_else(|| led.iter().find(|l| l.seq == q))
 }
 
 /// The oracle's confirmed state at each `B` it passed: `B → (C_B, board hash, state hash)`.
@@ -202,16 +246,30 @@ pub(crate) type OracleStates = BTreeMap<u64, (Hash32, Hash32, Hash32)>;
 /// The rules the oracle's sealer supports: the template's (`World::setup`).
 pub(crate) const ORACLE_RULES: [u32; 2] = [1, 2];
 
+/// The oracle's run on one log (§31.7).
+pub(crate) struct OracleRun {
+    /// Its first confirmed state at each `B`.
+    pub states: OracleStates,
+    /// The devices its final membership lists as revoked.
+    pub revoked: BTreeSet<Dev>,
+    /// Its first toy state at each `B`: where invariant 4's replays without a
+    /// Skip's target start (`replay_without`).
+    pub boards: BTreeMap<u64, ToyState>,
+    /// The seqs of the crash halts it had (an entry whose `apply` panics, §15, §16.2).
+    pub halts: BTreeSet<u64>,
+}
+
+/// Keeps the first value seen at `b` (§31.7: the oracle's state at each `B` is
+/// the first one it had there; a later visit to `B`, as a Skip replay that
+/// showed its intermediate states would make, does not overwrite it).
+pub(crate) fn keep_first<V>(map: &mut BTreeMap<u64, V>, b: u64, v: impl FnOnce() -> V) {
+    map.entry(b).or_insert_with(v);
+}
+
 /// The oracle on `rows` (§31.7): a fresh engine replaying them from seq 1
 /// with no faults, under the roots `pick_roots` chooses among `roots`. Its
-/// state at each `B` is the first one it had there (a Skip replay does not
-/// overwrite it). It is the only expected value invariant 4 accepts, a `B`
-/// between a Skip's target and the Skip included (ruling 6 of the D2 brief):
-/// a replay with injected crashes would be the engine under test run under
-/// faults, not an independent expected value (task D3 fix pass). A device
-/// that crash-halted on a Skip's target and so confirms the `B`s up to the
-/// Skip without it (ENG-HALT-004) differs from this oracle there; that is a
-/// spec question, reported (`api-simulator.md`), not settled in the check.
+/// state at each `B` is the first one it had there (`keep_first`).
+#[cfg(test)]
 pub(crate) fn oracle(
     rows: &[LogRow],
     template: Option<&FakeSealer>,
@@ -219,21 +277,20 @@ pub(crate) fn oracle(
     board: &[u8],
     relay: &RelayTarget,
 ) -> (OracleStates, BTreeSet<Dev>) {
+    let r = oracle_full(rows, template, roots, board, relay);
+    (r.states, r.revoked)
+}
+
+/// `oracle`, with the toy states and crash halts of the run.
+pub(crate) fn oracle_full(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8; 32])], board: &[u8], relay: &RelayTarget) -> OracleRun {
     oracle_run(rows, template, &pick_roots(rows, template, roots), board, relay)
 }
 
-/// Replays `rows` from seq 1 with a fresh engine and no faults (§31.7): the
-/// oracle's states, and the devices its final membership lists as revoked.
-fn oracle_run(
-    rows: &[LogRow],
-    template: Option<&FakeSealer>,
-    roots: &[(u32, [u8; 32])],
-    board: &[u8],
-    relay: &RelayTarget,
-) -> (OracleStates, BTreeSet<Dev>) {
-    let mut states = OracleStates::new();
-    let Some(first) = rows.first() else { return (states, BTreeSet::new()) };
-    let Some(sealer) = template.and_then(|t| t.observer(0x0a1c_1e00, roots)) else { return (states, BTreeSet::new()) };
+/// Replays `rows` from seq 1 with a fresh engine and no faults (§31.7).
+fn oracle_run(rows: &[LogRow], template: Option<&FakeSealer>, roots: &[(u32, [u8; 32])], board: &[u8], relay: &RelayTarget) -> OracleRun {
+    let mut run = OracleRun { states: OracleStates::new(), revoked: BTreeSet::new(), boards: BTreeMap::new(), halts: BTreeSet::new() };
+    let Some(first) = rows.first() else { return run };
+    let Some(sealer) = template.and_then(|t| t.observer(0x0a1c_1e00, roots)) else { return run };
     let identity = sealer.export_identity().to_vec();
     let mut store = Store::new(identity, Vec::new(), Bootstrap::Genesis { board: board.to_vec(), frame_1: first.frame.clone(), relay: relay.clone() });
     let toy = ToyMachine::new(true);
@@ -278,7 +335,8 @@ fn oracle_run(
         while let Some(ev) = q.pop_front() {
             guard += 1;
             if guard > 50_000_000 {
-                return (states, BTreeSet::new());
+                run.revoked.clear();
+                return run;
             }
             let fx = eng.handle(Input { wall_ms: wall, mono_ms: mono, event: ev });
             mono += 1;
@@ -287,6 +345,11 @@ fn oracle_run(
                     Effect::Persist { id, ops } => {
                         let hist = Some(eng.sealer().history());
                         store.apply(&ops, hist.as_ref());
+                        if let Some(h) = store.meta.as_ref().and_then(|m| m.halt.as_ref())
+                            && matches!(h.kind, crate::HaltKind::Crash { .. })
+                        {
+                            run.halts.insert(h.seq);
+                        }
                         q.push_back(Event::Persisted { id });
                     }
                     Effect::ReadLog { req, from, to } => {
@@ -322,7 +385,8 @@ fn oracle_run(
                 last = head;
                 let bh = toy.board_hash(st);
                 let sh = crate::state_hash(1, &bh, &eng.membership_bytes());
-                states.entry(head.seq).or_insert((head.chain, bh, sh));
+                keep_first(&mut run.states, head.seq, || (head.chain, bh, sh));
+                keep_first(&mut run.boards, head.seq, || st.clone());
             }
         }
         if served >= rows.len() {
@@ -333,11 +397,319 @@ fn oracle_run(
         q.push_back(Event::Page { req: None, page: page(served, wall, served as u64 - 1, 1) });
         q.push_back(Event::Tick);
     }
-    let revoked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    run.revoked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         eng.membership().devices.iter().filter(|d| d.status == DeviceStatus::Revoked).map(|d| d.dev).collect()
     }))
     .unwrap_or_default();
-    (states, revoked)
+    run
+}
+
+/// The board hash at each `B` of `a + 1..=end` of the log `led` replayed from
+/// `start` (the oracle's first toy state at `a`) with the seqs of `out` left
+/// out: §31.7 invariant 4's "the reference log replayed with `t` left out",
+/// computed from the oracle's classes without running the engine. The toy
+/// applies each accepted `cmd` entry in order under `Ctx { seq, d_author,
+/// at_ms, based_on }` (§13.1: a parse failure or an `apply` refusal changes
+/// nothing), and is upgraded with the entry whose membership activates a
+/// newer rules version, before the next entry (§14.1, ENG-SM-002; the board
+/// at that seq has it already). It stops before what it does not model: a
+/// `Panic` (the apply panics: a crash halt, §15), a `ResetTo` (§28.1), an
+/// accepted Skip (§17.3).
+pub(crate) fn replay_without(led: &[Ledger], start: &ToyState, a: u64, end: u64, out: &BTreeSet<u64>) -> BTreeMap<u64, Hash32> {
+    let toy = ToyMachine::new(true);
+    let mut st = start.clone();
+    let mut v = BTreeMap::new();
+    for q in a + 1..=end {
+        let Some(l) = ledger_at(led, q) else { break };
+        if l.accept && (l.reset || !l.skip_targets.is_empty()) {
+            break;
+        }
+        if l.accept && l.cmd && !out.contains(&q) {
+            match toy.parse(&l.payload) {
+                Ok(ToyCommand::Panic) => break,
+                Ok(c) => {
+                    let ctx = Ctx { seq: q, device_no: l.d_author, at_ms: l.at_ms, based_on: l.based_on };
+                    let _ = toy.apply(&mut st, &c, &ctx);
+                }
+                Err(_) => {}
+            }
+        }
+        if l.rules > st.rules && toy.upgrade(&mut st, l.rules).is_err() {
+            break;
+        }
+        v.insert(q, toy.board_hash(&st));
+    }
+    v
+}
+
+/// One log a device may have followed (the reference log, a branch), with
+/// what invariant 4 compares on it.
+struct LogCtx {
+    why: &'static str,
+    chain: BTreeMap<u64, Hash32>,
+    led: Vec<Ledger>,
+    run: OracleRun,
+    /// `(t, s)`: each Skip's target and the seq of the first accepted Skip of it.
+    windows: Vec<(u64, u64)>,
+}
+
+fn windows_of(led: &[Ledger]) -> Vec<(u64, u64)> {
+    let mut w: BTreeMap<u64, u64> = BTreeMap::new();
+    for l in led.iter().filter(|l| l.accept) {
+        for t in &l.skip_targets {
+            w.entry(*t).or_insert(l.seq);
+        }
+    }
+    w.into_iter().collect()
+}
+
+/// The board hash at each `B` of the windows of the targets `out` on `ctx`,
+/// replayed without them (`replay_without`, from the oracle's first state
+/// below the lowest target). The replay is checked against the oracle where
+/// both ran alike: run with every target the oracle applied (it crash-halts
+/// on none but a poison entry, §16.2), it must give the oracle's first state
+/// at each `B` where the oracle confirmed one. It covers no `B` from the
+/// first disagreement on, and none when nothing was compared: a replay that
+/// models the log otherwise than the board apply is no expected value.
+fn without(ctx: &LogCtx, out: &BTreeSet<u64>) -> BTreeMap<u64, Hash32> {
+    let Some(&t0) = out.first() else { return BTreeMap::new() };
+    let a = t0 - 1;
+    let Some(start) = ctx.run.boards.get(&a) else { return BTreeMap::new() };
+    let end = ctx.windows.iter().filter(|(t, _)| out.contains(t)).map(|(_, s)| s - 1).max().unwrap_or(a);
+    let alike: BTreeSet<u64> = out.intersection(&ctx.run.halts).copied().collect();
+    let mut upto = end;
+    let mut compared = false;
+    for (b, h) in replay_without(&ctx.led, start, a, end, &alike) {
+        let Some(o) = ctx.run.states.get(&b) else { continue };
+        if o.1 != h {
+            upto = b - 1;
+            break;
+        }
+        compared = true;
+    }
+    if !compared {
+        return BTreeMap::new();
+    }
+    replay_without(&ctx.led, start, a, upto, out)
+}
+
+/// Whether the device's state sampled at trace line `line` is that of a
+/// device that never applied the Skip's target `t` on the log `chain` (§31.7
+/// invariant 4): the last time before it that its board crossed `t` (from
+/// below `t` to `t` or above, on that log), its class head `K` was at or past
+/// the Skip at `s` on that log, so that the Skip was in its `M_K` when `t`
+/// reached its board and `t` was treated as skipped (§12.4 step 1, §17.3 step
+/// 1; a crash halt on `t` holds the board below `t` until the Skip clears it,
+/// §16.2). Read per state, as the amended text's "it crash-halted on t"
+/// requires: a device whose process applied `t` and died with it under its
+/// marker (§15) crash-halts on `t`, and its states after the Skip never
+/// applied it, while the states of the process that did were held to the
+/// oracle. With no crossing of `t` before it (the board started above `t`,
+/// as after a join) it is not.
+fn never_applied(x: &IdentFacts, chain: &BTreeMap<u64, Hash32>, t: u64, s: u64, line: u64) -> bool {
+    x.crossings
+        .iter()
+        .rev()
+        .find(|c| c.line <= line && c.from < t && t <= c.to && chain.get(&c.to) == Some(&c.to_chain))
+        .is_some_and(|c| c.k >= s && chain.get(&c.k) == Some(&c.k_chain))
+}
+
+/// An acknowledgement a relay gave a device (§31.7 invariant 2: `new` or
+/// `dup`, or a `register` or `fence` answer with a seq), whether its answer
+/// reached the device or not.
+#[derive(Clone, Debug)]
+pub(crate) struct AckFact {
+    pub eid: [u8; 16],
+    pub ident: usize,
+    /// The relay state that gave it: relay `r`'s own, or the fork's copy.
+    pub sel: Sel,
+    pub seq: u64,
+    pub frame: Hash32,
+    /// The trace line when the relay gave it.
+    pub line: u64,
+}
+
+/// How the relay made up a frame (the `injected frame` fault of §31.6: "a
+/// frame with a bad signature or another board's id"), and so the code a
+/// restore tail that carries it is refused with (`relay.md` §12.9 runs the
+/// checks of §9.3 on each frame: P7 `relay/bad_signature`, P2
+/// `relay/wrong_board`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MadeUp {
+    BadSignature,
+    OtherBoard,
+}
+
+impl MadeUp {
+    /// The code a restore tail is refused with at this frame.
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            MadeUp::BadSignature => "relay/bad_signature",
+            MadeUp::OtherBoard => "relay/wrong_board",
+        }
+    }
+}
+
+/// How a relay answered a `restore_tail` (`relay.md` §12.9).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Answer {
+    /// It stored the frames.
+    Stored,
+    /// It refused the request: the code, and the index of the frame the
+    /// refusal names (none for a refusal of the whole request).
+    Refused(String, Option<u32>),
+    /// The request never reached it (lost on the way).
+    Unanswered,
+    /// It was never sent: its device owed it (§21.3, ENG-EVID-004). In
+    /// session with the relay while the relay's head was below its durable
+    /// log on its chain, the device sent none and had none on its way for the
+    /// response timeout (`World::owe_from`).
+    Owed,
+}
+
+/// A `restore_tail` a device sent (`relay.md` §12.9, engine.md §21.3), or one
+/// it owed and did not send (`Answer::Owed`): what it carried, the relay's
+/// first answer (a duplicated copy of the request is no other restore tail),
+/// and what the relay and the sender held then.
+#[derive(Clone, Debug)]
+pub(crate) struct RestoreTry {
+    pub sel: Sel,
+    /// The trace line when the relay answered it, when it was sent if it
+    /// never reached the relay, or when it fell due if it was owed.
+    pub line: u64,
+    pub first_seq: u64,
+    /// The frames it carried (none known for one owed).
+    pub frames: Vec<Hash32>,
+    pub answer: Answer,
+    /// The relay's head when the request reached it, when it was sent if it
+    /// never did, or when it fell due.
+    pub head: Option<Head>,
+    /// The sender's durable log then: the first seq of the unbroken run of
+    /// rows that ends at its head, and that head `(L, C_L)`.
+    pub holds: Option<(u64, Head)>,
+}
+
+impl RestoreTry {
+    /// Whether it carried `frame` at `seq`.
+    pub(crate) fn carries(&self, seq: u64, frame: &Hash32) -> bool {
+        self.frame_at(seq) == Some(frame)
+    }
+
+    /// The frame it carried at `seq`.
+    fn frame_at(&self, seq: u64) -> Option<&Hash32> {
+        seq.checked_sub(self.first_seq).and_then(|i| usize::try_from(i).ok()).and_then(|i| self.frames.get(i))
+    }
+
+    /// The seq of the frame it was refused for, when the relay made that
+    /// frame up and refused it with the code it refuses such a frame with
+    /// (`MadeUp::code`): "refused for a frame the relay made up" (§31.7).
+    /// Another code at that frame (`relay/frame_mismatch`,
+    /// `relay/unknown_author`, …) refused it for something else.
+    pub(crate) fn made_up_at(&self, made_up: &BTreeMap<Hash32, MadeUp>) -> Option<u64> {
+        let Answer::Refused(code, Some(i)) = &self.answer else { return None };
+        let fh = self.frames.get(*i as usize)?;
+        (made_up.get(fh)?.code() == code).then(|| self.first_seq + u64::from(*i))
+    }
+
+    /// That a restore tail could have brought back `seq`, as this one shows
+    /// (the text of a violation).
+    fn could_text(&self, seq: u64) -> String {
+        let at = self.head.map_or_else(String::new, |h| format!(" at {} on that tail", h.seq));
+        let what = match &self.answer {
+            Answer::Stored => "the relay stored one that carried it".to_owned(),
+            Answer::Refused(code, None) => format!("the relay{at} refused one as a whole, {code}"),
+            Answer::Refused(code, Some(i)) => format!("the relay{at} refused one at its frame {i}, {code}, not for a frame it made up"),
+            Answer::Unanswered => format!("one sent while the relay was{at} never reached it"),
+            Answer::Owed => format!("its device owed one while the relay was{at}, and sent none in time"),
+        };
+        format!("a restore tail could have brought back {seq} (trace line {}: {what})", self.line)
+    }
+}
+
+/// The chain value a log (rows by seq) holds at `seq`.
+fn chain_in(rows: &[LogRow], seq: u64) -> Option<Hash32> {
+    rows.binary_search_by_key(&seq, |r| r.seq).ok().map(|i| rows[i].chain)
+}
+
+/// Whether restore tail `x`, sent after the rollback whose lost tail is `b`,
+/// could have brought back `b`'s `frame` at `q` (§31.7: "a dropped seq ...
+/// that a restore tail could have brought back, is not removed"). Read by the
+/// relay's state when the request met it, not by the request's own answer:
+///
+/// - stored, it brought back what it carried;
+/// - else, unless the relay refused it for a frame it made up: when the
+///   relay held a prefix of `b` below `q` (its chain at its head is `b`'s),
+///   `b` holds no frame the relay made up above that head up to `q`, and the
+///   sender held `b`'s rows from that head to `q`. A restore tail from that
+///   head is accepted then (`relay.md` §12.9), and the device sends the rest
+///   from its log, each request after the repairs the one before it needs
+///   (§21.3 steps 1 and 2); so a request refused there as a whole (a wrong
+///   `chain_before` or `first_seq`), at a frame the relay did not make up (a
+///   missing repair: `relay/unknown_author`), or that never reached the relay
+///   leaves every seq up to `q` to that restore tail, not to another device's
+///   entry. Not a request refused `relay/not_next` with the relay's head at
+///   or past its first seq: another device restored those seqs first, the
+///   device resumes from that head (§21.3 step 3), and its next request is
+///   judged on its own (or, sent none, the one it owed from that answer);
+/// - one owed and never sent (`Answer::Owed`) as one that never reached the
+///   relay, by the relay's state when it fell due: a device that holds more
+///   than the relay, on the relay's chain, restores it (§21.3,
+///   ENG-EVID-004); one that does not leaves the seq to the restore tail it
+///   owed, not to another device's entry.
+fn could_restore(x: &RestoreTry, b: &BranchLog, q: u64, frame: &Hash32, made_up: &BTreeMap<Hash32, MadeUp>, logs: &[&[LogRow]]) -> bool {
+    match &x.answer {
+        Answer::Stored => x.carries(q, frame),
+        _ if x.made_up_at(made_up).is_some() => false,
+        answer => {
+            let Some(h) = x.head else { return false };
+            let stale = matches!(answer, Answer::Refused(code, None) if code == "relay/not_next") && h.seq >= x.first_seq;
+            let b_at = |s: u64| chain_in(&b.rows, s);
+            // The sender held `b`'s rows `h + 1 ..= q`: the request carried
+            // them, or its log's unbroken run did, on a log whose chain at
+            // `q` is `b`'s (a chain value names the log up to its seq).
+            let held = (x.first_seq <= h.seq + 1 && x.carries(q, frame))
+                || x.holds.is_some_and(|(lo, top)| {
+                    lo <= h.seq + 1 && top.seq >= q && logs.iter().any(|l| chain_in(l, top.seq) == Some(top.chain) && chain_in(l, q) == b_at(q))
+                });
+            h.seq < q
+                && !stale
+                && b_at(h.seq) == Some(h.chain)
+                && !b.rows.iter().any(|r| r.seq > h.seq && r.seq <= q && made_up.contains_key(&r.hash))
+                && held
+        }
+    }
+}
+
+/// The alarms whose evidence is a relay state that contradicts the device's
+/// log or acknowledgements: the kinds of §21.1 whose response is the evidence
+/// stop of §21.2, the evidence SYNC.md §4.8 lists (an unechoed own entry, a
+/// relay head behind the stored one, a chain mismatch, a counter gap, entries
+/// that never arrived).
+pub(crate) fn is_evidence(k: AlarmKind) -> bool {
+    matches!(k, AlarmKind::RelayBehind | AlarmKind::Fork | AlarmKind::Counter | AlarmKind::Unechoed | AlarmKind::Withheld)
+}
+
+/// An alarm of `is_evidence`'s kinds, once durable (`Meta`, ENG-EVID-002),
+/// with the frames the device's durable log and outbox held then.
+#[derive(Clone, Debug)]
+pub(crate) struct EvidenceAlarm {
+    pub line: u64,
+    pub kind: AlarmKind,
+    pub held: BTreeSet<Hash32>,
+}
+
+/// One move of a device's confirmed head within a process (§31.7 invariant
+/// 4): from `from` to `to` (chain `to_chain`), with its class head `K` then,
+/// its durable log head (`K` is the last persisted seq, §12.3 step 9), chain
+/// `k_chain`, at trace line `line` (that of the sample taken with it).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Crossing {
+    pub from: u64,
+    pub to: u64,
+    pub to_chain: Hash32,
+    pub k: u64,
+    pub k_chain: Hash32,
+    pub line: u64,
 }
 
 /// What the end of a run hands the checks.
@@ -349,12 +721,24 @@ pub(crate) struct Facts<'a> {
     pub board: Vec<u8>,
     pub relay: RelayTarget,
     pub idents: Vec<IdentFacts>,
+    /// The acknowledgements delivered to a device: (entry id, ident, line, from the home relay).
     pub acked: &'a [([u8; 16], usize, u64, bool)],
+    /// Every acknowledgement a relay gave, delivered or not.
+    pub acks: &'a [AckFact],
     pub enqueued: &'a [([u8; 16], usize, u64, u64)],
-    /// Pairings' `DeviceAdded` entry ids that `register` acknowledged.
-    pub registered: &'a BTreeSet<[u8; 16]>,
+    /// Pairings' `DeviceAdded` entry ids that `register` acknowledged, with
+    /// the device each one adds.
+    pub registered: &'a BTreeMap<[u8; 16], Dev>,
+    /// The operation each entry's outbox record belongs to (`OutboxRecord.op`): (ident, ticket).
+    pub entry_ops: &'a BTreeMap<[u8; 16], (usize, u64)>,
     pub cancelled: &'a BTreeSet<[u8; 16]>,
     pub injected: &'a [(u64, Hash32, u64)],
+    /// The frames the relay made up (`injected_frame`, §31.6), by hash.
+    pub made_up: &'a BTreeMap<Hash32, MadeUp>,
+    /// Every restore tail a device sent.
+    pub restore_tails: &'a [RestoreTry],
+    /// Every restore tail a device owed and did not send (`Answer::Owed`).
+    pub owed: &'a [RestoreTry],
     pub deletions: &'a [(usize, super::world::Deletion, u64, u64)],
     pub t_f: u64,
 }
@@ -374,16 +758,38 @@ pub(crate) struct IdentFacts {
     pub caught_up: bool,
     pub joined_at: u64,
     pub samples: Vec<(u64, Hash32, Hash32, u64)>,
+    /// How its confirmed head moved, with its class head each time (invariant 4).
+    pub crossings: Vec<Crossing>,
     /// The seqs of the crash halts its storage held (§16.2).
     pub crash_halts: BTreeSet<u64>,
     /// The seqs `apply` ran for on the lineage of the final confirmed state,
     /// since it was last loaded from bytes (`counted`), oldest first.
     pub applied: Vec<u64>,
     pub alarms: Vec<(u64, AlarmKind, Option<u64>, u64)>,
+    /// Its durable alarms of `is_evidence`'s kinds.
+    pub evidence: Vec<EvidenceAlarm>,
     pub outbox: Vec<([u8; 16], u64)>,
     pub refusal_seqs: BTreeSet<u64>,
+    /// Its `PairFailed` notifications: (the device the pairing adds, trace line).
+    pub pair_failed: Vec<(Dev, u64)>,
+    /// Its `OpDone` notifications: (ticket, trace line).
+    pub op_done: Vec<(u64, u64)>,
     pub expect_alarm: Option<(u64, String)>,
     pub last_line: u64,
+}
+
+/// How the relay state that gave an acknowledgement fared (§31.7).
+enum Fate<'b> {
+    /// A removed relay state: the branch that holds it.
+    Removed(&'b BranchLog),
+    /// A rolled-back state whose seq is not removed: the reference log holds
+    /// that entry there again; or a restore tail could have brought it back
+    /// (the one that shows it); or the reference log holds none there and no
+    /// restore tail that would have brought it back was refused for a frame
+    /// the relay made up.
+    Repaired(&'b BranchLog, Option<&'b RestoreTry>),
+    /// A state no rollback or fork took away.
+    Kept,
 }
 
 /// The six invariants (§31.7). Returns (invariant, line, detail) per violation,
@@ -392,9 +798,11 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
     let mut v: Vec<(u8, u64, String)> = Vec::new();
     let reference = f.reference;
     let led = ledger(reference, f.template, &f.roots);
-    let (states, revoked_in_ref) = oracle(reference, f.template, &f.roots, &f.board, &f.relay);
+    let run = oracle_full(reference, f.template, &f.roots, &f.board, &f.relay);
+    let states = &run.states;
     let head = reference.last().map(|r| Head { seq: r.seq, chain: r.chain }).unwrap_or_default();
     let ref_chain: BTreeMap<u64, Hash32> = reference.iter().map(|r| (r.seq, r.chain)).collect();
+    let ref_frame: BTreeMap<u64, Hash32> = reference.iter().map(|r| (r.seq, r.hash)).collect();
 
     // 1. Convergence.
     for (i, x) in f.idents.iter().enumerate() {
@@ -415,7 +823,7 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
 
     // The rollback or fork branch on which a device applied an entry: the
     // branch holds it with class `Accept` at `q`, and the device confirmed a
-    // `B ≥ q` on that branch's chain.
+    // `B ≥ q` on that branch's chain (a diagnostic of invariant 3's texts).
     let lost_ledgers: Vec<(&BranchLog, Vec<Ledger>)> = f
         .branches
         .iter()
@@ -444,7 +852,130 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
             .unwrap_or_default()
     };
 
-    // 2. Acknowledged entries.
+    // Removed relay states (§31.7, task D6). A dropped seq of a rollback is
+    // removed when the reference log, after the settle, holds a different
+    // entry there, or holds none because every restore tail that would have
+    // brought it back was refused for a frame the relay made up (`relay.md`
+    // §12.9); one that the reference log holds again, or that a restore tail
+    // could have brought back (`could_restore`: judged by the relay's state
+    // when a request met it, so that a request refused as a whole, one stuck
+    // behind a refused one, and one lost on the way count as well as one
+    // stored; and one a device owed and never sent, by the relay's state when
+    // it fell due: a seq is not left to another device's entry because the
+    // device that held it sent nothing), is not. A restore tail restores seqs
+    // in order from the relay head, each request after the one before it
+    // succeeded (§21.3 step 1), so one refused at a made-up frame at `p`
+    // brings back no seq from `p` on, whether or not a request carried it: a
+    // seq the reference log holds nothing at is removed when the relay refused
+    // a restore tail for a made-up frame at or below it (or one that carried
+    // it, for a made-up frame above it). A seq a request that carried it was
+    // refused for a made-up frame over could be brought back by no other
+    // request either (every request from a head below it carries both).
+    let mut logs: Vec<&[LogRow]> = vec![reference];
+    logs.extend(f.branches.iter().map(|b| b.rows.as_slice()));
+    let seq_removed = |b: &'_ BranchLog, a: &AckFact| -> (bool, Option<&RestoreTry>) {
+        let after: Vec<&RestoreTry> = f.restore_tails.iter().chain(f.owed).filter(|x| x.sel == Sel::Main(0) && x.line > b.line).collect();
+        // A refusal for a frame the relay made up on `b`'s tail, at its seq.
+        let made_up_on_b = |x: &RestoreTry| x.made_up_at(f.made_up).filter(|p| b.rows.iter().any(|r| r.seq == *p && Some(&r.hash) == x.frame_at(*p)));
+        let blocked = after.iter().any(|x| x.carries(a.seq, &a.frame) && made_up_on_b(x).is_some());
+        let could = after
+            .iter()
+            .copied()
+            .find(|x| (x.answer == Answer::Stored || !blocked) && could_restore(x, b, a.seq, &a.frame, f.made_up, &logs));
+        let removed = match ref_frame.get(&a.seq) {
+            Some(h) => *h != a.frame && could.is_none(),
+            None => could.is_none() && after.iter().any(|x| made_up_on_b(x).is_some_and(|p| p <= a.seq || x.carries(a.seq, &a.frame))),
+        };
+        (removed, could)
+    };
+    // An acknowledgement comes from a removed relay state when the relay gave
+    // it at a seq of that state: on a fork's copy (every branch the oracle
+    // does not name), or before a rollback (relay 0, the home before any
+    // move) whose dropped seqs include it and whose lost tail held that frame
+    // there, at a removed seq.
+    let fate = |a: &AckFact| {
+        match a.sel {
+            Sel::Fork => f.branches.iter().rev().find(|b| b.why == WHY_FORK && b.line <= a.line).map_or(Fate::Kept, Fate::Removed),
+            Sel::Main(r) => {
+                let mut repaired = None;
+                for b in f.branches.iter().filter(|b| b.why == WHY_ROLLBACK && r == 0 && b.line > a.line && b.removed_from <= a.seq) {
+                    let held = b.rows.binary_search_by_key(&a.seq, |x| x.seq).is_ok_and(|i| b.rows[i].hash == a.frame);
+                    if !held {
+                        continue;
+                    }
+                    match seq_removed(b, a) {
+                        (true, _) => return Fate::Removed(b),
+                        (false, could) => {
+                            repaired.get_or_insert((b, could));
+                        }
+                    }
+                }
+                repaired.map_or(Fate::Kept, |(b, could)| Fate::Repaired(b, could))
+            }
+        }
+    };
+    // A device that held the frame a removed state acknowledged raised an
+    // alarm of §21.1 with evidence (`is_evidence`) after that fault.
+    let alarmed = |a: &AckFact, b: &BranchLog| {
+        f.idents.iter().any(|x| x.evidence.iter().any(|e| is_evidence(e.kind) && e.line > b.line && e.held.contains(&a.frame)))
+    };
+    let acks_of = |eid: &[u8; 16]| {
+        let e = *eid;
+        f.acks.iter().filter(move |a| a.eid == e)
+    };
+    // "Never lost silently" (§31.7 invariant 2, third outcome): every
+    // acknowledgement of it came from a removed relay state, and a device that
+    // held its frame raised an alarm with evidence. Strict reading: at least
+    // one acknowledgement (an entry no relay acknowledged was never lost by
+    // one). Otherwise, why not.
+    let quiet = |eid: &[u8; 16]| -> Result<(), String> {
+        let mut removed = Vec::new();
+        for a in acks_of(eid) {
+            match fate(a) {
+                Fate::Removed(b) => removed.push((a, b)),
+                Fate::Repaired(b, could) => {
+                    let why = match (ref_frame.get(&a.seq), could) {
+                        (Some(h), _) if *h == a.frame => format!("the reference log holds it at {} again", a.seq),
+                        (Some(_), Some(x)) => format!("another entry took {}, but {}", a.seq, x.could_text(a.seq)),
+                        (None, Some(x)) => format!("the reference log holds nothing at {}, and {}", a.seq, x.could_text(a.seq)),
+                        (_, None) => format!(
+                            "the reference log holds nothing at {}, and no restore tail that would have brought it back was refused for a frame the relay made up",
+                            a.seq
+                        ),
+                    };
+                    return Err(format!("lost to a rolled-back relay state that is not removed ({}, fault at trace line {}): {why}", b.why, b.line));
+                }
+                Fate::Kept => return Err(format!("acknowledged at {} (trace line {}) by a relay state no rollback or fork removed", a.seq, a.line)),
+            }
+        }
+        let Some((_, b0)) = removed.first() else { return Err("no relay acknowledged it".to_owned()) };
+        if removed.iter().any(|(a, b)| alarmed(a, b)) {
+            Ok(())
+        } else {
+            Err(format!(
+                "lost to a removed relay state ({}, fault at trace line {}), and no device that held its frame raised an alarm of §21.1 with evidence after it",
+                b0.why, b0.line
+            ))
+        }
+    };
+    // "Its device reported the refusal" (§31.7 invariant 2, second outcome):
+    // a device the relay acknowledged it to holds a refusal record at its seq,
+    // or emitted, after the relay sequenced it, the `PairFailed` of the
+    // pairing whose `DeviceAdded` it is (§28.4 step 4) or the `OpDone` of the
+    // operation its outbox record belonged to (§17.1).
+    let reported = |eid: &[u8; 16], q: u64, delivered: u64| -> bool {
+        let given = acks_of(eid).filter(|a| a.seq == q).map(|a| a.line).min().unwrap_or(delivered);
+        let devs: BTreeSet<usize> = acks_of(eid).map(|a| a.ident).chain(f.acked.iter().filter(|x| x.0 == *eid).map(|x| x.1)).collect();
+        devs.iter().filter_map(|d| f.idents.get(*d).map(|x| (*d, x))).any(|(d, x)| {
+            x.refusal_seqs.contains(&q)
+                || f.registered.get(eid).is_some_and(|pd| x.pair_failed.iter().any(|(p, l)| p == pd && *l > given))
+                || f.entry_ops.get(eid).is_some_and(|(od, t)| *od == d && x.op_done.iter().any(|(tt, l)| tt == t && *l > given))
+        })
+    };
+
+    // 2. Acknowledged entries. One of the three outcomes of §31.7, read
+    // strictly: accepted exactly once; held once, finally refused, and
+    // reported by its device; never lost silently.
     let mut by_id: BTreeMap<[u8; 16], Vec<&Ledger>> = BTreeMap::new();
     for l in &led {
         if let Some(e) = l.entry_id {
@@ -452,38 +983,43 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
         }
     }
     let accepted_once = |e: &[u8; 16]| by_id.get(e).map_or(0, |ls| ls.iter().filter(|l| l.accept).count());
-    // The entry ids on each other branch: a rollback's lost tail, a fork's
-    // copy, the old relay after a move.
-    let branch_ids: Vec<BTreeSet<[u8; 16]>> =
-        f.branches.iter().map(|b| ledger(&b.rows, f.template, &f.roots).into_iter().filter_map(|l| l.entry_id).collect()).collect();
     let mut seen_ack = BTreeSet::new();
     for (eid, dev, line, _) in f.acked {
         if !seen_ack.insert(*eid) {
             continue;
         }
-        // Strict reading (§31.7 has no exemption): whatever relay state
-        // acknowledged it and whatever became of the device since.
-        let n = accepted_once(eid);
+        let rows: &[&Ledger] = by_id.get(eid).map_or(&[], Vec::as_slice);
+        let n = rows.iter().filter(|l| l.accept).count();
         if n == 1 {
             continue;
         }
-        let classes: Vec<&str> = by_id.get(eid).map(|ls| ls.iter().map(|l| l.class).collect()).unwrap_or_default();
-        // Ruling 1 of the D2 brief: an entry sequenced only in a relay state
-        // that a rollback or a fork removed from the reference branch is named
-        // as such, with the fault's trace line.
-        let lost = (n == 0)
-            .then(|| f.branches.iter().zip(&branch_ids).find(|(b, ids)| ids.contains(eid) && (b.why == WHY_ROLLBACK || b.why == WHY_FORK)))
-            .flatten()
-            .map(|(b, _)| format!(": lost to a rolled-back relay state ({}, fault at trace line {})", b.why, b.line))
-            .unwrap_or_default();
-        // Task D3: a pairing's `DeviceAdded` that `register` acknowledged and
-        // the board then refused (a racing rotation made it stale, §28.4 step
-        // 4); the owner decides that case. Told by the `register` that
-        // acknowledged it: a refused frame carries no items (`Opened::items`
-        // is filled on accept only), so its `DeviceAdded` cannot be read here.
-        let pairing = n == 0 && lost.is_empty() && f.registered.contains(eid) && by_id.get(eid).is_some_and(|ls| ls.iter().any(|l| l.class == "refuse"));
-        let lost = if pairing { ": a pairing's DeviceAdded refused after register (§28.4 step 4)".to_owned() } else { lost };
-        v.push((2, *line, format!("dev {dev}: acknowledged entry {} is accepted {n} times in the reference log (classes there: {classes:?}){lost}", hexs(eid))));
+        let classes: Vec<&str> = rows.iter().map(|l| l.class).collect();
+        let base = format!("dev {dev}: acknowledged entry {} is accepted {n} times in the reference log (classes there: {classes:?})", hexs(eid));
+        if n == 0 && rows.len() == 1 && rows[0].class == "refuse" {
+            if reported(eid, rows[0].seq, *line) {
+                continue;
+            }
+            let what = if f.registered.contains_key(eid) {
+                "a pairing's DeviceAdded refused after register (§28.4 step 4), "
+            } else if f.entry_ops.contains_key(eid) {
+                "an operation's entry, "
+            } else {
+                ""
+            };
+            v.push((2, *line, format!(
+                "{base}: {what}finally refused at {}, and its device reported no refusal record, PairFailed of its pairing or end of its operation for it",
+                rows[0].seq
+            )));
+            continue;
+        }
+        if n == 0 && rows.is_empty() {
+            match quiet(eid) {
+                Ok(()) => {}
+                Err(why) => v.push((2, *line, format!("{base}: {why}"))),
+            }
+            continue;
+        }
+        v.push((2, *line, base));
     }
 
     // 2, second half: every device whose B is past that seq has applied it
@@ -526,8 +1062,8 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
         }
     }
 
-    // 3. Queued edits. The three outcomes of §31.7, read strictly; and a
-    // record dropped as a cancelled hold (ruling 5 of the D2 brief:
+    // 3. Queued edits. The outcomes of §31.7, read strictly; and a record
+    // dropped as a cancelled hold (ruling 5 of the D2 brief:
     // `Coalesce::CancelBoth`, matched to its `Forget` when it was dropped).
     for (eid, dev, _, line) in f.enqueued {
         if f.cancelled.contains(eid) {
@@ -539,72 +1075,104 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
         }
         let x = &f.idents[*dev];
         let in_outbox = x.outbox.iter().any(|(o, _)| o == eid);
-        let revoked = x.revoked || revoked_in_ref.contains(&x.dev);
+        let revoked = x.revoked || run.revoked.contains(&x.dev);
         let held = n == 0 && in_outbox && (x.halted_or_stopped_persisted || revoked);
         let refused = n == 0
             && by_id.get(eid).is_some_and(|ls| ls.iter().any(|l| !l.accept && x.refusal_seqs.contains(&l.seq)));
-        if !(held || refused) {
-            // Task D3: a record its device applied on a relay state that a
-            // rollback or a fork later removed from the reference branch is
-            // named as such, with the fault's trace line (still a violation).
-            let lost = if n == 0 && !in_outbox { applied_on_lost_branch(eid, x) } else { None };
-            let lost = lost.map(|(why, l)| format!(": applied on a rolled-back relay state ({why}, fault at trace line {l})")).unwrap_or_else(|| pairing_lost(x));
-            v.push((3, *line, format!("dev {dev}: enqueued entry {} is accepted {n} times and not held or refused (in its outbox: {in_outbox}){lost}", hexs(eid))));
+        if held || refused {
+            continue;
         }
+        // Never lost silently, as invariant 2 states it (task D6).
+        let quiet = if n == 0 { quiet(eid) } else { Err(String::new()) };
+        let Err(why) = quiet else { continue };
+        let mut why = if why.is_empty() { String::new() } else { format!(": {why}") };
+        // Task D3: a record its device applied on a relay state that a
+        // rollback or a fork later removed from the reference branch is
+        // named as such, with the fault's trace line.
+        match if n == 0 && !in_outbox { applied_on_lost_branch(eid, x) } else { None } {
+            Some((b, l)) => why.push_str(&format!("; applied on a rolled-back relay state ({b}, fault at trace line {l})")),
+            None => why.push_str(&pairing_lost(x)),
+        }
+        v.push((3, *line, format!("dev {dev}: enqueued entry {} is accepted {n} times and not held or refused (in its outbox: {in_outbox}){why}", hexs(eid))));
     }
 
-    // 4. Tampering: the confirmed state at every B against the oracle's
-    // (§31.7: a fresh engine, the reference log from seq 1, no faults),
-    // skipping none (ruling 6 of the D2 brief), a B between a Skip's target
-    // and the Skip included. Such a violation names the Skip, and, for a
-    // device that crash-halted on the target, the spec question it turns on
-    // (ENG-HALT-004 against invariant 4), so that it can be told apart.
-    let skip_window = |b: u64| led.iter().find(|l| l.skip_targets.iter().any(|t| *t <= b && b < l.seq)).map(|l| l.seq);
-    let mut branch_states: BTreeMap<usize, OracleStates> = BTreeMap::new();
+    // 4. Tampering (§31.7): the confirmed state at every B past the device's
+    // join against the oracle's first state at that B on the log it followed
+    // (the reference log, or the branch whose chain it holds at B), skipping
+    // none (ruling 6 of the D2 brief), with one exception (task D6): between
+    // a Skip's target t and the Skip at s (t ≤ B < s), a device that never
+    // applied t (`never_applied`) is compared with that log replayed with t
+    // left out (`without`: the toy on the oracle's classes, no engine;
+    // ENG-SKIP-002, ENG-HALT-004). A B in a window that no expected value
+    // covers is a violation.
+    let ref_ctx = LogCtx { why: "the reference log", chain: ref_chain.clone(), windows: windows_of(&led), led: led.clone(), run };
+    let mut branch_ctx: BTreeMap<usize, LogCtx> = BTreeMap::new();
+    let mut without_cache: BTreeMap<(usize, Vec<u64>), BTreeMap<u64, Hash32>> = BTreeMap::new();
     for (i, x) in f.idents.iter().enumerate() {
         for (b, c, bh, line) in &x.samples {
             if *b <= x.joined_at {
                 continue;
             }
-            let on_ref = ref_chain.get(b) == Some(c);
-            let st = if on_ref {
-                states.get(b)
+            let k = if ref_chain.get(b) == Some(c) {
+                0
             } else {
-                let Some(k) = f.branches.iter().position(|br| br.rows.iter().any(|r| r.seq == *b && r.chain == *c)) else {
-                    // On no branch at all: the device's chain at B was served by no relay.
-                    v.push((4, *line, format!("dev {i}: confirmed state at {b} on a chain no relay served")));
-                    continue;
-                };
-                let s = branch_states.entry(k).or_insert_with(|| oracle(&f.branches[k].rows, f.template, &f.roots, &f.board, &f.relay).0);
-                s.get(b)
+                match f.branches.iter().position(|br| br.rows.iter().any(|r| r.seq == *b && r.chain == *c)) {
+                    Some(p) => p + 1,
+                    None => {
+                        // On no branch at all: the device's chain at B was served by no relay.
+                        v.push((4, *line, format!("dev {i}: confirmed state at {b} on a chain no relay served")));
+                        continue;
+                    }
+                }
             };
-            // The oracle's state at B, when it is on the same chain.
-            let same = st.filter(|(oc, _, _)| oc == c);
-            if let Some((_, obh, _)) = same
-                && obh != bh
-            {
-                let on = if on_ref {
-                    "the reference log"
-                } else {
-                    f.branches.iter().find(|br| br.rows.iter().any(|r| r.seq == *b && r.chain == *c)).map_or("", |br| br.why)
-                };
-                let window = skip_window(*b).map(|s| format!(" (between a Skip's target and the Skip at {s})")).unwrap_or_default();
-                let halted = led
-                    .iter()
-                    .filter(|l| l.accept && *b < l.seq)
-                    .find_map(|l| l.skip_targets.iter().find(|t| **t <= *b && x.crash_halts.contains(t)))
-                    .map(|t| {
-                        format!("; it crash-halted on the target {t}: ENG-HALT-004 against §31.7 invariant 4, a spec question (api-simulator.md)")
-                    })
-                    .unwrap_or_default();
-                v.push((4, *line, format!("dev {i}: confirmed state at {b} differs from the oracle's on {on}{window}{halted}")));
-            }
-            // Ruling 6: nothing between a Skip's target and the Skip goes
-            // uncompared; a B there the oracle never confirmed is reported.
-            if on_ref && same.is_none()
-                && let Some(s) = skip_window(*b)
-            {
-                v.push((4, *line, format!("dev {i}: confirmed state at {b} between a Skip's target and the Skip at {s}, where the oracle confirmed nothing")));
+            let ctx: &LogCtx = if k == 0 {
+                &ref_ctx
+            } else {
+                branch_ctx.entry(k).or_insert_with(|| {
+                    let br = &f.branches[k - 1];
+                    let led = ledger(&br.rows, f.template, &f.roots);
+                    LogCtx {
+                        why: br.why,
+                        chain: br.rows.iter().map(|r| (r.seq, r.chain)).collect(),
+                        windows: windows_of(&led),
+                        run: oracle_full(&br.rows, f.template, &f.roots, &f.board, &f.relay),
+                        led,
+                    }
+                })
+            };
+            let win: Vec<(u64, u64)> = ctx.windows.iter().filter(|(t, s)| t <= b && b < s).copied().collect();
+            let out: BTreeSet<u64> = win.iter().filter(|(t, s)| never_applied(x, &ctx.chain, *t, *s, *line)).map(|w| w.0).collect();
+            let on = ctx.why;
+            if out.is_empty() {
+                // The oracle's state at B, when it is on the same chain.
+                let same = ctx.run.states.get(b).filter(|(oc, _, _)| oc == c);
+                if let Some((_, obh, _)) = same
+                    && obh != bh
+                {
+                    let window = win.first().map(|(_, s)| format!(" (between a Skip's target and the Skip at {s})")).unwrap_or_default();
+                    let halted = win.iter().find(|(t, _)| x.crash_halts.contains(t)).map(|(t, _)| format!("; it crash-halted on the target {t}")).unwrap_or_default();
+                    v.push((4, *line, format!("dev {i}: confirmed state at {b} differs from the oracle's on {on}{window}{halted}")));
+                }
+                // Ruling 6: nothing between a Skip's target and the Skip goes
+                // uncompared; a B there the oracle never confirmed is reported.
+                if same.is_none()
+                    && let Some((_, s)) = win.first()
+                {
+                    v.push((4, *line, format!("dev {i}: confirmed state at {b} between a Skip's target and the Skip at {s}, where the oracle confirmed nothing")));
+                }
+            } else {
+                let ts: Vec<u64> = out.iter().copied().collect();
+                let s = win.iter().filter(|(t, _)| out.contains(t)).map(|w| w.1).min().unwrap_or(0);
+                let exp = without_cache.entry((k, ts.clone())).or_insert_with(|| without(ctx, &out)).get(b).copied();
+                match exp {
+                    Some(e) if e == *bh => {}
+                    Some(_) => v.push((4, *line, format!(
+                        "dev {i}: confirmed state at {b} differs from {on} replayed without {ts:?}, which it never applied (between a Skip's target and the Skip at {s})"
+                    ))),
+                    None => v.push((4, *line, format!(
+                        "dev {i}: confirmed state at {b} between a Skip's target and the Skip at {s}, where no replay of {on} without {ts:?}, which it never applied, reaches"
+                    ))),
+                }
             }
         }
         if let Some((line, what)) = &x.expect_alarm {
@@ -713,4 +1281,47 @@ pub(crate) fn check(f: &Facts<'_>) -> Vec<(u8, u64, String)> {
 
 pub(crate) fn hexs(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::script::{Case, HandLog};
+
+    // §31.7 invariant 4 (task D6): the replay without a Skip's target is an
+    // expected value only as far as the same replay, run as the oracle ran
+    // (here with the target applied), gives the oracle's first states: from
+    // the first `B` where they disagree it covers nothing, and with nothing
+    // to compare (no oracle state from the target to the Skip) it covers no
+    // `B` at all.
+    #[test]
+    fn a_replay_that_disagrees_with_the_oracle_is_no_expected_value() {
+        let mut log = HandLog::new(41);
+        for k in 0..3u8 {
+            log.set(k, 10 + i64::from(k));
+        }
+        let (t, _) = log.set(1, 99);
+        log.set(2, 5);
+        log.set(4, 6);
+        let (s, _) = log.skip(t);
+        let c = Case::of(&log);
+        let led = ledger(&c.reference, Some(&c.template), &c.roots);
+        let mut ctx = LogCtx {
+            why: "the reference log",
+            chain: c.reference.iter().map(|r| (r.seq, r.chain)).collect(),
+            windows: windows_of(&led),
+            run: oracle_full(&c.reference, Some(&c.template), &c.roots, &c.board, &c.relay),
+            led,
+        };
+        assert_eq!(ctx.windows, vec![(t, s)]);
+        let out = BTreeSet::from([t]);
+        let keys = |ctx: &LogCtx| without(ctx, &out).keys().copied().filter(|b| *b < s).collect::<Vec<u64>>();
+        assert_eq!(keys(&ctx), (t..s).collect::<Vec<u64>>(), "every B of the window");
+        ctx.run.states.get_mut(&(t + 1)).expect("the oracle's state at t + 1").1 = [0xee; 32];
+        assert_eq!(keys(&ctx), vec![t], "nothing from the first disagreement on");
+        for b in t..s {
+            ctx.run.states.remove(&b);
+        }
+        assert_eq!(keys(&ctx), Vec::<u64>::new(), "nothing compared");
+    }
 }

@@ -206,6 +206,7 @@ impl World<'_> {
                 if let Some(dev) = self.pair_devs.get(&ticket).copied() {
                     let call = self.idents[id].calls;
                     self.idents[id].pair_failed.push((dev, call));
+                    self.idents[id].pair_failed_log.push((dev, line));
                 }
                 if let Some(pp) = self.pairs.remove(&ticket) {
                     self.retry_pair(pp);
@@ -223,6 +224,7 @@ impl World<'_> {
                 }
             }
             Notification::OpDone { ticket, result } => {
+                self.idents[id].op_done.push((ticket, line));
                 if let (Some(k), Ok(())) = (self.op_tickets.get(&ticket), result) {
                     *self.stats.ops_ok.entry(k).or_default() += 1;
                 }
@@ -649,7 +651,7 @@ impl World<'_> {
 
     // ---------- faults (§31.6)
 
-    fn fault(&mut self, f: FaultEv) {
+    pub(super) fn fault(&mut self, f: FaultEv) {
         if !self.faults_on && f != FaultEv::ForkEnd {
             return;
         }
@@ -695,7 +697,7 @@ impl World<'_> {
                 let from = self.relays[0].head().map_or(0, |h| h.seq);
                 self.contra_since = self.t;
                 let line = self.fault_line("relay_rollback", ("r", 0), &[from as i64, to as i64]);
-                self.branches.push(BranchLog { rows: self.archive.clone(), why: check::WHY_ROLLBACK, line });
+                self.branches.push(BranchLog { rows: self.archive.clone(), why: check::WHY_ROLLBACK, line, removed_from: to + 1 });
                 self.relays[0].rollback_to(&snap);
                 self.archive.truncate(to as usize);
                 self.relay_line(Sel::Main(0), "rollback");
@@ -730,6 +732,7 @@ impl World<'_> {
                 let at = self.relays[0].head().map_or(0, |h| h.seq);
                 let p: Vec<i64> = std::iter::once(at as i64).chain(set.iter().map(|x| *x as i64)).collect();
                 self.fork_line = self.fault_line("relay_fork", ("r", 0), &p);
+                self.fork_at = at;
                 self.fork = Some((self.relays[0].clone(), set.clone()));
                 for id in set {
                     if self.idents[id].proc.as_ref().is_some_and(|p| p.conn.is_some()) {
@@ -747,7 +750,7 @@ impl World<'_> {
                 if let Some(first) = rows.first().map(|r| r.seq) {
                     let mut all: Vec<LogRow> = self.archive.iter().take(first.saturating_sub(1) as usize).cloned().collect();
                     all.extend(rows);
-                    self.branches.push(BranchLog { rows: all, why: check::WHY_FORK, line: self.fork_line });
+                    self.branches.push(BranchLog { rows: all, why: check::WHY_FORK, line: self.fork_line, removed_from: self.fork_at + 1 });
                 }
                 self.contra_since = self.t;
                 self.fault_line("relay_fork_end", ("r", 0), &[]);
@@ -782,20 +785,22 @@ impl World<'_> {
             }
             FaultEv::Inject(i) => {
                 let sel = Sel::Main(self.home);
-                let frame = if i % 2 == 0 {
+                let (frame, how) = if i % 2 == 0 {
                     // A frame with a bad signature: a stored frame with its last byte flipped.
                     let Some(mut f) = self.archive.last().map(|r| r.frame.clone()) else { return };
                     if let Some(b) = f.last_mut() {
                         *b ^= 0x01;
                     }
-                    f
+                    (f, MadeUp::BadSignature)
                 } else {
                     // Another board's genesis frame.
                     let wall = self.relay_now(0);
-                    FakeSealer::create_at(self.fault.next(), "Other", wall).1
+                    (FakeSealer::create_at(self.fault.next(), "Other", wall).1, MadeUp::OtherBoard)
                 };
                 let now = self.sel_now(sel);
+                let made_up = h(&frame);
                 let Some((head, outs)) = self.relay(sel).inject_frame(now, frame) else { return };
+                self.made_up.insert(made_up, how);
                 let line = self.fault_line("injected_frame", ("r", self.home as i128), &[head.seq as i64, i64::from(i % 2)]);
                 self.injected_seqs.push((head.seq, head.chain, line));
                 self.route(sel, outs);
