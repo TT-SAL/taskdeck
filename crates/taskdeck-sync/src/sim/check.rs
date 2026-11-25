@@ -360,6 +360,7 @@ pub(crate) struct Facts<'a> {
 }
 
 /// One identity at the end of a run.
+#[derive(Clone)]
 pub(crate) struct IdentFacts {
     pub dev: Dev,
     pub desc: String,

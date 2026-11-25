@@ -17,6 +17,8 @@ pub mod relay;
 mod check;
 mod counted;
 mod config;
+#[cfg(test)]
+mod script;
 mod store;
 mod trace;
 mod world;

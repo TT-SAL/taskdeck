@@ -11,16 +11,11 @@ in the order it happened; this file is the current truth and is rewritten, not a
 - Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the first spec
   change). Open, draft: TT-SAL/taskdeck#30 (everything since); the branch
   `claude/cool-franklin-c6e6um` is pushed.
-- Tests on the branch: 170 unit tests pass and **4 fail, all four the simulator's own**
-  (`sim::world::tests::a_device_that_applied_the_skip_target_is_held_to_the_oracle`,
-  `…a_pairing_lost_with_a_fork_is_named_and_a_raced_skip_is_not_a_pairing`,
-  `…a_refused_entry_register_acknowledged_is_named_a_pairing`,
-  `…invariant_4_at_a_skip_window_is_judged_by_the_no_fault_oracle_only`): they assert what `gate`
-  seeds 1014 and 1017 did before the engine's fixes, and those seeds now run differently. Task D4
-  (agents) rewrites them so that no simulator test depends on what the engine does at a seed.
-  `regressions` (10 files), `relay_conformance` (16), clippy, the wasm check pass; every clause is
-  cited (234 of 234); `unimplemented!()`: 0. The `simulator` target (50 `gate` seeds) fails, so CI
-  of TT-SAL/taskdeck#30 is red.
+- Tests on the branch: 178 unit tests, `regressions` (10 files), `relay_conformance` (16),
+  clippy, the wasm check pass; every clause is cited (234 of 234); `unimplemented!()`: 0. Task D4
+  rebuilt the simulator's own tests on hand-built logs (`src/sim/script.rs`), so none depends on
+  what the engine does at a seed. The `simulator` target (50 `gate` seeds) fails, so CI of
+  TT-SAL/taskdeck#30 is red.
 - The simulator after the fixes (the lead's runs): `gate` at base 100, 50 seeds: 26 fail, every one
   only with "lost to a rolled-back relay state" (question 2). `gate` at base 1000, 100 seeds: 59
   fail: 57 only for that; 1018 a pairing's `DeviceAdded` refused after `register` (question 3);
@@ -257,7 +252,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_fbed9968-73a | D2 simulator follow-up (the check's findings, the lead's rulings, what still fails) | `engine/briefs/d2-simulator-followup.md` | done, applied to the branch as a patch (the lead ran its gate) | invariants read strictly, `sim/counted.rs`, regression files 1, 102, 111, 116, 200, a report of what still fails by cause (the journal, 2026-11-25) | 977,242 |
 | wf_0eb7fcfb-f49 | D3 what still fails under `gate`, seed by seed (diagnosis; simulator faults fixed, engine faults reported) | `engine/briefs/d3-gate-seeds.md` | done, applied to the branch as a patch (the lead ran its gate) | `src/sim/{check,world}.rs`, `src/sim/world/{rt,load,end}.rs`, `api-simulator.md`; gate base 1000: 61 of 100 fail, base 100: 27 of 50 | 827,210 |
 | wf_1623f41a-09b | D4 simulator tests, first attempt | `engine/briefs/d4-sim-tests.md` | lost: the container restarted nine minutes into the writer (54 turns); its 16 uncommitted lines were discarded | nothing kept | not reported (about 55,000 output tokens) |
-| wf_a03961da-e96 | D4 (second attempt) simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | running since 2026-11-25 in `/home/user/wt/d4` (branch `wt/d4`, from c6354ae); task id w395ke6op | | |
+| wf_a03961da-e96 | D4 (second attempt) simulator tests that do not depend on what the engine does at a seed; the gate classified again | `engine/briefs/d4-sim-tests.md` | done, applied to the branch as a patch from `wt/d4` 32a1637 (the lead ran its gate) | `src/sim/script.rs` (hand-built logs for the check), `src/sim/world.rs`, `api-simulator.md`; reported: gate 116 (a pairing refused after a restart dropped without `PairFailed`), 1021 (the crash-halt question again) | 471,311 |
 
 ## Open threads
 
