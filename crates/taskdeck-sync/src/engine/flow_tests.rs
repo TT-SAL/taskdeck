@@ -560,7 +560,7 @@ fn imported_commands_are_rebound_and_resubmitted_in_order() {
     assert_eq!(a.e.confirmed().0.items[&new_id], 31);
 }
 
-// spec: ENG-DUTY-003 ENG-DUTY-002
+// spec: ENG-DUTY-003 ENG-DUTY-002 ENG-SESS-011
 #[test]
 fn a_duty_that_waits_only_for_a_fresh_head_asks_for_one() {
     let hellos = |n: &Node| n.fx.iter().filter(|f| matches!(f, Effect::Hello)).count();
@@ -838,7 +838,7 @@ fn a_skip_target_frame_is_supplied_only_when_its_hash_fits() {
     assert!(!b.e.confirmed().0.keys.contains_key(&1));
 }
 
-// spec: ENG-SKIP-003
+// spec: ENG-SKIP-003 ENG-SKIP-005
 #[test]
 fn reports_from_before_a_skip_are_not_compared_by_a_device_that_never_applied_the_target() {
     let (mut a, f1) = creator(951);

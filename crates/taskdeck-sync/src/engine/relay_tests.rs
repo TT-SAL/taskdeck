@@ -1346,7 +1346,7 @@ fn a_skip_it_cannot_replay_makes_a_device_wait_for_a_snapshot() {
     assert_eq!(a.e.confirmed().0.keys[&90].0, 9);
 }
 
-// spec: ENG-MOVE-006 ENG-MOVE-009
+// spec: ENG-MOVE-006 ENG-MOVE-009 ENG-MOVE-011
 #[test]
 fn a_move_whose_relay_is_away_for_a_moment_still_fences_it() {
     const NEW: &str = "relay2.test";
@@ -1410,7 +1410,7 @@ fn nothing_is_sent_to_a_fenced_relay() {
     assert_eq!(status_of(&a, &c), DeviceStatus::Revoked);
 }
 
-// spec: ENG-OPS-006
+// spec: ENG-OPS-006 ENG-OPS-012
 #[test]
 fn a_pairing_cut_off_by_a_restart_is_reported_failed() {
     let (mut net, mut a) = board(441);
@@ -1433,7 +1433,7 @@ fn a_pairing_cut_off_by_a_restart_is_reported_failed() {
     assert!(a.e.outbox.is_empty());
 }
 
-// spec: ENG-MOVE-003 ENG-MOVE-006
+// spec: ENG-MOVE-003 ENG-MOVE-006 ENG-MOVE-010
 #[test]
 fn a_move_starts_its_seed_above_a_frame_the_relay_made_up() {
     const NEW: &str = "relay2.test";
@@ -1516,7 +1516,7 @@ fn move_reports(n: &Node) -> Vec<(u64, bool)> {
     })
 }
 
-// spec: ENG-MOVE-003 ENG-OPS-003
+// spec: ENG-MOVE-003 ENG-OPS-003 ENG-MOVE-012
 #[test]
 fn a_seed_tail_nobody_answered_is_sent_again() {
     const NEW: &str = "relay2.test";
@@ -1667,7 +1667,7 @@ fn a_move_restarted_after_the_switch_reports_once_what_it_carried() {
     assert_eq!(move_reports(&a), vec![(last, false)]);
 }
 
-// spec: ENG-MOVE-003 ENG-OPS-003
+// spec: ENG-MOVE-003 ENG-OPS-003 ENG-MOVE-012
 #[test]
 fn a_move_whose_last_tail_answer_was_lost_goes_on_to_the_open_board() {
     const NEW: &str = "relay2.test";
@@ -1733,7 +1733,7 @@ fn a_move_report_written_but_never_shown_is_made_again_after_a_start() {
     assert!(a.has_note(|x| matches!(x, crate::Notification::MoveCode { .. })));
 }
 
-// spec: ENG-OPS-004 ENG-OPS-006
+// spec: ENG-OPS-004 ENG-OPS-006 ENG-OPS-013
 #[test]
 fn a_pairing_found_after_a_start_still_ends_with_a_report() {
     let (mut net, mut a) = board(501);
