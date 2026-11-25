@@ -921,3 +921,43 @@ fn a_skip_whose_target_another_device_skipped_first_is_done() {
         assert_eq!(n.board_bytes(), a.board_bytes());
     }
 }
+
+// spec: ENG-SKIP-002 ENG-CKPT-003
+#[test]
+fn a_base_written_before_a_skip_is_written_again_without_the_target() {
+    use sha2::Digest as _;
+    let (mut a, f1) = creator(451);
+    let mut hub = Hub::with_genesis(&a, &f1);
+    let mut b = join(&mut hub, &mut a, 452, "Laptop");
+    b.set(1, 1, 5);
+    hub.settle(&mut [&mut a, &mut b]);
+    let target = hub.log.len() as u64;
+    // Eight days of log clock: a base is due at 64 (§18.2 case 2), written with the target applied.
+    a.advance(8 * 86_400_000);
+    b.advance(8 * 86_400_000);
+    let mut k = 0u64;
+    while (hub.log.len() as u64) < 70 {
+        k += 1;
+        a.set(10 + k, (2 + k % 40) as u8, k as i64);
+        hub.settle(&mut [&mut a, &mut b]);
+    }
+    assert!(a.store.bases.contains_key(&64), "{:?}", a.store.bases.keys().collect::<Vec<_>>());
+    a.feed(Event::Op { ticket: 3, op: Operation::Skip { seq: target } });
+    hub.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 3), Some(Ok(())));
+    // The base at 64 now holds the state that never held the target: the hash record's state.
+    for n in [&a, &b] {
+        let base = &n.store.bases[&64];
+        let bh: [u8; 32] = sha2::Sha256::digest(&base.board).into();
+        assert_eq!(crate::state_hash(1, &bh, &base.membership), n.e.hashes[&64].hash);
+    }
+    // A restore to a seq above it replays from it, and the target stays skipped on every device.
+    a.feed(Event::Op { ticket: 4, op: Operation::RestoreTo { seq: 66 } });
+    hub.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 4), Some(Ok(())));
+    for n in [&a, &b] {
+        let st = n.e.status();
+        assert!(st.alarms.is_empty() && st.stops.is_empty(), "{:?} {:?}", st.alarms.len(), st.stops);
+        assert_eq!(n.e.state.as_ref().and_then(|s| s.keys.get(&1)).map(|v| v.0), None);
+    }
+}

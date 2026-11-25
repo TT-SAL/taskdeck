@@ -6,79 +6,41 @@ in the order it happened; this file is the current truth and is rewritten, not a
 
 ## Resuming: read this first
 
-**Where things stand (2026-11-25, after the owner's decisions; both spec changes merged):**
+**Where things stand (2026-11-25, end of the day; the owner asked to wrap up, to be continued in a few days):**
 
-- Merged: TT-SAL/taskdeck#28 (the engine and its first tests), TT-SAL/taskdeck#29 (the first spec
-  change), TT-SAL/taskdeck#31 and TT-SAL/taskdeck#32 (the second spec change and the gate
-  change). TT-SAL/taskdeck#30 (the engine's work since #29) was closed for the parking cycle; that
-  work is on the branch `claude/cool-franklin-c6e6um`, rebased onto day-planner fc18f4c and
-  pushed, and its pull request is opened again once task D6 is in and the gate passes locally.
-- Tests on the branch: 189 unit tests, `relay_conformance` (16), clippy, the wasm check pass;
-  every clause is cited (234 of 234); `unimplemented!()`: 0. **`regressions` fails on one file,
-  `1099.json`**: the lead added it for the lost `SeedTail` (it passed then); a later engine fix
-  changed what that seed does, and it now ends with "lost to a rolled-back relay state" only
-  (question 2). The lead does not remove or change the file; it turns green with the answer to
-  question 2, or the owner says what to do with it (question 6). The other nine files pass. The
-  `simulator` target (50 `gate` seeds) fails, so CI of TT-SAL/taskdeck#30 is red.
-- The simulator on the current engine (the lead's runs with `TD_SIM_ALL=1`, every violation of
-  every failing seed classified): `gate`, 450 seeds (base 100: 50; base 1000: 100; base 2000:
-  300): 268 fail. 252 only with "lost to a rolled-back relay state" (question 2); 9 an
-  acknowledged Skip refused for good because another device's Skip of the same target came first
-  (125, 1002, 1065, 1066, 1073, 1093, 2019, 2082, 2167) and 3 a pairing's `DeviceAdded` refused
-  after `register` (140, 1054, 2075) (question 3); 4 a crash halt on a Skip's target (1006, 2159,
-  2207, 2236) (question 4). **No seed fails for any other cause.** Every named configuration
-  except `fork` (17 without rollback and fork, and `rollback`) passes 60 of 60 seeds at base 3000
-  on the engine of 98e31e3 (1,080 runs).
-- Reading a seed: `TD_SIM_ALL=1` prints every violation. A trace file written with `2>&1` holds
-  the poison entries' backtraces, so its line numbers drift from the trace's: strip them first
-  (the journal has the command).
-- Fixed in the engine on 2026-11-25 after D3 (each with a test that failed before; journal):
-  a `SeedTail` nobody answered is sent again (regression file 1099); a move reads back after a
-  `Start` what its durable records say (door, generation, Fence seq) and goes on from its stage;
-  a `Start` in stage 4 seeds again, and `relay/exists` (repeated seed) or `relay/target` (repeated
-  last tail) means the board is open; the seed's `last_seq` is kept in the operation's record
-  (`OpRecord.mark`, a new field); stage 7 is written with the report, and a `Start` that finds
-  stage 7 emits the code and the report again; the move's snapshot is sealed again after a `Start`
-  in stage 6; reports from before a Skip are not compared by a device that already knows the
-  Skip; a second Skip of a target whose Skip is still in this device's outbox is refused; a pairing's
-  sealed `Register` record found after a `Start` ends with a report however it ends (D4's
-  finding, `gate` 116: refused after the restart, it was dropped without `PairFailed`); what a
-  page's commit records (the alarm of a relay-made frame) is written before the board applies
-  the page (`gate` 2188: a crash between a checkpoint above the frame and the alarm's write lost
-  the alarm, a later move then carried the frame in its tail, the new relay refused it, and the
-  board was left fenced with every edit queued); a halted device sends, ahead of its Skip, the
-  frames it had sealed before the halt (`gate` 122: the Skip's counter lay above an unsent
-  frame's, the relay answered `gap`, and the device sent the Skip again 318 times until its next
-  reconnect).
-- Fixed after D6 (each with a test that failed before and a regression file): a restore that
-  goes on right after a control entry at the relay's head sends that entry's repairs first,
-  since this device cannot know whether they succeeded (a lost answer, a restart; the relay
-  answers a repeated repair as done) (`gate` 1022: the repair of a restored `DeviceAdded` was
-  lost with the connection, and every later request was refused `relay/unknown_author`); a
-  pairing whose `DeviceAdded` is refused in the log is reported failed in the call that sends
-  the revoke, not after the revoke's answer (`gate` 1073: the process stopped in between, the
-  record had already left the outbox, and the pairing was never reported; ENG-OPS-004 asks
-  only that the revoke is sent first, and `a_pairing_that_cannot_stand_is_dropped_or_undone`
-  now checks that); a move's seed is planned with the Skip frames up to its `last_seq` only
-  (`gate` 2154: a frame the fenced relay made up above the move's Fence ended the move with
-  `engine/move_tail`, and the board stayed fenced with no new home). **Open (spec change
-  needed):** the frame above the Fence stays in the mover's log (and a follower's); on the new
-  relay its head reads as `RelayBehind`, the restore tail of the made-up frame is refused, and
-  the device stays in the evidence stop with the move in stage 7. Proposed: a page from a relay
-  that an accepted `Fence` moved the board away from is not taken above that `Fence`.
-- ENG-RECV-007 (a fenced relay is read up to its `Fence` only; spec in TT-SAL/taskdeck#33) is
-  built on the local branch `engine-recv` 7a946dd (worktree `/home/user/wt/engine`, target dir
-  `/home/user/wt/target-e`), with the test of `gate` 2154 rewritten for it: 221 unit tests,
-  conformance, clippy and wasm pass, but `regressions` fails until task D7, because the oracle
-  stops at the first `Fence` (its user types no move code). TT-SAL/taskdeck#33 and #34 merged
-  (day-planner 561d084, then d96b360). The engine's work is rebased onto d96b360 and pushed as
-  the stage branch (without ENG-RECV-007: every test passes there, and spec-coverage lacks only
-  ENG-RECV-007); ENG-RECV-007 is the local commit dc885b8 on `engine-recv` above it, to land
-  with task D7's work.
-- Next: task D6 (the simulator's checks carry the decided invariants) integrated and the gate run
-  at 1,000 seeds; the engine's pull request green and merged "(stage in progress, not the exit)";
-  task E (scenario and trace vectors); `bash scripts/gate.sh engine`; the one round of checks;
-  the exit pull request.
+- Merged into day-planner: TT-SAL/taskdeck#28, #29, #31, #32, #33 (561d084), #34 (d96b360),
+  #35 (eda5051), #36 (fa138b2). TT-SAL/taskdeck#30 was closed for a parking cycle. **No engine
+  pull request is open.** The stage branch `claude/cool-franklin-c6e6um` is day-planner fa138b2
+  plus the engine's later commits: task D9 (4ddd4ad), the fix of `gate` 5024 (ec4dbda) and the
+  fix of `gate` 5942 (the commit after it).
+- Tests on the branch (the lead's run after the 5942 fix): 249 unit tests, `regressions` (every
+  file passes, 5942.json included), `relay_conformance` (16), clippy pass; wasm, spec-lint (968)
+  and spec-coverage (244 of 244) last checked at the rebase onto fa138b2; `unimplemented!()`: 0.
+- The gate (task D9's runs, release build, `TD_SIM_ALL=1`, before the 5024 and 5942 fixes):
+  bases 100/1000/2000: 0 of 450 fail; 1,000 seeds from base 17163374614648704531: 1 fails
+  (17163374614648704878, E2 below); 1,000 seeds from base 5000: 2 fail (5024 and 5942, both
+  fixed since, each with a test that failed before and a regression file). Every named
+  configuration passes.
+- **Open: E2 (`gate` 17163374614648704878, base 17163374614648704531).** A move's `Fence`
+  sealed under the epoch a K entry had just replaced was stored by the relay (fencing it) and
+  then refused `seal/stale_epoch`: the board is fenced with nowhere to write. Proposed (the
+  lead's choice, no owner question needed): §28.3 stage 2 says a move whose own `Fence` is
+  refused after the relay fenced itself goes on as for a relay that is gone (seed with
+  `last_seq = L`, the `Fence` appended to the new relay in stage 5). Spec change first (its own
+  pull request), then the engine change, a test that fails before, and the regression file
+  (`seeds_hold` prints its JSON when the seed is run on the build before the fix).
+- **The next spec change** (one pull request, through the parking cycle of the journal) holds:
+  §7.12 D13 (the settlement writes of applied entries before any checkpoint or base at or above
+  them; 5024); §17.3 step 3 "rewrites every base at a seq from `t` to `s − 1` with the replay's
+  board and membership at that seq" with the §7.x table and `device.md`'s store table saying
+  `WriteBase` creates **or replaces** `base-<seq>.tdk` (5942); and E2's §28.3 wording.
+- Next, in order: E2; the lead's gate runs (450 samples, 1,000 seeds from at least two bases,
+  one of them the CI base of the commit, every named configuration); the engine's pull request
+  "(stage in progress, not the exit)", CI green on three systems (time the 1,000-seed step),
+  merged; task E (`engine-scenarios.json`, `engine-traces.json`, agents); `bash scripts/gate.sh
+  engine`; the one round of checks; the exit pull request.
+- Working copies from this session (`/home/user/wt/dbg` with debug prints, the spec worktree)
+  hold nothing to keep; a new container will not have them.
 
 1. Read this file, then the last 40 lines of `engine/journal.md`. Do not read `engine.md` (the
    spec) in full again: use the clause index
