@@ -97,13 +97,20 @@ These are working papers of the stage, not contracts. The exit pull request may 
 None for this stage: it has exited. For the owner: start wave 1 (SYNC_PLAN.md §1.3), the sessions
 `core`, `seal`, `relay`, `engine` and `android-shell`.
 
-Two dated follow-ups remain, each a small pull request to shared files (plan §3.2), by whoever
-comes first after the date:
+The two dated follow-ups were made on 2026-11-28, in one small pull request to shared files (plan
+§3.2), titled "deps: zeroize 1.9.2 and url 2.5.9":
 
-- from 2026-11-24: `cargo update -p zeroize --precise 1.9.2` and `zeroize = "=1.9.2"` in the root
-  manifest (SYNC.md §5.1 names that version; it was inside the seven-day cooldown at the exit);
-- from 2026-11-28: `cargo update -p url --precise 2.5.9`, and remove the ignore of
-  RUSTSEC-2026-0592 from `deny.toml` and `.cargo/audit.toml`.
+- `zeroize` 1.9.2 in `Cargo.lock` and `zeroize = "=1.9.2"` in the root manifest (SYNC.md §5.1 names
+  that version). The pin reaches the fuzz crate of stage `seal`, which has a lockfile of its own:
+  `crates/taskdeck-seal/fuzz/Cargo.lock` moved to 1.9.2 in the same pull request, because its
+  `--locked` build and seal's test that keeps it within the root lockfile would both fail
+  otherwise. It is noted in `docs/sync/status/seal.md` too.
+- `url` 2.5.9, and with it `form_urlencoded` 1.2.3, which `url` 2.5.9 requires (the same project,
+  published the same day, past the seven-day cooldown). The ignore of RUSTSEC-2026-0592 is gone
+  from `deny.toml` and `.cargo/audit.toml`.
+
+The lead read the three source diffs: fixes and faster zeroing, no new dependency, no build script.
+One change to know: `Zeroizing`'s `Debug` output no longer shows the value it holds.
 
 How a task was integrated here, for a later session that takes over these paths: agents worked in
 clones under `target/work/`; the lead copied the changed files into the main checkout, ran the
@@ -508,7 +515,8 @@ Rulings on what the bridge draft raised (2026-11-21):
 ## Facts found along the way
 
 - Versions named in SYNC.md §2.3 and §5.1 all exist on crates.io. Youngest on 2026-11-21:
-  `zeroize` 1.9.2 (2026-11-17, inside the cooldown until 2026-11-24). `Cargo.lock` has 1.9.0 today.
+  `zeroize` 1.9.2 (2026-11-17, inside the cooldown until 2026-11-24). `Cargo.lock` had 1.9.0 until
+  2026-11-28 ("Next steps").
 - `origin/main` (the older build, commit `03554d6`) is fetchable: `git fetch origin main`.
 - `Cargo.lock` before the refresh: rustls 0.23.43, rustls-webpki 0.103.14, webpki-roots 1.0.9,
   tokio 1.52.3. After it: 0.23.46, 0.103.17, 1.0.12, 1.53.3.
@@ -551,7 +559,8 @@ Decisions the lead took that the owner may want to overrule:
 - Reminder defaults are a starting point; SYNC.md's open question 11 is still the owner's (S19).
 - A backup's file name carries a writer tag (S28).
 - `zeroize` stays at the lockfile's 1.9.0 until 1.9.2 (named by SYNC.md §5.1, published 2026-11-17)
-  is seven days old, on 2026-11-24; then one `cargo update -p zeroize --precise 1.9.2`.
+  is seven days old, on 2026-11-24; then one `cargo update -p zeroize --precise 1.9.2`. Done on
+  2026-11-28 ("Next steps").
 - Eight more crates moved in the lockfile than the four the plan names, each for an advisory or a
   yanked version, and `deny.toml` carries four more reviewed ignores than SYNC.md's one (D19).
 - cargo-deny is pinned at 0.20.2: the two newer releases were inside the seven-day rule on
@@ -567,7 +576,7 @@ Decisions the lead took that the owner may want to overrule:
 - `url` 2.5.8 has an advisory (RUSTSEC-2026-0592, a crash on a nested `blob:` URL that nothing in
   the tree can reach). It is ignored with that reason until its fix, 2.5.9, is seven days old: from
   2026-11-28, `cargo update -p url --precise 2.5.9` and remove the ignore from `deny.toml` and
-  `.cargo/audit.toml`.
+  `.cargo/audit.toml`. Done on 2026-11-28 ("Next steps").
 - `wrangler` is pinned at 4.166.0, the version the plan names, although it was a day old when
   pinned; `scripts/dev-setup.sh` accepts the Android SDK licences for its own SDK directory.
 - `taskdeck-android` has a default backend (S32); `taskdeck-recover` depends on `taskdeck-device`.
