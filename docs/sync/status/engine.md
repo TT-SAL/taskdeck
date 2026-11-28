@@ -74,7 +74,8 @@ end; what it finds comes back to this stage before the exit review.
 
 **Where things stand (2026-11-28):** everything the stage built is on day-planner: the spec
 change TT-SAL/taskdeck#38 and the engine's pull request TT-SAL/taskdeck#39 "(stage in progress, not
-the exit)", which carries this file. **The gate of §6.5 does not pass yet.** The first CI set of
+the exit)", merged as 9d383a2 (CI green on the three systems). **The gate of §6.5 does not
+pass yet.** The first CI set of
 TT-SAL/taskdeck#39 (1,000 seeds from base 3996381313176633817) had 4 failing seeds: one was an
 engine fault, fixed (3996381313176634013); three are open (below). The owner decided on
 2026-11-28 that the pull request merges without the 1,000-seed CI step: `crates/taskdeck-sync/ci.sh`
@@ -140,7 +141,11 @@ None yet. The device session notes here each pull request of its own that change
   (a simulator task).
 - **Met anyway, not diagnosed (open):** the push run of 1556c56 (1,000 seeds from base
   1537633369139214929, the commit's own id) failed 3: `gate` 1537633369139215112,
-  1537633369139215286, 1537633369139215798 (the lead's run, release, 133 s, the same three).
+  1537633369139215286, 1537633369139215798 (the lead's run, release, 133 s, the same three);
+  and the lead's run of the 50 default seeds from the id of f61382a (base 17731659848299532422,
+  which its push run skipped: that push changed only this file) failed 17731659848299532453 (a
+  rollback removed acknowledged entries and no device holding their frames raised §21.1
+  evidence after it; invariant 2, 26 entries).
 - Lows and questions for the round of checks (no seed fails for them today; details in the
   journal): a move ends every alarm (`mv_switch`); `RelayBehind` can end at a relay head above `L`
   without the chain at `L` (`gate` 5463, its first part); a `FollowAddress` whose candidate relay
