@@ -27,7 +27,7 @@ use taskdeck_sync::{Event, Head, NewDevice, SnapInfo};
 use zeroize::Zeroizing;
 
 use crate::net::{Auth, Fail, Job, Method, Req, Resp, wire};
-use crate::runtime::{Msg, Runtime, err};
+use crate::runtime::{Msg, Runtime, err, later};
 use crate::strict_json::hex;
 use crate::{DeviceError, PairSheet, PairState};
 
@@ -266,7 +266,7 @@ impl Runtime {
                     }
                     _ => Err(err("device/pair_state")),
                 };
-                let _ = reply.send(r);
+                self.deferred.push(later(reply, r));
             }
             PairCall::Cancel { reply } => {
                 match &mut self.pair {
@@ -280,7 +280,7 @@ impl Runtime {
                     }
                     _ => {}
                 }
-                let _ = reply.send(Ok(()));
+                self.deferred.push(later(reply, Ok(())));
             }
             PairCall::Join { host, board, door, code, name, reply } => self.join(host, board, door, code, name, reply),
             PairCall::Sas { digits, reply } => self.join_sas(&digits, reply),
@@ -292,34 +292,34 @@ impl Runtime {
     /// `Existing::start`; the answer waits for the ticket's registration.
     fn pair_start(&mut self, reply: Sender<Result<PairSheet, DeviceError>>) {
         if self.pair.busy() {
-            let _ = reply.send(Err(err("engine/pair_busy")));
+            self.deferred.push(later(reply, Err(err("engine/pair_busy"))));
             return;
         }
         let mono = self.mono_ms();
         let Some(s) = self.synced.as_ref() else {
-            let _ = reply.send(Err(err("device/wrong_mode")));
+            self.deferred.push(later(reply, Err(err("device/wrong_mode"))));
             return;
         };
         let st = s.engine.status();
         if st.halt.is_some() {
-            let _ = reply.send(Err(err("engine/halted")));
+            self.deferred.push(later(reply, Err(err("engine/halted"))));
             return;
         }
         if s.engine.device_no().is_none() || !st.stops.is_empty() || st.session != taskdeck_sync::SessionState::Live {
-            let _ = reply.send(Err(err("engine/not_eligible")));
+            self.deferred.push(later(reply, Err(err("engine/not_eligible"))));
             return;
         }
         let Some(relay) = s.relay.clone() else {
-            let _ = reply.send(Err(err("engine/not_eligible")));
+            self.deferred.push(later(reply, Err(err("engine/not_eligible"))));
             return;
         };
         let Ok(membership) = Membership::from_canonical_bytes(&s.engine.membership_bytes()) else {
-            let _ = reply.send(Err(err("device/store_corrupt")));
+            self.deferred.push(later(reply, Err(err("device/store_corrupt"))));
             return;
         };
         let (_, head) = s.engine.confirmed();
         let Ok(origin) = taskdeck_seal::relay_origin(&relay.host) else {
-            let _ = reply.send(Err(err("relay/address")));
+            self.deferred.push(later(reply, Err(err("relay/address"))));
             return;
         };
         let (board, dev) = (s.board, s.dev);
@@ -352,11 +352,11 @@ impl Runtime {
     /// before any request (DEV-PAIR-003); then `CodeEntered`.
     fn join(&mut self, host: String, board: [u8; 16], door: [u8; 5], code: Zeroizing<String>, name: String, reply: Sender<Result<(), DeviceError>>) {
         if self.synced.is_some() || self.pending_create.is_some() {
-            let _ = reply.send(Err(err("device/wrong_mode")));
+            self.deferred.push(later(reply, Err(err("device/wrong_mode"))));
             return;
         }
         if self.pair.busy() {
-            let _ = reply.send(Err(err("device/pair_state")));
+            self.deferred.push(later(reply, Err(err("device/pair_state"))));
             return;
         }
         let now = self.mono_ms();
@@ -373,7 +373,7 @@ impl Runtime {
             &mut OsEntropy,
         );
         if let Some(NewEffect::AskAgain { code }) = fx.first() {
-            let _ = reply.send(Err(err(code.code())));
+            self.deferred.push(later(reply, Err(err(code.code()))));
             return;
         }
         let attempt = ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -402,16 +402,15 @@ impl Runtime {
         }));
         self.mark_pairing();
         self.n_effects(fx);
-        let _ = reply.send(Ok(()));
+        self.deferred.push(later(reply, Ok(())));
     }
 
     /// `join_sas` (decision 6): exactly six ASCII digits reach the machine.
     fn join_sas(&mut self, typed: &str, reply: Sender<Result<(), DeviceError>>) {
-        let digits: Zeroizing<String> = Zeroizing::new(typed.chars().filter(|c| *c != ' ' && *c != '-').collect());
-        if digits.len() != 6 || !digits.bytes().all(|b| b.is_ascii_digit()) {
-            let _ = reply.send(Err(err("device/sas_format")));
+        let Some(digits) = sas_digits(typed) else {
+            self.deferred.push(later(reply, Err(err("device/sas_format"))));
             return;
-        }
+        };
         match &mut self.pair {
             Pairing::N(n) if n.state == PairState::AskSas => {
                 n.sas_reply = Some(reply);
@@ -419,11 +418,11 @@ impl Runtime {
                 self.n_effects(fx);
                 if let Pairing::N(n) = &mut self.pair
                     && let Some(r) = n.sas_reply.take() {
-                        let _ = r.send(Ok(()));
+                        self.deferred.push(later(r, Ok(())));
                     }
             }
             _ => {
-                let _ = reply.send(Err(err("device/pair_state")));
+                self.deferred.push(later(reply, Err(err("device/pair_state"))));
             }
         }
     }
@@ -557,7 +556,7 @@ impl Runtime {
                     e.code = None;
                     e.state = PairState::Aborted { code: code.code() };
                     if let Some(r) = e.start_reply.take() {
-                        let _ = r.send(Err(err(code.code())));
+                        self.deferred.push(later(r, Err(err(code.code()))));
                     }
                     self.mark_pairing();
                 }
@@ -612,7 +611,7 @@ impl Runtime {
         if let Pairing::E(e) = &mut self.pair {
             e.state = PairState::Aborted { code };
             if let Some(r) = e.start_reply.take() {
-                let _ = r.send(Err(err(code)));
+                self.deferred.push(later(r, Err(err(code))));
             }
         }
         self.mark_pairing();
@@ -701,7 +700,7 @@ impl Runtime {
                     n.ticket_key = None;
                     n.state = PairState::Aborted { code: code.code() };
                     if let Some(r) = n.sas_reply.take() {
-                        let _ = r.send(Err(err(code.code())));
+                        self.deferred.push(later(r, Err(err(code.code()))));
                     }
                     self.mark_pairing();
                 }
@@ -745,13 +744,13 @@ impl Runtime {
                         code_display: e.code.take().unwrap_or_default(),
                     };
                     if let Some(r) = e.start_reply.take() {
-                        let _ = r.send(Ok(sheet));
+                        self.deferred.push(later(r, Ok(sheet)));
                     }
                     self.mark_pairing();
                 } else {
                     let code = code_of(&p.result);
                     if let Some(r) = e.start_reply.take() {
-                        let _ = r.send(Err(err(code)));
+                        self.deferred.push(later(r, Err(err(code))));
                     }
                     let fx = e.m.on(ExistingEvent::Cancel, &mut OsEntropy);
                     self.e_effects(fx);
@@ -900,6 +899,13 @@ impl Runtime {
     }
 }
 
+/// The six digits the machine is handed (decision 6): spaces and hyphens
+/// removed, then exactly six ASCII digits, or nothing.
+fn sas_digits(typed: &str) -> Option<Zeroizing<String>> {
+    let digits: Zeroizing<String> = Zeroizing::new(typed.chars().filter(|c| *c != ' ' && *c != '-').collect());
+    (digits.len() == 6 && digits.bytes().all(|b| b.is_ascii_digit())).then_some(digits)
+}
+
 /// N's read of a slot: the door and the ticket proof (relay.md §10.8).
 fn n_slot_get(n: &NPair, label: u8) -> Req {
     let l = char::from(label.to_ascii_lowercase());
@@ -924,5 +930,23 @@ fn n_get(n: &NPair, rest: String, limit: usize) -> Req {
         proof: None,
         body: None,
         limit,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Decision 6 of the pairing runtime (SEAL-PAIR-007 compares exactly
+    /// what it is handed): separators are removed, and only six ASCII
+    /// digits reach the machine.
+    #[test]
+    fn sas_digits_are_six_ascii_digits() {
+        assert_eq!(sas_digits("123 456").as_deref().map(String::as_str), Some("123456"));
+        assert_eq!(sas_digits("123-456").as_deref().map(String::as_str), Some("123456"));
+        assert!(sas_digits("12345").is_none());
+        assert!(sas_digits("1234567").is_none());
+        assert!(sas_digits("12345\u{0663}").is_none(), "an Arabic-Indic digit is not ASCII");
+        assert!(sas_digits("12a456").is_none());
     }
 }

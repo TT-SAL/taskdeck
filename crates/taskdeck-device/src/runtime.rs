@@ -269,6 +269,9 @@ pub(crate) struct Runtime {
     next_ticket: u64,
     /// The relay address shown (§17.8), once known.
     pub(crate) relay_address: Option<String>,
+    /// Replies sent after the turn's publish, so that a caller that reads
+    /// the view after its call returned sees what the call changed.
+    pub(crate) deferred: Vec<Deferred>,
     /// The data folder's lock, held for the runtime's life (§5.2).
     pub(crate) lock: store::Lock,
     pub(crate) cloud: bool,
@@ -277,6 +280,16 @@ pub(crate) struct Runtime {
 /// How long `shutdown` waits for the engine's `ReadyToExit` (§17.2: the
 /// call returns within 10,000 ms).
 const EXIT_WAIT: Duration = Duration::from_millis(8_000);
+
+/// A reply waiting for the end of the turn.
+pub(crate) type Deferred = Box<dyn FnOnce() + Send>;
+
+/// A reply to send after the turn's publish.
+pub(crate) fn later<T: Send + 'static>(tx: Sender<T>, v: T) -> Deferred {
+    Box::new(move || {
+        let _ = tx.send(v);
+    })
+}
 
 pub(crate) fn err(code: &'static str) -> DeviceError {
     DeviceError { code, status: None, message: None }
@@ -316,6 +329,7 @@ impl Runtime {
             relay_address: None,
             lock: s.lock,
             cloud: s.cloud,
+            deferred: Vec::new(),
         };
         if let Some(o) = s.opened {
             rt.start_synced(*o)?;
@@ -405,6 +419,9 @@ impl Runtime {
         self.check_exit();
         self.pair_progress();
         self.publish();
+        for reply in self.deferred.drain(..) {
+            reply();
+        }
     }
 
     fn tick_due(&self) -> bool {
@@ -493,12 +510,12 @@ impl Runtime {
                 let Some(s) = self.synced.as_mut() else { return };
                 if let Some(w) = s.waiting.remove(&ticket) {
                     let view_version = s.engine.view_version();
-                    let _ = w.reply.send(Ok(Submitted { reply: w.compiled, entry_id, provisional_seq, view_version }));
+                    self.deferred.push(later(w.reply, Ok(Submitted { reply: w.compiled, entry_id, provisional_seq, view_version })));
                 }
             }
             Notification::EnqueueRefused { ticket, code } => {
                 if let Some(w) = self.synced.as_mut().and_then(|s| s.waiting.remove(&ticket)) {
-                    let _ = w.reply.send(Err(err(code)));
+                    self.deferred.push(later(w.reply, Err(err(code))));
                 }
             }
             Notification::ViewChanged { .. } => self.dirty.view = true,
@@ -560,11 +577,11 @@ impl Runtime {
             Call::Shutdown { reply } => self.begin_exit(Some(reply)),
             Call::CreatePersist { new, reply } => {
                 let r = crate::create::persist(self, *new);
-                let _ = reply.send(r);
+                self.deferred.push(later(reply, r));
             }
             Call::CreateActivate { token, reply } => {
                 let r = crate::create::activate(self, token);
-                let _ = reply.send(r);
+                self.deferred.push(later(reply, r));
             }
             Call::Pair(p) => self.pair_call(p),
         }
@@ -603,7 +620,7 @@ impl Runtime {
         };
         let Some(command) = compiled.command else {
             let view_version = s.engine.view_version();
-            let _ = reply.send(Ok(Submitted { reply: compiled.reply, entry_id: None, provisional_seq: None, view_version }));
+            self.deferred.push(later(reply, Ok(Submitted { reply: compiled.reply, entry_id: None, provisional_seq: None, view_version })));
             return Ok(());
         };
         s.minter = Some(minter);

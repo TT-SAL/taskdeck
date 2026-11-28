@@ -305,3 +305,51 @@ Every case met while the real core, seal and relay are wired into the engine, or
 - Done here: `device/create_secret` (a malformed create secret, before any request), `device/sas_format` (digits that are not six ASCII digits after removing spaces and hyphens; costs no attempt), `device/relay_unreachable` (a pairing or create request with no answer, as `Aborted { code }`), `device/relay_refused` (a relay refusal of a pairing request whose code is not one of the pairing routes'; `PairState::Aborted` holds a `&'static str`), `device/not_built` (above).
 - Proposed fix: §21: add `device/create_secret`, `device/sas_format`, `device/relay_unreachable`; give `PairState::Aborted` a `String` code so a relay code passes through as it is.
 - Evidence: `pairing::code_of`, `create::begin`
+
+## f3-8. Decision: a write's reply is sent after the turn's publish
+- Kind: decision
+- Where: device.md §4.3 (steps 2 to 4), §4.5, DEV-THREAD-006, DEV-THREAD-007, DEV-FACADE-002 ("the view version that includes it")
+- Says / does: §4.3 publishes at the end of the turn and §4.5 has a write block until its reply; nothing orders the two. A caller whose `pair_start` had returned read `status().pairing = Idle`, and a `submit`'s `view_version` could be ahead of `view()`.
+- Done here: every reply of a facade request (and the `Enqueued` answer of a `submit`) is queued during the turn and sent after the turn's publish (`runtime::later`, `Runtime::deferred`), so a read made after a write returned sees what the write changed.
+- Proposed fix: §4.3 step 4: "…then send the replies of the requests this turn served"; DEV-THREAD-007: "and MUST send a request's reply only after the publish of the turn that served it".
+- Evidence: `first_sync::first_sync` failed 2 runs in 3 (`left: "idle"`, `right: "showing_code"` after `pair_start`) before the change, and passed 10 in 10 after
+
+## f3-9. Decision (CHANGES.md, pairing runtime, points 1 to 6)
+- Kind: decision
+- Where: `docs/sync/spec/CHANGES.md` row 2026-11-23 "Left open by stage `seal` for the pairing runtime"; device.md §8.4, §18.3; seal.md §17.10, §17.11, SEAL-PAIR-013; `pairing.rs`
+- Says / does: six points left to `device`.
+- Done here: (1) a `PairFailed` for the pairing's ticket sets `status().pairing = Aborted { code }` with the engine's code whatever E's machine state, `Done` included (the machine, if not ended, is cancelled first): the user never sees success on E for a device that was not added. (2) N's `ReadLog { from }` is performed as `read` pages from `after = from − 1` (limit 256) until `more` is clear, then one `Entries` with every entry; `FetchFrames { seqs }` as one `read` with `after = t − 1, limit = 1` per seq, in order, then one `Frames`. (3) A ticket is deleted (`DELETE …/pair/<tid>`) only when E's machine emits `DeleteTicket`; `Abort` alone deletes nothing. (4) After an abort that follows `Registered`, the runtime does nothing more: the device that never joins shows in the device list with no last beat and the user revokes it, as after a crash while registering (§18.3). (5) Each machine gets `Tick { now }` with the device's monotonic time every 1,000 ms while it is neither `Done` nor `Aborted`. (6) `join_sas` removes spaces and hyphens and hands on exactly six ASCII digits; anything else is refused with `device/sas_format` before the machine sees it, so it costs no attempt.
+- Proposed fix: device.md §18.3 and §8.4: state the six as above.
+- Evidence: `first_sync::first_sync`
+
+## f3-10. E's `RegisterFailed` takes a seal code; the engine reports a pairing's failure with its own
+- Kind: misfit
+- Where: seal.md §17.10, `ExistingEvent::RegisterFailed { code: SealError }`; engine.md §30.3 `Notification::PairFailed { ticket, code: &'static str }` (codes `engine/…`, `relay/…`, `seal/…`); device.md §8.4
+- Says / does: the engine's code cannot be made a `SealError`, so `PairFailed` cannot be handed to the machine as `RegisterFailed`.
+- Done here: on `PairFailed` the runtime cancels the machine (`Cancel`: `DeleteTicket`, `Abort { seal/pair_cancelled }`) and then shows the engine's code (`Aborted { code }`, decision f3-9 point 1).
+- Proposed fix: seal.md §26: `RegisterFailed { code: &'static str }` (the machine passes it to `Abort` unchanged), or device.md §18.3 states the cancel as above.
+- Evidence: `pairing::Runtime::pair_failed`
+
+## f3-11. `pair_start` checks the engine's refusals itself, and returns once the ticket is registered
+- Kind: decision
+- Where: device.md §17.10 `pair_start` (errors `engine/not_eligible`, `engine/halted`, `engine/pair_busy`; long, 20,000 ms), §18.3; engine.md §28.4 (refusals of `PairRegister`)
+- Says / does: the engine sees the pairing only at `PairRegister`, after the user confirmed on E; `pair_start`'s errors are the engine's refusals of that input.
+- Done here: `pair_start` refuses before `Existing::start` with `engine/halted` (a halt), `engine/not_eligible` (no `device_no`, a stop, or a session other than `Live`) and `engine/pair_busy` (a pairing not ended); then it answers once the relay has answered `pair-open`, so that the code shown is one the new device can use (a refusal there aborts the machine and is returned).
+- Proposed fix: §17.10: "`pair_start` returns after the relay stored the ticket; its refusals are checked against the engine's status before the machine starts."
+- Evidence: `first_sync::first_sync`
+
+## f3-12. `PairState` has no state for the new device before it is asked for the digits
+- Kind: spec-unclear
+- Where: device.md §18.3 tables, §25 `PairState`
+- Says / does: N's table names `AskSas`, `Accepted`, `Joining`, `Done`, `Aborted`; between `join` and `AskSas` (reading slot A, posting B, waiting for C) and while it reads slot D, the snapshot and the log nothing is named.
+- Done here: `Joining` from `join` until `AskSas`, again from `Accepted`'s slot D on, and until the engine has applied the `DeviceAdded` and has a `device_no` (then `Done`, engine.md §19.8). devicectl's `pair_status` answers `{"state": snake_case name, "sas"?: digits}` and, for an aborted pairing, `"reason": code`.
+- Proposed fix: §18.3: say so, or add `PairState::Connecting`; §19.2 `pair_status`: add `reason`.
+- Evidence: `first_sync::first_sync`
+
+## f3-13. The store writes a joining device's history before its bootstrap; the sealer builds its identity from the bundle
+- Kind: decision
+- Where: device.md §18.3 "Persisting the join", DEV-PAIR-006, SEAL-KEY-013; `store::NewIdentity`, `SealSealer::join_identity` (F1's open item "a joining device's constructor from a pairing bundle")
+- Says / does: §18.3 lists `history.tdk` among the identity directory's files but `create_identity` wrote none; the identity bytes of a joiner had no constructor.
+- Done here: `NewIdentity.history` (ascending `(seq, HistoryRecord::to_bytes)`), appended to `history.tdk` after `device.tdk` and before `bootstrap.tdk`; empty for a creating device. `SealSealer::join_identity(board, keys, roots, membership)` checks every bundle root against the commitment the snapshot's membership records for its epoch (a root without one, or a mismatch, is `seal/bundle_invalid`) and lays out `identity.tdk` with no pending root and no anchor. `create_identity` also writes `pending.tds` for a join, which `activate` then removes; the plain files of a local-only board are not set aside (§18.4 is not built).
+- Proposed fix: §18.3: "…`history.tdk` (written before `bootstrap.tdk`) … `pending.tds` as for a create, removed by the activation."
+- Evidence: `first_sync::first_sync` (the joined device restarts from its files and holds the board with the same state hash)
