@@ -1,0 +1,396 @@
+{
+ "spec": "relay.md §5.4",
+ "cases": [
+  {
+   "name": "the canonical text",
+   "clauses": [
+    "RELAY-ADDR-001"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "formatAddress",
+   "args": {
+    "host": "relay-x7k2.example.org",
+    "board": "000102030405060708090a0b0c0d0e0f",
+    "door": "a1b2c3d4e5"
+   },
+   "expect": "relay-x7k2.example.org/000G40R40M30E209185GR38E1YGV5GYMWM"
+  },
+  {
+   "name": "the display form: groups of four, the last of two",
+   "clauses": [
+    "RELAY-ADDR-001"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "displayAddress",
+   "args": {
+    "host": "relay.example.org:8443",
+    "board": "000102030405060708090a0b0c0d0e0f",
+    "door": "a1b2c3d4e5"
+   },
+   "expect": "relay.example.org:8443/000G-40R4-0M30-E209-185G-R38E-1YGV-5GYM-WM"
+  },
+  {
+   "name": "the display form of the largest values",
+   "clauses": [
+    "RELAY-ADDR-001"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "displayAddress",
+   "args": {
+    "host": "a.b",
+    "board": "ffffffffffffffffffffffffffffffff",
+    "door": "ffffffffff"
+   },
+   "expect": "a.b/ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZW"
+  },
+  {
+   "name": "canonical text",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "expect": {
+    "host": "relay.example.org",
+    "origin": "https://relay.example.org",
+    "board": "000102030405060708090a0b0c0d0e0f",
+    "door": "a1b2c3d4e5"
+   }
+  },
+  {
+   "name": "the display form",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org/000G-40R4-0M30-E209-185G-R38E-1YGV-5GYM-WM"
+   },
+   "expect": {
+    "host": "relay.example.org",
+    "origin": "https://relay.example.org",
+    "board": "000102030405060708090a0b0c0d0e0f",
+    "door": "a1b2c3d4e5"
+   }
+  },
+  {
+   "name": "spaces, tabs and line breaks around it; https:// in any case",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": " \t\nHTTPS://relay.example.org/000G40R40M30E209185GR38E1YGV5GYMWM\r\n "
+   },
+   "expect": {
+    "host": "relay.example.org",
+    "origin": "https://relay.example.org",
+    "board": "000102030405060708090a0b0c0d0e0f",
+    "door": "a1b2c3d4e5"
+   }
+  },
+  {
+   "name": "capitals in the host, lower case and spaces in the code",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "Relay.Example.ORG/000g 40r4 0m30 e209 185g r38e 1ygv 5gym wm"
+   },
+   "expect": {
+    "host": "relay.example.org",
+    "origin": "https://relay.example.org",
+    "board": "000102030405060708090a0b0c0d0e0f",
+    "door": "a1b2c3d4e5"
+   }
+  },
+  {
+   "name": "a port",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org:8443/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "expect": {
+    "host": "relay.example.org:8443",
+    "origin": "https://relay.example.org:8443",
+    "board": "000102030405060708090a0b0c0d0e0f",
+    "door": "a1b2c3d4e5"
+   }
+  },
+  {
+   "name": "port 443 is never kept",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org:443/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "expect": {
+    "host": "relay.example.org",
+    "origin": "https://relay.example.org",
+    "board": "000102030405060708090a0b0c0d0e0f",
+    "door": "a1b2c3d4e5"
+   }
+  },
+  {
+   "name": "look-alikes: O for 0, I and L for 1",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org/OOOG4OR4OM3OE2O9I85GR38ElYGV5GYMWM"
+   },
+   "expect": {
+    "host": "relay.example.org",
+    "origin": "https://relay.example.org",
+    "board": "000102030405060708090a0b0c0d0e0f",
+    "door": "a1b2c3d4e5"
+   }
+  },
+  {
+   "name": "another scheme",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "http://relay.example.org/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "no slash",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "two slashes",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org/000G40R40M30E209185GR38E1YGV5GYMWM/"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "a path after the scheme",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "https://relay.example.org/x/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "one character short",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org/00G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "one character more",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org/000G40R40M30E209185GR38E1YGV5GYMWM0"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "the letter U",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org/U00G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "padding bits that are not zero",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org/000G40R40M30E209185GR38E1YGV5GYMWN"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "a host that starts with a hyphen",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "-relay.example.org/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "an empty host",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "a port above 65535",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org:65536/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "a port with a leading zero",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay.example.org:0443/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "a host of 256 bytes",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "an underscore in the host",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": "relay_1.example.org/000G40R40M30E209185GR38E1YGV5GYMWM"
+   },
+   "error": "relay/address"
+  },
+  {
+   "name": "not text",
+   "clauses": [
+    "RELAY-ADDR-002"
+   ],
+   "targets": [
+    "core"
+   ],
+   "call": "parseAddress",
+   "args": {
+    "text": 7
+   },
+   "error": "relay/address"
+  }
+ ]
+}

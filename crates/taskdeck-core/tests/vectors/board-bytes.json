@@ -1,0 +1,445 @@
+{
+ "spec": "core.md §6",
+ "cases": [
+  {
+   "name": "the empty board",
+   "board_text": "{\"rules\":1}",
+   "board_sha256": "b7da465233f0ab98a6d289bdd04d20b7c4806caca8adeb032a6e6bb2a8814d1e"
+  },
+  {
+   "name": "every field present",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-01T10:00:00.000000000Z\",\"blocks\":[{\"minutes\":30,\"sid\":2,\"start\":\"2026-08-31T09:00:00.000000000Z\"}],\"created\":\"2026-08-30T08:00:00.000000000Z\",\"deadline\":\"2026-09-02T17:00:00.000000000Z\",\"duration_minutes\":60,\"id\":3,\"importance\":1,\"kind\":\"task\",\"name\":\"Old\",\"outcome\":\"dropped\",\"time_importance\":0}],\"home\":{\"lat\":4852,\"lon\":-235},\"items\":[{\"blocks\":[{\"minutes\":45,\"sid\":1,\"stamp\":[3,1],\"start\":\"2026-09-04T09:00:00.000000000Z\"}],\"created\":\"2026-09-01T08:00:00.000000000Z\",\"deadline\":\"2026-09-05T17:00:00.000000000Z\",\"duration_minutes\":90,\"id\":1,\"importance\":4,\"kind\":\"task\",\"name\":\"Write \\\"spec\\\"\",\"stamps\":{\"estimate\":[1,1],\"levels\":[2,1],\"name\":[0,0],\"repeat\":[0,0],\"time\":[9007199254740991,8191]},\"time_importance\":3},{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":2,\"kind\":\"routine\",\"name\":\"Run\",\"recurrence\":{\"anchor\":\"1970-01-01\",\"days\":127,\"minutes\":1440,\"start_minutes\":1439},\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}},{\"created\":\"2026-09-02T08:00:00.000000000Z\",\"deadline\":\"2026-09-04T12:00:00.000000000Z\",\"duration_minutes\":0,\"id\":1099511627777,\"importance\":0,\"kind\":\"event\",\"name\":\"Lunch é😀\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[5,1],\"repeat\":[0,0],\"time\":[5,1]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":4},{\"block\":0,\"device_no\":1,\"item\":1}],\"notes\":\"line 1\\nline 2\\u0001\",\"notes_rev\":7,\"palette\":[[1,2,3,255],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[200,100,50,128]],\"picture\":{\"blob\":\"00112233445566778899aabbccddeeff\",\"epoch\":4294967295,\"parts\":64,\"sha256\":\"abababababababababababababababababababababababababababababababab\",\"size\":67108864},\"rules\":1,\"subscriptions\":[{\"color\":[10,20,30,255],\"enabled\":false,\"id\":4,\"name\":\"Holidays\",\"url\":\"https://example.com/h.ics\"}],\"unreadable\":[\"AQ==\",\"AQI=\",\"/w==\"]}",
+   "board_sha256": "3504d9c7a755d7647a421d81567fc345c29469981cc7868429c9df938e37bf5b"
+  },
+  {
+   "name": "archive: by archived_at, then id, then bytes; identical rows repeat",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":0,\"kind\":\"task\",\"name\":\"r\"},{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":2,\"kind\":\"task\",\"name\":\"a\"},{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":2,\"kind\":\"task\",\"name\":\"b\"},{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":2,\"kind\":\"task\",\"name\":\"b\"},{\"archived_at\":\"2026-09-03T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"r\"}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":2}],\"rules\":1}",
+   "board_sha256": "e173dd64a5b8228394024323ce40b650f0b0fcddfde30a34f6aaa20a1e4c8899"
+  },
+  {
+   "name": "archive: equal keys, the bytes decide (a deadline member sorts before the id member)",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"deadline\":\"2026-09-03T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\"},{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\"}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "board_sha256": "0dfdf2b73a93accaf00b98d2abd51a1c892af584ec22d307b4901fe645e0f701"
+  },
+  {
+   "name": "rule 1: equal keys, the row without a deadline first",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\"},{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"deadline\":\"2026-09-03T00:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\"}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "the largest id of device 8191",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":9007199254740991,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":8191,\"item\":1099511627775}],\"rules\":1}",
+   "board_sha256": "e536820eef103d260c51bc87476840e6f7726b522d8a6d66b9bd45006efb127a"
+  },
+  {
+   "name": "a routine with its recurrence",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"routine\",\"name\":\"n\",\"recurrence\":{\"anchor\":\"2026-09-01\",\"days\":0,\"minutes\":0,\"start_minutes\":0},\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "board_sha256": "2def289116ead1376ccc00a1c6e23a2a3993b7254d898c8f6bf017b968a97ca9"
+  },
+  {
+   "name": "a task with time_importance 3",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]},\"time_importance\":3}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "board_sha256": "9366f12811b6b7913cdc2d3821d20626ac55096f49e363cdb6470400cb037900"
+  },
+  {
+   "name": "rule 1: items out of order",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":2,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}},{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":2}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "rule 1: duplicate item ids",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}},{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "rule 1: blocks out of sid order",
+   "board_text": "{\"items\":[{\"blocks\":[{\"minutes\":15,\"sid\":2,\"stamp\":[0,0],\"start\":\"2026-09-01T08:00:00.000000000Z\"},{\"minutes\":15,\"sid\":1,\"stamp\":[0,0],\"start\":\"2026-09-01T08:00:00.000000000Z\"}],\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "rule 1: archive out of order",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-03T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"r\"},{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"r\"}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "rule 1: archive equal keys out of byte order",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"b\"},{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"a\"}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "rule 1: unreadable out of order",
+   "board_text": "{\"rules\":1,\"unreadable\":[\"/w==\",\"AQ==\"]}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "rule 1: duplicate subscription URLs",
+   "board_text": "{\"marks\":[{\"block\":0,\"device_no\":0,\"item\":2}],\"rules\":1,\"subscriptions\":[{\"color\":[0,0,0,0],\"id\":1,\"name\":\"a\",\"url\":\"https://x\"},{\"color\":[0,0,0,0],\"id\":2,\"name\":\"b\",\"url\":\"https://x\"}]}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "rule 1: marks out of order",
+   "board_text": "{\"marks\":[{\"block\":0,\"device_no\":2,\"item\":1},{\"block\":0,\"device_no\":1,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "rule 1: a mark with both numbers 0",
+   "board_text": "{\"marks\":[{\"block\":0,\"device_no\":1,\"item\":0}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 1
+  },
+  {
+   "name": "rule 2: 21 subscriptions",
+   "board_text": "{\"marks\":[{\"block\":0,\"device_no\":0,\"item\":21}],\"rules\":1,\"subscriptions\":[{\"color\":[0,0,0,0],\"id\":1,\"name\":\"s\",\"url\":\"https://x/01\"},{\"color\":[0,0,0,0],\"id\":2,\"name\":\"s\",\"url\":\"https://x/02\"},{\"color\":[0,0,0,0],\"id\":3,\"name\":\"s\",\"url\":\"https://x/03\"},{\"color\":[0,0,0,0],\"id\":4,\"name\":\"s\",\"url\":\"https://x/04\"},{\"color\":[0,0,0,0],\"id\":5,\"name\":\"s\",\"url\":\"https://x/05\"},{\"color\":[0,0,0,0],\"id\":6,\"name\":\"s\",\"url\":\"https://x/06\"},{\"color\":[0,0,0,0],\"id\":7,\"name\":\"s\",\"url\":\"https://x/07\"},{\"color\":[0,0,0,0],\"id\":8,\"name\":\"s\",\"url\":\"https://x/08\"},{\"color\":[0,0,0,0],\"id\":9,\"name\":\"s\",\"url\":\"https://x/09\"},{\"color\":[0,0,0,0],\"id\":10,\"name\":\"s\",\"url\":\"https://x/10\"},{\"color\":[0,0,0,0],\"id\":11,\"name\":\"s\",\"url\":\"https://x/11\"},{\"color\":[0,0,0,0],\"id\":12,\"name\":\"s\",\"url\":\"https://x/12\"},{\"color\":[0,0,0,0],\"id\":13,\"name\":\"s\",\"url\":\"https://x/13\"},{\"color\":[0,0,0,0],\"id\":14,\"name\":\"s\",\"url\":\"https://x/14\"},{\"color\":[0,0,0,0],\"id\":15,\"name\":\"s\",\"url\":\"https://x/15\"},{\"color\":[0,0,0,0],\"id\":16,\"name\":\"s\",\"url\":\"https://x/16\"},{\"color\":[0,0,0,0],\"id\":17,\"name\":\"s\",\"url\":\"https://x/17\"},{\"color\":[0,0,0,0],\"id\":18,\"name\":\"s\",\"url\":\"https://x/18\"},{\"color\":[0,0,0,0],\"id\":19,\"name\":\"s\",\"url\":\"https://x/19\"},{\"color\":[0,0,0,0],\"id\":20,\"name\":\"s\",\"url\":\"https://x/20\"},{\"color\":[0,0,0,0],\"id\":21,\"name\":\"s\",\"url\":\"https://x/21\"}]}",
+   "error": "core/invariant",
+   "rule": 2
+  },
+  {
+   "name": "20 subscriptions",
+   "board_text": "{\"marks\":[{\"block\":0,\"device_no\":0,\"item\":20}],\"rules\":1,\"subscriptions\":[{\"color\":[0,0,0,0],\"id\":1,\"name\":\"s\",\"url\":\"https://x/01\"},{\"color\":[0,0,0,0],\"id\":2,\"name\":\"s\",\"url\":\"https://x/02\"},{\"color\":[0,0,0,0],\"id\":3,\"name\":\"s\",\"url\":\"https://x/03\"},{\"color\":[0,0,0,0],\"id\":4,\"name\":\"s\",\"url\":\"https://x/04\"},{\"color\":[0,0,0,0],\"id\":5,\"name\":\"s\",\"url\":\"https://x/05\"},{\"color\":[0,0,0,0],\"id\":6,\"name\":\"s\",\"url\":\"https://x/06\"},{\"color\":[0,0,0,0],\"id\":7,\"name\":\"s\",\"url\":\"https://x/07\"},{\"color\":[0,0,0,0],\"id\":8,\"name\":\"s\",\"url\":\"https://x/08\"},{\"color\":[0,0,0,0],\"id\":9,\"name\":\"s\",\"url\":\"https://x/09\"},{\"color\":[0,0,0,0],\"id\":10,\"name\":\"s\",\"url\":\"https://x/10\"},{\"color\":[0,0,0,0],\"id\":11,\"name\":\"s\",\"url\":\"https://x/11\"},{\"color\":[0,0,0,0],\"id\":12,\"name\":\"s\",\"url\":\"https://x/12\"},{\"color\":[0,0,0,0],\"id\":13,\"name\":\"s\",\"url\":\"https://x/13\"},{\"color\":[0,0,0,0],\"id\":14,\"name\":\"s\",\"url\":\"https://x/14\"},{\"color\":[0,0,0,0],\"id\":15,\"name\":\"s\",\"url\":\"https://x/15\"},{\"color\":[0,0,0,0],\"id\":16,\"name\":\"s\",\"url\":\"https://x/16\"},{\"color\":[0,0,0,0],\"id\":17,\"name\":\"s\",\"url\":\"https://x/17\"},{\"color\":[0,0,0,0],\"id\":18,\"name\":\"s\",\"url\":\"https://x/18\"},{\"color\":[0,0,0,0],\"id\":19,\"name\":\"s\",\"url\":\"https://x/19\"},{\"color\":[0,0,0,0],\"id\":20,\"name\":\"s\",\"url\":\"https://x/20\"}]}",
+   "board_sha256": "6d1272f8275d8b0f64c9c76f800aed12fc7fa2abf1d9d5d40f1b7c46a362bd34"
+  },
+  {
+   "name": "rule 3: an item id with low part 0",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1099511627776,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":1,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 3
+  },
+  {
+   "name": "rule 3: an archive row id with low part 0",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1099511627776,\"kind\":\"task\",\"name\":\"r\"}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 3
+  },
+  {
+   "name": "rule 3: a sid with low part 0",
+   "board_text": "{\"items\":[{\"blocks\":[{\"minutes\":15,\"sid\":2199023255552,\"stamp\":[0,0],\"start\":\"2026-09-01T08:00:00.000000000Z\"}],\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 3
+  },
+  {
+   "name": "rule 4: an item above its mark",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":5,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":4}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 4
+  },
+  {
+   "name": "rule 4: an item with no mark",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1099511627777,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 4
+  },
+  {
+   "name": "rule 4: a sid above its block mark",
+   "board_text": "{\"items\":[{\"blocks\":[{\"minutes\":15,\"sid\":3,\"stamp\":[0,0],\"start\":\"2026-09-01T08:00:00.000000000Z\"}],\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":2,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 4
+  },
+  {
+   "name": "rule 4: an archive row sid above its mark",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"blocks\":[{\"minutes\":15,\"sid\":1,\"start\":\"2026-09-01T08:00:00.000000000Z\"}],\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"r\"}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 4
+  },
+  {
+   "name": "rule 5: two items share a sid",
+   "board_text": "{\"items\":[{\"blocks\":[{\"minutes\":15,\"sid\":1,\"stamp\":[0,0],\"start\":\"2026-09-01T08:00:00.000000000Z\"}],\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}},{\"blocks\":[{\"minutes\":15,\"sid\":1,\"stamp\":[0,0],\"start\":\"2026-09-01T08:00:00.000000000Z\"}],\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":2,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":1,\"device_no\":0,\"item\":2}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 5
+  },
+  {
+   "name": "rule 6: a routine without recurrence",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"routine\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 6
+  },
+  {
+   "name": "rule 6: an archived task with recurrence",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"r\",\"recurrence\":{\"anchor\":\"2026-09-01\",\"days\":0,\"minutes\":30,\"start_minutes\":0}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 6
+  },
+  {
+   "name": "rule 7: notes with a tab",
+   "board_text": "{\"notes\":\"a\\tb\",\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 7
+  },
+  {
+   "name": "rule 8: picture parts",
+   "board_text": "{\"picture\":{\"blob\":\"00000000000000000000000000000000\",\"epoch\":1,\"parts\":1,\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1048577},\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 8
+  },
+  {
+   "name": "picture parts at a part boundary",
+   "board_text": "{\"picture\":{\"blob\":\"00000000000000000000000000000000\",\"epoch\":1,\"parts\":1,\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":1048576},\"rules\":1}",
+   "board_sha256": "74f391a51dcefabd4068cfd1ed68b53a0f7cb73d0b35b7df5a0be4501de9ed33"
+  },
+  {
+   "name": "rule 9: rules 2",
+   "board_text": "{\"rules\":2}",
+   "error": "core/invariant",
+   "rule": 9
+  },
+  {
+   "name": "the first failing rule: 4 before 7",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":5,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"notes\":\"\\t\",\"rules\":1}",
+   "error": "core/invariant",
+   "rule": 4
+  },
+  {
+   "name": "schema: unknown field",
+   "board_text": "{\"rules\":1,\"x\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: rules missing",
+   "board_text": "{}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: rules 0",
+   "board_text": "{\"rules\":0}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: rules 2^31",
+   "board_text": "{\"rules\":2147483648}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: importance 5",
+   "board_text": "{\"items\":[{\"importance\":5,\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: time_importance 4",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]},\"time_importance\":4}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: duration 1441",
+   "board_text": "{\"items\":[{\"duration_minutes\":1441,\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: kind Task",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"Task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: name of 4,097 bytes",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: an instant without nine digits",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: a stamp of one number",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: a stamp device_no of 8192",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,8192],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: stamps missing one",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: an id of 2^53",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":9007199254740992,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: a mark device_no of 8192",
+   "board_text": "{\"marks\":[{\"block\":0,\"device_no\":8192,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: a mark of 2^40",
+   "board_text": "{\"marks\":[{\"block\":0,\"device_no\":1,\"item\":1099511627776}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: a palette of five",
+   "board_text": "{\"palette\":[[0,0,0,1],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: a colour of 256",
+   "board_text": "{\"palette\":[[0,0,0,256],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: home lat 9001",
+   "board_text": "{\"home\":{\"lat\":9001,\"lon\":0},\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: home lon -18001",
+   "board_text": "{\"home\":{\"lat\":0,\"lon\":-18001},\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: uppercase blob hex",
+   "board_text": "{\"picture\":{\"blob\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"epoch\":1,\"parts\":1,\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":67},\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: picture size 66",
+   "board_text": "{\"picture\":{\"blob\":\"00000000000000000000000000000000\",\"epoch\":1,\"parts\":1,\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":66},\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: picture epoch 0",
+   "board_text": "{\"picture\":{\"blob\":\"00000000000000000000000000000000\",\"epoch\":0,\"parts\":1,\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"size\":67},\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: outcome other",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":0,\"kind\":\"task\",\"name\":\"r\",\"outcome\":\"lost\"}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: base64 with non-zero unused bits",
+   "board_text": "{\"rules\":1,\"unreadable\":[\"AR==\"]}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: base64 without padding",
+   "board_text": "{\"rules\":1,\"unreadable\":[\"AQ\"]}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: an empty unreadable line",
+   "board_text": "{\"rules\":1,\"unreadable\":[\"\"]}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: an empty URL",
+   "board_text": "{\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1,\"subscriptions\":[{\"color\":[0,0,0,0],\"id\":1,\"name\":\"a\",\"url\":\"\"}]}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: a recurrence start of 1440",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"routine\",\"name\":\"n\",\"recurrence\":{\"anchor\":\"2026-09-01\",\"days\":0,\"minutes\":30,\"start_minutes\":1440},\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: an anchor in 1969",
+   "board_text": "{\"items\":[{\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"routine\",\"name\":\"n\",\"recurrence\":{\"anchor\":\"1969-12-31\",\"days\":0,\"minutes\":30,\"start_minutes\":0},\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: a duplicate key",
+   "board_text": "{\"rules\":1,\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: null",
+   "board_text": "{\"picture\":null,\"rules\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: a float",
+   "board_text": "{\"rules\":1.0}",
+   "error": "core/schema"
+  },
+  {
+   "name": "schema: not an object",
+   "board_text": "[]",
+   "error": "core/schema"
+  },
+  {
+   "name": "not canonical: whitespace",
+   "board_text": "{\"rules\": 1}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: key order",
+   "board_text": "{\"rules\":1,\"notes\":\"x\"}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: notes at its default",
+   "board_text": "{\"notes\":\"\",\"rules\":1}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: notes_rev at its default",
+   "board_text": "{\"notes_rev\":0,\"rules\":1}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: archive at its default",
+   "board_text": "{\"archive\":[],\"rules\":1}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: home at its default",
+   "board_text": "{\"home\":{\"lat\":0,\"lon\":0},\"rules\":1}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: palette at its default",
+   "board_text": "{\"palette\":[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],\"rules\":1}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: enabled true written",
+   "board_text": "{\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1,\"subscriptions\":[{\"color\":[0,0,0,0],\"enabled\":true,\"id\":1,\"name\":\"a\",\"url\":\"https://x\"}]}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: outcome finished written",
+   "board_text": "{\"archive\":[{\"archived_at\":\"2026-09-02T00:00:00.000000000Z\",\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":0,\"kind\":\"task\",\"name\":\"r\",\"outcome\":\"finished\"}],\"rules\":1}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: empty blocks written",
+   "board_text": "{\"items\":[{\"blocks\":[],\"created\":\"2026-09-01T08:00:00.000000000Z\",\"id\":1,\"kind\":\"task\",\"name\":\"n\",\"stamps\":{\"estimate\":[0,0],\"levels\":[0,0],\"name\":[0,0],\"repeat\":[0,0],\"time\":[0,0]}}],\"marks\":[{\"block\":0,\"device_no\":0,\"item\":1}],\"rules\":1}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not canonical: an escaped character",
+   "board_text": "{\"notes\":\"\\u0041\",\"rules\":1}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "schema before not canonical: unknown field and whitespace",
+   "board_text": "{\"rules\": 1,\"x\":1}",
+   "error": "core/schema"
+  },
+  {
+   "name": "not canonical before invariant: whitespace and rules 2",
+   "board_text": "{\"rules\": 2}",
+   "error": "core/not_canonical"
+  },
+  {
+   "name": "not json: truncated",
+   "board_text": "{\"rules\":1",
+   "error": "core/not_json"
+  },
+  {
+   "name": "not json: empty",
+   "board_text": "",
+   "error": "core/not_json"
+  }
+ ]
+}

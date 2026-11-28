@@ -237,12 +237,12 @@ fn recovery_of(n: &Node) -> Rk {
     Rk { dev: r.dev_r, sign_pk: r.sign_pk, ctr: r.last_ctr }
 }
 
-/// Seals a body as the recovery identity, with `n`'s fake and roots.
+/// Seals a body as the recovery identity `rk` (current or not), with `n`'s fake and roots.
 fn seal_as_recovery(n: &mut Node, rk: &mut Rk, net: &Net, at_ms: i64, body: Body) -> Vec<u8> {
     rk.ctr += 1;
     let entry_id = ok(n.fake.new_entry_id());
     let entry = PlainEntry { entry_id, at_ms, based_on: net.head(), body };
-    ok(n.fake.seal_as(&rk.dev, &rk.sign_pk, &n.m, rk.ctr, &entry)).frame
+    ok(n.fake.seal_as(&rk.dev, &rk.sign_pk, &n.m, rk.ctr, &entry, Content::Body(&entry.body))).frame
 }
 
 /// A `ctl` frame of hand-made items by any author, under `n`'s current epoch.
@@ -394,9 +394,11 @@ fn fake_keys_signatures_wraps_and_aead_follow_the_table() {
     assert_eq!(w[80..], tag[..16]);
     let commit = commitment(&board_id, 2, &root);
     assert_eq!(commit, sha(&[b"FAKE-EPOCH", &board_id, &[0, 0, 0, 2], &root]));
-    assert_eq!(unwrap(&w, &p, 2, &commit, &board_id), Some(root));
-    assert_eq!(unwrap(&w, &s, 2, &commit, &board_id), None);
-    assert_eq!(unwrap(&w, &p, 2, &[0; 32], &board_id), None);
+    assert_eq!(unwrap(&w, &[0x10; 16], &p, 2, &commit, &board_id), Some(root));
+    assert_eq!(unwrap(&w, &[0x10; 16], &s, 2, &commit, &board_id), None);
+    assert_eq!(unwrap(&w, &[0x10; 16], &p, 2, &[0; 32], &board_id), None);
+    // A wrap opens only for its own recipient id (`seal.md` §7).
+    assert_eq!(unwrap(&w, &[0x11; 16], &p, 2, &commit, &board_id), None);
 
     let k = entry_key(&board_id, 1, &root);
     assert_eq!(k, sha(&[b"FAKE-KEY", &board_id, &[0, 0, 0, 1], &root]));
@@ -470,10 +472,9 @@ fn payload_encodings_have_the_fixed_layouts() {
         (Item::Upgrade { rules: 2, mode: 2 }, "0a0000000202".into()),
         (Item::Revoked([0x66; 16]), format!("03{}", "66".repeat(16))),
         (Item::Reinstated([0x66; 16]), format!("04{}", "66".repeat(16))),
-        (Item::Recovery { mode: 4, keys: None }, "0604".into()),
         (
-            Item::Recovery { mode: 2, keys: Some(([0x01; 32], [0x02; 32])) },
-            format!("0602{}{}", "01".repeat(32), "02".repeat(32)),
+            Item::Recovery { sign_pk: [0x01; 32], hpke_pk: [0x02; 32] },
+            format!("06{}{}", "01".repeat(32), "02".repeat(32)),
         ),
         (
             Item::DeviceAdded {
@@ -505,6 +506,10 @@ fn payload_encodings_have_the_fixed_layouts() {
     }
     // Strict: no trailing bytes, counts from 1 to 16.
     assert!(parse_items(&unhex("0a000000020200")).is_none());
+    // Item 6 is the two keys and nothing else: the withdrawn mode byte makes it 65 bytes.
+    assert!(parse_items(&unhex(&format!("0106{}{}", "01".repeat(32), "02".repeat(32)))).is_some());
+    assert!(parse_items(&unhex(&format!("010601{}{}", "01".repeat(32), "02".repeat(32)))).is_none());
+    assert!(parse_items(&unhex(&format!("0106{}", "01".repeat(32)))).is_none());
     assert!(parse_items(&unhex("00")).is_none());
     // Schema constraints (§12): a host of §5.4, rules above 1.
     assert!(parse_items(&unhex("01070d52454c41592e6578616d706c65010203040500000002")).is_none());
@@ -621,8 +626,8 @@ fn the_genesis_helper_draws_in_order_and_builds_seq_1() {
     want.extend_from_slice(&unhex(&format!("{z8}{z8}")));
     want.extend_from_slice(&unhex("01000000010101010100000001"));
     want.extend_from_slice(&unhex("05616c706861"));
-    // No pending recovery, override or reset; no skips; ctl_seqs = [1].
-    want.extend_from_slice(&unhex(&format!("000000{}{}{one8}", "00000000", "00000001")));
+    // No override or reset (no `pending_recovery` flag since the 2026-11-23 change); no skips; ctl_seqs = [1].
+    want.extend_from_slice(&unhex(&format!("0000{}{}{one8}", "00000000", "00000001")));
     assert_eq!(hex(&m1), hex(&want));
     assert_eq!(ok(n1.fake.membership_from_bytes(&m1)).to_bytes(), m1);
     let Some(Opened { items, .. }) = &r[0].opened else { panic!("opened") };
@@ -897,6 +902,8 @@ fn add_revoke_with_rotation_and_reinstate_with_missed_wraps() {
     assert_eq!(n1.fake.roots.keys().copied().collect::<Vec<_>>(), vec![5]);
 }
 
+/// A missed wrap (delivered outside an entry) that does not open halts on the rotation that sets its epoch.
+// spec: SEAL-WRAP-003
 #[test]
 fn a_missed_wrap_that_does_not_open_halts_on_the_rotation() {
     let (mut net, mut n1, mut n2) = two_devices();
@@ -914,6 +921,8 @@ fn a_missed_wrap_that_does_not_open_halts_on_the_rotation() {
     assert!(matches!(r.halt, Some(Halt::Commitment)));
 }
 
+/// A wrap inside a rotation whose root does not match `commit`: the commitment halt, for its recipient only.
+// spec: SEAL-WRAP-003
 #[test]
 fn an_own_wrap_that_does_not_match_the_commitment_halts_only_its_recipient() {
     let (mut net, mut n1, mut n2) = two_devices();
@@ -935,90 +944,149 @@ fn an_own_wrap_that_does_not_match_the_commitment_halts_only_its_recipient() {
     assert_eq!(n2.m.to_bytes(), n1.m.to_bytes());
 }
 
+/// The rotation item of an opened `ctl` payload's items.
+fn rotation_wrap_ids(payload: &[u8]) -> Vec<Dev> {
+    let c = parse_ctl(payload).expect("a ctl payload");
+    c.items
+        .iter()
+        .find_map(|i| if let Item::Rotated { wraps, .. } = i { Some(wraps.iter().map(first16_of).collect()) } else { None })
+        .expect("a rotation")
+}
+
 #[test]
-fn recovery_key_changes_direct_propose_confirm_and_cancel() {
+fn recovery_key_changes_only_by_the_current_recovery_identity() {
     let (mut net, mut n1, mut n2) = two_devices();
     let mut rk = recovery_of(&n1);
     let old_rk_dev = rk.dev;
 
-    // direct, by the current recovery identity: a K-shape entry wrapping to the new key.
+    // A device cannot change the recovery key: the row's author is R (`seal/ctl_author`).
     let (s2, p2) = public_keys(&[0x21; 32]);
-    let body = Body::Ctl(CtlIntent::RecoveryChange { mode: RecoveryMode::Direct, sign_pk: Some(s2), hpke_pk: Some(p2) });
-    let f = seal_as_recovery(&mut n1, &mut rk, &net, 1_500, body);
-    let rs = submit(&mut net, &mut [&mut n1, &mut n2], f);
+    let rot = |n: &Node, recipients: &BTreeMap<Dev, Hash32>| rotation_item(&n.m, 2, &[0x71; 32], recipients);
+    let mut to_new = recipients_of(&n1.m);
+    to_new.remove(&old_rk_dev);
+    to_new.insert(dev_r_of(&n1.fake.board_id, &s2), p2);
+    let items = [Item::Recovery { sign_pk: s2, hpke_pk: p2 }, rot(&n1, &to_new)];
+    let f = raw_own(&mut n1, &net, 1_000, &items);
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), refused(code::CTL_AUTHOR));
+    // By R, the change needs its rotation (shape K); a lone item is no shape.
+    rk.ctr += 1;
+    let f = raw_ctl(&mut n1, &rk.dev, &rk.sign_pk, rk.ctr, &net, 1_100, &items[..1]);
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), refused(code::CTL_SHAPE));
+    // A rotation that wraps to the old key after the change: `seal/ctl_wraps`.
+    rk.ctr += 1;
+    let stale_wraps = [items[0].clone(), rot(&n1, &recipients_of(&n1.m))];
+    let f = raw_ctl(&mut n1, &rk.dev, &rk.sign_pk, rk.ctr, &net, 1_200, &stale_wraps);
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), refused(code::CTL_WRAPS));
+    // Keys already recorded: a device's keys (`seal/ctl_duplicate_key`).
+    rk.ctr += 1;
+    let d2 = n1.m.device(&n2.dev()).expect("device 2").clone();
+    let mut to_d2 = recipients_of(&n1.m);
+    to_d2.remove(&old_rk_dev);
+    to_d2.insert(dev_r_of(&n1.fake.board_id, &d2.sign_pk), d2.hpke_pk);
+    let dup = [Item::Recovery { sign_pk: d2.sign_pk, hpke_pk: d2.hpke_pk }, rot(&n1, &to_d2)];
+    let f = raw_ctl(&mut n1, &rk.dev, &rk.sign_pk, rk.ctr, &net, 1_300, &dup);
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), refused(code::CTL_DUPLICATE_KEY));
+
+    // The K-shape entry the crate-private helper seals: the change, then a
+    // rotation wrapping to the current devices and the new key, not the old one.
+    rk.ctr += 1;
+    let entry = PlainEntry { entry_id: ok(n1.fake.new_entry_id()), at_ms: 1_500, based_on: net.head(), body: Body::Cmd(vec![]) };
+    let sealed = ok(n1.fake.seal_recovery_key_change(&n1.m, rk.ctr, &entry, (s2, p2)));
+    assert!(!sealed.keys_changed && n1.fake.pending.is_empty());
+    let rs = submit(&mut net, &mut [&mut n1, &mut n2], sealed.frame);
     assert_all(&rs, ACCEPT);
-    let s_direct = net.head().seq;
+    assert!(rs[0].keys_changed && rs[1].keys_changed);
+    let s_change = net.head().seq;
     let v = n2.fake.view(&n2.m);
     assert_eq!(v.recovery.len(), 2);
-    assert_eq!(v.recovery[0].until_seq, s_direct);
+    assert_eq!(v.recovery[0].until_seq, s_change);
+    assert_eq!((v.recovery[1].since_seq, v.recovery[1].until_seq, v.recovery[1].last_ctr), (s_change, 0, 0));
     assert_eq!(v.recovery_dev, dev_r_of(&n2.fake.board_id, &s2));
     assert_eq!(v.recovery_fp, key_fp(&s2, &p2));
     assert_eq!(n2.m.epoch, 2);
-    let Some(Opened { items, .. }) = &rs[1].opened else { panic!("opened") };
-    assert!(matches!(items.as_slice(), [CtlItem::RecoveryKeyChange { mode: RecoveryMode::Direct, key_fp: Some(_) }, CtlItem::EpochRotated { epoch: 2, purge_before: None }]));
+    let Some(Opened { items, payload, .. }) = &rs[1].opened else { panic!("opened") };
+    assert_eq!(
+        items,
+        &vec![CtlItem::RecoveryKeyChange { key_fp: key_fp(&s2, &p2) }, CtlItem::EpochRotated { epoch: 2, purge_before: None }]
+    );
+    let mut want: Vec<Dev> = vec![n1.dev(), n2.dev(), dev_r_of(&n1.fake.board_id, &s2)];
+    want.sort_unstable();
+    assert_eq!(rotation_wrap_ids(payload), want);
     // The retired key is refused from now on; the new one starts at counter 1.
-    let f = seal_as_recovery(&mut n1, &mut rk, &net, 1_600, Body::Ctl(CtlIntent::Fence { host: "a.example".into(), door: [0; 5], home_gen: 2 }));
+    let fence = || Body::Ctl(CtlIntent::Fence { host: "a.example".into(), door: [0; 5], home_gen: 2 });
+    let f = seal_as_recovery(&mut n1, &mut rk, &net, 1_600, fence());
     assert_eq!(outcome(&n2.classify(&net, net.next_seq(), &f)), refused(code::REVOKED_AUTHOR));
     let mut rk2 = Rk { dev: dev_r_of(&n2.fake.board_id, &s2), sign_pk: s2, ctr: 0 };
-    let f = seal_as_recovery(&mut n1, &mut rk2, &net, 1_700, Body::Ctl(CtlIntent::Fence { host: "a.example".into(), door: [0; 5], home_gen: 2 }));
+    let f = seal_as_recovery(&mut n1, &mut rk2, &net, 1_700, fence());
     assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
     assert_ne!(rk2.dev, old_rk_dev);
     // The recovery identity never authors a cmd.
     let f = seal_as_recovery(&mut n1, &mut rk2, &net, 1_800, Body::Cmd(vec![1]));
     assert_eq!(outcome(&n2.classify(&net, net.next_seq(), &f)), refused(code::NOT_AUTHORIZED));
+}
 
-    // propose by device 1; a second proposal; a confirm too early, by the proposer, then by device 2.
-    let (s3, p3) = public_keys(&[0x31; 32]);
-    let propose = |s, p| Body::Ctl(CtlIntent::RecoveryChange { mode: RecoveryMode::Propose, sign_pk: Some(s), hpke_pk: Some(p) });
-    let confirm = |s, p| Body::Ctl(CtlIntent::RecoveryChange { mode: RecoveryMode::Confirm, sign_pk: Some(s), hpke_pk: Some(p) });
-    let f = n1.seal(&net, 10 * DAY, propose(s3, p3)).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
-    let pending = n2.fake.view(&n2.m).pending_recovery.expect("pending");
-    assert_eq!((pending.proposer, pending.start_ms, pending.key_fp), (n1.dev(), 10 * DAY, key_fp(&s3, &p3)));
-    let f = n2.seal(&net, 10 * DAY, propose(s3, p3)).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), refused(code::CTL_PENDING));
-    let early = n2.seal(&net, 12 * DAY, confirm(s3, p3));
-    assert!(early.keys_changed);
-    let entry_id = ok(n2.fake.open_own(&n2.m, &early.frame));
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], early.frame), refused(code::CTL_WINDOW));
-    assert!(n2.fake.discard_pending(&entry_id));
-    assert!(!n2.fake.discard_pending(&entry_id));
-    let f = n1.seal(&net, 14 * DAY, confirm(s3, p3)).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), refused(code::CTL_AUTHOR));
-    let (s4, p4) = public_keys(&[0x41; 32]);
-    let f = n2.seal(&net, 14 * DAY, confirm(s4, p4)).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), refused(code::CTL_TARGET));
-    let f = n2.seal(&net, 13 * DAY + 1, confirm(s3, p3)).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
-    let v = n1.fake.view(&n1.m);
-    assert_eq!(v.recovery.len(), 3);
-    assert_eq!(v.recovery_dev, dev_r_of(&n1.fake.board_id, &s3));
-    assert!(v.pending_recovery.is_none());
-
-    // cancel: without a proposal, then after one; keys already recorded.
-    let cancel = || Body::Ctl(CtlIntent::RecoveryChange { mode: RecoveryMode::Cancel, sign_pk: None, hpke_pk: None });
-    let f = n1.seal(&net, 15 * DAY, cancel()).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), refused(code::CTL_NO_PENDING));
-    let f = n1.seal(&net, 15 * DAY, propose(s3, p3)).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), refused(code::CTL_DUPLICATE_KEY));
-    let f = n1.seal(&net, 15 * DAY, propose(s4, p4)).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
-    let f = n2.seal(&net, 15 * DAY, cancel()).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
-    assert!(n1.m.pending_recovery.is_none());
-    // Revoking the proposer clears its proposal (SEAL-MEM-025).
-    let f = n1.seal(&net, 16 * DAY, propose(s4, p4)).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
-    let body = Body::Ctl(CtlIntent::Rotate { revoke: vec![n1.dev()], reinstate: vec![], purge_before: None });
-    let f = n2.seal(&net, 16 * DAY, body).frame;
-    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
-    assert!(n2.m.pending_recovery.is_none());
-    assert_eq!(err_code(n2.fake.seal(&n2.m, 99, &PlainEntry {
-        entry_id: [0; 16],
-        at_ms: 0,
+#[test]
+fn the_recovery_helpers_seal_as_the_current_recovery_identity() {
+    let (mut net, mut n1, mut n2) = two_devices();
+    // `seal_as_recovery`: an R-shape revocation, as the current recovery identity of `m`.
+    let r = n1.m.current_recovery().expect("current").clone();
+    let entry = PlainEntry {
+        entry_id: ok(n1.fake.new_entry_id()),
+        at_ms: 2_000,
         based_on: net.head(),
-        body: Body::Ctl(CtlIntent::RecoveryChange { mode: RecoveryMode::Direct, sign_pk: None, hpke_pk: None }),
-    })), code::BAD_PAYLOAD);
+        body: Body::Ctl(CtlIntent::Rotate { revoke: vec![n2.dev()], reinstate: vec![], purge_before: None }),
+    };
+    let sealed = ok(n1.fake.seal_as_recovery(&n1.m, r.last_ctr + 1, &entry));
+    assert!(!sealed.keys_changed && n1.fake.pending.is_empty() && !n1.fake.sealed.contains_key(&(r.last_ctr + 1)));
+    assert_eq!(n1.fake.frame_author(&sealed.frame).ok(), Some((r.dev_r, r.last_ctr + 1)));
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], sealed.frame), ACCEPT);
+    assert_eq!(n1.m.device(&n2.dev()).map(|d| (d.current, d.status_by)), Some((false, r.dev_r)));
+    // A device revoked by the recovery identity cannot be reinstated by it (§13.6): no wraps either.
+    assert_eq!(err_code(n1.fake.reinstate_wraps(&n1.m, &n2.dev())), code::CTL_TARGET);
+    assert_eq!(err_code(n1.fake.reinstate_wraps(&n1.m, &n1.dev())), code::CTL_TARGET);
+    // Without a current recovery record (`M_0`) nothing is sealed.
+    assert_eq!(err_code(n1.fake.seal_as_recovery(&FakeMembership::default(), 1, &entry)), code::BAD_PAYLOAD);
+}
+
+#[test]
+fn reinstate_wraps_cover_the_missed_epochs_and_open_on_login() {
+    let (mut net, mut n1, mut n2) = two_devices();
+    // Device 1 revokes device 2 (epoch 2), rotates again (epoch 3).
+    let body = Body::Ctl(CtlIntent::Rotate { revoke: vec![n2.dev()], reinstate: vec![], purge_before: None });
+    let f = n1.seal(&net, 1_000, body).frame;
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
+    let f = n1.seal(&net, 2_000, Body::Ctl(CtlIntent::Rotate { revoke: vec![], reinstate: vec![], purge_before: None })).frame;
+    let s3 = net.push(f);
+    assert_eq!(outcome(&n1.deliver(&net, s3)), ACCEPT);
+    // The wraps of epochs 2 (the revoking rotation's) to 3 (the reinstating entry's), one draw each.
+    let before = n1.fake.rng.state;
+    let (first, wraps) = ok(n1.fake.reinstate_wraps(&n1.m, &n2.dev()));
+    assert_eq!(first, 2);
+    assert_eq!(wraps.len(), 2);
+    assert_eq!(n1.fake.rng.state, before.wrapping_add(0x9E37_79B9_7F4A_7C15_u64.wrapping_mul(8)));
+    assert_eq!(wraps[0], wrap(&n2.dev(), &n2.fake.hpke_pk, 2, &n1.fake.roots[&2]));
+    assert_eq!(wraps[1], wrap(&n2.dev(), &n2.fake.hpke_pk, 3, &n1.fake.roots[&3]));
+    // The recovery identity reinstates; device 2 takes the wraps at login and catches up.
+    let r = n1.m.current_recovery().expect("current").clone();
+    let entry = PlainEntry {
+        entry_id: ok(n1.fake.new_entry_id()),
+        at_ms: 3_000,
+        based_on: net.head(),
+        body: Body::Ctl(CtlIntent::Rotate { revoke: vec![], reinstate: vec![n2.dev()], purge_before: None }),
+    };
+    let f = ok(n1.fake.seal_as_recovery(&n1.m, r.last_ctr + 1, &entry)).frame;
+    let s4 = net.push(f);
+    assert_eq!(outcome(&n1.deliver(&net, s4)), ACCEPT);
+    // A wrap addressed to another recipient does not open (`seal.md` §7): `seal/commitment`.
+    let mut wrong = wraps.clone();
+    wrong[0][..16].copy_from_slice(&n1.dev());
+    assert_eq!(err_code(n2.fake.take_missed_wraps(&n2.m, first, &wrong)), code::COMMITMENT);
+    assert_eq!(n2.fake.take_missed_wraps(&n2.m, first, &wraps).ok(), Some(true));
+    for s in s3..=s4 {
+        assert_eq!(outcome(&n2.deliver(&net, s)), ACCEPT, "seq {s}");
+    }
+    assert_eq!(n2.m.to_bytes(), n1.m.to_bytes());
+    assert_eq!(n2.fake.roots, n1.fake.roots);
 }
 
 // ---------- refusals of the checks of §14.2, in order
@@ -1112,8 +1180,9 @@ fn every_step_of_14_2_refuses_with_its_code() {
     n2.retained_from = 1;
     // Step 15.
     let mut raw = raw_cmd(&n2, &net);
+    // A `cmd` payload is opaque to the sealer (SEAL-KIND-002): step 15 parses only ctl, beat and snap.
     raw.plain = plain(1, 5, &net.head(), b"");
-    assert_eq!(outcome(&n2.classify(&net, s, &raw_frame(&n2, &n1dev, &n1pk, 2, &raw))), refused(code::BAD_PAYLOAD));
+    assert_eq!(outcome(&n2.classify(&net, s, &raw_frame(&n2, &n1dev, &n1pk, 2, &raw))), ACCEPT);
     let beat = encode_beat(&beat_info(vec![2, 1])).expect("encodes");
     raw.plain = plain(3, 5, &net.head(), &beat);
     assert_eq!(outcome(&n2.classify(&net, s, &raw_frame(&n2, &n1dev, &n1pk, 2, &raw))), refused(code::BAD_PAYLOAD));
@@ -1146,8 +1215,8 @@ fn every_step_of_14_2_refuses_with_its_code() {
     let off = entry(Body::Cmd(vec![1]), Head { seq: 0, chain: [0; 32] });
     assert_eq!(err_code(n1.fake.seal(&n1.m, 51, &off)), code::BAD_PLAINTEXT);
     assert_eq!(err_code(n1.fake.seal(&n1.m, 0, &entry(Body::Cmd(vec![1]), net.head()))), code::FRAME_FORMAT);
-    // SEAL-FRAME-005: a counter already sealed returns the stored bytes.
-    let again = ok(n1.fake.seal(&n1.m, 50, &entry(Body::Cmd(vec![2]), net.head())));
+    // SEAL-FRAME-005: the same entry under a counter already sealed returns the stored bytes.
+    let again = ok(n1.fake.seal(&n1.m, 50, &fits));
     assert_eq!(h(&[&again.frame]), again.frame_hash);
     assert!(again.frame == fits_frame && !again.keys_changed);
     assert_eq!(err_code(n1.fake.frame_author(&good[..10])), code::FRAME_FORMAT);
@@ -1185,10 +1254,24 @@ fn epochs_old_stale_and_missing_roots() {
     assert_eq!(outcome(&n1.classify(&net, s, &stale_ctl)), refused(code::STALE_EPOCH));
     let stale_ok = stale(&mut n2, 3, Head { ..before_rotation }, Body::Cmd(vec![1]));
     n2.fake.sealed.remove(&ctr);
-    // ... nor after 30 days of log clock since the rotation.
-    let f = n1.seal(&net, 1_000 + 31 * DAY, Body::Cmd(vec![2])).frame;
+    // ... at exactly 30 days of log clock since the rotation it still is (§13.9 condition 4) ...
+    let f = n1.seal(&net, 1_000 + 30 * DAY, Body::Cmd(vec![2])).frame;
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
+    assert_eq!(outcome(&n1.classify(&net, net.next_seq(), &stale_ok)), ACCEPT);
+    // ... but not after more than 30 days.
+    let f = n1.seal(&net, 1_001 + 30 * DAY, Body::Cmd(vec![2])).frame;
     assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
     assert_eq!(outcome(&n1.classify(&net, net.next_seq(), &stale_ok)), refused(code::STALE_EPOCH));
+    // That condition is step 9's, before decryption (SEAL-RCPT-001, SEAL-MEM-018): a
+    // receiver without the root of E − 1 refuses the same, and a frame that would
+    // not open is `seal/stale_epoch`, not `seal/aead`.
+    let r1 = n1.fake.roots.remove(&1).expect("R_1");
+    assert_eq!(outcome(&n1.classify(&net, net.next_seq(), &stale_ok)), refused(code::STALE_EPOCH));
+    n1.fake.roots.insert(1, r1);
+    let (n2dev, n2pk) = (n2.dev(), n2.fake.sign_pk);
+    let garbage = Raw { ver: 1, suite: 1, epoch: 1, root: [0xEE; 32], plain: plain(1, 5, &before_rotation, b"x") };
+    let f = raw_frame(&n2, &n2dev, &n2pk, ctr, &garbage);
+    assert_eq!(outcome(&n1.classify(&net, net.next_seq(), &f)), refused(code::STALE_EPOCH));
 
     // Two rotations on, epoch 1 is old (step 9).
     let f = n1.seal(&net, 2_000 + 31 * DAY, rotate()).frame;
@@ -1204,6 +1287,10 @@ fn epochs_old_stale_and_missing_roots() {
     let e = PlainEntry { entry_id: [6; 16], at_ms: 0, based_on: net.head(), body: Body::Cmd(vec![1]) };
     assert_eq!(err_code(n1.fake.seal(&n1.m, 77, &e)), code::MISSING_ROOT);
     let f = cmd(&mut n2, &net, 3_000 + 31 * DAY);
+    assert_eq!(err_code(n1.try_classify(&net, net.next_seq(), &f, true)), code::MISSING_ROOT);
+    // A held root that does not match the commitment the membership records is
+    // the same local fault (`seal.md` §14.2, SEAL-KEY-013).
+    n1.fake.roots.insert(3, [0x33; 32]);
     assert_eq!(err_code(n1.try_classify(&net, net.next_seq(), &f, true)), code::MISSING_ROOT);
     assert_eq!(err_code(n1.fake.open_own(&m_epoch1, &f)), code::UNKNOWN_AUTHOR);
 }
@@ -1261,8 +1348,7 @@ fn control_items_refuse_with_their_codes() {
     check(&mut n1, &[Item::ResetTo { seq: s, state_hash: [0; 32], hash_version: 1 }], code::CTL_TARGET);
     check(&mut n1, &[Item::ResetTo { seq: 1, state_hash: [0; 32], hash_version: 1 }], code::CTL_TARGET);
     check(&mut n1, &[Item::ResetTo { seq: 2, state_hash: [0; 32], hash_version: 2 }], code::CTL_TARGET);
-    check(&mut n1, &[Item::Recovery { mode: 1, keys: Some((s3, p3)) }, rot(2)], code::CTL_AUTHOR);
-    check(&mut n1, &[Item::Recovery { mode: 3, keys: Some((s3, p3)) }, rot(2)], code::CTL_NO_PENDING);
+    check(&mut n1, &[Item::Recovery { sign_pk: s3, hpke_pk: p3 }, rot(2)], code::CTL_AUTHOR);
 
     // By the recovery identity: what it may not author (§13.12).
     let rkdev = rk.dev;
@@ -1274,7 +1360,7 @@ fn control_items_refuse_with_their_codes() {
     by_r(&mut n1, &[add(d3, s3, p3, 1)], code::CTL_AUTHOR);
     by_r(&mut n1, &[Item::ResetTo { seq: 2, state_hash: [0; 32], hash_version: 1 }], code::CTL_AUTHOR);
     by_r(&mut n1, &[Item::Upgrade { rules: 2, mode: 1 }], code::CTL_AUTHOR);
-    by_r(&mut n1, &[Item::Recovery { mode: 2, keys: Some((s3, p3)) }], code::CTL_AUTHOR);
+    by_r(&mut n1, &[Item::Recovery { sign_pk: s3, hpke_pk: p3 }], code::CTL_SHAPE);
     let mut purge = rot(2);
     if let Item::Rotated { purge_before, .. } = &mut purge {
         *purge_before = 1;
@@ -1350,6 +1436,61 @@ fn rules_upgrades_support_override_and_the_rules_halt() {
     assert_eq!(n1.m.rules, 2);
 }
 
+/// A fake that supports rules 2 treats version 2 as allowing exactly (1, 1)
+/// and state-hash version 1 (engine.md §6.3), where `seal.md` §14.3 allows
+/// no envelope above version 1.
+// spec: ENG-FAKE-003
+#[test]
+fn rules_above_1_allow_what_rules_1_allows() {
+    let (mut net, mut n1) = board();
+    n1.fake.set_supported_rules(&[1, 2]);
+    let f = n1.seal(&net, 1_000, Body::Beat(beat_info(vec![1, 2]))).frame;
+    assert_all(&submit(&mut net, &mut [&mut n1], f), ACCEPT);
+    let f = n1.seal(&net, 1_100, Body::Ctl(CtlIntent::RulesUpgrade { rules: 2, mode: UpgradeMode::Normal })).frame;
+    assert_all(&submit(&mut net, &mut [&mut n1], f), ACCEPT);
+    assert_eq!(n1.m.rules, 2);
+    // Under rules 2: a (1, 1) frame passes step 8 and is accepted; (2, 1) is `seal/bad_version`.
+    let f = cmd(&mut n1, &net, 1_200);
+    assert_all(&submit(&mut net, &mut [&mut n1], f), ACCEPT);
+    let (dev, pk) = (n1.dev(), n1.fake.sign_pk);
+    let mut raw = raw_cmd(&n1, &net);
+    raw.ver = 2;
+    let f = raw_frame(&n1, &dev, &pk, n1.ctr + 1, &raw);
+    assert_eq!(outcome(&n1.classify(&net, net.next_seq(), &f)), refused(code::BAD_VERSION));
+    // A device added under rules 2 records the envelopes and hash versions of rules 1.
+    let n2 = add_device(&mut net, &mut n1, &mut [], SEED2, 1_300);
+    let d2 = n1.m.device(&n2.dev()).expect("device 2");
+    assert_eq!((d2.rules.clone(), d2.envelopes.clone(), d2.hash_versions.clone()), (vec![2], vec![(1, 1)], vec![1]));
+    // A ResetTo with state-hash version 1 is allowed under rules 2, version 2 is not.
+    let f = raw_own(&mut n1, &net, 1_400, &[Item::ResetTo { seq: 5, state_hash: [0; 32], hash_version: 2 }]);
+    assert_all(&submit(&mut net, &mut [&mut n1], f), refused(code::CTL_TARGET));
+    let f = raw_own(&mut n1, &net, 1_500, &[Item::ResetTo { seq: 5, state_hash: [0; 32], hash_version: 1 }]);
+    assert_all(&submit(&mut net, &mut [&mut n1], f), ACCEPT);
+}
+
+#[test]
+fn forged_frames_reach_the_steps_a_sealed_frame_cannot_fail() {
+    let (net, mut n1, n2) = two_devices();
+    let s = net.next_seq();
+    let (dev, pk) = (n2.dev(), n2.fake.sign_pk);
+    let p = FakeSealer::plaintext_bytes(&[1; 16], 1, 5, &net.head(), b"x").expect("fits");
+    // A forged frame with the right fields is a sealed one, nonce apart.
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 1, None, &p))), ACCEPT);
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 2, 1, None, &p))), refused(code::BAD_VERSION));
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 2, None, &p))), refused(code::BAD_EPOCH));
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 1, Some([9; 32]), &p))), refused(code::AEAD));
+    let mut bad = p.clone();
+    let last = bad.len() - 1;
+    bad[last] = 1;
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 1, None, &bad))), refused(code::BAD_PLAINTEXT));
+    let mut kind = p.clone();
+    kind[16] = 5;
+    assert_eq!(outcome(&n1.classify(&net, s, &n1.fake.forge_frame(&dev, &pk, 1, 1, 1, None, &kind))), refused(code::BAD_PLAINTEXT));
+    assert!(FakeSealer::plaintext_bytes(&[1; 16], 1, 5, &net.head(), &vec![0; 257_980]).is_none());
+    n1.fake.roots.clear();
+    assert_eq!(n1.fake.forge_frame(&dev, &pk, 1, 1, 1, None, &p), n1.fake.forge_frame(&dev, &pk, 1, 1, 1, Some([0; 32]), &p));
+}
+
 #[test]
 fn skips_need_their_target_frames() {
     let (mut net, mut n1, mut n2) = two_devices();
@@ -1407,18 +1548,17 @@ fn the_device_and_recovery_caps() {
 
     // 64 recovery records at most (`seal/ctl_cap`).
     let (mut net, mut n1) = board();
-    let mut rk = recovery_of(&n1);
+    let change = |n1: &mut Node, net: &Net, key: [u8; 32]| {
+        let ctr = n1.m.current_recovery().map_or(0, |r| r.last_ctr) + 1;
+        let entry = PlainEntry { entry_id: ok(n1.fake.new_entry_id()), at_ms: 10, based_on: net.head(), body: Body::Cmd(vec![]) };
+        ok(n1.fake.seal_recovery_key_change(&n1.m, ctr, &entry, public_keys(&key))).frame
+    };
     for i in 0..63u8 {
-        let (s, p) = public_keys(&[i; 32]);
-        let body = Body::Ctl(CtlIntent::RecoveryChange { mode: RecoveryMode::Direct, sign_pk: Some(s), hpke_pk: Some(p) });
-        let f = seal_as_recovery(&mut n1, &mut rk, &net, 10, body);
+        let f = change(&mut n1, &net, [i; 32]);
         assert_all(&submit(&mut net, &mut [&mut n1], f), ACCEPT);
-        rk = Rk { dev: dev_r_of(&n1.fake.board_id, &s), sign_pk: s, ctr: 0 };
     }
     assert_eq!(n1.m.recovery.len(), 64);
-    let (s, p) = public_keys(&[0xF0; 32]);
-    let body = Body::Ctl(CtlIntent::RecoveryChange { mode: RecoveryMode::Direct, sign_pk: Some(s), hpke_pk: Some(p) });
-    let f = seal_as_recovery(&mut n1, &mut rk, &net, 10, body);
+    let f = change(&mut n1, &net, [0xF0; 32]);
     assert_all(&submit(&mut net, &mut [&mut n1], f), refused(code::CTL_CAP));
     assert_eq!(n1.m.epoch, 64);
 }
@@ -1444,9 +1584,9 @@ fn the_membership_parser_is_strict() {
     let mut swapped = n1.m.clone();
     swapped.devices.reverse();
     assert_eq!(reject(&swapped.to_bytes()), code::MEMBERSHIP_FORMAT);
-    // A flag other than 0 or 1: the pending_recovery flag sits after the device records.
-    let flags_at = bytes.len() - 2 * 8 - 4 - 4 - 3;
-    assert_eq!(&bytes[flags_at..flags_at + 3], &[0, 0, 0]);
+    // A flag other than 0 or 1: the pending_override flag sits after the device records.
+    let flags_at = bytes.len() - 2 * 8 - 4 - 4 - 2;
+    assert_eq!(&bytes[flags_at..flags_at + 2], &[0, 0]);
     let mut flag = bytes.clone();
     flag[flags_at] = 2;
     assert_eq!(reject(&flag), code::MEMBERSHIP_FORMAT);
@@ -1456,6 +1596,225 @@ fn the_membership_parser_is_strict() {
     r.since_seq = 5;
     two.recovery.push(r);
     assert_eq!(reject(&two.to_bytes()), code::MEMBERSHIP_FORMAT);
+}
+
+#[test]
+fn the_membership_parser_refuses_states_no_log_produces() {
+    let (_net, n1, _n2) = two_devices();
+    let m = n1.m.clone();
+    let reject = |x: &FakeMembership| err_code(n1.fake.membership_from_bytes(&x.to_bytes()));
+    assert_eq!(reject(&m), "ok");
+    let mut bad = Vec::new();
+    // `M_0` is exactly the all-zero state; any other state with epoch 0 is no state.
+    bad.push(("epoch 0, not M_0", FakeMembership { rules: 1, ..FakeMembership::default() }));
+    // Commitments other than exactly those of the epochs 1 to `epoch`.
+    let mut x = m.clone();
+    x.epoch = 2;
+    bad.push(("a missing commitment", x));
+    // Another number of current recovery records than one.
+    let mut x = m.clone();
+    x.recovery[0].until_seq = 2;
+    bad.push(("no current recovery record", x));
+    // A recovery `dev` that is not the `dev_R` of its key.
+    let mut x = m.clone();
+    x.recovery[0].dev_r[0] ^= 1;
+    bad.push(("a wrong dev_R", x));
+    // An `until_seq` that is not the next record's `since_seq`.
+    let mut x = m.clone();
+    let (s2, p2) = public_keys(&[0x77; 32]);
+    x.recovery[0].until_seq = 3;
+    x.recovery.push(RecRec { dev_r: dev_r_of(&x.board_id, &s2), sign_pk: s2, hpke_pk: p2, since_seq: 4, until_seq: 0, last_ctr: 0 });
+    bad.push(("a broken recovery chain", x.clone()));
+    x.recovery[0].until_seq = 4;
+    assert_eq!(reject(&x), "ok");
+    // An id twice (a device's `dev` equal to a `dev_R`), a `device_no` twice or at `next_device_no`.
+    let mut x = m.clone();
+    let dev_r = x.recovery[0].dev_r;
+    x.devices[0].dev = dev_r;
+    x.devices.sort_by_key(|d| d.dev);
+    bad.push(("an id twice", x));
+    let mut x = m.clone();
+    x.devices[0].device_no = x.devices[1].device_no;
+    bad.push(("a device_no twice", x));
+    let mut x = m.clone();
+    x.next_device_no = 2;
+    bad.push(("a device_no at next_device_no", x));
+    // A `board_id` that the first recovery key and the salt do not give.
+    let mut x = m.clone();
+    x.salt[0] ^= 1;
+    bad.push(("another salt", x));
+    // A `home_host` outside §5.4, a name outside §5.5.
+    let mut x = m.clone();
+    x.home_host = "Relay.example".into();
+    bad.push(("a bad host", x));
+    let mut x = m.clone();
+    x.devices[0].name = "a\u{7}b".into();
+    bad.push(("a bad name", x));
+    for (what, x) in bad {
+        assert_eq!(reject(&x), code::MEMBERSHIP_FORMAT, "{what}");
+    }
+}
+
+#[test]
+fn seq_1_is_classified_from_m_0_whatever_membership_is_passed() {
+    let (fake, frame, _board) = FakeSealer::create(SEED1, "alpha");
+    let mut a = Node::new(fake);
+    let mut net = Net::new(&a.fake.board_id);
+    let s = net.push(frame.clone());
+    let clean = a.classify(&net, s, &frame);
+    let (_n, n1, _n2) = two_devices();
+    a.m = n1.m.clone();
+    let junk = a.classify(&net, s, &frame);
+    assert_eq!(outcome(&junk), ACCEPT);
+    assert_eq!(junk.membership, clean.membership);
+    // A refused seq 1 leaves `M_0`, not what was passed (§13.5).
+    let mut broken = frame.clone();
+    let at = broken.len() - 64 - 20;
+    broken[at] ^= 1;
+    let resigned = {
+        let f = parse_frame(&broken).expect("a frame");
+        let rsign_pk = a.fake.anchor.as_ref().expect("anchor").rsign_pk;
+        let mut out = f.signed_prefix.to_vec();
+        out.extend_from_slice(&sign(&rsign_pk, &frame_signed(f.signed_prefix)));
+        out
+    };
+    let r = a.classify(&net, s, &resigned);
+    assert_eq!(outcome(&r), refused(code::AEAD));
+    assert_eq!(r.membership, FakeMembership::default());
+}
+
+#[test]
+fn a_skip_target_shorter_than_an_author_has_none() {
+    let (mut net, mut n1, mut n2) = two_devices();
+    // A relay sequences 10 bytes: every device skips them (`seal/frame_format`).
+    let junk = vec![0xAB; 10];
+    let rs = submit(&mut net, &mut [&mut n1, &mut n2], junk.clone());
+    assert_all(&rs, ("skip", Some(code::FRAME_FORMAT)));
+    let t = net.head().seq;
+    // A device may skip it: its author check passes (`seal.md` §14.6).
+    let f = n1.seal(&net, 100, Body::Ctl(CtlIntent::Skip { targets: vec![(t, h(&[&junk]))] })).frame;
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
+    assert_eq!(n1.m.skips, vec![(t, h(&[&junk]))]);
+}
+
+#[test]
+fn a_snapshot_history_runs_the_rows_of_13_6_whole() {
+    let (_net, n1, _n2) = two_devices();
+    let held = n1.fake.history.borrow().clone();
+    let records: Vec<Vec<u8>> = held.values().cloned().collect();
+    let replay = |records: &[Vec<u8>]| {
+        let mut p = Projection::default();
+        for bytes in records {
+            let mut r = Reader::new(bytes);
+            let rec = read_hist(&mut r)?;
+            p.step(&n1.fake.board_id, &rec)?;
+        }
+        Some(p)
+    };
+    let p = replay(&records).expect("the board's history verifies");
+    assert!(p.agrees(&n1.m));
+    let (dev1, pk1) = (n1.dev(), n1.fake.sign_pk);
+    let record = |seq: u64, dev: &Dev, pk: &Hash32, ctr: u64, items: &[Item]| {
+        let items = encode_items(items).expect("encodes");
+        let entry_id = [9; 16];
+        let sig = sign(pk, &ctl_inner(&n1.fake.board_id, dev, ctr, &entry_id, 50, &items));
+        HistRec { seq, dev: *dev, ctr, entry_id, at_ms: 50, frame_hash: [0; 32], items: &items, sig: &sig }.to_bytes()
+    };
+    // A rotation whose wraps do not name the current devices and the recovery
+    // key: the row of EpochRotated (`seal/ctl_wraps`) runs whole in the projection.
+    let mut recipients = recipients_of(&n1.m);
+    let good = rotation_item(&n1.m, 2, &[0x44; 32], &recipients);
+    let mut ok_history = records.clone();
+    ok_history.push(record(3, &dev1, &pk1, 2, std::slice::from_ref(&good)));
+    assert!(replay(&ok_history).is_some());
+    recipients.insert([0xEE; 16], [0; 32]);
+    let wrong = rotation_item(&n1.m, 2, &[0x44; 32], &recipients);
+    let mut bad = records.clone();
+    bad.push(record(3, &dev1, &pk1, 2, &[wrong]));
+    assert!(replay(&bad).is_none());
+    // A DeviceAdded whose keys are recorded (`seal/ctl_duplicate_key`).
+    let d1 = n1.m.device(&dev1).expect("device 1").clone();
+    let dup = Item::DeviceAdded { dev: [0x31; 16], sign_pk: d1.sign_pk, hpke_pk: [0x32; 32], name: "x".into(), transcript: [0; 32], bootstrap_seq: 1 };
+    let mut bad = records.clone();
+    bad.push(record(3, &dev1, &pk1, 2, &[dup]));
+    assert!(replay(&bad).is_none());
+    // The first record's counter is 1 (projection step 3).
+    let g = held.get(&1).expect("seq 1").clone();
+    let mut r = Reader::new(&g);
+    let rec = read_hist(&mut r).expect("a record");
+    let items = parse_items(rec.items).expect("items");
+    let rsign_pk = n1.m.recovery[0].sign_pk;
+    let mut bad = vec![record(1, &rec.dev, &rsign_pk, 2, &items)];
+    bad.extend_from_slice(&records[1..]);
+    assert!(replay(&bad).is_none());
+    let mut same = vec![record(1, &rec.dev, &rsign_pk, 1, &items)];
+    same.extend_from_slice(&records[1..]);
+    assert!(replay(&same).is_some());
+}
+
+#[test]
+fn snapshots_check_the_state_hash_and_the_history_bounds() {
+    let (net, mut n1, n2) = two_devices();
+    let material = material_at(&n1, &net);
+    let info = |b: &SealedBlob, m: &SnapshotMaterial| SnapInfo {
+        seq: m.seq,
+        hash: m.state_hash,
+        hash_version: m.hash_version,
+        blob: b.id,
+        sha256: b.sha256,
+        size: b.bytes.len() as u64,
+        parts: b.parts,
+        inflated: b.inflated,
+        epoch: b.epoch,
+    };
+    let w = n1.dev();
+    // A body whose board does not give its (signed) state hash: sealed, but
+    // refused by an exact opening, which recomputes it (§20.5 step 7).
+    let mut lying = material.clone();
+    lying.state_hash = [0x55; 32];
+    let blob = ok(n1.fake.seal_snapshot(&n1.m, &lying));
+    let i = info(&blob, &lying);
+    assert_eq!(err_code(n2.fake.open_snapshot(&[&blob.bytes], &i, &w, true)), code::BLOB_OPEN);
+    assert_eq!(err_code(n2.fake.open_snapshot(&[&blob.bytes], &i, &w, false)), "ok");
+    // A hash version the body states but that does not give its hash.
+    let mut v2 = material.clone();
+    v2.hash_version = 2;
+    let blob = ok(n1.fake.seal_snapshot(&n1.m, &v2));
+    assert_eq!(err_code(n2.fake.open_snapshot(&[&blob.bytes], &info(&blob, &v2), &w, true)), code::BLOB_OPEN);
+    let good = ok(n1.fake.seal_snapshot(&n1.m, &material));
+    assert_eq!(err_code(n2.fake.open_snapshot(&[&good.bytes], &info(&good, &material), &w, true)), "ok");
+    // Under 67 bytes no blob exists (`seal/blob_size`).
+    let mut tiny = info(&good, &material);
+    tiny.size = 66;
+    assert_eq!(err_code(n2.fake.open_snapshot(&[&good.bytes[..66]], &tiny, &w, true)), code::BLOB_SIZE);
+    // seal_snapshot refuses, before it draws, another board's membership and a
+    // history record above `S` (`seal/blob_open`).
+    let state = n1.fake.rng.state;
+    let mut below = material.clone();
+    below.seq = 1;
+    assert_eq!(err_code(n1.fake.seal_snapshot(&n1.m, &below)), code::BLOB_OPEN);
+    let (other, _, _) = FakeSealer::create(SEED_OTHER, "other");
+    let mut foreign = material.clone();
+    let mut m_other = FakeMembership::default();
+    let mut rec = other_board_node(other);
+    std::mem::swap(&mut m_other, &mut rec.m);
+    foreign.membership = m_other.to_bytes();
+    assert_eq!(err_code(n1.fake.seal_snapshot(&n1.m, &foreign)), code::BLOB_OPEN);
+    assert_eq!(n1.fake.rng.state, state);
+}
+
+/// A node on another board, its genesis classified.
+fn other_board_node(fake: FakeSealer) -> Node {
+    let mut n = Node::new(fake);
+    let (_, frame, _) = FakeSealer::create(SEED_OTHER, "other");
+    let net = {
+        let mut net = Net::new(&n.fake.board_id);
+        net.push(frame);
+        net
+    };
+    let r = n.deliver(&net, 1);
+    assert_eq!(outcome(&r), ACCEPT);
+    n
 }
 
 // ---------- snapshots (§20)
@@ -1494,9 +1853,10 @@ fn snapshots_refuse_with_the_codes_of_20_5() {
     let mut flipped = blob.bytes.clone();
     flipped[60] ^= 1;
     assert_eq!(open(&good, &[&flipped], &w, true), code::BLOB_HASH);
+    // The header's blob id is not compared with the reference's (§20.5 step 3).
     let mut i = info(&blob);
     i.blob = [0; 16];
-    assert_eq!(open(&i, &[&blob.bytes], &w, true), code::BLOB_HEADER);
+    assert_eq!(open(&i, &[&blob.bytes], &w, true), "ok");
     let mut i = info(&blob);
     i.epoch = 2;
     assert_eq!(open(&i, &[&blob.bytes], &w, true), code::BLOB_HEADER);
@@ -1573,6 +1933,391 @@ fn the_identity_export_holds_keys_roots_pending_roots_and_anchor() {
     assert_eq!(n1.fake.chain_step(&net.chains[0], 1, &net.frames[0]), net.chains[1]);
     assert_eq!(n1.fake.frame_hash(&net.frames[0]), sha(&[&net.frames[0]]));
 }
+
+// ---------- sealing a counter again, classifying again, restoring after a restart
+
+fn rotate_body() -> Body {
+    Body::Ctl(CtlIntent::Rotate { revoke: vec![], reinstate: vec![], purge_before: None })
+}
+
+/// SEAL-FRAME-005 as engine.md §11.3 step 3 and §11.4 meet it: the stored
+/// bytes answer only the same entry under the same epoch; another entry, or
+/// the same entry under a newer epoch, with a counter sealed before is sealed
+/// anew, and the new frame is the one a receiver accepts.
+// spec: SEAL-FRAME-005
+// spec: ENG-SEALER-005
+#[test]
+fn seal_returns_the_stored_frame_only_for_the_same_entry_and_epoch() {
+    let (mut net, mut n1, mut n2) = two_devices();
+    let ctr = n1.ctr + 1;
+    let e1 = PlainEntry { entry_id: [1; 16], at_ms: 100, based_on: net.head(), body: Body::Cmd(vec![1]) };
+    let first = ok(n1.fake.seal(&n1.m, ctr, &e1));
+    let state = n1.fake.rng.state;
+    let again = ok(n1.fake.seal(&n1.m, ctr, &e1));
+    assert_eq!((&again.frame, again.frame_hash, again.epoch, again.keys_changed), (&first.frame, first.frame_hash, 1, false));
+    assert_eq!(n1.fake.rng.state, state, "the stored bytes draw nothing");
+
+    // Each field of the entry changed: a new frame of that entry, under the same counter.
+    let earlier = Head { seq: 1, chain: net.chains[1] };
+    let variants = [
+        PlainEntry { entry_id: [2; 16], ..e1.clone() },
+        PlainEntry { at_ms: 101, ..e1.clone() },
+        PlainEntry { based_on: earlier, ..e1.clone() },
+        PlainEntry { body: Body::Beat(beat_info(vec![1])), ..e1.clone() },
+        PlainEntry { body: Body::Cmd(vec![2]), ..e1.clone() },
+    ];
+    let mut last = first.frame.clone();
+    for v in &variants {
+        let sealed = ok(n1.fake.seal(&n1.m, ctr, v));
+        assert_ne!(sealed.frame, last);
+        assert_eq!(ok(n1.fake.open_own(&n1.m, &sealed.frame)), v.entry_id);
+        assert_eq!(ok(n1.fake.frame_author(&sealed.frame)), (n1.dev(), ctr));
+        last = sealed.frame;
+    }
+    // The last sealing is the stored one; the receivers accept it.
+    let resealed = ok(n1.fake.seal(&n1.m, ctr, &variants[4]));
+    assert_eq!(resealed.frame, last);
+    n1.ctr = ctr;
+    n1.own.insert(ctr, resealed.frame_hash);
+    let rs = submit(&mut net, &mut [&mut n1, &mut n2], resealed.frame);
+    assert_all(&rs, ACCEPT);
+    assert!(!rs[0].own_dev_foreign);
+    assert_eq!(rs[1].opened.as_ref().map(|o| o.payload.clone()), Some(vec![2]));
+
+    // The same entry under a newer epoch: n1 seals X at its next counter, n2
+    // rotates the epoch before X reaches the relay, and X is sealed again.
+    let ctr = n1.ctr + 1;
+    let x = PlainEntry { entry_id: [3; 16], at_ms: 200, based_on: net.head(), body: Body::Cmd(vec![3]) };
+    let under_1 = ok(n1.fake.seal(&n1.m, ctr, &x));
+    assert_eq!(under_1.epoch, 1);
+    let f = n2.seal(&net, 300, rotate_body()).frame;
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
+    assert_eq!(n1.m.epoch, 2);
+    let under_2 = ok(n1.fake.seal(&n1.m, ctr, &x));
+    assert_eq!(under_2.epoch, 2);
+    assert_ne!(under_2.frame, under_1.frame);
+    n1.ctr = ctr;
+    n1.own.insert(ctr, under_2.frame_hash);
+    let rs = submit(&mut net, &mut [&mut n1, &mut n2], under_2.frame);
+    assert_all(&rs, ACCEPT);
+    assert!(!rs[0].own_dev_foreign);
+
+    // A rotation whose pending root was discarded, asked again for the same
+    // entry: the stored bytes; accepting them gives the root by the own wrap.
+    let ctr = n1.ctr + 1;
+    let r = PlainEntry { entry_id: [4; 16], at_ms: 400, based_on: net.head(), body: rotate_body() };
+    let sealed = ok(n1.fake.seal(&n1.m, ctr, &r));
+    assert!(sealed.keys_changed && sealed.epoch == 2);
+    assert!(n1.fake.discard_pending(&r.entry_id));
+    let again = ok(n1.fake.seal(&n1.m, ctr, &r));
+    assert!(again.frame == sealed.frame && !again.keys_changed && n1.fake.pending.is_empty());
+    n1.ctr = ctr;
+    n1.own.insert(ctr, again.frame_hash);
+    let rs = submit(&mut net, &mut [&mut n1, &mut n2], again.frame);
+    assert_all(&rs, ACCEPT);
+    assert!(rs[0].keys_changed && n1.fake.roots.contains_key(&3));
+    assert_eq!(n1.fake.roots.get(&3), n2.fake.roots.get(&3));
+}
+
+/// One classification: the seq, the membership it was classified from, the receipt.
+type Rec = (u64, FakeMembership, Receipt<FakeMembership>);
+
+/// Appends `frame` and delivers it to each node, recording each classification.
+fn submit_rec(net: &mut Net, nodes: &mut [&mut Node], recs: &mut [Vec<Rec>], frame: Vec<u8>) -> u64 {
+    let s = net.push(frame);
+    for (n, rec) in nodes.iter_mut().zip(recs.iter_mut()) {
+        let before = n.m.clone();
+        let r = n.deliver(net, s);
+        rec.push((s, before, r));
+    }
+    s
+}
+
+fn but_keys_changed(r: &Receipt<FakeMembership>) -> Receipt<FakeMembership> {
+    Receipt { keys_changed: false, ..r.clone() }
+}
+
+/// Classifies each of `seqs` again from the membership recorded for it.
+fn classify_again(n: &mut Node, net: &Net, recs: &[Rec], seqs: impl IntoIterator<Item = u64>) {
+    for s in seqs {
+        let (_, before, want) = recs.iter().find(|x| x.0 == s).expect("a recorded seq");
+        n.m = before.clone();
+        let got = n.deliver(net, s);
+        assert_eq!(but_keys_changed(&got), but_keys_changed(want), "seq {s}");
+        assert!(!got.keys_changed || want.keys_changed, "seq {s}: nothing new to learn");
+    }
+}
+
+/// `classify` called again for seqs it classified before, with the same inputs
+/// (a restart that classifies the log above the checkpoint again, ENG-STATE-002;
+/// a replay after a Skip or a ResetTo): the same receipt apart from
+/// `keys_changed`, no second history record, no failure for an own rotation's
+/// pending root already gone or a root already known, and the calls may go
+/// back to a lower seq and forward again.
+// spec: ENG-SEALER-001
+// spec: ENG-SEALER-009
+// spec: ENG-STATE-002
+#[test]
+fn classifying_a_seq_again_gives_the_same_receipt() {
+    let (mut net, mut n1, mut n2) = two_devices();
+    let mut recs = [Vec::new(), Vec::new()];
+    let f = n1.seal(&net, 100, rotate_body());
+    assert!(f.keys_changed && n1.fake.pending.len() == 1);
+    let s_rot = submit_rec(&mut net, &mut [&mut n1, &mut n2], &mut recs, f.frame);
+    assert!(recs[0][0].2.keys_changed && n1.fake.pending.is_empty());
+    let f = cmd(&mut n2, &net, 200);
+    let t_hash = h(&[&f]);
+    let t = submit_rec(&mut net, &mut [&mut n1, &mut n2], &mut recs, f.clone());
+    let skip = Body::Ctl(CtlIntent::Skip { targets: vec![(t, t_hash)] });
+    let f2 = n1.seal(&net, 300, skip).frame;
+    submit_rec(&mut net, &mut [&mut n1, &mut n2], &mut recs, f2);
+    let fence = Body::Ctl(CtlIntent::Fence { host: "b.example".into(), door: [0; 5], home_gen: 2 });
+    let f2 = n1.seal(&net, 400, fence).frame;
+    submit_rec(&mut net, &mut [&mut n1, &mut n2], &mut recs, f2);
+    let reset = Body::Ctl(CtlIntent::ResetTo { seq: 2, state_hash: [0xCD; 32], hash_version: 1 });
+    let f2 = n1.seal(&net, 500, reset).frame;
+    submit_rec(&mut net, &mut [&mut n1, &mut n2], &mut recs, f2);
+    let f2 = n2.seal(&net, 600, rotate_body()).frame;
+    submit_rec(&mut net, &mut [&mut n1, &mut n2], &mut recs, f2);
+    // The cmd again, at a new seq: a replayed counter (Tamper).
+    submit_rec(&mut net, &mut [&mut n1, &mut n2], &mut recs, f);
+    let f2 = cmd(&mut n1, &net, 700);
+    let last = submit_rec(&mut net, &mut [&mut n1, &mut n2], &mut recs, f2);
+    for rec in &recs {
+        let got: Vec<_> = rec.iter().map(|(_, _, r)| outcome(r)).collect();
+        let tamper = ("tamper", Some(code::COUNTER_REPLAY));
+        assert_eq!(got, vec![ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, ACCEPT, tamper, ACCEPT]);
+    }
+    let (m1, m2) = (n1.m.clone(), n2.m.clone());
+    let (h1, h2) = (n1.fake.history(), n2.fake.history());
+    assert_eq!(h1.len(), 7);
+    let (roots1, roots2) = (n1.fake.roots.clone(), n2.fake.roots.clone());
+
+    for (n, rec, m, hist, roots) in [(&mut n1, &recs[0], &m1, &h1, &roots1), (&mut n2, &recs[1], &m2, &h2, &roots2)] {
+        // The whole tail again, then back to a lower seq and forward, then from the rotation once more.
+        classify_again(n, &net, rec, s_rot..=last);
+        classify_again(n, &net, rec, t + 2..=last);
+        classify_again(n, &net, rec, t..=t + 1);
+        classify_again(n, &net, rec, t + 1..=last);
+        classify_again(n, &net, rec, [s_rot, s_rot, t, s_rot]);
+        classify_again(n, &net, rec, s_rot + 1..=last);
+        assert_eq!(&n.m, m);
+        assert_eq!(&n.fake.history(), hist, "one history record per control entry, unchanged");
+        assert_eq!(&n.fake.roots, roots);
+        assert!(n.fake.pending.is_empty());
+    }
+
+    // The genesis and the AddDevice again, from `M_0` and from `M_1`.
+    let m_0 = n1.fake.membership_zero();
+    assert_eq!(m_0, FakeMembership::default());
+    n1.m = m_0;
+    let r1 = n1.deliver(&net, 1);
+    assert_eq!(outcome(&r1), ACCEPT);
+    let r2 = n1.deliver(&net, 2);
+    assert_eq!(outcome(&r2), ACCEPT);
+    assert_eq!(r2.membership, recs[0][0].1);
+    assert_eq!(n1.fake.history(), h1);
+}
+
+/// Classifies the log's frames `from..=to` on `n`, keeping each membership.
+fn deliver_range(n: &mut Node, net: &Net, from: u64, to: u64) -> Vec<Receipt<FakeMembership>> {
+    (from..=to).map(|s| n.deliver(net, s)).collect()
+}
+
+/// A node with the fake that `restore` rebuilds from `n`'s identity and history,
+/// and `n`'s engine-side state (membership, counter, own frames).
+fn restored(n: &Node, reseed: u64, rules: &[u32]) -> Node {
+    let id = n.fake.export_identity();
+    let fake = ok(FakeSealer::restore(&id, n.fake.history(), reseed, rules));
+    Node { fake, m: n.m.clone(), ctr: n.ctr, own: n.own.clone(), retained_from: n.retained_from }
+}
+
+/// engine.md §31.4: a fake restored from `export_identity()` and `history()`
+/// holds the same keys, roots, pending roots, anchor and history, draws from
+/// the new seed, and classifies, seals, opens and seals snapshots as the live one.
+// spec: ENG-SEALER-004
+// spec: ENG-SEALER-009
+// spec: ENG-FAKE-002
+#[test]
+fn a_restored_fake_works_as_the_live_one() {
+    let (mut net, mut n1, mut n2) = two_devices();
+    // n1 has sealed a rotation that is not yet classified: its pending root is in the identity.
+    let f = n1.seal(&net, 100, rotate_body()).frame;
+    let mut b = restored(&n1, 0xB0B0, &[1, 2]);
+    assert_eq!(b.fake.export_identity().to_vec(), n1.fake.export_identity().to_vec());
+    assert_eq!(b.fake.history(), n1.fake.history());
+    assert_eq!(b.fake.pending, n1.fake.pending);
+    assert_eq!(b.fake.supported_rules, vec![1, 2]);
+    assert!(b.fake.sealed.is_empty() && b.fake.missed.is_empty());
+    // The new generator: not the old one's values.
+    let mut g = SplitMix64 { state: 0xB0B0 };
+    assert_eq!(ok(b.fake.new_entry_id()), draw::<16>(&mut g));
+    let mut b = restored(&n1, 0xB0B0, &[1]);
+
+    // Classification: the same receipts, keys_changed included (the pending root goes).
+    let rs = submit(&mut net, &mut [&mut n1, &mut n2, &mut b], f);
+    assert_all(&rs, ACCEPT);
+    assert_eq!(rs[0], rs[2]);
+    assert!(rs[2].keys_changed && b.fake.pending.is_empty());
+    let f = cmd(&mut n2, &net, 200);
+    let rs = submit(&mut net, &mut [&mut n1, &mut n2, &mut b], f);
+    assert_eq!(rs[0], rs[2]);
+    assert_eq!(b.fake.export_identity().to_vec(), n1.fake.export_identity().to_vec());
+
+    // Sealing: other random values, the same entry; both open and classify alike.
+    let ctr = n1.ctr + 1;
+    let e = PlainEntry { entry_id: [9; 16], at_ms: 300, based_on: net.head(), body: Body::Cmd(vec![4, 5]) };
+    let live = ok(n1.fake.seal(&n1.m, ctr, &e));
+    let other = ok(b.fake.seal(&b.m, ctr, &e));
+    assert_ne!(live.frame, other.frame);
+    assert_eq!((live.epoch, live.keys_changed), (other.epoch, other.keys_changed));
+    assert_eq!(ok(n1.fake.open_own(&n1.m, &other.frame)), e.entry_id);
+    assert_eq!(ok(b.fake.open_own(&b.m, &live.frame)), e.entry_id);
+    let (s, a1, a2) = (net.next_seq(), n2.classify(&net, net.next_seq(), &live.frame), n2.classify(&net, net.next_seq(), &other.frame));
+    assert_eq!((outcome(&a1), outcome(&a2)), (ACCEPT, ACCEPT));
+    assert_eq!(a1.opened, a2.opened);
+    assert_eq!(a1.membership, a2.membership);
+    for n in [&mut n1, &mut b] {
+        n.ctr = ctr;
+        n.own.insert(ctr, other.frame_hash);
+    }
+    let rs = submit(&mut net, &mut [&mut n1, &mut n2, &mut b], other.frame);
+    assert_eq!(s, net.head().seq);
+    assert_eq!(rs[0], rs[2]);
+    assert!(!rs[0].own_dev_foreign);
+    // A rotation sealed by each: the same keys_changed, and each one's pending root.
+    let ctr = n1.ctr + 1;
+    let r = PlainEntry { entry_id: [8; 16], at_ms: 400, based_on: net.head(), body: rotate_body() };
+    let (live, other) = (ok(n1.fake.seal(&n1.m, ctr, &r)), ok(b.fake.seal(&b.m, ctr, &r)));
+    assert!(live.keys_changed && other.keys_changed);
+    assert!(n1.fake.discard_pending(&r.entry_id) && b.fake.discard_pending(&r.entry_id));
+
+    // Snapshots: each opens the other's, and both carry the same history.
+    let material = material_at(&n1, &net);
+    let blob_a = ok(n1.fake.seal_snapshot(&n1.m, &material));
+    let blob_b = ok(b.fake.seal_snapshot(&b.m, &material));
+    assert_ne!(blob_a.bytes, blob_b.bytes);
+    assert_eq!((blob_a.inflated, blob_a.epoch, blob_a.parts), (blob_b.inflated, blob_b.epoch, blob_b.parts));
+    for (blob, opener) in [(&blob_a, &b), (&blob_b, &n1)] {
+        let info = SnapInfo {
+            seq: material.seq,
+            hash: material.state_hash,
+            hash_version: 1,
+            blob: blob.id,
+            sha256: blob.sha256,
+            size: blob.bytes.len() as u64,
+            parts: blob.parts,
+            inflated: blob.inflated,
+            epoch: blob.epoch,
+        };
+        let (m, epoch, inflated) = ok(opener.fake.open_snapshot(&[&blob.bytes], &info, &n1.dev(), true));
+        assert_eq!((m, epoch, inflated), (material.clone(), blob.epoch, blob.inflated));
+    }
+    assert_eq!(b.fake.history(), n1.fake.history());
+
+    // A joined device (no anchor) restores too, and classifies what follows alike.
+    let mut c = restored(&n2, 0xC0C0, &[1]);
+    assert_eq!(c.fake.export_identity().to_vec(), n2.fake.export_identity().to_vec());
+    let f = cmd(&mut n1, &net, 500);
+    b.ctr += 1;
+    b.own.insert(b.ctr, h(&[&f]));
+    let rs = submit(&mut net, &mut [&mut n1, &mut n2, &mut b, &mut c], f);
+    assert_all(&rs, ACCEPT);
+    assert_eq!((&rs[0], &rs[1]), (&rs[2], &rs[3]));
+}
+
+/// A restart in the middle: the fake restored from an older identity and its
+/// history classifies the log above that point again, as the live one did.
+// spec: ENG-STATE-002
+// spec: ENG-SEALER-009
+#[test]
+fn a_restored_fake_classifies_the_tail_again() {
+    let (mut net, mut n1, mut n2) = two_devices();
+    let (b_seq, b_m) = (net.head().seq, n1.m.clone());
+    // n1 has sealed a rotation (a pending root) when its identity is saved.
+    let f = n1.seal(&net, 100, rotate_body()).frame;
+    let saved = restored(&n1, 0x5AFE, &[1]);
+    let mut want = Vec::new();
+    want.push(submit(&mut net, &mut [&mut n1, &mut n2], f).remove(0));
+    let f = n2.seal(&net, 200, rotate_body()).frame;
+    want.push(submit(&mut net, &mut [&mut n1, &mut n2], f).remove(0));
+    let f = cmd(&mut n2, &net, 300);
+    want.push(submit(&mut net, &mut [&mut n1, &mut n2], f).remove(0));
+    assert!(want[0].keys_changed && want[1].keys_changed);
+
+    let mut b = saved;
+    b.m = b_m.clone();
+    let got = deliver_range(&mut b, &net, b_seq + 1, net.head().seq);
+    assert_eq!(got, want);
+    assert!(b.fake.pending.is_empty());
+    assert_eq!(b.m, n1.m);
+    assert_eq!(b.fake.history(), n1.fake.history());
+    assert_eq!(b.fake.export_identity().to_vec(), n1.fake.export_identity().to_vec());
+
+    // Restarted again after that, from the same checkpoint: the same receipts
+    // but `keys_changed`, since every root is now known; `M_{B}` itself comes
+    // from `M_0` (`membership_zero`) by classifying seqs 1 to B again.
+    let mut c = restored(&b, 0x5AFF, &[1]);
+    c.m = c.fake.membership_zero();
+    assert_all(&deliver_range(&mut c, &net, 1, b_seq), ACCEPT);
+    assert_eq!(c.m, b_m);
+    let again = deliver_range(&mut c, &net, b_seq + 1, net.head().seq);
+    let strip = |v: &[Receipt<FakeMembership>]| v.iter().map(but_keys_changed).collect::<Vec<_>>();
+    assert_eq!(strip(&again), strip(&want));
+    assert!(again.iter().all(|r| !r.keys_changed));
+    assert_eq!(c.fake.history(), n1.fake.history());
+}
+
+/// `restore` reads exactly the layout `export_identity` writes.
+#[test]
+fn restore_refuses_identity_bytes_and_history_that_do_not_parse() {
+    let (mut net, mut n1, mut n2) = two_devices();
+    let f = n1.seal(&net, 100, rotate_body()).frame;
+    assert_all(&submit(&mut net, &mut [&mut n1, &mut n2], f), ACCEPT);
+    let _ = n1.seal(&net, 200, rotate_body());
+    let id = n1.fake.export_identity().to_vec();
+    let hist = n1.fake.history();
+    assert_eq!(id.len(), 221 + 2 * 36 + 4 + 52);
+    let restore = |id: &[u8], hist: Vec<Vec<u8>>| err_code(FakeSealer::restore(id, hist, 1, &[1]));
+    assert_eq!(restore(&id, hist.clone()), "ok");
+    let corrupt = code::FILE_CORRUPT;
+    let edit = |at: usize, v: u8| {
+        let mut x = id.clone();
+        x[at] = v;
+        x
+    };
+    let mut extra = id.clone();
+    extra.push(0);
+    let mut swapped = id.clone();
+    swapped[221..257].copy_from_slice(&id[257..293]);
+    swapped[257..293].copy_from_slice(&id[221..257]);
+    for (what, bytes) in [
+        ("empty", Vec::new()),
+        ("magic", edit(0, b'X')),
+        ("version", edit(7, 2)),
+        ("cut", id[..id.len() - 1].to_vec()),
+        ("extra", extra),
+        ("sign_pk of another key", edit(60, id[60] ^ 1)),
+        ("hpke_pk of another key", edit(100, id[100] ^ 1)),
+        ("anchor flag", edit(136, 2)),
+        ("anchor of another board", edit(170, id[170] ^ 1)),
+        ("roots out of order", swapped),
+    ] {
+        assert_eq!(restore(&bytes, hist.clone()), corrupt, "{what}");
+    }
+    let mut bad = hist.clone();
+    bad[1].push(0);
+    assert_eq!(restore(&id, bad), corrupt, "a record with a trailing byte");
+    let mut twice = hist.clone();
+    twice.push(hist[0].clone());
+    assert_eq!(restore(&id, twice), corrupt, "a seq twice");
+    // A joined device's identity has no anchor.
+    let id2 = n2.fake.export_identity().to_vec();
+    assert_eq!(id2[136], 0);
+    assert_eq!(err_code(FakeSealer::restore(&id2, n2.fake.history(), 1, &[1])), "ok");
+}
+
+mod vector_tests;
 
 proptest! {
     #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]

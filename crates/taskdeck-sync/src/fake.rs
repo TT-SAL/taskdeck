@@ -1,23 +1,23 @@
 //! The fake sealer of the simulator (engine.md §6.3), compiled only with the
-//! feature `sim` (ENG-TOY-002). Working code: stage `engine` starts from it.
+//! feature `sim` (ENG-TOY-002).
 //!
 //! It is `seal.md` §5, §8 to §15 and §20 with the substitutions of engine.md
 //! §6.3 and nothing else changed: the frame, body, plaintext and padding
 //! layouts, the checks of §14.2 in their order, the shapes and transitions of
-//! §12 and §13, the canonical membership bytes of §13.2, the chain of §15.1
-//! and the snapshot blob of §20 hold as written. Every random byte comes from
-//! one seeded SplitMix64 generator in call order (ENG-FAKE-002). Every integer
-//! is big-endian, every map is a `BTreeMap` and no `usize` is encoded, so the
-//! bytes do not depend on the platform.
+//! §12 and §13, the canonical membership bytes of §13.2 and their parser's
+//! state checks, the chain of §15.1, the snapshot blob of §20 and the
+//! projection of §21.6 that checks a snapshot's history hold as written.
+//! Every random byte comes from one seeded SplitMix64 generator in call order
+//! (ENG-FAKE-002). Every integer is big-endian, every map is a `BTreeMap` and
+//! no `usize` is encoded, so the bytes do not depend on the platform.
+//! `docs/sync/status/engine/api-fake-toy.md` describes what the engine and the
+//! simulator call; `tests/vectors/engine-fake.json` holds its bytes.
 //!
-//! Not yet: nothing of engine.md §6.3 is left out.
-//!
-//! Where §6.3 and `seal.md` leave a choice, this module takes these (each is
-//! reported to the lead):
+//! Where §6.3 and `seal.md` leave a choice, this module takes these:
 //! - A wrap draws its 32 bytes (`seal.md` §7, SEAL-WRAP-004) and discards
 //!   them, so the generator's position matches the real sealer's draw order
 //!   (§6.1 `seal`); the genesis helper does the same for its two wraps, after
-//!   the entry id and before the frame's nonce.
+//!   the entry id and before the frame's nonce, and so does `reinstate_wraps`.
 //! - "H(items bytes)" of the inner control signature, and a history record's
 //!   `items`, are the bytes `u8 n_items ‖ items` of the fake `ctl` payload.
 //! - Rules versions above 1 allow what rules version 1 allows (`seal.md` §14.3
@@ -26,15 +26,26 @@
 //!   another time. A fake made by `create` or `join` supports rules `[1]`
 //!   unless the simulator sets another list (`set_supported_rules`); both
 //!   setters are crate-private (engine.md §6.3).
-//! - The empty membership before seq 1 (`seal.md` §13.3) is
-//!   `FakeMembership::default()`.
+//! - `M_0` (`seal.md` §13.3) is `FakeMembership::default()`, which
+//!   `Sealer::membership_zero` returns.
 //! - `seal` refuses `ctr = 0` with `seal/frame_format`, the code
 //!   SEAL-FRAME-004 names, and an unencodable item (a device name outside
-//!   §5.5, a missing recovery key) with `seal/bad_payload`.
+//!   §5.5) with `seal/bad_payload`.
+//! - `seal` keeps per counter its own last sealing in memory and returns it
+//!   only for the same entry under the same epoch (SEAL-FRAME-005); a
+//!   restored fake starts without it.
 //! - `join` keeps the bundle's roots whose commitment the snapshot's
-//!   membership records (SEAL-KEY-013); the simulator reaches the fake also
-//!   through the crate-private `create_at`, `join_keys`, `bundle` and
-//!   `set_supported_rules`, so the public surface stays engine.md §37's.
+//!   membership records (SEAL-KEY-013).
+//! - The fake signature needs only the signer's public key, so any fake of a
+//!   board can seal as its recovery identity (`seal_as_recovery`,
+//!   `seal_recovery_key_change`), as the recovery tool does for the
+//!   simulator's workload (engine.md §31.5); such frames keep no pending root.
+//! - The simulator reaches the fake also through the crate-private
+//!   `create_at`, `join_keys`, `bundle`, `set_supported_rules`,
+//!   `seal_as_recovery`, `seal_recovery_key_change`, `reinstate_wraps`, and
+//!   after a restart `history` and `restore` (engine.md §31.4),
+//!   and tests forge frames with `plaintext_bytes` and `forge_frame`, so the
+//!   public surface stays engine.md §37's.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -45,7 +56,7 @@ use crate::sim::SplitMix64;
 use crate::toy::{ToyMachine, ToyState};
 use crate::{
     BeatInfo, Body, Class, ClassifyInput, CtlIntent, CtlItem, Dev, DeviceStatus, DeviceView, Halt, Hash32, Head, Kind,
-    MembershipView, Opened, PendingRecovery, PlainEntry, Receipt, RecoveryMode, RecoveryView, Sealed, SealedBlob,
+    MembershipView, Opened, PlainEntry, Receipt, RecoveryView, Sealed, SealedBlob,
     Sealer, SealerError, SnapInfo, SnapshotMaterial, StateMachine, UpgradeMode, Verdict,
 };
 
@@ -81,9 +92,6 @@ mod code {
     pub const CTL_EPOCH: &str = "seal/ctl_epoch";
     pub const CTL_WRAPS: &str = "seal/ctl_wraps";
     pub const CTL_LAST_DEVICE: &str = "seal/ctl_last_device";
-    pub const CTL_PENDING: &str = "seal/ctl_pending";
-    pub const CTL_NO_PENDING: &str = "seal/ctl_no_pending";
-    pub const CTL_WINDOW: &str = "seal/ctl_window";
     pub const CTL_HOME_GEN: &str = "seal/ctl_home_gen";
     pub const CTL_SUPPORT: &str = "seal/ctl_support";
     pub const COMMITMENT: &str = "seal/commitment";
@@ -98,7 +106,7 @@ mod code {
     pub const BLOB_OPEN: &str = "seal/blob_open";
     pub const SNAPSHOT_LARGE: &str = "seal/snapshot_large";
     pub const INFLATE: &str = "seal/inflate";
-    pub const BACKUP_HISTORY: &str = "seal/backup_history";
+    pub const FILE_CORRUPT: &str = "seal/file_corrupt";
 }
 
 // ---------- limits (`seal.md` §23)
@@ -122,7 +130,6 @@ const BLOB_HEADER_LEN: usize = 51;
 const PART: u64 = 1_048_576;
 const HISTORY_ITEMS_MAX: usize = 262_144;
 const WINDOW_30_DAYS: i64 = 2_592_000_000;
-const RECOVERY_DELAY: i64 = 259_200_000;
 const SKIP_WINDOW: u64 = 16_384;
 const MAX_CURRENT: usize = 16;
 const MAX_RECORDS: usize = 256;
@@ -228,8 +235,12 @@ fn wrap(id: &Dev, hpke_pk: &Hash32, e: u32, root: &[u8; 32]) -> [u8; 96] {
     w
 }
 
-/// Unwraps with the receiver's own `hpke_pk`, checking the tag and `c_e`.
-fn unwrap(w: &[u8; 96], hpke_pk: &Hash32, e: u32, commit: &Hash32, board_id: &[u8; 16]) -> Option<[u8; 32]> {
+/// Unwraps with the receiver's own id and `hpke_pk`, checking the tag and
+/// `c_e`; a wrap to another recipient id does not open (`seal.md` §7).
+fn unwrap(w: &[u8; 96], own: &Dev, hpke_pk: &Hash32, e: u32, commit: &Hash32, board_id: &[u8; 16]) -> Option<[u8; 32]> {
+    if w[..16] != own[..] {
+        return None;
+    }
     let mask = h(&[b"FAKE-WRAP", hpke_pk, &e.to_be_bytes()]);
     let mut root = [0u8; 32];
     for ((out, c), k) in root.iter_mut().zip(&w[48..80]).zip(&mask) {
@@ -378,7 +389,12 @@ fn hash_versions_for(_rules: u32) -> Vec<u32> {
 
 /// The state hash of engine.md §18.3, version 1.
 fn state_hash_of(board_hash: &Hash32, membership_bytes: &[u8]) -> Hash32 {
-    h(&[&ctx("state"), &1u32.to_be_bytes(), board_hash, &h(&[membership_bytes])])
+    state_hash_v(1, board_hash, membership_bytes)
+}
+
+/// The 86-byte composition of engine.md §18.3 with `hash_version` in its version field.
+fn state_hash_v(hash_version: u32, board_hash: &Hash32, membership_bytes: &[u8]) -> Hash32 {
+    h(&[&ctx("state"), &hash_version.to_be_bytes(), board_hash, &h(&[membership_bytes])])
 }
 
 // ---------- byte reader and writer
@@ -492,8 +508,8 @@ enum Item {
     Reinstated(Dev),
     /// `purge_before = 0` means absent.
     Rotated { epoch: u32, commit: Hash32, wraps: Vec<[u8; 96]>, purge_before: u64 },
-    /// `mode`: 1 direct, 2 propose, 3 confirm, 4 cancel; `keys` absent only for cancel.
-    Recovery { mode: u8, keys: Option<(Hash32, Hash32)> },
+    /// The new recovery key: `sign_pk`, `hpke_pk`.
+    Recovery { sign_pk: Hash32, hpke_pk: Hash32 },
     Fence { host: String, door: [u8; 5], home_gen: u32 },
     ResetTo { seq: u64, state_hash: Hash32, hash_version: u32 },
     Skip { seq: u64, frame_hash: Hash32 },
@@ -546,13 +562,10 @@ fn encode_item(item: &Item, out: &mut Vec<u8>) -> Option<()> {
             }
             out.extend_from_slice(&purge_before.to_be_bytes());
         }
-        Item::Recovery { mode, keys } => {
+        Item::Recovery { sign_pk, hpke_pk } => {
             out.push(6);
-            out.push(*mode);
-            if let Some((s, p)) = keys {
-                out.extend_from_slice(s);
-                out.extend_from_slice(p);
-            }
+            out.extend_from_slice(sign_pk);
+            out.extend_from_slice(hpke_pk);
         }
         Item::Fence { host, door, home_gen } => {
             out.push(7);
@@ -654,15 +667,7 @@ fn parse_item(r: &mut Reader<'_>) -> Option<Item> {
             }
             Item::Rotated { epoch, commit, wraps, purge_before }
         }
-        6 => {
-            let mode = r.u8()?;
-            let keys = match mode {
-                1..=3 => Some((r.take()?, r.take()?)),
-                4 => None,
-                _ => return None,
-            };
-            Item::Recovery { mode, keys }
-        }
+        6 => Item::Recovery { sign_pk: r.take()?, hpke_pk: r.take()? },
         7 => {
             let host = r.text8()?;
             let door = r.take()?;
@@ -731,8 +736,7 @@ fn shape_ok(items: &[Item], s: u64) -> bool {
     match items {
         [I::Genesis(_)] => false,
         [I::DeviceAdded { .. }] | [I::Fence { .. }] | [I::ResetTo { .. }] | [I::Upgrade { .. }] => true,
-        [I::Recovery { mode: 2 | 4, .. }] => true,
-        [I::Recovery { mode: 1 | 3, .. }, I::Rotated { .. }] => true,
+        [I::Recovery { .. }, I::Rotated { .. }] => true,
         _ => {
             if items.iter().all(|i| matches!(i, I::Skip { .. })) {
                 let mut seqs: Vec<u64> =
@@ -1075,7 +1079,7 @@ fn kind_of(k: u8) -> Kind {
 // ---------- membership (`seal.md` §13)
 
 /// A device record (`seal.md` §13.1).
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct DevRec {
     dev: Dev,
     sign_pk: Hash32,
@@ -1096,7 +1100,7 @@ struct DevRec {
 }
 
 /// A recovery record (`seal.md` §13.1).
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RecRec {
     dev_r: Dev,
     sign_pk: Hash32,
@@ -1106,18 +1110,8 @@ struct RecRec {
     last_ctr: u64,
 }
 
-/// A proposed recovery-key change (`seal.md` §13.1).
-#[derive(Clone)]
-struct PendingRec {
-    proposer: Dev,
-    sign_pk: Hash32,
-    hpke_pk: Hash32,
-    seq: u64,
-    start_ms: i64,
-}
-
 /// The latest accepted ResetTo (`seal.md` §13.1).
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct LastReset {
     at_seq: u64,
     target: u64,
@@ -1126,8 +1120,8 @@ struct LastReset {
 }
 
 /// The fake's membership state (engine.md §6.3, `seal.md` §13.1). The default
-/// value is the empty state before seq 1 (`seal.md` §13.3).
-#[derive(Clone, Default)]
+/// value is `M_0`, the empty state before seq 1 (`seal.md` §13.3).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FakeMembership {
     board_id: [u8; 16],
     salt: [u8; 16],
@@ -1148,7 +1142,6 @@ pub struct FakeMembership {
     recovery: Vec<RecRec>,
     /// Ascending by `dev`.
     devices: Vec<DevRec>,
-    pending_recovery: Option<PendingRec>,
     /// `(rules, voter, seq)`.
     pending_override: Option<(u32, Dev, u64)>,
     last_reset: Option<LastReset>,
@@ -1262,17 +1255,6 @@ impl FakeMembership {
                 o.extend_from_slice(&v.to_be_bytes());
             }
             let _ = put_vb8(&mut o, d.name.as_bytes());
-        }
-        match &self.pending_recovery {
-            None => o.push(0),
-            Some(p) => {
-                o.push(1);
-                o.extend_from_slice(&p.proposer);
-                o.extend_from_slice(&p.sign_pk);
-                o.extend_from_slice(&p.hpke_pk);
-                o.extend_from_slice(&p.seq.to_be_bytes());
-                o.extend_from_slice(&p.start_ms.to_be_bytes());
-            }
         }
         match &self.pending_override {
             None => o.push(0),
@@ -1404,17 +1386,6 @@ impl FakeMembership {
             }
             m.devices.push(d);
         }
-        m.pending_recovery = match r.u8()? {
-            0 => None,
-            1 => Some(PendingRec {
-                proposer: r.take()?,
-                sign_pk: r.take()?,
-                hpke_pk: r.take()?,
-                seq: r.u64()?,
-                start_ms: r.i64()?,
-            }),
-            _ => return None,
-        };
         m.pending_override = match r.u8()? {
             0 => None,
             1 => Some((r.u32()?, r.take()?, r.u64()?)),
@@ -1444,19 +1415,41 @@ impl FakeMembership {
         for _ in 0..n {
             m.ctl_seqs.push(r.u64()?);
         }
-        let commit_epochs: Vec<u32> = m.commitments.iter().map(|c| c.0).collect();
-        let since: Vec<u64> = m.recovery.iter().map(|x| x.since_seq).collect();
-        let devs: Vec<Dev> = m.devices.iter().map(|d| d.dev).collect();
         let skip_seqs: Vec<u64> = m.skips.iter().map(|s| s.0).collect();
-        let current_recovery = m.recovery.iter().filter(|x| x.until_seq == 0).count();
-        let ok = r.is_empty()
-            && ascending(&commit_epochs)
-            && ascending(&since)
-            && ascending(&devs)
-            && ascending(&skip_seqs)
-            && ascending(&m.ctl_seqs)
-            && (m.recovery.is_empty() || current_recovery == 1);
+        let ok = r.is_empty() && ascending(&skip_seqs) && ascending(&m.ctl_seqs) && m.reachable();
         ok.then_some(m)
+    }
+
+    /// The state checks of `seal.md` §13.2 that a parser makes beyond the
+    /// layout: bytes whose state no log can produce are refused, `M_0` of
+    /// §13.3 apart (the only state whose `epoch` is 0, every field zero).
+    fn reachable(&self) -> bool {
+        if self.epoch == 0 {
+            return *self == FakeMembership::default();
+        }
+        let commit_epochs: Vec<u32> = self.commitments.iter().map(|c| c.0).collect();
+        let epochs_ok = commit_epochs.len() as u64 == u64::from(self.epoch)
+            && commit_epochs.iter().zip(1..=self.epoch).all(|(e, want)| *e == want);
+        let since: Vec<u64> = self.recovery.iter().map(|x| x.since_seq).collect();
+        let one_current = self.recovery.iter().filter(|x| x.until_seq == 0).count() == 1;
+        let chained = self.recovery.windows(2).all(|w| w[0].until_seq == w[1].since_seq);
+        let devs_r = self.recovery.iter().all(|x| x.dev_r == dev_r_of(&self.board_id, &x.sign_pk));
+        let board_ok = self.recovery.first().is_some_and(|x| board_id_of(&x.sign_pk, &self.salt) == self.board_id);
+        let mut ids: Vec<Dev> = self.devices.iter().map(|d| d.dev).chain(self.recovery.iter().map(|x| x.dev_r)).collect();
+        let devs: Vec<Dev> = self.devices.iter().map(|d| d.dev).collect();
+        ids.sort_unstable();
+        let mut nos: Vec<u16> = self.devices.iter().map(|d| d.device_no).collect();
+        nos.sort_unstable();
+        let nos_ok = ascending(&nos) && nos.last().is_none_or(|n| *n < self.next_device_no);
+        epochs_ok
+            && ascending(&since)
+            && one_current
+            && chained
+            && devs_r
+            && board_ok
+            && ascending(&devs)
+            && ascending(&ids)
+            && nos_ok
     }
 
     /// The read-only view (engine.md §6.2).
@@ -1510,14 +1503,6 @@ impl FakeMembership {
                     last_ctr: r.last_ctr,
                 })
                 .collect(),
-            pending_recovery: self.pending_recovery.as_ref().map(|p| PendingRecovery {
-                proposer: p.proposer,
-                sign_pk: p.sign_pk,
-                hpke_pk: p.hpke_pk,
-                key_fp: key_fp(&p.sign_pk, &p.hpke_pk),
-                seq: p.seq,
-                start_ms: p.start_ms,
-            }),
             pending_override: self.pending_override,
             last_reset: self.last_reset.as_ref().map(|l| (l.at_seq, l.target)),
             skips: self.skips.clone(),
@@ -1569,7 +1554,6 @@ fn genesis_state(g: &GenesisItem, board_id: [u8; 16], dev_r: Dev, at_ms: i64) ->
             hash_versions: vec![1],
             name: g.name.clone(),
         }],
-        pending_recovery: None,
         pending_override: None,
         last_reset: None,
         skips: Vec::new(),
@@ -1620,80 +1604,44 @@ fn read_hist<'a>(r: &mut Reader<'a>) -> Option<HistRec<'a>> {
     (rec.items.len() <= HISTORY_ITEMS_MAX).then_some(rec)
 }
 
-/// A device of the projection.
-struct ProjDev {
-    sign_pk: Hash32,
-    hpke_pk: Hash32,
-    current: bool,
-    revoked_by_device: bool,
-}
-
-/// A recovery key of the projection.
-struct ProjRec {
-    dev_r: Dev,
-    sign_pk: Hash32,
-    hpke_pk: Hash32,
-    since_seq: u64,
-    current: bool,
-}
-
-/// The projection of `seal.md` §21.6, built from history records alone.
+/// The projection of `seal.md` §21.6, built from history records alone: a
+/// membership state to which `DeviceAdded`, `DeviceRevoked`,
+/// `DeviceReinstated`, `EpochRotated` and `RecoveryKeyChange` apply their
+/// rows of §13.6 whole, and `Fence`, `ResetTo`, `Skip` and `RulesUpgrade` only
+/// their Author column (projection step 6).
 #[derive(Default)]
 struct Projection {
-    devices: BTreeMap<Dev, ProjDev>,
-    recovery: Vec<ProjRec>,
-    pending: Option<(Dev, Hash32, Hash32)>,
-    commitments: Vec<(u32, u64, Hash32)>,
-    ctl_seqs: Vec<u64>,
-    last_ctr: BTreeMap<Dev, u64>,
-    epoch: u32,
+    w: FakeMembership,
+    /// The seq of the last record (projection step 1).
+    last_seq: u64,
 }
 
 impl Projection {
-    fn recorded(&self, dev: &Dev, sign_pk: &Hash32, hpke_pk: &Hash32) -> bool {
-        self.devices.iter().any(|(d, p)| d == dev || p.sign_pk == *sign_pk || p.hpke_pk == *hpke_pk)
-            || self.recovery.iter().any(|r| r.dev_r == *dev || r.sign_pk == *sign_pk || r.hpke_pk == *hpke_pk)
-    }
-
-    fn install(&mut self, board_id: &[u8; 16], seq: u64, sign_pk: Hash32, hpke_pk: Hash32) -> Option<()> {
-        let dev_r = dev_r_of(board_id, &sign_pk);
-        if self.recorded(&dev_r, &sign_pk, &hpke_pk) {
-            return None;
-        }
-        for r in &mut self.recovery {
-            r.current = false;
-        }
-        self.recovery.push(ProjRec { dev_r, sign_pk, hpke_pk, since_seq: seq, current: true });
-        self.pending = None;
-        Some(())
-    }
-
     /// One record, by the projection steps 1 to 6 of `seal.md` §21.6.
     fn step(&mut self, board_id: &[u8; 16], rec: &HistRec<'_>) -> Option<()> {
         // Step 1.
-        match self.ctl_seqs.last() {
-            None if rec.seq != 1 => return None,
-            Some(prev) if rec.seq <= *prev => return None,
-            _ => {}
+        if (self.last_seq == 0 && rec.seq != 1) || (self.last_seq != 0 && rec.seq <= self.last_seq) {
+            return None;
         }
         let items = parse_items(rec.items)?;
-        // Steps 2 and 4: the author and its key.
-        let (is_device, is_recovery, sign_pk) = if rec.seq == 1 {
+        // Step 2: the author is an authority so far (the first record: `dev_R` of its Genesis key).
+        let (who, sign_pk, last_ctr) = if rec.seq == 1 {
             let Some(Item::Genesis(g)) = items.first() else { return None };
             if rec.dev != dev_r_of(board_id, &g.rsign_pk) {
                 return None;
             }
-            (false, true, g.rsign_pk)
-        } else if let Some(d) = self.devices.get(&rec.dev).filter(|d| d.current) {
-            (true, false, d.sign_pk)
+            (Who::Recovery, g.rsign_pk, 0)
+        } else if let Some(d) = self.w.device(&rec.dev).filter(|d| d.current) {
+            (Who::Device, d.sign_pk, d.last_ctr)
         } else {
-            let r = self.recovery.iter().find(|r| r.current && r.dev_r == rec.dev && r.since_seq < rec.seq)?;
-            (false, true, r.sign_pk)
+            let r = self.w.current_recovery().filter(|r| r.dev_r == rec.dev && r.since_seq < rec.seq)?;
+            (Who::Recovery, r.sign_pk, r.last_ctr)
         };
-        // Step 3.
-        if self.last_ctr.get(&rec.dev).is_some_and(|c| rec.ctr <= *c) {
+        // Step 3: above the author's previous counter; the first record's is 1.
+        if rec.ctr <= last_ctr || (rec.seq == 1 && rec.ctr != 1) {
             return None;
         }
+        // Step 4.
         if !verify(&sign_pk, &ctl_inner(board_id, &rec.dev, rec.ctr, &rec.entry_id, rec.at_ms, rec.items), rec.sig) {
             return None;
         }
@@ -1701,104 +1649,46 @@ impl Projection {
         if !shape_ok(&items, rec.seq) {
             return None;
         }
-        // Step 6: the reduced rules.
-        for item in &items {
-            match item {
-                Item::Genesis(g) => {
-                    if board_id_of(&g.rsign_pk, &g.salt) != *board_id {
-                        return None;
-                    }
-                    self.devices.insert(
-                        g.dev,
-                        ProjDev { sign_pk: g.sign_pk, hpke_pk: g.hpke_pk, current: true, revoked_by_device: false },
-                    );
-                    self.recovery.push(ProjRec {
-                        dev_r: rec.dev,
-                        sign_pk: g.rsign_pk,
-                        hpke_pk: g.rhpke_pk,
-                        since_seq: 1,
-                        current: true,
-                    });
-                    self.commitments.push((1, 1, g.commit));
-                    self.epoch = 1;
-                }
-                Item::DeviceAdded { dev, sign_pk, hpke_pk, .. } => {
-                    if !is_device || self.recorded(dev, sign_pk, hpke_pk) {
-                        return None;
-                    }
-                    self.devices.insert(
-                        *dev,
-                        ProjDev { sign_pk: *sign_pk, hpke_pk: *hpke_pk, current: true, revoked_by_device: false },
-                    );
-                }
-                Item::Revoked(t) => {
-                    if !(is_recovery || (is_device && *t != rec.dev)) {
-                        return None;
-                    }
-                    let d = self.devices.get_mut(t).filter(|d| d.current)?;
-                    d.current = false;
-                    d.revoked_by_device = is_device;
-                    if self.pending.is_some_and(|(p, _, _)| p == *t) {
-                        self.pending = None;
-                    }
-                }
-                Item::Reinstated(t) => {
-                    let d = self.devices.get_mut(t).filter(|d| !d.current && d.revoked_by_device)?;
-                    if !is_recovery {
-                        return None;
-                    }
-                    d.current = true;
-                }
-                Item::Rotated { epoch, commit, .. } => {
-                    if *epoch != self.epoch.checked_add(1)? {
-                        return None;
-                    }
-                    self.epoch = *epoch;
-                    self.commitments.push((*epoch, rec.seq, *commit));
-                }
-                Item::Recovery { mode, keys } => match (mode, keys) {
-                    (1, Some((s, p))) if is_recovery => self.install(board_id, rec.seq, *s, *p)?,
-                    (2, Some((s, p))) if is_device => {
-                        let dev_r = dev_r_of(board_id, s);
-                        if self.pending.is_some() || self.recorded(&dev_r, s, p) {
-                            return None;
-                        }
-                        self.pending = Some((rec.dev, *s, *p));
-                    }
-                    (3, Some((s, p))) if is_device => {
-                        let (proposer, ps, pp) = self.pending?;
-                        if proposer == rec.dev || ps != *s || pp != *p {
-                            return None;
-                        }
-                        self.install(board_id, rec.seq, *s, *p)?;
-                    }
-                    (4, None) => {
-                        self.pending.take()?;
-                    }
-                    _ => return None,
-                },
-                Item::Fence { .. } | Item::Skip { .. } => {}
-                Item::ResetTo { .. } | Item::Upgrade { .. } => {
-                    if !is_device {
-                        return None;
-                    }
-                }
+        // Step 6.
+        if let [Item::Genesis(g)] = items.as_slice() {
+            let mut ids = [g.dev, rec.dev];
+            ids.sort_unstable();
+            let ok = board_id_of(&g.rsign_pk, &g.salt) == *board_id
+                && g.dev != rec.dev
+                && first16_of(&g.wraps[0]) == ids[0]
+                && first16_of(&g.wraps[1]) == ids[1];
+            if !ok {
+                return None;
             }
+            self.w = genesis_state(g, *board_id, rec.dev, rec.at_ms);
+        } else {
+            let e = EntryCtx { s: rec.seq, author: rec.dev, who, at_ms: rec.at_ms, tau: rec.at_ms };
+            apply_items(&mut self.w, &items, &e, Rows::History).ok()?;
+            if self.w.ctl_seqs.len() >= MAX_CTL {
+                return None;
+            }
+            self.w.ctl_seqs.push(rec.seq);
         }
-        self.last_ctr.insert(rec.dev, rec.ctr);
-        self.ctl_seqs.push(rec.seq);
+        self.w.set_last_ctr(&rec.dev, rec.ctr);
+        self.last_seq = rec.seq;
         Some(())
     }
 
-    /// The agreement of `seal.md` §21.6 step 11 with a membership state.
+    /// The agreement of `seal.md` §21.6 step 11 with a membership state: the
+    /// same board id, devices with the same keys and statuses, current
+    /// recovery key, epochs and commitments, and `ctl_seqs`.
     fn agrees(&self, m: &FakeMembership) -> bool {
-        let devices_agree = self.devices.len() == m.devices.len()
-            && self.devices.iter().zip(&m.devices).all(|((dev, p), d)| {
-                *dev == d.dev && p.sign_pk == d.sign_pk && p.hpke_pk == d.hpke_pk && p.current == d.current
+        let p = &self.w;
+        let devices_agree = p.devices.len() == m.devices.len()
+            && p.devices.iter().zip(&m.devices).all(|(a, b)| {
+                a.dev == b.dev && a.sign_pk == b.sign_pk && a.hpke_pk == b.hpke_pk && a.current == b.current
             });
-        let proj_rec = self.recovery.iter().find(|r| r.current).map(|r| (r.dev_r, r.sign_pk, r.hpke_pk));
-        let mem_rec = m.current_recovery().map(|r| (r.dev_r, r.sign_pk, r.hpke_pk));
-        devices_agree && proj_rec == mem_rec && self.commitments == m.commitments && self.ctl_seqs == m.ctl_seqs
+        let key = |x: &FakeMembership| x.current_recovery().map(|r| (r.dev_r, r.sign_pk, r.hpke_pk));
+        p.board_id == m.board_id
+            && devices_agree
+            && key(p) == key(m)
+            && p.commitments == m.commitments
+            && p.ctl_seqs == m.ctl_seqs
     }
 }
 
@@ -1828,6 +1718,21 @@ enum Fail {
 /// A rotation's epoch and its freshly drawn root, kept as pending under the entry id.
 type DrawnRoot = (u32, [u8; 32]);
 
+/// What `seal_as` composes: an entry's body, or the items of a K-shape entry.
+enum Content<'a> {
+    Body(&'a Body),
+    KeyChange(Hash32, Hash32),
+}
+
+/// The last frame this device sealed under one counter, with what it sealed:
+/// the entry (id, `at_ms`, `based_on`, body, so the kind too) and the epoch.
+struct OwnSealed {
+    entry: PlainEntry,
+    epoch: u32,
+    frame: Vec<u8>,
+    frame_hash: Hash32,
+}
+
 /// A snapshot body's material and its history records by seq.
 type OpenedBody = (SnapshotMaterial, Vec<(u64, Vec<u8>)>);
 
@@ -1848,13 +1753,15 @@ pub struct FakeSealer {
     missed: BTreeMap<u32, [u8; 96]>,
     /// One history record per accepted control entry, by seq (§6.3 "Control history").
     history: RefCell<BTreeMap<u64, Vec<u8>>>,
-    /// The frames it sealed, by counter (SEAL-FRAME-005): `(frame, hash, epoch)`.
-    sealed: BTreeMap<u64, (Vec<u8>, Hash32, u32)>,
+    /// Its own last sealing per counter (SEAL-FRAME-005), in memory only: asked
+    /// again for the same entry under the same epoch, `seal` returns these bytes.
+    sealed: BTreeMap<u64, OwnSealed>,
     /// The rules versions this build supports (`seal.md` §14.5).
     supported_rules: Vec<u32>,
 }
 
 /// What a pairing hands the new device (engine.md §6.3, §37).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FakeBundle {
     /// Every epoch root the existing device holds, `(e, R_e)`.
     pub roots: Vec<(u32, [u8; 32])>,
@@ -1954,7 +1861,7 @@ impl FakeSealer {
     /// The pairing helper (engine.md §6.3), standing in for `seal.md` §17:
     /// the new device's keys from `seed`, and the roots the bundle hands over
     /// that match the snapshot membership's commitments (SEAL-KEY-013).
-    pub fn join(seed: u64, name: &str, bundle: FakeBundle) -> Self {
+    pub fn join(seed: u64, _name: &str, bundle: FakeBundle) -> Self {
         let mut rng = SplitMix64 { state: seed };
         let (sk, dev) = device_keys(&mut rng);
         let m = FakeMembership::from_bytes(&bundle.material.membership).unwrap_or_default();
@@ -1997,6 +1904,90 @@ impl FakeSealer {
     #[allow(dead_code)]
     pub(crate) fn set_supported_rules(&mut self, rules: &[u32]) {
         self.supported_rules = rules.to_vec();
+    }
+
+    /// Its control history records (§6.3 "Control history", the layout of
+    /// `seal.md` §21.5), in seq order: what the model runtime persists beside
+    /// the identity, as `device.md` §15.7 does for the real sealer (§31.4).
+    // Used by the simulator stage `engine` writes, and by the tests.
+    #[allow(dead_code)]
+    pub(crate) fn history(&self) -> Vec<Vec<u8>> {
+        self.history.borrow().values().cloned().collect()
+    }
+
+    /// The fake a new process builds after a restart (engine.md §31.4): keys,
+    /// board id, anchor, roots and pending roots from `identity` (the bytes of
+    /// `export_identity`), the control history `history` (from `history()`),
+    /// a generator seeded with `reseed` (a restart must not draw the old
+    /// generator's values again) and the build's `supported_rules`. Missed
+    /// wraps and the frames kept for SEAL-FRAME-005 are memory only and start
+    /// empty (§6.1 `take_missed_wraps`). `seal/file_corrupt` for identity bytes
+    /// that do not parse exactly, keys that do not belong together, an anchor
+    /// of another board, roots or pending roots out of order, or a history
+    /// record that does not parse or repeats a seq.
+    // Used by the simulator stage `engine` writes, and by the tests.
+    #[allow(dead_code)]
+    pub(crate) fn restore(
+        identity: &[u8],
+        history: Vec<Vec<u8>>,
+        reseed: u64,
+        supported_rules: &[u32],
+    ) -> Result<FakeSealer, SealerError> {
+        let corrupt = SealerError { code: code::FILE_CORRUPT };
+        let mut fake = Self::parse_identity(identity, SplitMix64 { state: reseed }).ok_or(corrupt.clone())?;
+        let mut held = fake.history.borrow_mut();
+        for bytes in history {
+            let mut r = Reader::new(&bytes);
+            let seq = read_hist(&mut r).filter(|_| r.is_empty()).ok_or(corrupt.clone())?.seq;
+            if held.insert(seq, bytes).is_some() {
+                return Err(corrupt);
+            }
+        }
+        drop(held);
+        fake.supported_rules = supported_rules.to_vec();
+        Ok(fake)
+    }
+
+    /// The strict parser of the identity layout `export_identity` writes.
+    fn parse_identity(bytes: &[u8], rng: SplitMix64) -> Option<FakeSealer> {
+        let mut r = Reader::new(bytes);
+        if &r.take::<4>()? != IDENTITY_MAGIC || r.u32()? != 1 {
+            return None;
+        }
+        let dev: Dev = r.take()?;
+        let sk: [u8; 32] = r.take()?;
+        let (sign_pk, hpke_pk): (Hash32, Hash32) = (r.take()?, r.take()?);
+        let board_id: [u8; 16] = r.take()?;
+        let mut fake = Self::blank(rng, sk, dev, board_id);
+        if (fake.sign_pk, fake.hpke_pk) != (sign_pk, hpke_pk) {
+            return None;
+        }
+        fake.anchor = match r.u8()? {
+            0 => None,
+            1 => {
+                let a = Anchor { rsign_pk: r.take()?, salt: r.take()?, root: r.take()? };
+                if board_id_of(&a.rsign_pk, &a.salt) != board_id {
+                    return None;
+                }
+                Some(a)
+            }
+            _ => return None,
+        };
+        for _ in 0..r.u32()? {
+            let (e, root) = (r.u32()?, r.take::<32>()?);
+            if fake.roots.last_key_value().is_some_and(|(last, _)| *last >= e) {
+                return None;
+            }
+            fake.roots.insert(e, root);
+        }
+        for _ in 0..r.u32()? {
+            let (id, e, root) = (r.take::<16>()?, r.u32()?, r.take::<32>()?);
+            if fake.pending.last_key_value().is_some_and(|(last, _)| *last >= id) {
+                return None;
+            }
+            fake.pending.insert(id, (e, root));
+        }
+        r.is_empty().then_some(fake)
     }
 
     /// Composes, seals and signs a `ctl` frame by any author (the genesis helper, the tests).
@@ -2122,21 +2113,6 @@ impl FakeSealer {
                 };
                 (vec![item], None)
             }
-            CtlIntent::RecoveryChange { mode, sign_pk, hpke_pk } => {
-                let keys = (*sign_pk).zip(*hpke_pk);
-                match (mode, keys) {
-                    (RecoveryMode::Cancel, _) => (vec![Item::Recovery { mode: 4, keys: None }], None),
-                    (RecoveryMode::Propose, Some(k)) => (vec![Item::Recovery { mode: 2, keys: Some(k) }], None),
-                    (RecoveryMode::Direct | RecoveryMode::Confirm, Some((s, p))) => {
-                        let mode = if matches!(mode, RecoveryMode::Direct) { 1 } else { 3 };
-                        let mut recipients = current_devices();
-                        recipients.insert(dev_r_of(&self.board_id, &s), p);
-                        let (item, root) = self.rotation(m, &recipients, 0)?;
-                        (vec![Item::Recovery { mode, keys: Some((s, p)) }, item], Some(root))
-                    }
-                    _ => return Err(bad),
-                }
-            }
             CtlIntent::Fence { host, door, home_gen } => {
                 if !host_ok(host) {
                     return Err(SealerError { code: code::HOST_FORMAT });
@@ -2157,7 +2133,24 @@ impl FakeSealer {
         Ok(out)
     }
 
-    /// `seal` for any author (the trait uses this device's own identity).
+    /// The items of a K-shape entry (`seal.md` §12.1): the new recovery key,
+    /// then a rotation wrapping to the current devices and the new key.
+    fn compose_key_change(
+        &mut self,
+        m: &FakeMembership,
+        sign_pk: Hash32,
+        hpke_pk: Hash32,
+    ) -> Result<(Vec<Item>, Option<DrawnRoot>), SealerError> {
+        let mut recipients: BTreeMap<Dev, Hash32> =
+            m.devices.iter().filter(|d| d.current).map(|d| (d.dev, d.hpke_pk)).collect();
+        recipients.insert(dev_r_of(&self.board_id, &sign_pk), hpke_pk);
+        let (item, root) = self.rotation(m, &recipients, 0)?;
+        Ok((vec![Item::Recovery { sign_pk, hpke_pk }, item], Some(root)))
+    }
+
+    /// `seal` for any author: this device's own entries (the trait), or the
+    /// recovery identity's (`seal_as_recovery`). Only own entries keep their
+    /// frame (SEAL-FRAME-005) and the pending root of their rotation.
     fn seal_as(
         &mut self,
         author: &Dev,
@@ -2165,13 +2158,18 @@ impl FakeSealer {
         m: &FakeMembership,
         ctr: u64,
         entry: &PlainEntry,
+        content: Content<'_>,
     ) -> Result<Sealed, SealerError> {
         if ctr == 0 {
             return Err(SealerError { code: code::FRAME_FORMAT });
         }
         let own = *author == self.dev;
-        if let Some((frame, frame_hash, epoch)) = self.sealed.get(&ctr).filter(|_| own) {
-            return Ok(Sealed { frame: frame.clone(), frame_hash: *frame_hash, epoch: *epoch, keys_changed: false });
+        // SEAL-FRAME-005: the same entry under the same epoch gets the stored
+        // bytes; another entry, or a newer epoch, under a counter sealed before
+        // (a frame cleared for re-sealing, engine.md §11.3 step 3, §11.4) is sealed anew.
+        let stored = self.sealed.get(&ctr).filter(|x| own && x.entry == *entry && x.epoch == m.epoch);
+        if let Some(x) = stored {
+            return Ok(Sealed { frame: x.frame.clone(), frame_hash: x.frame_hash, epoch: x.epoch, keys_changed: false });
         }
         let based_on_ok = entry.based_on.seq != 0 || entry.based_on.chain == chain_zero_of(&self.board_id);
         if !based_on_ok || !(0..=AT_MS_MAX).contains(&entry.at_ms) {
@@ -2179,26 +2177,135 @@ impl FakeSealer {
         }
         let epoch = m.epoch;
         let root = *self.roots.get(&epoch).ok_or(SealerError { code: code::MISSING_ROOT })?;
-        let (kind, payload, drawn) = match &entry.body {
-            Body::Cmd(p) => (1, p.clone(), None),
-            Body::Beat(b) => (3, encode_beat(b).ok_or(SealerError { code: code::BAD_PAYLOAD })?, None),
-            Body::Snap(i) => (4, encode_snap(i), None),
-            Body::Ctl(intent) => {
+        let (kind, payload, drawn) = match content {
+            Content::Body(Body::Cmd(p)) => (1, p.clone(), None),
+            Content::Body(Body::Beat(b)) => (3, encode_beat(b).ok_or(SealerError { code: code::BAD_PAYLOAD })?, None),
+            Content::Body(Body::Snap(i)) => (4, encode_snap(i), None),
+            Content::Body(Body::Ctl(intent)) => {
                 let (items, drawn) = self.compose(m, intent)?;
+                (2, self.ctl_payload(author, author_pk, ctr, &entry.entry_id, entry.at_ms, &items)?, drawn)
+            }
+            Content::KeyChange(sign_pk, hpke_pk) => {
+                let (items, drawn) = self.compose_key_change(m, sign_pk, hpke_pk)?;
                 (2, self.ctl_payload(author, author_pk, ctr, &entry.entry_id, entry.at_ms, &items)?, drawn)
             }
         };
         let frame =
             self.entry_frame(author, author_pk, ctr, epoch, &root, &entry.entry_id, kind, entry.at_ms, &entry.based_on, &payload)?;
         let frame_hash = h(&[&frame]);
-        let keys_changed = drawn.is_some();
-        if let Some(pending) = drawn {
-            self.pending.insert(entry.entry_id, pending);
-        }
+        let mut keys_changed = false;
         if own {
-            self.sealed.insert(ctr, (frame.clone(), frame_hash, epoch));
+            if let Some(pending) = drawn {
+                self.pending.insert(entry.entry_id, pending);
+                keys_changed = true;
+            }
+            let stored = OwnSealed { entry: entry.clone(), epoch, frame: frame.clone(), frame_hash };
+            self.sealed.insert(ctr, stored);
         }
         Ok(Sealed { frame, frame_hash, epoch, keys_changed })
+    }
+
+    /// Seals `entry` as the current recovery identity of `m` with counter
+    /// `ctr` (its `last_ctr + 1`), as the recovery tool does (engine.md §31.5):
+    /// a `Body::Ctl` is composed as `seal` composes it (shape R from `Rotate`,
+    /// F, S). The fake's signature needs only the public key `m` records, so
+    /// any fake of the board can stand in for the sheet. Draws as `seal`; keeps
+    /// neither the frame nor a pending root, so `keys_changed` is false.
+    // Used by the simulator stage `engine` writes, and by the tests.
+    #[allow(dead_code)]
+    pub(crate) fn seal_as_recovery(&mut self, m: &FakeMembership, ctr: u64, entry: &PlainEntry) -> Result<Sealed, SealerError> {
+        let r = m.current_recovery().ok_or(SealerError { code: code::BAD_PAYLOAD })?;
+        let (dev_r, rsign_pk) = (r.dev_r, r.sign_pk);
+        self.seal_as(&dev_r, &rsign_pk, m, ctr, entry, Content::Body(&entry.body))
+    }
+
+    /// Seals a K-shape entry (`seal.md` §12.1, §13.11) as the current recovery
+    /// identity of `m`: `RecoveryKeyChange` to `new_key` (`sign_pk`,
+    /// `hpke_pk`), then `EpochRotated` wrapping to the current devices and the
+    /// new key. `entry.body` is not read. Draws the root, the wraps, the nonce.
+    // Used by the simulator stage `engine` writes, and by the tests.
+    #[allow(dead_code)]
+    pub(crate) fn seal_recovery_key_change(
+        &mut self,
+        m: &FakeMembership,
+        ctr: u64,
+        entry: &PlainEntry,
+        new_key: (Hash32, Hash32),
+    ) -> Result<Sealed, SealerError> {
+        let r = m.current_recovery().ok_or(SealerError { code: code::BAD_PAYLOAD })?;
+        let (dev_r, rsign_pk) = (r.dev_r, r.sign_pk);
+        self.seal_as(&dev_r, &rsign_pk, m, ctr, entry, Content::KeyChange(new_key.0, new_key.1))
+    }
+
+    /// The padded plaintext of `seal.md` §10.1 for `forge_frame`: `entry_id`,
+    /// `kind` (any byte), `at_ms` (any value), `based_on` and `payload`, padded
+    /// with zeros to `P(69 + len)`; `None` above the 258,048-byte cap. Draws nothing.
+    // Used by the engine's and the simulator's tests.
+    #[allow(dead_code)]
+    pub(crate) fn plaintext_bytes(entry_id: &[u8; 16], kind: u8, at_ms: i64, based_on: &Head, payload: &[u8]) -> Option<Vec<u8>> {
+        build_plain(entry_id, kind, at_ms, based_on, payload)
+    }
+
+    /// A frame with every envelope field chosen (`seal.md` §8.1, §9): author
+    /// `dev` signing with `sign_pk`, counter `ctr`, `ver` (suite 1), `epoch`,
+    /// the AEAD under `K_entry` of `root` (this fake's root of `epoch` when
+    /// `None`, 32 zero bytes when it holds none), a zero nonce, and `plaintext`
+    /// as given (from `plaintext_bytes`, then altered at will). For the steps of
+    /// §14.2 a sealed frame cannot fail. Draws nothing.
+    // Used by the engine's and the simulator's tests.
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn forge_frame(
+        &self,
+        dev: &Dev,
+        sign_pk: &Hash32,
+        ctr: u64,
+        ver: u8,
+        epoch: u32,
+        root: Option<[u8; 32]>,
+        plaintext: &[u8],
+    ) -> Vec<u8> {
+        let root = root.or_else(|| self.roots.get(&epoch).copied()).unwrap_or([0; 32]);
+        let env = Envelope {
+            board_id: &self.board_id,
+            dev,
+            sign_pk,
+            ctr,
+            ver,
+            suite: 1,
+            epoch,
+            key: entry_key(&self.board_id, epoch, &root),
+        };
+        build_frame(&env, &[0; 24], plaintext)
+    }
+
+    /// The wraps of the `reinstate` admin operation (`seal.md` §16.2, ruling
+    /// S24) for the revoked device `dev` of `m`: `(first_epoch, wraps)`, the
+    /// roots of `first_epoch` (the epoch the revoking entry's rotation set up)
+    /// to `m.epoch` (the epoch the reinstating entry is sealed under), in
+    /// order, each wrapped to the target's `hpke_pk`; one 32-byte draw per
+    /// wrap. `seal/ctl_target` when `dev` is no device that a device revoked
+    /// (§13.6 `DeviceReinstated`) by an entry at or above `m.purge_seq`; `seal/missing_root` when this
+    /// fake lacks one of the roots; `seal/bad_payload` for more than 256 wraps.
+    // Used by the simulator stage `engine` writes, and by the tests.
+    #[allow(dead_code)]
+    pub(crate) fn reinstate_wraps(&mut self, m: &FakeMembership, dev: &Dev) -> Result<(u32, Vec<[u8; 96]>), SealerError> {
+        let target = SealerError { code: code::CTL_TARGET };
+        let by_device = |d: &&DevRec| m.device(&d.status_by).is_some();
+        let d = m.device(dev).filter(|d| !d.current && d.status_seq >= m.purge_seq).filter(by_device).ok_or(target.clone())?;
+        let first = m.commitments.iter().find(|(_, seq, _)| *seq == d.status_seq).map(|(e, _, _)| *e).ok_or(target)?;
+        let n = m.epoch.checked_sub(first).map_or(0, |x| x + 1);
+        if n > 256 {
+            return Err(SealerError { code: code::BAD_PAYLOAD });
+        }
+        let (id, pk) = (d.dev, d.hpke_pk);
+        let mut wraps = Vec::with_capacity(n as usize);
+        for e in first..=m.epoch {
+            let root = *self.roots.get(&e).ok_or(SealerError { code: code::MISSING_ROOT })?;
+            let _ephemeral = draw::<32>(&mut self.rng);
+            wraps.push(wrap(&id, &pk, e, &root));
+        }
+        Ok((first, wraps))
     }
 
     /// The author of the frame at `s` and its class (`seal.md` §13.4, §14.2 step 3).
@@ -2218,7 +2325,9 @@ impl FakeSealer {
 
     fn classify_inner(&mut self, input: &ClassifyInput<'_, FakeMembership>) -> Result<Receipt<FakeMembership>, SealerError> {
         let s = input.seq;
-        let m0 = input.membership;
+        // Seq 1 is classified from the anchor alone, from `M_0`, whatever the caller passes (§13.3).
+        let m_zero = FakeMembership::default();
+        let m0 = if s == 1 { &m_zero } else { input.membership };
         let frame_hash = h(&[input.frame]);
         let mut r = Receipt {
             class: Class::Skip,
@@ -2278,14 +2387,23 @@ impl FakeSealer {
         if !envelopes_for(rules).contains(&(ver, suite)) {
             return refuse(r, code::BAD_VERSION);
         }
-        // Step 9.
+        // Step 9, with condition 4 of §13.9 (30 days of log clock) before decryption.
         let epoch = u32::from_be_bytes([f.body[2], f.body[3], f.body[4], f.body[5]]);
         let current = if s == 1 { 1 } else { m0.epoch };
         let stale = s != 1 && current >= 2 && epoch == current - 1;
         if epoch != current && !stale {
             return refuse(r, if epoch > current || s == 1 { code::BAD_EPOCH } else { code::OLD_EPOCH });
         }
-        let root = if s == 1 { self.anchor.as_ref().map(|a| a.root) } else { self.roots.get(&epoch).copied() };
+        if stale && m0.clock_ms.saturating_sub(m0.epoch_clock_ms) > WINDOW_30_DAYS {
+            return refuse(r, code::STALE_EPOCH);
+        }
+        // A root this device lacks, or one that does not match the commitment
+        // its membership records (SEAL-KEY-013), is its own store's fault.
+        let root = if s == 1 {
+            self.anchor.as_ref().map(|a| a.root)
+        } else {
+            self.roots.get(&epoch).copied().filter(|x| m0.commitment_of(epoch) == Some(&commitment(&self.board_id, epoch, x)))
+        };
         let root = root.ok_or(SealerError { code: code::MISSING_ROOT })?;
         // Step 10.
         let ad = entry_ad(f.header, ver, suite, epoch);
@@ -2337,12 +2455,8 @@ impl FakeSealer {
         if stale && (p.kind == 2 || p.kind == 4) {
             return refuse(r, code::STALE_EPOCH);
         }
-        // Step 14.
-        if stale
-            && !(who == Who::Device
-                && b < m0.epoch_seq
-                && m0.clock_ms.saturating_sub(m0.epoch_clock_ms) <= WINDOW_30_DAYS)
-        {
+        // Step 14: conditions 1 to 3 of §13.9 (step 13 refused the other kinds).
+        if stale && !(who == Who::Device && b < m0.epoch_seq) {
             return refuse(r, code::STALE_EPOCH);
         }
         // Step 15.
@@ -2352,7 +2466,7 @@ impl FakeSealer {
         let mut snap = None;
         let mut ctl = None;
         match p.kind {
-            1 if p.payload.is_empty() => return refuse(r, code::BAD_PAYLOAD),
+            // A `cmd` payload is opaque here (SEAL-KIND-002): the engine's parser judges it.
             1 => {}
             2 => {
                 let Some(c) = parse_ctl(p.payload) else { return refuse(r, code::BAD_PAYLOAD) };
@@ -2377,7 +2491,8 @@ impl FakeSealer {
                 return refuse(r, code::CTL_SHAPE);
             }
             let e = EntryCtx { s, author: f.dev, who, at_ms: p.at_ms, tau };
-            let outcome = if s == 1 { self.genesis(&mut w, &c.items, &f, p.at_ms) } else { apply_items(&mut w, &c.items, &e, input) };
+            let outcome =
+                if s == 1 { self.genesis(&mut w, &c.items, &f, p.at_ms) } else { apply_items(&mut w, &c.items, &e, Rows::Log(input)) };
             match outcome {
                 Ok(()) => {}
                 Err(Fail::Refuse(c)) => return refuse(r, c),
@@ -2405,7 +2520,8 @@ impl FakeSealer {
         let items_view = ctl.as_ref().map(|c| c.items.iter().map(opened_item).collect()).unwrap_or_default();
         if let Some(c) = &ctl {
             self.record_history(s, &f, &p, &frame_hash, c);
-            self.accept_keys(&mut r.keys_changed, &mut r.halt, &w, &c.items, &p.entry_id);
+            let own_entry = (f.dev == self.dev).then_some(&p.entry_id);
+            self.accept_keys(&mut r.keys_changed, &mut r.halt, &w, &c.items, own_entry);
             if w.rules != m0.rules && s != 1 && !self.supported_rules.contains(&w.rules) && r.halt.is_none() {
                 r.halt = Some(Halt::UnknownRules(w.rules));
             }
@@ -2469,14 +2585,14 @@ impl FakeSealer {
         halt: &mut Option<Halt>,
         w: &FakeMembership,
         items: &[Item],
-        entry_id: &[u8; 16],
+        own_entry: Option<&[u8; 16]>,
     ) {
         for item in items {
             let Item::Rotated { epoch, commit, wraps, .. } = item else { continue };
             let own = wraps.iter().find(|x| first16_of(x) == self.dev).copied();
             let missed = self.missed.get(epoch).filter(|_| !self.roots.contains_key(epoch)).copied();
             if let Some(x) = own.or(missed) {
-                match unwrap(&x, &self.hpke_pk, *epoch, commit, &w.board_id) {
+                match unwrap(&x, &self.dev, &self.hpke_pk, *epoch, commit, &w.board_id) {
                     Some(root) => {
                         if self.roots.insert(*epoch, root) != Some(root) {
                             *keys_changed = true;
@@ -2486,7 +2602,8 @@ impl FakeSealer {
                     None => *halt = Some(Halt::Commitment),
                 }
             }
-            if self.pending.remove(entry_id).is_some() {
+            // An own rotation: its pending root goes in the same call (ENG-SEALER-009).
+            if own_entry.is_some_and(|id| self.pending.remove(id).is_some()) {
                 *keys_changed = true;
             }
         }
@@ -2519,7 +2636,7 @@ fn current_after(w: &FakeMembership, rest: &[Item]) -> usize {
     current.values().filter(|c| **c).count()
 }
 
-/// Installs a new recovery key (`seal.md` §13.6 `direct`, `confirm`).
+/// Installs a new recovery key (`seal.md` §13.6 `RecoveryKeyChange`).
 fn install_recovery(w: &mut FakeMembership, s: u64, sign_pk: Hash32, hpke_pk: Hash32) -> Result<(), Fail> {
     let dev_r = dev_r_of(&w.board_id, &sign_pk);
     if w.recorded(&dev_r, &sign_pk, &hpke_pk) {
@@ -2534,7 +2651,6 @@ fn install_recovery(w: &mut FakeMembership, s: u64, sign_pk: Hash32, hpke_pk: Ha
         }
     }
     w.recovery.push(RecRec { dev_r, sign_pk, hpke_pk, since_seq: s, until_seq: 0, last_ctr: 0 });
-    w.pending_recovery = None;
     Ok(())
 }
 
@@ -2554,10 +2670,12 @@ fn apply_skips(w: &mut FakeMembership, items: &[Item], e: &EntryCtx, input: &Cla
             let missing = targets.iter().filter(|(x, _)| (input.skip_targets)(*x).is_none()).copied().collect();
             return Err(Fail::Need(missing));
         };
-        if h(&[frame]) != *fh || frame.len() < 36 {
+        if h(&[frame]) != *fh {
             return Err(Fail::Refuse(code::CTL_TARGET));
         }
-        if e.who == Who::Device && frame[20..36] == e.author {
+        // The author is the 16 bytes at offset 20, which `frame_hash`
+        // authenticates; a frame shorter than that has none (§14.6).
+        if e.who == Who::Device && frame.get(20..36) == Some(e.author.as_slice()) {
             return Err(Fail::Refuse(code::CTL_AUTHOR));
         }
     }
@@ -2569,10 +2687,27 @@ fn apply_skips(w: &mut FakeMembership, items: &[Item], e: &EntryCtx, input: &Cla
     Ok(())
 }
 
+/// Which rows of `seal.md` §13.6 the items run.
+enum Rows<'a, 'b> {
+    /// Classification: every row whole, with the caller's Skip targets.
+    Log(&'a ClassifyInput<'b, FakeMembership>),
+    /// The projection of §21.6 step 6: `Fence`, `ResetTo`, `Skip` and
+    /// `RulesUpgrade` check only their Author column and change nothing.
+    History,
+}
+
 /// Applies the items of an accepted-so-far control entry to `W` (`seal.md` §13.6).
-fn apply_items(w: &mut FakeMembership, items: &[Item], e: &EntryCtx, input: &ClassifyInput<'_, FakeMembership>) -> Result<(), Fail> {
+fn apply_items(w: &mut FakeMembership, items: &[Item], e: &EntryCtx, rows: Rows<'_, '_>) -> Result<(), Fail> {
+    let input = match rows {
+        Rows::Log(input) => Some(input),
+        Rows::History => None,
+    };
     if matches!(items.first(), Some(Item::Skip { .. })) {
-        return apply_skips(w, items, e, input);
+        // An S-shape entry: by a current device or the current recovery identity, both authorities here.
+        return match input {
+            Some(input) => apply_skips(w, items, e, input),
+            None => Ok(()),
+        };
     }
     let refuse = |c| Err(Fail::Refuse(c));
     let device = e.who == Who::Device;
@@ -2630,9 +2765,6 @@ fn apply_items(w: &mut FakeMembership, items: &[Item], e: &EntryCtx, input: &Cla
                     d.status_seq = e.s;
                     d.status_by = e.author;
                 }
-                if w.pending_recovery.as_ref().is_some_and(|p| p.proposer == *t) {
-                    w.pending_recovery = None;
-                }
                 if w.pending_override.is_some_and(|(_, voter, _)| voter == *t) {
                     w.pending_override = None;
                 }
@@ -2687,48 +2819,14 @@ fn apply_items(w: &mut FakeMembership, items: &[Item], e: &EntryCtx, input: &Cla
                     w.purge_seq = *purge_before;
                 }
             }
-            Item::Recovery { mode, keys } => match (mode, keys) {
-                (1, Some((s, p))) => {
-                    if !recovery {
-                        return refuse(code::CTL_AUTHOR);
-                    }
-                    install_recovery(w, e.s, *s, *p)?;
+            Item::Recovery { sign_pk, hpke_pk } => {
+                if !recovery {
+                    return refuse(code::CTL_AUTHOR);
                 }
-                (2, Some((s, p))) => {
-                    if !device {
-                        return refuse(code::CTL_AUTHOR);
-                    }
-                    if w.pending_recovery.is_some() {
-                        return refuse(code::CTL_PENDING);
-                    }
-                    if w.recorded(&dev_r_of(&w.board_id, s), s, p) {
-                        return refuse(code::CTL_DUPLICATE_KEY);
-                    }
-                    w.pending_recovery =
-                        Some(PendingRec { proposer: e.author, sign_pk: *s, hpke_pk: *p, seq: e.s, start_ms: e.tau });
-                }
-                (3, Some((s, p))) => {
-                    if !device {
-                        return refuse(code::CTL_AUTHOR);
-                    }
-                    let Some(pending) = w.pending_recovery.clone() else { return refuse(code::CTL_NO_PENDING) };
-                    if pending.proposer == e.author {
-                        return refuse(code::CTL_AUTHOR);
-                    }
-                    if pending.sign_pk != *s || pending.hpke_pk != *p {
-                        return refuse(code::CTL_TARGET);
-                    }
-                    if e.at_ms < pending.start_ms.saturating_add(RECOVERY_DELAY) {
-                        return refuse(code::CTL_WINDOW);
-                    }
-                    install_recovery(w, e.s, *s, *p)?;
-                }
-                _ => {
-                    if w.pending_recovery.take().is_none() {
-                        return refuse(code::CTL_NO_PENDING);
-                    }
-                }
-            },
+                install_recovery(w, e.s, *sign_pk, *hpke_pk)?;
+            }
+            // The projection of §21.6 checks only the Author column (D or R: always met here).
+            Item::Fence { .. } if input.is_none() => {}
             Item::Fence { host, door, home_gen } => {
                 if w.home_gen.checked_add(1) != Some(*home_gen) {
                     return refuse(code::CTL_HOME_GEN);
@@ -2742,6 +2840,9 @@ fn apply_items(w: &mut FakeMembership, items: &[Item], e: &EntryCtx, input: &Cla
                 if !device {
                     return refuse(code::CTL_AUTHOR);
                 }
+                if input.is_none() {
+                    continue;
+                }
                 let above_bootstraps = w.devices.iter().filter(|d| d.current).all(|d| *seq > d.bootstrap_seq);
                 if *seq >= e.s || *seq < w.purge_seq || !above_bootstraps || !hash_versions_for(w.rules).contains(hash_version) {
                     return refuse(code::CTL_TARGET);
@@ -2752,6 +2853,9 @@ fn apply_items(w: &mut FakeMembership, items: &[Item], e: &EntryCtx, input: &Cla
             Item::Upgrade { rules, mode } => {
                 if !device {
                     return refuse(code::CTL_AUTHOR);
+                }
+                if input.is_none() {
+                    continue;
                 }
                 if *rules <= w.rules {
                     return refuse(code::CTL_TARGET);
@@ -2799,15 +2903,7 @@ fn opened_item(item: &Item) -> CtlItem {
         Item::Rotated { epoch, purge_before, .. } => {
             CtlItem::EpochRotated { epoch: *epoch, purge_before: (*purge_before != 0).then_some(*purge_before) }
         }
-        Item::Recovery { mode, keys } => CtlItem::RecoveryKeyChange {
-            mode: match mode {
-                1 => RecoveryMode::Direct,
-                2 => RecoveryMode::Propose,
-                3 => RecoveryMode::Confirm,
-                _ => RecoveryMode::Cancel,
-            },
-            key_fp: keys.as_ref().map(|(s, p)| key_fp(s, p)),
-        },
+        Item::Recovery { sign_pk, hpke_pk } => CtlItem::RecoveryKeyChange { key_fp: key_fp(sign_pk, hpke_pk) },
         Item::Fence { host, door, home_gen } => CtlItem::Fence { host: host.clone(), door: *door, home_gen: *home_gen },
         Item::ResetTo { seq, state_hash, hash_version } => {
             CtlItem::ResetTo { seq: *seq, state_hash: *state_hash, hash_version: *hash_version }
@@ -2849,6 +2945,10 @@ fn blob_ad(board_id: &[u8; 16], header27: &[u8], s: u64, writer: &Dev) -> Vec<u8
 
 impl Sealer for FakeSealer {
     type Membership = FakeMembership;
+
+    fn membership_zero(&self) -> FakeMembership {
+        FakeMembership::default()
+    }
 
     fn own_dev(&self) -> Dev {
         self.dev
@@ -2899,10 +2999,10 @@ impl Sealer for FakeSealer {
 
     fn seal(&mut self, m: &FakeMembership, ctr: u64, entry: &PlainEntry) -> Result<Sealed, SealerError> {
         let (dev, sign_pk) = (self.dev, self.sign_pk);
-        self.seal_as(&dev, &sign_pk, m, ctr, entry)
+        self.seal_as(&dev, &sign_pk, m, ctr, entry, Content::Body(&entry.body))
     }
 
-    fn open_own(&self, m: &FakeMembership, frame: &[u8]) -> Result<[u8; 16], SealerError> {
+    fn open_own(&self, _m: &FakeMembership, frame: &[u8]) -> Result<[u8; 16], SealerError> {
         let err = |c| Err(SealerError { code: c });
         let Some(f) = parse_frame(frame) else { return err(code::FRAME_FORMAT) };
         if f.dev != self.dev || f.board_id != self.board_id {
@@ -2951,7 +3051,8 @@ impl Sealer for FakeSealer {
                 continue;
             }
             let Some(commit) = m.commitment_of(e) else { continue };
-            let root = unwrap(&x, &self.hpke_pk, e, commit, &m.board_id).ok_or(SealerError { code: code::COMMITMENT })?;
+            let root =
+                unwrap(&x, &self.dev, &self.hpke_pk, e, commit, &m.board_id).ok_or(SealerError { code: code::COMMITMENT })?;
             self.roots.insert(e, root);
             self.missed.remove(&e);
             learned = true;
@@ -2961,12 +3062,19 @@ impl Sealer for FakeSealer {
 
     fn seal_snapshot(&mut self, m: &FakeMembership, material: &SnapshotMaterial) -> Result<SealedBlob, SealerError> {
         let large = SealerError { code: code::SNAPSHOT_LARGE };
+        let blob_open = SealerError { code: code::BLOB_OPEN };
+        // Refused before anything is drawn (`seal.md` §20.4): membership bytes
+        // that do not parse, another board's, a history record above `S`, and
+        // a history that is not one record per seq of `ctl_seqs`.
         let at_s = FakeMembership::from_bytes(&material.membership).ok_or(SealerError { code: code::MEMBERSHIP_FORMAT })?;
+        if at_s.board_id != self.board_id || at_s.ctl_seqs.last().is_some_and(|s| *s > material.seq) {
+            return Err(blob_open);
+        }
         let history: Vec<Vec<u8>> = {
             let held = self.history.borrow();
             let mut out = Vec::with_capacity(at_s.ctl_seqs.len());
             for s in &at_s.ctl_seqs {
-                out.push(held.get(s).cloned().ok_or(SealerError { code: code::BACKUP_HISTORY })?);
+                out.push(held.get(s).cloned().ok_or(blob_open.clone())?);
             }
             out
         };
@@ -3018,7 +3126,7 @@ impl Sealer for FakeSealer {
         // Step 1.
         let size = expected.size;
         let n = size.div_ceil(PART);
-        let sizes_ok = (1..=BLOB_MAX).contains(&size)
+        let sizes_ok = (BLOB_HEADER_LEN as u64 + TAG_LEN as u64..=BLOB_MAX).contains(&size)
             && parts.len() as u64 == n
             && u64::from(expected.parts) == n
             && parts.iter().enumerate().all(|(i, p)| {
@@ -3039,10 +3147,8 @@ impl Sealer for FakeSealer {
             return Err(err(code::BLOB_HEADER));
         }
         let epoch = u32::from_be_bytes([bytes[7], bytes[8], bytes[9], bytes[10]]);
-        let header_ok = &bytes[..4] == BLOB_MAGIC
-            && bytes[4..7] == [1, 1, 1]
-            && bytes[11..27] == expected.blob
-            && (!exact || epoch == expected.epoch);
+        // The header's `blob_id` is not compared: the signed `sha256` fixes every byte.
+        let header_ok = &bytes[..4] == BLOB_MAGIC && bytes[4..7] == [1, 1, 1] && (!exact || epoch == expected.epoch);
         if !header_ok {
             return Err(err(code::BLOB_HEADER));
         }
@@ -3085,13 +3191,22 @@ impl Sealer for FakeSealer {
             let mut records = Vec::new();
             for _ in 0..n {
                 let rec = read_hist(&mut r)?;
+                if rec.seq > material.seq {
+                    return None;
+                }
                 projection.step(&self.board_id, &rec)?;
                 records.push((rec.seq, rec.to_bytes()));
             }
             let m = FakeMembership::from_bytes(&material.membership)?;
+            // With `exact`, the signed values and the state hash recomputed from
+            // the body's own board and membership (engine.md §18.3).
+            let recomputed = state_hash_v(material.hash_version, &h(&[&material.board]), &material.membership);
+            let signed_ok = material.state_hash == expected.hash
+                && material.hash_version == expected.hash_version
+                && recomputed == expected.hash;
             let ok = r.is_empty()
                 && material.seq == expected.seq
-                && (!exact || (material.state_hash == expected.hash && material.hash_version == expected.hash_version))
+                && (!exact || signed_ok)
                 && m.board_id == self.board_id
                 && projection.agrees(&m);
             ok.then_some((material, records))

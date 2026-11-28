@@ -1,0 +1,1616 @@
+{
+ "spec": "relay.md §12.10",
+ "cases": [
+  {
+   "name": "purge raises the floor at once and drops what lies below it",
+   "clauses": [
+    "RELAY-PURGE-001",
+    "RELAY-PURGE-002",
+    "RELAY-PURGE-003",
+    "RELAY-STORE-005",
+    "RELAY-STORE-007",
+    "RELAY-SEQ-002",
+    "RELAY-ROWS-001",
+    "RELAY-READ-002",
+    "RELAY-TOKEN-004"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "8f4cfff810d36277b37ed4ed40e2d13a",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 2,
+        "chain": {
+         "$chain": 2
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     },
+     {
+      "fill_log": {
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "author": "alice",
+       "from_ctr": 2,
+       "count": 19
+      }
+     },
+     {
+      "request": {
+       "route": "blob-begin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$blob_begin": {
+         "id": "01010101010101010101010101010101",
+         "purpose": 2,
+         "seq": 5,
+         "size": 67
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "route": "blob-put",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "id": "01010101010101010101010101010101",
+        "part": 0
+       },
+       "body": {
+        "$part": {
+         "size": 67,
+         "index": 0
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "route": "blob-begin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$blob_begin": {
+         "id": "02020202020202020202020202020202",
+         "purpose": 4,
+         "seq": 0,
+         "size": 67
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "route": "blob-put",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "id": "02020202020202020202020202020202",
+        "part": 0
+       },
+       "body": {
+        "$part": {
+         "size": 67,
+         "index": 0
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     },
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "mint_read_token"
+       },
+       "body": {
+        "$admin": {
+         "op": "mint_read_token",
+         "signer": "alice",
+         "args": {
+          "dev": "alice",
+          "epoch": 1
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "rec"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "rec",
+        "args": {
+         "before_seq": 10,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/not_signer"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 10,
+         "epoch": 0
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_args"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 22,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 10,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "purge_floor": 10,
+       "done": 10
+      },
+      "rows_written": 14,
+      "storage": {
+       "board": {
+        "purge_floor": 10,
+        "purge_done": 10,
+        "compact_floor": 1,
+        "read_epoch": 2,
+        "del_count": 9
+       },
+       "read_tokens": [
+        {
+         "state": 2
+        }
+       ],
+       "blobs": [
+        {
+         "id": "02020202020202020202020202020202",
+         "purpose": 4
+        }
+       ],
+       "count": {
+        "parts": 1
+       },
+       "log": [
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "head_seq": 21,
+       "floor": 10,
+       "purge_floor": 10,
+       "truncated": true,
+       "more": false,
+       "seqs": [
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=9"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "truncated": false,
+       "seqs": [
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/token_stale"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-meta",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "status": 404,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_blob"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "conflict",
+        "seq": 0,
+        "frame": null
+       }
+      ],
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 9
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "dup",
+        "seq": 10
+       }
+      ],
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "register"
+      },
+      "body": {
+       "$admin": {
+        "op": "register",
+        "signer": "alice",
+        "args": {
+         "dev": "carol",
+         "sign_pk": "carol",
+         "frame_hash": {
+          "$hash": {
+           "$frame": {
+            "author": "alice",
+            "ctr": 4
+           }
+          }
+         }
+        },
+        "extra": {
+         "$u64": 5
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/frame_mismatch"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 10,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "purge_floor": 10,
+       "done": 10
+      },
+      "rows_written": 2
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 9,
+         "epoch": 3
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/target"
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 21,
+         "epoch": 5
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "purge_floor": 21,
+       "done": 21
+      },
+      "rows_written": 13,
+      "storage": {
+       "board": {
+        "purge_floor": 21,
+        "purge_done": 21,
+        "read_epoch": 5
+       },
+       "log": [
+        21
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "head": {
+        "seq": 21,
+        "chain": {
+         "$chain": 21
+        }
+       },
+       "last_ctr": 20,
+       "last_seq": 21,
+       "appends_left": 2980,
+       "relay_now": "$any",
+       "floor": 21,
+       "purge_floor": 21,
+       "state": "open",
+       "door": {
+        "$door": true
+       },
+       "push": "$push"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "mint_read_token"
+      },
+      "body": {
+       "$admin": {
+        "op": "mint_read_token",
+        "signer": "alice",
+        "args": {
+         "dev": "alice",
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/stale_epoch",
+       "read_epoch": 5
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 21
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 22
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "the rows themselves go within the day's delete budget",
+   "clauses": [
+    "RELAY-PURGE-003",
+    "RELAY-COMPACT-005",
+    "RELAY-STORE-005",
+    "RELAY-SEQ-002"
+   ],
+   "targets": [
+    "core",
+    "standby"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "3901a2a447f787495f7554c435b6ebef",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "fill_log": {
+       "board": "main",
+       "cred": {
+        "door": true
+       },
+       "author": "rec",
+       "from_ctr": 2,
+       "count": 5100
+      }
+     },
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 5102,
+        "chain": {
+         "$chain": 5102
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 5100,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "purge_floor": 5100,
+       "done": 5001
+      },
+      "rows_written": 5002,
+      "storage": {
+       "board": {
+        "purge_floor": 5100,
+        "purge_done": 5001,
+        "del_count": 5000,
+        "del_day": 20775
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=0&limit=5"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "head_seq": 5102,
+       "floor": 5100,
+       "purge_floor": 5100,
+       "truncated": true,
+       "seqs": [
+        5100,
+        5101,
+        5102
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "read",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "query": "after=5050"
+     },
+     "expect": {
+      "status": 200,
+      "page": {
+       "truncated": true,
+       "seqs": [
+        5100,
+        5101,
+        5102
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "rec",
+          "ctr": 5050
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "conflict",
+        "seq": 0,
+        "frame": null
+       }
+      ],
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "rec",
+          "ctr": 5100
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "dup",
+        "seq": 5100
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 5100,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "purge_floor": 5100,
+       "done": 5001
+      },
+      "rows_written": 2
+     }
+    },
+    {
+     "clock_ms": 1795046399999,
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 5100,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "purge_floor": 5100,
+       "done": 5001
+      },
+      "rows_written": 2
+     }
+    },
+    {
+     "clock_ms": 1795046400000,
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "purge"
+      },
+      "body": {
+       "$admin": {
+        "op": "purge",
+        "signer": "alice",
+        "args": {
+         "before_seq": 5100,
+         "epoch": 2
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "purge_floor": 5100,
+       "done": 5100
+      },
+      "rows_written": 101,
+      "storage": {
+       "board": {
+        "purge_done": 5100,
+        "del_count": 99,
+        "del_day": 20776
+       },
+       "log": [
+        5100,
+        5101,
+        5102
+       ]
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

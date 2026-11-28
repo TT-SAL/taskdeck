@@ -1,6 +1,7 @@
 //! The error codes (seal.md §22, §26).
 
 /// A failure, one variant per code of §22 (seal.md §26).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SealError {
     /// `seal/frame_format` (seal.md §22).
     FrameFormat,
@@ -62,12 +63,6 @@ pub enum SealError {
     CtlWraps,
     /// `seal/ctl_last_device` (seal.md §22).
     CtlLastDevice,
-    /// `seal/ctl_pending` (seal.md §22).
-    CtlPending,
-    /// `seal/ctl_no_pending` (seal.md §22).
-    CtlNoPending,
-    /// `seal/ctl_window` (seal.md §22).
-    CtlWindow,
     /// `seal/ctl_home_gen` (seal.md §22).
     CtlHomeGen,
     /// `seal/ctl_support` (seal.md §22).
@@ -173,6 +168,99 @@ pub enum SealError {
 impl SealError {
     /// The `seal/…` code of this variant (seal.md §22, §26).
     pub fn code(&self) -> &'static str {
-        unimplemented!()
+        match self {
+            SealError::FrameFormat => "seal/frame_format",
+            SealError::WrongBoard => "seal/wrong_board",
+            SealError::UnknownAuthor => "seal/unknown_author",
+            SealError::BadSignature => "seal/bad_signature",
+            SealError::CounterReplay => "seal/counter_replay",
+            SealError::CounterGap => "seal/counter_gap",
+            SealError::RevokedAuthor => "seal/revoked_author",
+            SealError::BadVersion => "seal/bad_version",
+            SealError::BadEpoch => "seal/bad_epoch",
+            SealError::OldEpoch => "seal/old_epoch",
+            SealError::MissingRoot => "seal/missing_root",
+            SealError::Aead => "seal/aead",
+            SealError::BadPlaintext => "seal/bad_plaintext",
+            SealError::BasedOnFuture => "seal/based_on_future",
+            SealError::BasedOnFork => "seal/based_on_fork",
+            SealError::NotAuthorized => "seal/not_authorized",
+            SealError::StaleEpoch => "seal/stale_epoch",
+            SealError::BadPayload => "seal/bad_payload",
+            SealError::BadCtlSig => "seal/bad_ctl_sig",
+            SealError::CtlShape => "seal/ctl_shape",
+            SealError::CtlGenesis => "seal/ctl_genesis",
+            SealError::CtlAuthor => "seal/ctl_author",
+            SealError::CtlTarget => "seal/ctl_target",
+            SealError::CtlDuplicateKey => "seal/ctl_duplicate_key",
+            SealError::CtlDuplicate => "seal/ctl_duplicate",
+            SealError::CtlDeviceCap => "seal/ctl_device_cap",
+            SealError::CtlCap => "seal/ctl_cap",
+            SealError::CtlEpoch => "seal/ctl_epoch",
+            SealError::CtlWraps => "seal/ctl_wraps",
+            SealError::CtlLastDevice => "seal/ctl_last_device",
+            SealError::CtlHomeGen => "seal/ctl_home_gen",
+            SealError::CtlSupport => "seal/ctl_support",
+            SealError::Commitment => "seal/commitment",
+            SealError::UnknownRules => "seal/unknown_rules",
+            SealError::PayloadTooLarge => "seal/payload_too_large",
+            SealError::Entropy => "seal/entropy",
+            SealError::MembershipFormat => "seal/membership_format",
+            SealError::ChallengeLength => "seal/challenge_length",
+            SealError::HostFormat => "seal/host_format",
+            SealError::MoveCode => "seal/move_code",
+            SealError::CodeFormat => "seal/code_format",
+            SealError::CodeCheck => "seal/code_check",
+            SealError::SlotMac => "seal/slot_mac",
+            SealError::SlotFormat => "seal/slot_format",
+            SealError::CommitMismatch => "seal/commit_mismatch",
+            SealError::DhZero => "seal/dh_zero",
+            SealError::SasMismatch => "seal/sas_mismatch",
+            SealError::PairKeysConflict => "seal/pair_keys_conflict",
+            SealError::PairRules => "seal/pair_rules",
+            SealError::PairTimeout => "seal/pair_timeout",
+            SealError::PairCancelled => "seal/pair_cancelled",
+            SealError::BundleOpen => "seal/bundle_open",
+            SealError::BundleInvalid => "seal/bundle_invalid",
+            SealError::DeviceAddedMismatch => "seal/device_added_mismatch",
+            SealError::PairRaced => "seal/pair_raced",
+            SealError::SheetLength => "seal/sheet_length",
+            SealError::SheetChar => "seal/sheet_char",
+            SealError::SheetPadding => "seal/sheet_padding",
+            SealError::SheetCheck => "seal/sheet_check",
+            SealError::FileHeader => "seal/file_header",
+            SealError::FileTornTail => "seal/file_torn_tail",
+            SealError::FileBadTail => "seal/file_bad_tail",
+            SealError::FileCorrupt => "seal/file_corrupt",
+            SealError::BlobSize => "seal/blob_size",
+            SealError::BlobHash => "seal/blob_hash",
+            SealError::BlobHeader => "seal/blob_header",
+            SealError::BlobOpen => "seal/blob_open",
+            SealError::SnapshotLarge => "seal/snapshot_large",
+            SealError::Inflate => "seal/inflate",
+            SealError::BackupSize => "seal/backup_size",
+            SealError::BackupHeader => "seal/backup_header",
+            SealError::BackupBoard => "seal/backup_board",
+            SealError::BackupRecipient => "seal/backup_recipient",
+            SealError::BackupSignature => "seal/backup_signature",
+            SealError::BackupOpen => "seal/backup_open",
+            SealError::BackupPayload => "seal/backup_payload",
+            SealError::BackupHistory => "seal/backup_history",
+            SealError::BackupWriter => "seal/backup_writer",
+            SealError::BackupUnpinned => "seal/backup_unpinned",
+            SealError::NotControl => "seal/not_control",
+        }
     }
 }
+
+impl core::fmt::Display for SealError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for SealError {}
+
+#[cfg(test)]
+mod tests;
+

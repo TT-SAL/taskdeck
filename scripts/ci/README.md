@@ -35,7 +35,7 @@ is true.
 | `foundation` | `docs/sync/spec/**`, `fixtures/**`, `scripts/**`, `crates/**`, `build.rs` (checked by `scripts/check-build-date.sh`), `SYNC.md` and `SYNC_PLAN.md` (`scripts/spec-lint.sh` checks the requirement map against their sections, stages and §2 rows); and whenever `root` is true (the fixture generator, `fixtures/generator`, links the root package, and `scripts/check-fixtures.sh` compares the committed fixtures with what it writes) |
 | `core` | `crates/taskdeck-core/**`, `fixtures/**` except `fixtures/generator/**` (the generator's code is `foundation`'s alone) |
 | `seal` | `crates/taskdeck-seal/**`, `docs/sync/vectors/**` |
-| `engine` | `crates/taskdeck-sync/**` |
+| `engine` | `crates/taskdeck-sync/**`; `relay/test/vectors/**` and `docs/sync/spec/relay.md` (the engine's tests read them: the model relay runs the relay's published cases, and the table of relay codes is compared with the catalogue; they also mark `foundation` and `recovery`, as the crate does) |
 | `relay` | `relay/**`, `docs/sync/vectors/**` (the relay's suite takes seal's published vectors) |
 | `device` | `crates/taskdeck-device/**`, `tests/e2e/**`; and whenever `core`, `seal`, `engine`, `relay` or `recovery` is true (it links the backup crate, and its end-to-end tests run against the relay) |
 | `recovery` | `crates/taskdeck-backup/**`, `crates/taskdeck-recover/**`, `crates/taskdeck-device/**`, `crates/taskdeck-sync/**` (the tool's online steps link the device runtime, which links the engine); and whenever `core` or `seal` is true |

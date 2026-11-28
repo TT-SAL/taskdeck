@@ -129,6 +129,10 @@ A canonical parser for a record schema takes bytes and returns the record or an 
 
 Step 5 makes the encoding unique: whitespace, key order, escapes, a field written at its default, and the textual forms of instants and integers are all checked by it.
 
+A string that holds a `\u` escape of a lone surrogate (`"\ud800"`) fails step 2 (`core/not_json`): it is RFC 8259 grammar but denotes no Unicode text. A record type names its own byte limit for step 1 (`Record::LIMIT`, §20).
+
+**Tree budget.** A parser bounds what the parsed value costs before any schema is applied, with numbers that are the same on every platform. Against a budget of `max(32 × limit, 1,048,576)` it charges: for every string, member keys included, the number of bytes between its quotes as written, plus 16; for every array element, 32; for every object, 744 for each started group of five members (once for 1 to 5 members, twice for 6 to 10, nothing for an empty object). A text whose charges exceed the budget is `core/schema`, returned once the whole text has passed step 2. No value that a record schema of this spec admits within its limit comes near the budget: the densest record, a `Mark` of 34 bytes, is charged 810, under 24 times its length.
+
 - **CORE-ENC-001** (core) The canonical encoder MUST produce exactly the bytes §4.2 defines for every value, with the members of every object in ascending unsigned-byte order of their keys.
 - **CORE-ENC-002** (core) The canonical encoder MUST omit every field whose value equals the default its schema states and every optional field whose value is none, and MUST write every other field.
 - **CORE-ENC-003** (core) The canonical encoder MUST escape exactly the characters of the table in §4.2 and MUST write every other character as itself.
@@ -168,6 +172,8 @@ The core provides three implementations:
 
 A device passes `ChronoZone(chrono::Local)` or a `TableZone`; `device.md` chooses, at run time, and may pass it as `&dyn Zone`: every zone parameter of this crate is `&(impl Zone + ?Sized)` or a generic `Z: Zone + ?Sized` (§20). Inside the core the type `chrono::Local` never appears (CORE-GEN-004).
 
+`TableZone::new` returns `core/schema` for transitions that are not strictly ascending by `utc_ms` and for an offset outside −86,399 to 86,399. When more than two instants share a local wall time (transitions less than a day apart), `TableZone::from_local` returns the first and the last as `Ambiguous`. `ChronoZone::from_local` returns the instants ascending whatever order `chrono` lists them in, and only those that `offset_at` maps back to `local`: chrono 0.4.45's `Local` lists the later instant of a fold first, and reports a fold at the first minute after one.
+
 ### 5.3 Local day and minutes
 
 For an instant `t` and a zone `z`, the local date-time is `t + z.offset_at(t)` read as a naive date-time. Its date is the **local day** of `t`, and `hour × 60 + minute` (seconds and fractions dropped) its **minutes**. `t` **falls on** day `d` when its local day is `d`. These replace every `date_naive()`, `hour()` and `minute()` that today's code calls on a `DateTime<Local>`.
@@ -179,6 +185,10 @@ For an instant `t` and a zone `z`, the local date-time is `t + z.offset_at(t)` r
 1. `m' = clamp(m, 0, 1439)`;
 2. `local_at(d, x)` is the naive date-time `d` at hour `min(x div 60, 23)`, minute `x mod 60`, second 0; its instant is the earlier one for `Ambiguous`, the one for `Single`, none for `None`;
 3. the result is `local_at(d, m')`, or, when that is none, `local_at(d, min(m' + 60, 1439))`, or none.
+
+On a fold the core takes the earlier instant in every zone. Today's code takes `chrono`'s `.earliest()`, which for `Local` is the later one (§5.2); §13.5 says how the recorded transcripts, which hold the later one, are replayed.
+
+A local time **outside the range** is not a gap. A naive date-time is outside the range when it, taken as seconds since 1970-01-01T00:00:00, minus `z.offset_at(Instant::MIN)` is below 0, or minus `z.offset_at(Instant::MAX)` is above 253,402,300,799. For such a time `local_at` is none and step 3 does not try 60 minutes later: the result is none. (Without this rule 00:00 on 1970-01-01 in a zone east of Greenwich became 01:00.) The test is made on the time asked for; a 60-minute step that itself lands outside the range gives none, as any step that finds no instant does.
 
 ### 5.5 Planner arithmetic in integers
 
@@ -194,7 +204,7 @@ Examples (they are vectors, §18): `clamp_block(547, 100) = (540, 105)`; `clamp_
 
 - **CORE-TIME-001** (core) An `Instant` MUST lie within the range of §5.1, and every function that produces one from outside data (the canonical parser, `at_ms`, the intent parser, the zone conversions) MUST return an error, never an out-of-range instant.
 - **CORE-TIME-002** (core) Every read query and compile function that needs a local day or local minutes MUST compute them from an instant and the caller's `Zone` as §5.3 states, and MUST NOT take a local date-time from anywhere else.
-- **CORE-TIME-003** (core) `resolve_on_day` MUST follow the three steps of §5.4, taking the earlier instant of an ambiguous local time and stepping once by 60 minutes over a gap.
+- **CORE-TIME-003** (core) `resolve_on_day` MUST follow the three steps of §5.4, taking the earlier instant of an ambiguous local time and stepping once by 60 minutes over a gap, and MUST return none, without that step, for a local time outside the range.
 - **CORE-TIME-004** (core) `snap`, `clamp_block` and `snap_up` MUST be computed in integer arithmetic exactly as §5.5 states, and MUST return the values listed there for the listed inputs.
 - **CORE-TIME-005** (core) `TableZone` MUST compute offsets and local candidates exactly as the table of §5.2 states.
 
@@ -331,7 +341,7 @@ A row's key is `(id, archived_at)`. Commands name a row by its key (`restore`, `
 
 `BoardData::check` holds exactly when every one of these is true:
 
-1. the record parses under its schema (§6.1 to §6.10) and every array is in its stated order without forbidden duplicates;
+1. the record parses under its schema (§6.1 to §6.10), every array is in its stated order without forbidden duplicates, and no mark has both numbers 0 (§6.10);
 2. every count is within its cap (§17);
 3. every live item id, every subscription id, every non-zero archive-row id and every sid has a non-zero low part (`n = id mod 2^40 ≥ 1`) and a high part `id div 2^40` from 0 to 8191;
 4. for every such id or sid with high part `h` and low part `n`, the mark of `h` has `item ≥ n` (items, rows, subscriptions) or `block ≥ n` (sids);
@@ -382,7 +392,7 @@ A `restore` carries the row key and a `fallback` id minted by the origin. `apply
 
 - **CORE-ID-001** (core) Every id and sid in `BoardData`, except the id 0 of a pre-id archive row, MUST have the form of §7.1 with a non-zero low part and a high part from 0 to 8191.
 - **CORE-ID-002** (core) `apply` MUST refuse with `core/bad_id` a command that mints an item, subscription or block id whose high part differs from `Ctx.device_no` or whose low part is not above the author's mark for that kind.
-- **CORE-ID-003** (core) `apply` MUST raise the author's mark to the low part of every id it accepts as newly minted, including a `restore`'s `fallback` whether or not the restore used it.
+- **CORE-ID-003** (core) `apply` MUST raise the author's mark to the low part of every id it accepts as newly minted, including a `restore`'s `fallback` whether or not the restore used it. A benign repeat (§10.6) accepts no id and raises no mark.
 - **CORE-ID-004** (core) The compile step MUST mint each number as `max(minter.next, mark + 1)` of §7.2 and MUST advance the minter past it, so that one minter never yields the same number twice.
 - **CORE-ID-007** (core) `IdMinter::new(device_no)` MUST return a minter with that `device_no`, `next_item = 1` and `next_block = 1`.
 - **CORE-ID-005** (core) `apply` MUST restore a row under its own id when that id is not 0 and not held by a live item, and under the command's `fallback` otherwise, without applying the range check to the row's own id.
@@ -453,7 +463,10 @@ The change set lets `device.md`'s local-only `Store` write today's files in toda
 1. `ctx` satisfies §8.1's constraints, else `core/bad_ctx`;
 2. the command's `op` is in the op table of `board.rules` (§11.1), else `core/rules`;
 3. the command's checks, in the order its section in §9 lists them;
-4. the command's effects, which cannot fail.
+4. the size check: the command's effects would leave canonical board bytes (§6.13) that are over 61,865,984 bytes (59 MiB) and longer than before the command, which is `core/cap`;
+5. the command's effects, which cannot fail.
+
+The caps of §9 do not bound the board's bytes on their own (200,000 archive rows of 300 bytes are 60 MB, and unreadable lines can be more), so step 4 does: no sequence of commands grows a board past 59 MiB. That keeps it loadable (§17: 60 MiB) with room for what `reset` adds (§11.3: at most 8,191 marks, under 0.6 MB). A command that does not lengthen the board is never refused by step 4, so a board can always be made smaller. An implementation may use any method that gives exactly this result; a bound that is cheap to compute and never below the true length lets it skip the exact count for all but the largest boards.
 
 A refusal leaves `board` unchanged. An `Applied` with `benign` set has an empty change set and no notices.
 
@@ -464,6 +477,7 @@ A refusal leaves `board` unchanged. An `Applied` with `benign` set has an empty 
 - **CORE-APPLY-002** (core) A refused `apply` MUST leave the canonical board bytes unchanged.
 - **CORE-APPLY-003** (core) A successful `apply` MUST report in its change set every live item, archive key, subscription and setting it changed, and nothing else; and MUST list in `overlay_forget` every subscription it removed or set to disabled.
 - **CORE-APPLY-004** (core) A benign repeat MUST return `Applied` with `benign` set, an empty change set and no notices, and MUST leave the canonical board bytes unchanged.
+- **CORE-APPLY-005** (core) `apply` MUST refuse with `core/cap`, changing nothing, a command whose effects would leave canonical board bytes that are over 61,865,984 bytes and longer than before the command, and MUST NOT refuse for size a command that does not lengthen them.
 
 ## 9. Log commands v1
 
@@ -480,6 +494,8 @@ A log command is one record of the canonical encoding with a field `op` naming i
 5. §4.5 step 4 against that command's schema, else `core/schema`;
 6. §4.5 step 5, else `core/not_canonical`;
 7. the command's cross-field constraints in its section ("Schema rule"), else `core/schema`.
+
+A text over the tree budget of §4.5 is `core/schema` whatever its `op`: the budget is spent before step 4 reads one.
 
 A command that parses is not yet valid against the board: that is `apply`'s business (§8.4). The engine maps a parse failure of a sequenced `cmd` entry to a refusal on every device (`seal.md` §14.4, `engine.md`); it is not an `apply` refusal and changes nothing.
 
@@ -639,7 +655,7 @@ Fields: `op`, `id` `id`, `start` `instant`, `minutes` `len`. Apply: (1) gone; (2
 | `op` | `"set_notes"` | required | |
 | `text` | string | default `""` | at most 20,000 scalars; contains no U+0009 |
 
-Apply: (1) `base = board.notes_rev`, else `core/notes_stale`, with `NotesConflict{base, current: board.notes_rev}`. Effects: `notes = text`; `notes_rev += 1`. In rules version 1 the cap counts scalars after the origin's detab (SYNC.md §4.6; today counts before, board.rs:1253-1256).
+Apply: (1) `base = board.notes_rev`, else `core/notes_stale`, with `NotesConflict{base, current: board.notes_rev}`; (2) `notes_rev` is below 2^53 − 1, else `core/cap`. Effects: `notes = text`; `notes_rev += 1`. In rules version 1 the cap counts scalars after the origin's detab (SYNC.md §4.6; today counts before, board.rs:1253-1256).
 
 ### 9.21 `restore`
 
@@ -693,7 +709,7 @@ Schema rule for `set_picture`: `parts = ceil(size / 1,048,576)`. None of them ha
 
 The last writer wins per command, in seq order, as today (DOC §4.1), and identically on every device because every device applies the same entries in the same order with the same `apply` (SYNC.md §4.6).
 
-A **stamp** `(seq, device_no)` records which entry last changed something. Each live item carries five (§6.5), each live block one (§6.3). A creating command, `restore` and `add_block` write the entry's stamp `(ctx.seq, ctx.device_no)` on everything they create; every other command writes it on exactly the groups its row of §9.3 names. The legacy import writes `(1, 0)` everywhere (§15.4); `device_no` 0 is never an author. An item's **latest stamp** is the one with the greatest `seq` among its five field stamps and its blocks' stamps.
+A **stamp** `(seq, device_no)` records which entry last changed something. Each live item carries five (§6.5), each live block one (§6.3). A creating command, `restore` and `add_block` write the entry's stamp `(ctx.seq, ctx.device_no)` on everything they create; every other command writes it on exactly the groups its row of §9.3 names. The legacy import writes `(1, 0)` everywhere (§15.4); `device_no` 0 is never an author. An item's **latest stamp** is the one with the greatest `seq` among its five field stamps and its blocks' stamps; among stamps of equal `seq`, the first in the order `estimate`, `levels`, `name`, `repeat`, `time`, then the blocks in ascending sid (equal seqs from different devices occur only in a board that no sequence of commands produces).
 
 A stamp `(s, d)` is **another device's change since the origin's view** for an entry with `ctx` when `s > ctx.based_on`, `d ≠ ctx.device_no` and `d ≠ 0`.
 
@@ -730,7 +746,7 @@ Every other "not there" is a refusal (`core/gone`). The compile step still repor
 
 ### 10.7 Notice and refusal records
 
-Notices and refusals live per device, outside `BoardData`, in the device's sealed notices file (`seal.md` §19.2 kind 8); `engine.md` owns the list (which entries it records, when it shows and clears them), `device.md` the file. Only entries applied to the confirmed state produce records: a notice produced while applying to the pending state is discarded (`engine.md`). A device keeps a notice when its own `device_no` is the notice's `author` or `other`, and a refusal when it is the refused entry's author. Both are canonical-encoding records:
+Notices and refusals live per device, outside `BoardData`, in the device's sealed notices file (`seal.md` §19.2 kind 8); `engine.md` owns the list (which entries it records, when it shows and clears them), `device.md` the file. Only entries applied to the confirmed state produce records: a notice produced while applying to the pending state is discarded (`engine.md`). A device keeps an `overwrite` notice when its own `device_no` is the notice's `author` or `other`, a `skipped` notice when it is the `author` (§10.3: the author alone), and a refusal when it is the refused entry's author. Both are canonical-encoding records of at most 4,096 bytes each (`device.md` §6.4.5). A refusal's `code` and `op` are read as any string, so that a record a newer build wrote still reads; `base` and `current` are present only when `op` is `set_notes`.
 
 **Notice**
 
@@ -800,12 +816,12 @@ A `ResetTo` (`seal.md` §13.6, `engine.md` §28.1) installs an earlier state of 
 1. `target.rules ≤ current.rules`, else `core/unknown_rules`;
 2. the result `b` is `target` with every field kept, except:
    - `marks`: one mark for each `device_no` that has a mark in `target` or in `current`, its `item` and its `block` each the larger of the two boards' values (an absent mark counts as 0), ascending by `device_no`;
-   - `notes_rev = max(target.notes_rev, current.notes_rev) + 1`;
+   - `notes_rev = max(target.notes_rev, current.notes_rev) + 1`; when the larger of the two is already 2^53 − 1, `reset` returns `core/cap` instead;
 3. when `b.rules < current.rules`: `upgrade_rules(&mut b, current.rules)` (§11.2); its error is returned.
 
 The marks keep every number minted since the target from being minted again (§7.2); the raised revision makes every `set_notes` based on a revision of either board stale (§10.5); and `b.rules` mirrors the unchanged membership. `reset` produces no notices and, like `apply`, is a function of its arguments alone (CORE-CTX-002).
 
-- **CORE-RULES-005** (core) `reset` MUST return `target` unchanged except that its marks are the elementwise maximum of both boards' marks, its `notes_rev` is one above the larger of the two, and its rules version is raised to `current.rules` by `upgrade_rules`, and MUST return `core/unknown_rules` when `target.rules` exceeds `current.rules`.
+- **CORE-RULES-005** (core) `reset` MUST return `target` unchanged except that its marks are the elementwise maximum of both boards' marks, its `notes_rev` is one above the larger of the two, and its rules version is raised to `current.rules` by `upgrade_rules`, and MUST return `core/unknown_rules` when `target.rules` exceeds `current.rules`, and `core/cap` when the larger `notes_rev` is already 2^53 − 1.
 
 ## 12. Intents
 
@@ -818,10 +834,10 @@ An intent is a user action as a UI expresses it, before policy: it may carry nai
 `parse_intent(text)` reads today's wire shapes (`Command`, board.rs:111-280, with `wire::optional_local`, board.rs:392-419), so the forked page needs no change to what it sends:
 
 1. the text is at most 84,096 bytes (today's `MAX_BODY_BYTES`, phone.rs:136), else `core/intent_json`;
-2. it is a JSON object with a string field `op` naming an intent of §12.3, else `core/intent_json` ("unknown variant");
+2. it is a JSON object with a string field `op` naming an intent of §12.3, else `core/intent_json` ("unknown variant"); a JSON array is refused too, although today's `serde` derive reads one; the three query ops are answered here with `core/query` (`Intent` has no variant for them);
 3. the fields are read as today's `serde` derive reads them: an unknown field is ignored (today's behaviour, R1 §11), a missing field takes the default the table gives, a missing field without one is an error, a wrong type is an error; integers into the Rust types the table names;
 4. a **wire time** field (`deadline` of `add`, `quick_add`, `set_deadline`; `at` of `complete`, `delete`) that is absent, `null`, or a string that is empty after trim is none; otherwise, after trim, it is `WireTime::Exact` if `chrono::DateTime::parse_from_rfc3339` (chrono 0.4.45) accepts it and its seconds are not a leap second; else `WireTime::Naive` if `chrono::NaiveDateTime::parse_from_str` accepts it with `%Y-%m-%dT%H:%M` or `%Y-%m-%dT%H:%M:%S`; else an error with the message `` not a time: `<text>` ``;
-5. `archived_at` of `restore` and `forget_archived` is RFC 3339 as in step 4, `Exact` only; a naive form is an error, as today;
+5. `archived_at` of `restore` and `forget_archived` is RFC 3339 as in step 4, `Exact` only; a naive form is an error, as today, with step 4's message;
 6. a `date` field (`day`) is `YYYY-MM-DD` as `chrono::NaiveDate`'s `serde` reads it.
 
 Every failure is `core/intent_json` with HTTP status 400 and the parser's message, as today's `BoardError::bad_request` carries it (board.rs:491-515).
@@ -895,12 +911,12 @@ Policy lives here and nowhere else (thin apply, SYNC.md §4.5, V2-1): default na
 
 1. **Trim** (G1): names, URLs and wire-time text are trimmed of White_Space (§2), an explicit list, so the result does not depend on the toolchain's Unicode tables (V2-1).
 2. **Names** (G2): after trimming, a name over 200 scalars is `core/name_long`; an empty name is handled as the intent's row says.
-3. **Wire times** (G3): `Exact` converts to an instant (an out-of-range one is `core/date_range`); `Naive` resolves as today's `parse_local_input` (board.rs:409-419) in the origin's zone: `resolve_on_day(date, hour × 60 + minute, zone)` (seconds dropped); no instant, or an instant whose local day's year is outside 1970 to 9999, is `core/intent_json` with `` not a time: `<text>` ``.
+3. **Wire times** (G3): `Exact` converts to an instant (an out-of-range one is `core/date_range`); `Naive` resolves as today's `parse_local_input` (board.rs:409-419) in the origin's zone: `resolve_on_day(date, hour × 60 + minute, zone)` (seconds dropped); no instant, or an instant whose local day's year is outside 1970 to 9999, is `core/intent_json` with `` not a time: `<text>` ``. A naive time outside the range (§5.4) has no instant and gets this answer too, as today.
 4. **Dates** (G4): a `day` whose year is outside 1970 to 9999 is `core/date_range` ("sane day").
-5. **Instants** (G5): every instant the intent yields must lie within §5.1's range, else `core/date_range` ("sane instant"). The bound is checked on the UTC instant (V2-4), not on a local date as today (board.rs:446-460).
-6. **The view** (G6): every check `apply` would make against the board (existence, kind, a block's presence, caps, URL uniqueness) is made against `view`, with today's message, so the user hears at once what today's server says; the command can still be refused later if another device's entry lands first.
-7. **Ids** (G7): every id, sid and fallback is minted from the minter (§7.2) after every check has passed.
-8. **Rules** (G8): CORE-RULES-004.
+5. **Instants** (G5): every instant the intent yields must lie within §5.1's range, else `core/date_range` ("sane instant"). The bound is checked on the UTC instant (V2-4), not on a local date as today (board.rs:446-460). Where a row of §13.4 resolves a day and minutes and says "none: `core/bad_time`", a local time outside the range (§5.4) is `core/date_range`; `core/bad_time` is for a real gap.
+6. **The view** (G6): every check `apply` would make against the board (existence, kind, a block's presence, caps, URL uniqueness) is made against `view`, with today's message, so the user hears at once what today's server says; the command can still be refused later if another device's entry lands first. The size check of §8.4 step 4 is one of these checks: `core/cap_board`, after the row's own checks and before ids are minted. So are the two checks of `restore` that have no message of today's (§13.4).
+7. **Ids** (G7): every id, sid and fallback is minted from the minter (§7.2) after every check has passed. The minter is the device's: a `minter.device_no` other than `cx.device_no` is `core/bad_id`, checked before anything else. A minter with no number left is `core/cap_items` for an item id or a fallback and `core/cap_blocks` for a sid, reported after the checks of G6 and G8.
+8. **Rules** (G8): CORE-RULES-004. An intent whose command is outside the op table of `view.rules` is `core/rules`.
 9. **Clock** (G9): `now` is the only clock: it defaults and caps `complete` and `delete` and gives Reflow's now-line; `created` comes from `Ctx.at`, which equals `now`.
 10. **Detab** (G10): `set_notes` text is detabbed before its length is checked.
 
@@ -927,8 +943,8 @@ Each row's steps run in order; the first failure is the result. "Missing" means 
 | `set_horizon` | `level ≥ 4`: `core/horizon`; missing; event or routine: `core/horizon_kind` | `set_horizon{id, level}` | — |
 | `set_repeat` | `day` (G4); missing; not a routine: `core/repeat_kind`; `days' = days AND 127`; `anchor = day` when `days' = 0`, else `item.recurrence.anchor` | `set_repeat{id, days: days', anchor}` | — |
 | `reflow` | `day` (G4); `from` given: `f = clamp(from, 0, 1440)`; else `f = now_marker(day, now)`, and when none: no command, `moved = 0`; then the algorithm below | `move_blocks{moves}`, or no command when `moves` is empty | `moved` |
-| `set_notes` | `t = detab(text)` (G10); `t` over 20,000 scalars: `core/notes_long` | `set_notes{text: t, base}`, `base` = the intent's `base`, or `view.notes_rev` when none | — |
-| `restore` | `archived_at` (G5); no row of `view` has the key `(id, archived_at)`: `core/archive_gone`; cap of 10,000 live items: `core/cap_items`; mint `fallback` | `restore{id, archived_at, fallback}` | `id`: the row's `id` when it is not 0 and not live in `view`, else `fallback` |
+| `set_notes` | `t = detab(text)` (G10); `t` over 20,000 scalars: `core/notes_long`; a `base` that is given and is not `view.notes_rev`: `core/notes_stale`; `view.notes_rev` at 2^53 − 1: `core/cap_board` | `set_notes{text: t, base: view.notes_rev}` | — |
+| `restore` | `archived_at` (G5); no row of `view` has the key `(id, archived_at)`: `core/archive_gone`; cap of 10,000 live items: `core/cap_items`; the live blocks plus the row's over 50,000: `core/cap_blocks`; a sid of the row held by a live block: `core/id_taken`; mint `fallback` | `restore{id, archived_at, fallback}` | `id`: the row's `id` when it is not 0 and not live in `view`, else `fallback` |
 | `forget_archived` | `archived_at` (G5); no row of `view` has the key: `core/archive_gone` | `forget_archived{id, archived_at}` | — |
 | `add_subscription` | 20 subscriptions in `view`: `core/calendars_full`; `u = checked_url(url)` (below); a subscription in `view` with URL `u`: `core/url_duplicate`; name (G2); mint `id`; empty name: `name_from_url(u)` (subscriptions.rs:294-302) when it is some and at most 200 scalars, else `"Calendar <id>"` with `id` in decimal; `color` given, else `DEFAULT_COLORS[n mod 6]` with `n` the number of subscriptions in `view` | `add_subscription{id, name, url: u, color}` | `id` |
 | `remove_subscription` | no subscription `id` in `view`: `core/calendar_gone` | `remove_subscription{id}` | — |
@@ -938,7 +954,7 @@ Each row's steps run in order; the first failure is the result. "Missing" means 
 | `set_palette` | none | `set_palette{colors}` | — |
 | `set_home` | `lat` and `lon` finite, `−90 ≤ lat ≤ 90`, `−180 ≤ lon ≤ 180`, else `core/place`; each rounded to hundredths: `round_half_away_from_zero(x × 100)` in `f64` | `set_home{lat, lon}` | — |
 | `set_picture` | `picture` present: `parts = ceil(size / 1,048,576)` and the §6.9 ranges, else `core/picture` | `set_picture{picture}` | — |
-| `snapshot`, `feed`, `board` | always `core/query` | — | — |
+| `snapshot`, `feed`, `board` | always `core/query`, answered by `parse_intent` (§12.2) | — | — |
 
 **`checked_url`** is today's (subscriptions.rs:156-180), with trim per G1: trim; empty: `core/url_empty`; over 2,000 scalars: `core/url_long`; a leading `webcal://` becomes `https://`; a leading `http://`: `core/url_http`; not beginning with `https://`: `core/url_scheme`; the host (the text after `https://` up to the first `/`, `?` or `#`) empty or without a `.`: `core/url_host`.
 
@@ -948,7 +964,7 @@ Each row's steps run in order; the first failure is the result. "Missing" means 
 2. The anchors of `overlay.anchors_on(day)` (subscriptions.rs:460-466) are appended.
 3. `planner::reflow(flowables, anchors, f)` gives a new start per flowable, in input order.
 4. For each flowable in input order whose new start `m` differs from its current local minutes: `w = resolve_on_day(day, m)`; when `w` is some and differs from the block's `start`, append `{id, sid, start: w, minutes}` with the block's stored `minutes`.
-5. `moved` is the number of moves.
+5. At most the first 1,000 moves are kept (§9.11); `moved` is the number kept.
 
 - **CORE-COMP-001** (core) `compile` MUST perform the steps of each row of §13.4 in order, MUST return the code, status and message of the first that fails, and MUST otherwise return exactly the command and reply of that row.
 - **CORE-COMP-002** (core) `compile` MUST trim exactly the White_Space code points of §2 and no others.
@@ -961,7 +977,9 @@ Each row's steps run in order; the first failure is the result. "Missing" means 
 
 ### 13.5 Today's commands against the new ones
 
-The transcript test (SYNC_PLAN.md §6.2) replays `fixtures/`' recorded sequences: each recorded command is parsed as an intent (§12.2), compiled with the transcript's pinned clock as `now` (truncated to milliseconds) and its pinned `TZ` as a `TableZone` or `ChronoZone`, and applied with `Ctx{seq: k + 1, device_no: 1, at: now, based_on: k}` at step `k`. The table classifies each recorded command against the state before it. The state after step `k` is compared with the recorded state only while steps 1 to `k` are all "same"; the comparison is the one of §18.4.
+The transcript test (SYNC_PLAN.md §6.2) replays `fixtures/`' recorded sequences: each recorded command is parsed as an intent (§12.2), compiled with the transcript's pinned clock as `now` (truncated to milliseconds) and its pinned `TZ` as a zone that reads local times as the recording did, and applied with `Ctx{seq: k + 1, device_no: 1, at: now, based_on: k}` at step `k`. The table classifies each recorded command against the state before it. The state after step `k` is compared with the recorded state only while steps 1 to `k` are all "same"; the comparison is the one of §18.4.
+
+The replay's zone holds the rules of the transcript's `TZ` and, for a local time in a fold, returns the later instant alone: the recording took chrono's `.earliest()`, which is the later one (§5.4). A recorded command that resolves a time in a fold therefore stays "same". CORE-TIME-003 itself is proven by the `planner.json` vectors (§18.2).
 
 | Today's `op` | New | Classification |
 |---|---|---|
@@ -985,6 +1003,8 @@ The transcript test (SYNC_PLAN.md §6.2) replays `fixtures/`' recorded sequences
 | `rename_subscription` | `rename_subscription` or nothing | same (an empty name changed nothing but today's version, which is not compared) |
 | `snapshot` | read query (§14.3) | gone: not a command; transcripts replay it as a snapshot comparison (§18.4) |
 | `feed`, `board` | none | gone (SYNC_PLAN.md §2) |
+
+Whatever its row says, a recorded command is changed when it carries or resolves an instant whose local year and UTC year fall on different sides of 1970 or 9999 (V2-4): today's code judged the local date, the core judges the instant (§13.3 G5, §5.4).
 
 A changed classification ends the comparison of that transcript at the step before it; the remaining steps are still replayed, so that `apply` runs on them, but not compared.
 
@@ -1061,7 +1081,7 @@ pub struct SnapshotInput<'a, Z: Zone + ?Sized> {
 
 ### 14.4 The archive bucketed by day
 
-`archive_by_day(board, from, days, zone)` returns, for each of the `days` days from `from`, the ghost sources of that day: one pass over the archive newest first; for each row whose `kind` is not `event`, for each of its blocks in ascending sid, the pair `(row, block)` is appended to the bucket of `D(block.start)` when that day is in range. `build_day` takes each day's bucket, places each block as `Block{start: L(block.start), minutes: max(block.minutes, 15)}`, and sorts them stably by start, which equals today's per-day scan (phone.rs:2409-2421: only archived task blocks ghost; an archived event, having no deadline in today's ghost placeable, places nothing, and a row with blocks of any other kind ghosts its blocks). One pass serves a 31-day snapshot, which keeps the 40 ms budget with 10,000 rows (§17).
+`archive_by_day(board, from, days, zone)` returns, for each of the `days` days from `from` (a `days` above 366 is read as 366), the ghost sources of that day: one pass over the archive newest first; for each row whose `kind` is not `event`, for each of its blocks in ascending sid, the pair `(row, block)` is appended to the bucket of `D(block.start)` when that day is in range. `build_day` takes each day's bucket, places each block as `Block{start: L(block.start), minutes: max(block.minutes, 15)}`, and sorts them stably by start, which equals today's per-day scan (phone.rs:2409-2421: only archived task blocks ghost; an archived event, having no deadline in today's ghost placeable, places nothing, and a row with blocks of any other kind ghosts its blocks). One pass serves a 31-day snapshot, which keeps the 40 ms budget with 10,000 rows (§17).
 
 ### 14.5 Reminders
 
@@ -1080,7 +1100,7 @@ Sources, from live items only:
 | `block` | each block of a task | the block's `start` | the block's `minutes` |
 | `due` | a task with a `deadline` | `deadline` | absent |
 
-Routines give no reminders: a routine is a habit, not an appointment (decided here). `fire_at = at − lead`, with the lead of the kind in minutes (each 0 to 1,440); a source is included when `from ≤ fire_at < until`. The list is ascending by `fire_at`, then by `key` bytes.
+Routines give no reminders: a routine is a habit, not an appointment (decided here). `fire_at = at − lead`, with the lead of the kind in minutes (each 0 to 1,440; a larger lead is read as 1,440); a source is included when `from ≤ fire_at < until`. The list is ascending by `fire_at`, then by `key` bytes.
 
 **Reminder record** (canonical encoding, so that it crosses JNI as text):
 
@@ -1101,6 +1121,16 @@ A reminder's Done compiles the `complete` intent, its Tomorrow the `move_block` 
 
 `ics::parse(text, from, until, limits, zone)` is today's parser (ics.rs:182-214) with `zone` where it converts UTC and `TZID` times to `Local` (ics.rs:904, 1218, 740-749) and reads an undefined `TZID` as local wall time; everything else is unchanged, including `Limits::default()`. The overlay types (`OverlayEvent`, `FetchOutcome`, `FetchStatus`, `Covered`, `Overlay` with `sealed`, `covering`, `digest`, `anchors_on`, `events_on`, `forget`, `status_for`, `better_name`, `is_unnamed`; subscriptions.rs:184-484) and the weather report types (`Report`, `Hour`, `Day`, `Now`, `build_report`, `sky_symbol`, the cities; weather.rs) are copied unchanged, except that `FetchStatus.at` is `chrono::DateTime<chrono::FixedOffset>` (today `DateTime<Local>`, subscriptions.rs:337-339, a type CORE-GEN-004 forbids). Its `serde` form is RFC 3339 with the offset, which today's `DateTime<Local>` also writes and reads, so `subscribed_cache.json` keeps today's format in both directions. The caller fills it from its own clock and zone (`device.md` §13.1.2 step 8); none of the copied functions reads a clock (CORE-GEN-003). The overlay is per device and never enters `apply` (SYNC.md §3, R1 §7); a device keeps it in its own sealed file (`device.md`).
 
+Three things in the copied code are not as today. `weather::build_report` leaves `Report.fetched_at` at 0, where today's function reads the system clock; the caller sets it. An ICS time in UTC or in a zone the file defines that lies outside the instant range (a series that began in 1950) is read with the zone's offset at the nearer end of the range, because a `Zone` answers only for instants. And the parser's cost is **bounded** by its limits, the window and the length of the text, never by what the text says of itself: a feed is text from an address anyone may control, and a fetch has 20 seconds (`device.md` DEV-ICS-004). Today's parser promises this and does not keep it in these cases:
+
+- a `BY…` list of a recurrence rule is read without duplicates and holds at most 64 values; a rule with a longer list is a rule the parser cannot follow;
+- a `VTIMEZONE` holds at most 512 observances and yields at most 4,096 transition points inside the window it is asked for; a zone over either bound is treated as undefined; transitions are found by search, not by a scan per lookup;
+- the `EXDATE` values, the `RDATE` values and the `RECURRENCE-ID` overrides of one event are each at most `max_occurrences_per_event`; what is beyond is dropped and noted once;
+- arithmetic on durations, ends and spans is checked: an occurrence whose end cannot be computed is dropped and noted, and `OverlayEvent::minutes` saturates;
+- `Parsed.problems` holds one line per kind of problem with a count, at most 64 lines, and neither it nor an error of `parse` quotes text of the file (CORE-GEN-010);
+- occurrences that tie on (day, start, end, name) are ordered by their remaining fields, so one calendar listed in two orders parses equal;
+- all the rules that one call of `parse` follows, those of events and of `VTIMEZONE` observances together, take at most `200 × max_rule_steps` steps (20,000,000 with today's limits; 5,000 daily events that began ten years ago need 18 million); a rule that this budget cuts short is treated as one that reached `max_rule_steps`.
+
 - **CORE-READ-001** (core) Every read query of §14.2 MUST take the caller's zone as a parameter wherever it needs a local day or local minutes, and MUST give the result today's function gives for the same board when the zone equals that function's process zone, except for the changes §14.2 and §14.3 list.
 - **CORE-READ-002** (core) A read query MUST NOT change `BoardData`.
 - **CORE-READ-003** (core) `ranked_ids` MUST sort tasks stably by `importance_score` descending over the items in ascending id.
@@ -1110,6 +1140,7 @@ A reminder's Done compiles the `complete` intent, its Tomorrow the `move_block` 
 - **CORE-REM-001** (core) `reminders` MUST return exactly the sources of the table in §14.5 whose `fire_at` lies in `[from, until)`, in ascending `(fire_at, key)`, with `ReminderDefaults::default()` leads of 10, 0 and 0 minutes.
 - **CORE-REM-002** (core) A reminder's `key` MUST be formed as §14.5 states, so that equal sources give equal keys across recomputations.
 - **CORE-READ-004** (core) `ics::parse` MUST convert UTC and `TZID` times with the zone it is given, and MUST NOT read the process zone.
+- **CORE-READ-007** (core) `ics::parse` MUST keep the seven bounds of §14.6, so that its time and memory are bounded by its limits, the window and the length of the text.
 
 ## 15. Legacy import
 
@@ -1152,14 +1183,14 @@ The first board created from a legacy folder takes its palette from the scheme t
    1. an item whose id is 0, or equal to an earlier item's id, or at least 2^62 (a temporary id, `adopt_temporaries`, board.rs:697-711) gets `next`, and `next` increases;
    2. a row whose id is at least 2^62 gets `next` likewise; a row with id 0 keeps it (a pre-id row);
    3. a subscription whose id is 0, or equal to an earlier subscription's id, or at least 2^62 gets `next` likewise (today's seeding bug can leave two subscriptions with one id, R1 §2);
-   4. an item, row or subscription id from 2^40 to 2^62 − 1 whose high part (`id div 2^40`) is from 1 to 8191 and whose low part (`id mod 2^40`) is at least 1 is **device-minted** (§7.1) and is kept unchanged; any other id from 2^40 to 2^62 − 1 (a high part of 8192 or more, which is an id of at least 2^53, or a low part of 0), or any `next` that reaches 2^40: fail `id_range`, listing the ids.
+   4. an item, row or subscription id from 2^40 to 2^62 − 1 whose high part (`id div 2^40`) is from 1 to 8191 and whose low part (`id mod 2^40`) is at least 1 is **device-minted** (§7.1) and is kept unchanged; any other id from 2^40 to 2^62 − 1 (a high part of 8192 or more, which is an id of at least 2^53, or a low part of 0), or a renumbering that would assign 2^40 or more: fail `id_range`, listing the out-of-range ids, ascending and distinct, or, when only the numbers ran out, the ids left without one.
    Every renumbering is reported as `(list, old id, new id)`. Ids held both by a live item and by an archive row are reported as `live_and_archived` (a warning; both are kept, and a later `restore` of such a row uses its fallback; V2-11).
 10. **Kinds and sids.** Each item and row gets `kind`: `routine` when it has a `recurrence`, else `event` when `is_event`, else `task`. Sids are numbered from 1 by one counter: first the live items in ascending (new) id, each item's sessions in file order; then the rows in file line order, each row's sessions in order.
-11. **Instants.** Every `DateTime<Local>` value becomes the instant it denotes, keeping every fraction digit (a nine-digit fraction holds them all); an instant outside §5.1's range: fail `instant_range`, listing the item or row ids.
-12. **Fields.** Every value is checked against the schema of §6: names at most 4,096 bytes, levels, durations, recurrence fields, block minutes, URLs, at most 20 subscriptions with distinct URLs, notes at most 1,048,576 bytes, and the caps of §17; a violation: fail `field_range`, listing the ids, or `cap`.
+11. **Instants.** Every `DateTime<Local>` value becomes the instant it denotes, keeping every fraction digit (a nine-digit fraction holds them all); an instant outside §5.1's range, or a leap second (`:60`), which is no instant of §5.1: fail `instant_range`, listing the item or row ids.
+12. **Fields.** Every value is checked against the schema of §6: names at most 4,096 bytes, levels, durations, recurrence fields, block minutes, URLs, at most 20 subscriptions with distinct URLs, notes at most 1,048,576 bytes, and the caps of §17; a violation: fail `field_range`, listing the ids, or `cap`. More than 20 subscriptions is `field_range` with the ids past the twentieth; a record over its block cap is `cap` with its id; a board-wide cap is `cap` with no ids.
 13. **Notes cap.** Notes over 20,000 scalars after detab: warning `notes_over_cap`; they are kept, and the next `set_notes` must fit the cap.
 14. **Assembly.** `rules = 1`; every stamp `(1, 0)`; the marks, ascending by `device_no`: for `device_no` 0, `{item: the largest low part among the item, row and subscription ids now present whose high part is 0, block: the last sid numbered}`; for each high part `h` from 1 to 8191 that some item, row or subscription id now present has, `{device_no: h, item: the largest low part among those ids with high part h, block: 0}`; no other marks, and a mark whose two numbers are 0 is not stored (§6.10); `notes_rev = 0`; no picture; the archive in archive order; the unreadable lines in their order (§6.1).
-15. **Check.** `BoardData::check` must hold; otherwise fail `invariant` (an error in the import itself).
+15. **Check.** `BoardData::check` must hold; otherwise fail `invariant` (an error in the import itself). The board's canonical bytes must be at most 61,865,984 (§8.4 step 4); otherwise fail `cap`.
 
 The genesis of an empty board (no folder) is `BoardData::empty()`: `rules = 1` and every other field at its default; its canonical bytes are `{"rules":1}`.
 
@@ -1178,7 +1209,7 @@ pub struct ImportReport {
 pub fn import(folder: &LegacyFolder) -> (Option<BoardData>, ImportReport);
 ```
 
-It holds counts, ids and kinds only, never a name, the notes, a URL or any other text from the board (SYNC_PLAN.md §6.2 item 8). The canonical hash that `--import-check` prints and that must repeat (SYNC.md §9 step 4) is SHA-256 of the genesis board's canonical bytes, computed by the caller.
+It holds counts, ids and kinds only, never a name, the notes, a URL or any other text from the board (SYNC_PLAN.md §6.2 item 8). A failed import's report holds its `failure` and every other field at its default. `blocks` counts the blocks of live items. The canonical hash that `--import-check` prints and that must repeat (SYNC.md §9 step 4) is SHA-256 of the genesis board's canonical bytes, computed by the caller.
 
 - **CORE-IMP-001** (core) `import` MUST perform the steps of §15.3 in order and MUST stop at the first failing step with that step's failure kind.
 - **CORE-IMP-002** (core) `import` MUST give equal canonical board bytes and equal reports for equal inputs.
@@ -1208,14 +1239,14 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 | Code | Meaning | Raised when | What the caller does |
 |---|---|---|---|
 | `core/bad_ctx` | `Ctx` breaks §8.1 | §8.4 step 1 | a fault of the caller: the engine treats it as a bug, never as a user refusal (`engine.md`) |
-| `core/rules` | `op` not in the active rules' op table | §8.4 step 2 | record the refusal; the UI says the author's build is ahead of the board |
+| `core/rules` | `op` not in the active rules' op table; from `compile` (400, "This board's rules do not allow that yet."): the same on the view | §8.4 step 2; §13.3 G8 | record the refusal; the UI says the author's build is ahead of the board |
 | `core/gone` | the item, block or subscription is not there | §9.7–§9.23 | record the refusal; the UI says it was deleted elsewhere |
 | `core/kind` | the item's kind does not take this command | §9 | record the refusal |
-| `core/bad_id` | a minted id or sid is not the author's or not above its mark | CORE-ID-002 | record the refusal; the author's minter is behind its mark: the device advances it (`device.md`) |
-| `core/id_taken` | a restored row's sid is held by a live block | §9.21 step 4 | record the refusal |
-| `core/cap` | a cap of §17 would be exceeded | §9 | record the refusal; the UI says the board is full |
+| `core/bad_id` | a minted id or sid is not the author's or not above its mark; from `compile` (400, "The id counter belongs to another device."): the minter is not the device's | CORE-ID-002; §13.3 G7 | record the refusal; the author's minter is behind its mark: the device advances it (`device.md`) |
+| `core/id_taken` | a restored row's sid is held by a live block; from `compile` (400, "That item's blocks are already on the board."): the same on the view | §9.21 step 4; §13.4 | record the refusal |
+| `core/cap` | a cap of §17 would be exceeded; from `reset`, the notes revision cannot be raised past 2^53 − 1 | §9; §8.4 step 4; §11.3 | record the refusal; the UI says the board is full. From `reset`: the local fault `engine/local_fault`, as for its `core/unknown_rules` (`engine.md` §28.1) |
 | `core/duplicate_url` | that calendar URL is already subscribed | §9.23 | record the refusal |
-| `core/notes_stale` | `set_notes` base is not the current revision | §9.20 | record the refusal with `base` and `current`; the origin offers its draft and the merge view |
+| `core/notes_stale` | `set_notes` base is not the current revision; from `compile` (400, "The notes changed on another device."): the intent's base is not the view's revision | §9.20; §13.4 | record the refusal with `base` and `current`; the origin offers its draft and the merge view |
 
 **Rules.**
 
@@ -1261,6 +1292,7 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 | `core/cap_archive` | "The archive is full." (400; new) | `complete`, `delete` | show it |
 | `core/place` | "That place is off the map." (400; new) | `set_home` | show it |
 | `core/picture` | "That picture could not be shared." (400; new) | `set_picture` | a fault of the uploading code: log it |
+| `core/cap_board` | "The board is full." (400; new) | G6: the size check of §8.4 step 4; `set_notes` at the last revision | show it |
 
 **Import.**
 
@@ -1275,6 +1307,9 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 | JSON nesting depth | 32 | levels | CORE-ENC-004 |
 | log command | 1 to 257,979 | bytes | CORE-CMD-001 |
 | canonical board bytes | 62,914,560 | bytes (60 MiB, so that a snapshot body, which holds the board, the membership and the control history, `seal.md` §20.4, stays under 64 MiB inflated) | CORE-DATA-004 |
+| canonical board bytes after a command that lengthens them | 61,865,984 | bytes (59 MiB) | CORE-APPLY-005 |
+| notice or refusal record | 4,096 | bytes | CORE-CONF-006 |
+| parser tree budget | `max(32 × limit, 1,048,576)` | charged units (§4.5) | CORE-ENC-004 |
 | intent JSON | 84,096 | bytes | CORE-INT-001 |
 | legacy input file | 268,435,456 | bytes | CORE-IMP-001 |
 | live items | 10,000 | items | CORE-CMD-004 |
@@ -1312,6 +1347,8 @@ It holds counts, ids and kinds only, never a name, the notes, a URL or any other
 - **CORE-PERF-001** (core) `snapshot` of 31 days from the 10,000-row fixture MUST complete within 40 ms as the median of five runs in the budget CI job.
 - **CORE-PERF-002** (core) Applying 5,000 log commands of the budget workload to the 10,000-row fixture MUST complete within 1 s as the median of five runs.
 - **CORE-PERF-003** (core) `BoardData::from_canonical_bytes` of the 10,000-row fixture's canonical bytes MUST complete within 150 ms as the median of five runs.
+
+The 10,000-row fixture is the board that `import` makes of `fixtures/boards/archive-10k`. The snapshot of CORE-PERF-001 is the request of that board's recorded 31-day snapshot (§18.5). The budget workload of CORE-PERF-002 is 1,000 rounds of five commands on that board, authored by `device_no` 2, each with `based_on` one below its `seq`: a `create_task` with one block of 30 minutes, a `rename` of that task, a `move_block` of its block by 15 minutes, a `set_deadline`, and its `complete`. Only `apply` is timed; the commands are built beforehand.
 
 ## 18. Test vectors
 
@@ -1359,14 +1396,25 @@ One file per topic (for example `create.json`, `blocks.json`, `archive.json`, `n
    "end_text": "<canonical board bytes>"}]}
 ```
 
-`code` is present for `refused` and `parse_error`; `notices`, `moved`, `skipped` and `restored_as` when they apply; `board_sha256` always (unchanged for a refusal). Rules version 1's golden logs, which CORE-RULES-003 requires, cover: every check of every op of §9 with a refused case; every row of §10.6; every notice kind and group; skips for both reasons; and the boundary values 200 and 201 scalars, 14, 15, 1,440 and 1,441 minutes, levels 4 and 5 (severity) and 3 and 4 (horizon), notes of 20,000 and 20,001 scalars, ids at and above the mark, `device_no` 8191, the id 2^53 − 1, instants at both ends of the range, every cap at its value and one above, `based_on` equal to a stamp's seq and one below it, and a `complete` whose `ctx.at` is less than a day before the end of the instant range (the saturating clamp). Golden logs contain no zone, so they hold under any `TZ` (V2-4).
+`code` is present for `refused` and `parse_error`; `notices`, `moved`, `skipped` and `restored_as` when they apply; `board_sha256` always (unchanged for a refusal). Rules version 1's golden logs, which CORE-RULES-003 requires, cover: every check of every op of §9 with a refused case; every row of §10.6; every notice kind and group; skips for both reasons; and the boundary values 200 and 201 scalars, 14, 15, 1,440 and 1,441 minutes, levels 4 and 5 (severity) and 3 and 4 (horizon), notes of 20,000 and 20,001 scalars, ids at and above the mark, `device_no` 8191, the id 2^53 − 1, instants at both ends of the range, every cap at its value and one above, `based_on` equal to a stamp's seq and one below it, and a `complete` whose `ctx.at` is less than a day before the end of the instant range (the saturating clamp). Golden logs contain no zone, so they hold under any `TZ` (V2-4). Where one above a cap cannot be written as a command (1,001 blocks in a `create_task`, 1,001 moves or pairs), the case is a `parse_error`.
+
+**Generated start boards.** A case that needs a start board too large to print (the caps of §17: 200,000 archive rows are about 22 MB of JSON) gives `start_gen` in place of `start_text`, and `end_sha256`, lowercase hex of SHA-256 of the end board's canonical bytes, in place of `end_text`. `start_gen` is `{"blocks": B, "items": I, "rows": R, "unreadable": U}`, each an integer from 0, an absent member being 0, and names this board, which the test builds:
+
+- `rules` 1;
+- `I` items, item `i` (1 ≤ `i` ≤ `I`) being `{"created":"1970-01-01T00:00:00.000000000Z","id":i,"kind":"task","name":"t","stamps":{"estimate":[1,0],"levels":[1,0],"name":[1,0],"repeat":[1,0],"time":[1,0]}}`;
+- `B` blocks with sids 1 to `B`, block `s` in item `((s − 1) div 1000) + 1` (so `B ≤ 1000 × I`), each `{"minutes":15,"sid":s,"stamp":[1,0],"start":"1970-01-01T00:00:00.000000000Z"}`;
+- `R` archive rows, row `j` (1 ≤ `j` ≤ `R`) being `{"archived_at":t,"created":"1970-01-01T00:00:00.000000000Z","id":I+j,"kind":"task","name":"t"}` with `t` the instant `j − 1` seconds after 1970-01-01T00:00:00Z;
+- `U` unreadable lines, each 65,536 bytes of 0x00 (for the size check of §8.4 step 4);
+- unless `I`, `B` and `R` are all 0, the one mark `{"block":B,"device_no":0,"item":I+R}`.
+
+The board passes `check` (§6.12) whenever `I ≤ 10,000`, `B ≤ 1000 × I`, `B ≤ 50,000`, `R ≤ 200,000` and `U ≤ 10,000`.
 
 ### 18.4 Transcripts
 
-Transcripts are `foundation`'s recorded sequences (SYNC_PLAN.md §6.1 item 5): a starting legacy folder, a pinned clock and `TZ`, and per step today's command JSON, today's reply and today's `BoardState` after it. The core replays them as §13.5 states, starting from `import` of the starting folder, with an **id map** `M` (initially the identity; renumberings of the import are added): before compiling a step, every id in the recorded command is translated through `M`, and a recorded `session` index `i` becomes the sid of the `i`-th block of that item in ascending sid; after compiling, when the recorded reply has an `id` `r` and the compiled reply an `id` `c`, `M[r] = c`. The recorded and replayed states are compared through this projection, with ids translated through `M`:
+Transcripts are `foundation`'s recorded sequences (SYNC_PLAN.md §6.1 item 5): a starting legacy folder, a pinned clock and `TZ`, and per step today's command JSON, today's reply and today's `BoardState` after it. The core replays them as §13.5 states, starting from `import` of the starting folder, with an **id map** `M` (kept per id list, one map for items and archive rows and one for subscriptions, because today's ids repeat across the two lists; each starts as the identity, with the import's renumberings of its list added): before compiling a step, every id in the recorded command is translated through `M`, and a recorded `session` index `i` becomes the sid of the `i`-th block of that item in ascending sid, or 0, which no block has, when the item has no such block; after compiling, when the recorded reply has an `id` `r` and the compiled reply an `id` `c`, `M[r] = c`. The recorded and replayed states are compared through this projection, with ids translated through `M`:
 
 - items as a set keyed by id: `name`, `created` truncated to milliseconds, `deadline`, kind (`routine` when `recurrence` is present, else `event` when `is_event`, else `task`), `importance`, `time_importance`, `duration_minutes`, `recurrence`, and the sessions in index order against the blocks in ascending sid, each as `(start instant, minutes)`;
-- the archive as a multiset of rows with the same fields plus `archived_at` and `outcome`, blocks as `(start, minutes)` in order;
+- the archive as a multiset of rows with the same fields plus `archived_at` and `outcome`, blocks as `(start, minutes)` in order; a row's id is not compared, because today's ids repeat between a live item and an archived row;
 - `notes`;
 - subscriptions as a set keyed by id: `name`, `url`, `color`, `enabled`.
 
@@ -1379,6 +1427,15 @@ For each fixture board, `foundation` records the JSON today's `phone::snapshot` 
 ### 18.6 Fuzz and property tests
 
 Fuzz targets under `crates/taskdeck-core/fuzz/` (SYNC_PLAN.md §6.2 item 9): `command_apply` (bytes, through `parse_command`, applied to a fixture board), `board_bytes`, `intent_compile`, `ics_parse`, `snapshot`. Property tests (proptest, a dev-dependency): **determinism** — random command sequences from compiled random intents; a second replica built from the canonical bytes at a random point plus the rest of the log; under two `TZ` values for the compile steps' zones and the process; equal canonical bytes and equal notices at the end; **rebase** — commands compiled on a pending view, applied over a confirmed state that other devices' commands moved on, never panic, and give the same results on two replicas.
+
+### 18.7 A fixture folder the import refuses
+
+`import` refuses three of `foundation`'s boards, as §15.3 requires: `unreadable` with `field_range` (an archive row whose name has 50,071 bytes; a damaged line of 70,016 bytes is over the line cap as well), and `dst-edges` with `instant_range` (two items and one archive row hold an instant before 1970-01-01T00:00:00Z, written as 1970-01-01 in a zone east of Greenwich) and `id-limits` with `id_range` (ids with a high part above 8191 or a low part of 0). The tests of §18.4 and §18.5 treat such a folder as follows.
+
+- **`instant_range`.** The test removes from `read_at_startup.json` and `archived.jsonl` exactly the items and rows that hold an instant outside §5.1's range, checks that their ids are the ids the failure lists, and imports the repaired folder. A transcript is then replayed and compared as §18.4 states, with the removed records left out of every recorded state; a recorded command that names a removed item's id or a removed row's key is classified changed (§13.5). A snapshot is compared as §18.5 states after every object that carries a removed item's `id` is deleted from the recorded `items`, `tray.due`, `tray.later` and `days[].entries`, every such id from `ranked`, and every removed row from `done`. A snapshot in which a removed record places an entry or a ghost on one of its days is not compared: that day's `summary` counts it.
+- **Any other failure.** The folder's transcript and snapshots are not replayed. The test asserts the failure kind and the ids the failure lists: for `id-limits`, `id_range` with exactly the folder's ids that §15.3 step 9.4 names; for `unreadable`, `field_range` with the id of the long-named row.
+
+The import's own vectors (§18.2, `import.json`) record the refusals, with that of `fixtures/legacy-other/empty` (`notes_unreadable`: its notepad file holds `{}`), from which no transcript or snapshot starts.
 
 ## 19. Interfaces
 
@@ -1401,6 +1458,7 @@ Fuzz targets under `crates/taskdeck-core/fuzz/` (SYNC_PLAN.md §6.2 item 9): `co
 
 **`device.md`.**
 - Requires: the device persists the `IdMinter` with the outbox entry that consumed its numbers, in the same fsynced write (§7.2), and raises it to `mark + 1` after a catch-up that shows a higher mark.
+- Requires: the device sets `Report.fetched_at` from its own clock after `weather::build_report`, and passes an overlay it read from its cache through `Overlay::sealed` before using it (§14.6).
 - Requires: the device supplies the zone (`ChronoZone(chrono::Local)` or a `TableZone`, which it may pass as `&dyn Zone`, §5.2) and its overlay to compile and read calls, and keeps the overlay outside `BoardData`.
 - Requires: the local-only `Store` writes today's files from the `ChangeSet`, archive changes before item changes (R1 §3), and drops overlay events for every id in `overlay_forget`; in synced mode the device drops the overlay of every subscription absent or disabled in the new pending view (`device.md` §13.1.3).
 - Requires: checkpoints, bases and backups hold the canonical board bytes, loaded with `from_canonical_bytes` (§6.14).
@@ -1438,7 +1496,8 @@ pub mod canon {
     pub fn encode(value: &serde_json::Value) -> Result<Vec<u8>, super::CoreError>;      // core/schema for null or a float
     pub fn parse(bytes: &[u8], limit: usize) -> Result<serde_json::Value, super::CoreError>; // §4.5 steps 1–3 and 5
     pub fn is_canonical(bytes: &[u8], limit: usize) -> bool;
-    pub trait Record: Sized { fn to_value(&self) -> serde_json::Value;
+    pub trait Record: Sized { const LIMIT: usize;                                        // the record's byte limit (§17), checked before anything is parsed
+                              fn to_value(&self) -> serde_json::Value;
                               fn from_value(v: &serde_json::Value) -> Result<Self, super::CoreError>;
                               fn to_canonical(&self) -> Vec<u8>;
                               fn from_canonical(bytes: &[u8]) -> Result<Self, super::CoreError>; }
@@ -1503,7 +1562,7 @@ pub mod board {
     }   // fields public for reading; mutation only through apply, upgrade_rules and import
     impl BoardData {
         pub fn empty() -> Self;                                          // §15.3: {"rules":1}
-        pub fn to_canonical_bytes(&self) -> Vec<u8>;                     // §6.13
+        pub fn to_canonical_bytes(&self) -> Vec<u8>;                     // §6.13; panics for a board that fails check
         pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, super::CoreError>;
         pub fn check(&self) -> Result<(), super::CoreError>;             // §6.12
         pub fn item(&self, id: u64) -> Option<&Item>;
@@ -1551,7 +1610,7 @@ pub mod command {
     pub struct BlockMove { pub id: u64, pub sid: u64, pub start: Instant, pub minutes: u32 }
     impl LogCommand {
         pub fn op(&self) -> &'static str;
-        pub fn to_canonical(&self) -> Vec<u8>;
+        pub fn to_canonical(&self) -> Vec<u8>;                                   // panics for a command holding an integer above 2^53 − 1; compile and parse_command never make one
         pub fn with_name(self, name: String) -> Result<LogCommand, LogCommand>;   // Err(self) unless a create_* (V2-17)
         pub fn target(&self) -> Option<u64>;
     }

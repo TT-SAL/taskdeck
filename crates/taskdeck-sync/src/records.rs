@@ -5,6 +5,7 @@ use crate::{
 };
 
 /// One log record (engine.md §7.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogRecord {
     pub seq: u64,
     pub chain: Hash32,
@@ -13,6 +14,7 @@ pub struct LogRecord {
 }
 
 /// The checkpoint, and a base (engine.md §7.3, §7.9).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Checkpoint {
     pub board_seq: u64,
     pub board_chain: Hash32,
@@ -23,6 +25,7 @@ pub struct Checkpoint {
 }
 
 /// Engine data the log alone does not give (engine.md §7.3).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Registry {
     pub snapshots: Vec<SnapRecord>,
     pub reports: Vec<Report>,
@@ -32,6 +35,7 @@ pub struct Registry {
 }
 
 /// An accepted `snap` entry and its verdicts (engine.md §7.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SnapRecord {
     pub entry_seq: u64,
     pub author: Dev,
@@ -42,6 +46,7 @@ pub struct SnapRecord {
 }
 
 /// A state-hash report (engine.md §7.3, §22.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
     pub seq: u64,
     pub dev: Dev,
@@ -51,6 +56,7 @@ pub struct Report {
 }
 
 /// An author's newest accepted entry (engine.md §7.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LastEntry {
     pub dev: Dev,
     pub at_ms: i64,
@@ -59,6 +65,7 @@ pub struct LastEntry {
 }
 
 /// How an outbox record reaches the relay (engine.md §7.4, §11.7).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Via {
     Append,
     Register { dev: Dev, sign_pk: Hash32 },
@@ -66,6 +73,7 @@ pub enum Via {
 }
 
 /// One outbox record (engine.md §7.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutboxRecord {
     pub entry_id: [u8; 16],
     pub order: u64,
@@ -89,12 +97,14 @@ pub struct OutboxRecord {
 /// One outbox file operation (engine.md §7.4).
 // The spec fixes the variants; `Put` carries the whole record by value.
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutboxOp {
     Put(OutboxRecord),
     Drop([u8; 16]),
 }
 
 /// The state hash at an aligned seq (engine.md §7.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HashRecord {
     pub seq: u64,
     pub hash_version: u32,
@@ -102,6 +112,7 @@ pub struct HashRecord {
 }
 
 /// The apply marker (engine.md §7.6, §15).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Marker {
     pub first: u64,
     pub last: u64,
@@ -109,18 +120,21 @@ pub struct Marker {
 }
 
 /// The kind of a notice record (engine.md §7.7, §37).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoticeKind {
     Notice,
     Refusal,
 }
 
 /// One notices file operation (engine.md §7.7).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NoticeOp {
     Add { kind: NoticeKind, seq: u64, record: Vec<u8> },
     Dismiss { seq: u64, index: u32 },
 }
 
 /// The halt in force (engine.md §7.8 `halt`, §16).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HaltRecord {
     pub kind: HaltKind,
     pub seq: u64,
@@ -130,6 +144,7 @@ pub struct HaltRecord {
 }
 
 /// The three halts (engine.md §16.1, §37).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HaltKind {
     Crash { frame_hash: Hash32 },
     Rules { version: u32 },
@@ -137,6 +152,7 @@ pub enum HaltKind {
 }
 
 /// A stop in force (engine.md §7.8 `stops`, §21, §22).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StopRecord {
     pub kind: StopKind,
     pub since_ms: i64,
@@ -144,6 +160,7 @@ pub struct StopRecord {
 }
 
 /// The kinds of stop (engine.md §21, §22, §37).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StopKind {
     Evidence,
     Divergence,
@@ -158,6 +175,7 @@ pub enum StopKind {
 }
 
 /// The duties' persisted state (engine.md §7.8 `duties`, §29.3).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct DutyState {
     pub snapshot: Option<(u64, i64, u8)>,
     pub last_compact_day: i64,
@@ -166,6 +184,7 @@ pub struct DutyState {
 }
 
 /// The engine's meta record (engine.md §7.8).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Meta {
     pub attempt: u64,
     pub last_failed: Option<(u64, u64)>,
@@ -190,6 +209,8 @@ pub struct Meta {
 /// One persist operation (engine.md §7.11).
 // The spec fixes the variants; `WriteMeta` carries the whole `Meta` by value.
 #[allow(clippy::large_enum_variant)]
+#[derive(Clone)]
+#[cfg_attr(any(test, feature = "sim"), derive(PartialEq, Eq))]
 pub enum PersistOp {
     AppendLog(Vec<LogRecord>),
     SetMarker(Marker),
@@ -208,16 +229,18 @@ pub enum PersistOp {
 }
 
 /// How a new replica starts (engine.md §7.10 `bootstrap`, §19.8).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Bootstrap {
     Genesis { board: Vec<u8>, frame_1: Vec<u8>, relay: RelayTarget },
     Join { material: SnapshotMaterial, added_seq: u64, relay: RelayTarget },
 }
 
 /// What `Start` carries (engine.md §7.10).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Loaded {
     pub checkpoint: Option<Checkpoint>,
     pub bases: Vec<(u64, Hash32)>,
-    pub chains: Vec<(u64, Hash32)>,
+    pub chains: Vec<(u64, Hash32, i64)>,
     pub log_floor: u64,
     pub floor_chain: Option<Hash32>,
     pub tail: Vec<LogRecord>,
@@ -229,4 +252,28 @@ pub struct Loaded {
     pub build_id: String,
     pub session: [u8; 16],
     pub bootstrap: Option<Bootstrap>,
+}
+
+// The identity export is secret (ENG-GEN-010): `Debug` prints its length only,
+// and equality on `PersistOp` and `Effect` exists only for tests and the
+// simulator (ENG-GEN-011: the engine compares no secret).
+impl core::fmt::Debug for PersistOp {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            PersistOp::AppendLog(v) => f.debug_tuple("AppendLog").field(v).finish(),
+            PersistOp::SetMarker(v) => f.debug_tuple("SetMarker").field(v).finish(),
+            PersistOp::ClearMarker => f.write_str("ClearMarker"),
+            PersistOp::WriteCheckpoint(v) => f.debug_tuple("WriteCheckpoint").field(v).finish(),
+            PersistOp::WriteBase(v) => f.debug_tuple("WriteBase").field(v).finish(),
+            PersistOp::DeleteBases(v) => f.debug_tuple("DeleteBases").field(v).finish(),
+            PersistOp::TruncateLogBelow(a, b) => f.debug_tuple("TruncateLogBelow").field(a).field(b).finish(),
+            PersistOp::AppendHashes(v) => f.debug_tuple("AppendHashes").field(v).finish(),
+            PersistOp::Outbox(v) => f.debug_tuple("Outbox").field(v).finish(),
+            PersistOp::RewriteOutbox(v) => f.debug_tuple("RewriteOutbox").field(v).finish(),
+            PersistOp::Notices(v) => f.debug_tuple("Notices").field(v).finish(),
+            PersistOp::RewriteNotices(v) => f.debug_tuple("RewriteNotices").field(v).finish(),
+            PersistOp::WriteMeta(v) => f.debug_tuple("WriteMeta").field(v).finish(),
+            PersistOp::WriteIdentity(v) => write!(f, "WriteIdentity(<{} bytes>)", v.len()),
+        }
+    }
 }

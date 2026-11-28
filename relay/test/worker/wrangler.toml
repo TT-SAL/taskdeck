@@ -1,0 +1,25 @@
+# The suite's harness Worker (relay.md §18): the shipped worker.js wrapped by
+# test-only routes. Run only under `wrangler dev` by relay/test/run.sh; never deployed.
+# The values below are the made-up constants of relay/test/lib/harness.mjs.
+name = "taskdeck-relay-test-harness"
+main = "harness.js"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = false
+
+[vars]
+TOKEN_KEY = "7461736b6465636b2d72656c61792d746573742d6b65792d30303030303030a1"
+CREATE_SECRET = "7461736b6465636b2d72656c61792d746573742d6372656174652d3030303032"
+RELAY_ORIGIN = "https://relay.test"
+
+[[durable_objects.bindings]]
+name = "BOARD"
+class_name = "Board"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Board"]

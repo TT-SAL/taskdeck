@@ -131,6 +131,11 @@ classify() {
     esac
     case "$p" in crates/taskdeck-seal/* | docs/sync/vectors/*) mark seal ;; esac
     case "$p" in crates/taskdeck-sync/*) mark engine ;; esac
+    # What the engine's tests read from elsewhere: the relay's published cases
+    # (tests/relay_conformance.rs runs the model relay against them) and the
+    # relay's error catalogue (a test compares the engine's table of codes with
+    # relay.md §19). Every area a change under crates/taskdeck-sync marks.
+    case "$p" in relay/test/vectors/* | docs/sync/spec/relay.md) mark foundation; mark engine; mark recovery ;; esac
     # relay too: the relay's suite takes seal's published vectors.
     case "$p" in relay/* | docs/sync/vectors/*) mark relay ;; esac
     case "$p" in crates/taskdeck-device/* | tests/e2e/*) mark device ;; esac

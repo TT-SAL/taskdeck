@@ -1,0 +1,614 @@
+{
+  "spec": "engine.md §27.1, §27.2",
+  "cases": [
+    {
+      "name": "skew 300,000 ahead: no warning",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799999700000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 300000,
+      "warning": false,
+      "blocked": false
+    },
+    {
+      "name": "skew 300,001 ahead: warning",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799999699999,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 300001,
+      "warning": true,
+      "blocked": false
+    },
+    {
+      "name": "skew 3,600,000 ahead: warning, no block",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799996400000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 3600000,
+      "warning": true,
+      "blocked": false
+    },
+    {
+      "name": "skew 3,600,001 ahead: warning and block",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799996399999,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 3600001,
+      "warning": true,
+      "blocked": true
+    },
+    {
+      "name": "skew 300,000 behind: no warning",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1800000300000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": -300000,
+      "warning": false,
+      "blocked": false
+    },
+    {
+      "name": "skew 300,001 behind: warning",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1800000300001,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": -300001,
+      "warning": true,
+      "blocked": false
+    },
+    {
+      "name": "skew 3,600,000 behind: warning, no block",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1800003600000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": -3600000,
+      "warning": true,
+      "blocked": false
+    },
+    {
+      "name": "skew 3,600,001 behind: warning and block",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1800003600001,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": -3600001,
+      "warning": true,
+      "blocked": true
+    },
+    {
+      "name": "no measurement: no warning, no block",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": null,
+      "warning": false,
+      "blocked": false
+    },
+    {
+      "name": "zero skew",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1800000000000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 0,
+      "warning": false,
+      "blocked": false
+    },
+    {
+      "name": "the latest measurement counts",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799992800000,
+          "mono_ms": 49999999990
+        },
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799999999000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 1000,
+      "warning": false,
+      "blocked": false
+    },
+    {
+      "name": "an older large skew is replaced by a later small one; the old one would block",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799999999000,
+          "mono_ms": 49999999990
+        },
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1800007200000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": -7200000,
+      "warning": true,
+      "blocked": true
+    },
+    {
+      "name": "a measurement 86,399,999 ms of mono_ms old is still valid",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799992800000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800086400000,
+        "mono_ms": 50086399999
+      },
+      "skew_ms": 7200000,
+      "warning": true,
+      "blocked": true
+    },
+    {
+      "name": "a measurement 86,400,001 ms of mono_ms old has expired: neither warning nor block",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799992800000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800086400000,
+        "mono_ms": 50086400001
+      },
+      "skew_ms": null,
+      "warning": false,
+      "blocked": false
+    },
+    {
+      "name": "expiry follows mono_ms, not wall_ms",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799992800000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": null,
+      "now": {
+        "wall_ms": 1800259200000,
+        "mono_ms": 50000001000
+      },
+      "skew_ms": 7200000,
+      "warning": true,
+      "blocked": true
+    },
+    {
+      "name": "a valid confirmation lifts the block; the warning stays",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799992800000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": {
+        "wall_ms": 1800000000000,
+        "skew_ms": 7200000
+      },
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 7200000,
+      "warning": true,
+      "blocked": false,
+      "confirmation_valid": true
+    },
+    {
+      "name": "a confirmation exactly 604,800,000 ms old is still valid",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799992800000,
+          "mono_ms": 50604800000
+        }
+      ],
+      "confirmation": {
+        "wall_ms": 1800000000000,
+        "skew_ms": 7200000
+      },
+      "now": {
+        "wall_ms": 1800604800000,
+        "mono_ms": 50604800010
+      },
+      "skew_ms": 7200000,
+      "warning": true,
+      "blocked": false,
+      "confirmation_valid": true
+    },
+    {
+      "name": "a confirmation 604,800,001 ms old is too old: blocked",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799992800000,
+          "mono_ms": 50604800000
+        }
+      ],
+      "confirmation": {
+        "wall_ms": 1800000000000,
+        "skew_ms": 7200000
+      },
+      "now": {
+        "wall_ms": 1800604800001,
+        "mono_ms": 50604800010
+      },
+      "skew_ms": 7200000,
+      "warning": true,
+      "blocked": true,
+      "confirmation_valid": false
+    },
+    {
+      "name": "the skew drifted exactly 300,000 from the confirmed one: still valid",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799992500000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": {
+        "wall_ms": 1800000000000,
+        "skew_ms": 7200000
+      },
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 7500000,
+      "warning": true,
+      "blocked": false,
+      "confirmation_valid": true
+    },
+    {
+      "name": "the skew drifted 300,001 from the confirmed one: blocked",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799992499999,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": {
+        "wall_ms": 1800000000000,
+        "skew_ms": 7200000
+      },
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 7500001,
+      "warning": true,
+      "blocked": true,
+      "confirmation_valid": false
+    },
+    {
+      "name": "the skew drifted 300,001 the other way: blocked",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799993100001,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": {
+        "wall_ms": 1800000000000,
+        "skew_ms": 7200000
+      },
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 6899999,
+      "warning": true,
+      "blocked": true,
+      "confirmation_valid": false
+    },
+    {
+      "name": "a confirmation of a negative skew",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1800007200000,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": {
+        "wall_ms": 1799999999000,
+        "skew_ms": -7201000
+      },
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": -7200000,
+      "warning": true,
+      "blocked": false,
+      "confirmation_valid": true
+    },
+    {
+      "name": "a confirmation does not lift a warning; with a small skew nothing is blocked anyway",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [
+        {
+          "wall_ms": 1800000000000,
+          "relay_now": 1799999699995,
+          "mono_ms": 50000000000
+        }
+      ],
+      "confirmation": {
+        "wall_ms": 1800000000000,
+        "skew_ms": 7200000
+      },
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": 300005,
+      "warning": true,
+      "blocked": false,
+      "confirmation_valid": false
+    },
+    {
+      "name": "a confirmation with no valid measurement: neither warning nor block",
+      "clauses": [
+        "ENG-CLOCK-002",
+        "ENG-CLOCK-003",
+        "§27.1",
+        "§27.2"
+      ],
+      "measurements": [],
+      "confirmation": {
+        "wall_ms": 1800000000000,
+        "skew_ms": 7200000
+      },
+      "now": {
+        "wall_ms": 1800000060000,
+        "mono_ms": 50000060000
+      },
+      "skew_ms": null,
+      "warning": false,
+      "blocked": false
+    }
+  ]
+}

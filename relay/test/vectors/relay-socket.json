@@ -1,0 +1,4081 @@
+{
+ "spec": "relay.md §11",
+ "cases": [
+  {
+   "name": "hello and welcome; append, read and push over the socket",
+   "clauses": [
+    "RELAY-SOCK-001",
+    "RELAY-SOCK-004",
+    "RELAY-SOCK-005",
+    "RELAY-SOCK-006",
+    "RELAY-SOCK-008",
+    "RELAY-SOCK-012",
+    "RELAY-APPEND-002",
+    "RELAY-CAPS-002",
+    "RELAY-SHAPE-008",
+    "RELAY-SHAPE-010",
+    "RELAY-OBJ-007"
+   ],
+   "targets": [
+    "core",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "0c88967a5ea19fb64068ad34b8ff7570",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 2,
+        "chain": {
+         "$chain": 2
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "socket": "a",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "b",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 3
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "expect": {
+      "silent": true
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "silent": true
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$hello": {
+       "session": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 3,
+        "last_ctr": 2,
+        "last_seq": 3,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2998,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "send": {
+      "$hello": {
+       "session": "02020202020202020202020202020202"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 3,
+        "last_ctr": 0,
+        "last_seq": 0,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 3000,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_append": {
+       "req": 7,
+       "batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 4
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "result",
+        "req": 7,
+        "results": [
+         {
+          "status": "new",
+          "seq": 4
+         },
+         {
+          "status": "new",
+          "seq": 5
+         }
+        ]
+       },
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          4,
+          5
+         ],
+         "truncated": false,
+         "head_seq": 5,
+         "more": false,
+         "fenced": false,
+         "frames": [
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 3
+           }
+          },
+          {
+           "$frame": {
+            "author": "alice",
+            "ctr": 4
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          4,
+          5
+         ],
+         "truncated": false,
+         "head_seq": 5
+        }
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "bob",
+          "ctr": 1
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 6
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          6
+         ],
+         "truncated": false,
+         "head_seq": 6,
+         "frames": [
+          {
+           "$frame": {
+            "author": "bob",
+            "ctr": 1
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          6
+         ],
+         "truncated": false
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_read": {
+       "req": 9,
+       "after": 2,
+       "limit": 2
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "page",
+        "req": 9,
+        "page": {
+         "head_seq": 6,
+         "seqs": [
+          3,
+          4
+         ],
+         "more": true,
+         "truncated": false
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "send": {
+      "$sock_read": {
+       "req": 4294967295,
+       "after": 6,
+       "limit": 256
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "page",
+        "req": 4294967295,
+        "page": {
+         "head_seq": 6,
+         "seqs": [],
+         "more": false
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_append": {
+       "req": 8,
+       "batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "result",
+        "req": 8,
+        "results": [
+         {
+          "status": "dup",
+          "seq": 4
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_append": {
+       "req": 10,
+       "batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 5
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 7
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "result",
+        "req": 10,
+        "results": [
+         {
+          "status": "new",
+          "seq": 7
+         },
+         {
+          "status": "gap",
+          "last_ctr": 5,
+          "last_seq": 7
+         }
+        ]
+       },
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          7
+         ],
+         "truncated": false,
+         "head_seq": 7
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          7
+         ],
+         "truncated": false
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "send": {
+      "$sock_append": {
+       "req": 1,
+       "batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 6
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "result",
+        "req": 1,
+        "results": [
+         {
+          "status": "refused",
+          "http_status": 403,
+          "code": "relay/not_author"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_append": {
+       "req": 5,
+       "batch": {
+        "$hex": "00"
+       }
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 5,
+        "status": 400,
+        "code": "relay/bad_batch"
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_read": {
+       "req": 6,
+       "after": 0,
+       "limit": 0
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 6,
+        "status": 400,
+        "code": "relay/bad_query"
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_read": {
+       "req": 6,
+       "after": 0,
+       "limit": 257
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 6,
+        "status": 400,
+        "code": "relay/bad_query"
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_read": {
+       "req": 6,
+       "after": "ffffffffffffffff",
+       "limit": 1
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 6,
+        "status": 400,
+        "code": "relay/bad_query"
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "register"
+      },
+      "body": {
+       "$admin": {
+        "op": "register",
+        "signer": "alice",
+        "args": {
+         "dev": "carol",
+         "sign_pk": "carol",
+         "frame_hash": {
+          "$hash": {
+           "$frame": {
+            "author": "alice",
+            "ctr": 6
+           }
+          }
+         }
+        },
+        "extra": {
+         "$frame": {
+          "author": "alice",
+          "ctr": 6
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "socket": "a",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          8
+         ],
+         "truncated": false,
+         "head_seq": 8
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          8
+         ],
+         "truncated": false
+        }
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "restore_tail"
+      },
+      "body": {
+       "$admin": {
+        "op": "restore_tail",
+        "signer": "alice",
+        "args": {
+         "first_seq": 9,
+         "hashes": [
+          {
+           "$hash": {
+            "$frame": {
+             "author": "rec",
+             "ctr": 2
+            }
+           }
+          },
+          {
+           "$hash": {
+            "$frame": {
+             "author": "bob",
+             "ctr": 2
+            }
+           }
+          }
+         ]
+        },
+        "extra": {
+         "$cat": [
+          {
+           "$chain": 8
+          },
+          {
+           "$frames": [
+            {
+             "$frame": {
+              "author": "rec",
+              "ctr": 2
+             }
+            },
+            {
+             "$frame": {
+              "author": "bob",
+              "ctr": 2
+             }
+            }
+           ]
+          }
+         ]
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "socket": "a",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          9,
+          10
+         ],
+         "truncated": false,
+         "head_seq": 10
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          9,
+          10
+         ],
+         "truncated": false
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "expect": {
+      "silent": true
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "silent": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "a second process is told to both ends; a reconnect of the same process is silent",
+   "clauses": [
+    "RELAY-SOCK-003",
+    "RELAY-SOCK-011"
+   ],
+   "targets": [
+    "core",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "372b2222bd6d0d942f9464a5571184ad",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 2,
+        "chain": {
+         "$chain": 2
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "socket": "a1",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a1",
+     "send": {
+      "$hello": {
+       "session": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a2",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a1",
+     "expect": {
+      "silent": true
+     }
+    },
+    {
+     "socket": "a2",
+     "send": {
+      "$hello": {
+       "session": "02020202020202020202020202020202"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "second",
+        "session": "01010101010101010101010101010101"
+       },
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a1",
+     "expect": {
+      "messages": [
+       {
+        "type": "displaced",
+        "session": "02020202020202020202020202020202"
+       }
+      ],
+      "closed": 4001
+     }
+    },
+    {
+     "socket": "a3",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a3",
+     "send": {
+      "$hello": {
+       "session": "02020202020202020202020202020202"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a2",
+     "expect": {
+      "closed": 4002
+     }
+    },
+    {
+     "socket": "a4",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a5",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a5",
+     "send": {
+      "$hello": {
+       "session": "03030303030303030303030303030303"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "second",
+        "session": "02020202020202020202020202020202"
+       },
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a3",
+     "expect": {
+      "messages": [
+       {
+        "type": "displaced",
+        "session": "03030303030303030303030303030303"
+       }
+      ],
+      "closed": 4001
+     }
+    },
+    {
+     "socket": "a4",
+     "expect": {
+      "silent": true
+     }
+    },
+    {
+     "socket": "a4",
+     "send": {
+      "$hello": {
+       "session": "04040404040404040404040404040404"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "second",
+        "session": "03030303030303030303030303030303"
+       },
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a5",
+     "expect": {
+      "messages": [
+       {
+        "type": "displaced",
+        "session": "04040404040404040404040404040404"
+       }
+      ],
+      "closed": 4001
+     }
+    },
+    {
+     "socket": "b",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "b",
+     "send": {
+      "$hello": {
+       "session": "04040404040404040404040404040404"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 0,
+        "last_seq": 0,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 3000,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a4",
+     "expect": {
+      "silent": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "a socket that breaks the protocol is closed",
+   "clauses": [
+    "RELAY-SOCK-002",
+    "RELAY-SOCK-004",
+    "RELAY-SOCK-009",
+    "RELAY-SOCK-011"
+   ],
+   "targets": [
+    "core",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "4202f18fe8fba7064869224adf5b7b03",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 2,
+        "chain": {
+         "$chain": 2
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "socket": "x",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "x",
+     "send": {
+      "$sock_read": {
+       "req": 1,
+       "after": 0,
+       "limit": 1
+      }
+     },
+     "expect": {
+      "closed": 4004
+     }
+    },
+    {
+     "socket": "y",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "y",
+     "send": {
+      "$hex": "0100000000000000000000000000000000000000"
+     },
+     "expect": {
+      "closed": 4004
+     }
+    },
+    {
+     "socket": "y2",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "y2",
+     "send": {
+      "$hex": "01000000000000000000000000000000000000000000"
+     },
+     "expect": {
+      "closed": 4004
+     }
+    },
+    {
+     "socket": "y3",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "y3",
+     "send": {
+      "$text": "hello"
+     },
+     "expect": {
+      "closed": 4004
+     }
+    },
+    {
+     "socket": "z",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "z",
+     "send": {
+      "$hello": {
+       "session": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "z",
+     "send": {
+      "$hello": {
+       "session": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "closed": 4004
+     }
+    },
+    {
+     "socket": "w",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "w",
+     "send": {
+      "$hello": {
+       "session": "02020202020202020202020202020202"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "w",
+     "send": {
+      "$hex": "09000000"
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 0,
+        "status": 400,
+        "code": "relay/bad_message"
+       }
+      ],
+      "closed": 4004
+     }
+    },
+    {
+     "socket": "v",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "v",
+     "send": {
+      "$hello": {
+       "session": "03030303030303030303030303030303"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "v",
+     "send": {
+      "$hex": "0300000000000000000000000000"
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 0,
+        "status": 400,
+        "code": "relay/bad_message"
+       }
+      ],
+      "closed": 4004
+     }
+    },
+    {
+     "socket": "u",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "u",
+     "send": {
+      "$hello": {
+       "session": "04040404040404040404040404040404"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "u",
+     "send": {
+      "$text": "hi"
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 0,
+        "status": 400,
+        "code": "relay/bad_message"
+       }
+      ],
+      "closed": 4004
+     }
+    },
+    {
+     "socket": "t",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "t",
+     "send": {
+      "$hello": {
+       "session": "05050505050505050505050505050505"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "t",
+     "send": {
+      "$hex": "02000000"
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 0,
+        "status": 400,
+        "code": "relay/bad_message"
+       }
+      ],
+      "closed": 4004
+     }
+    },
+    {
+     "socket": "s",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "s",
+     "send": {
+      "$hello": {
+       "session": "06060606060606060606060606060606"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "s",
+     "send": {
+      "$fill": {
+       "len": 4194379,
+       "seed": "too big"
+      }
+     },
+     "expect": {
+      "closed": 1009
+     }
+    },
+    {
+     "socket": "r",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "r",
+     "send": {
+      "$hello": {
+       "session": "07070707070707070707070707070707"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "r",
+     "send": {
+      "$hex": ""
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 0,
+        "status": 400,
+        "code": "relay/bad_message"
+       }
+      ],
+      "closed": 4004
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "storage": {
+       "log": [
+        1,
+        2
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "the runtime answers the text ping without waking the object",
+   "clauses": [
+    "RELAY-SOCK-010"
+   ],
+   "targets": [
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "197bab077aa65961bcebe79afea902c3",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 2,
+        "chain": {
+         "$chain": 2
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "socket": "a",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$hello": {
+       "session": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$text": "ping"
+     },
+     "expect": {
+      "text": "pong"
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$text": "ping"
+     },
+     "expect": {
+      "text": "pong"
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_read": {
+       "req": 1,
+       "after": 2,
+       "limit": 1
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "page",
+        "req": 1,
+        "page": {
+         "seqs": []
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "a socket is accepted only for a device token that is valid at the object",
+   "clauses": [
+    "RELAY-SOCK-001",
+    "RELAY-SOCK-007",
+    "RELAY-LOGIN-004",
+    "RELAY-REVOKE-003",
+    "RELAY-SOCK-011"
+   ],
+   "targets": [
+    "core",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "a646b78a675079c871e64ae43e5d8ff6",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 2,
+        "chain": {
+         "$chain": 2
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "socket": "m",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "mallory",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "error": "relay/unauthorized",
+      "x_td_relay": "object"
+     }
+    },
+    {
+     "socket": "n",
+     "open": {
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 403,
+      "error": "relay/forbidden",
+      "x_td_relay": "gate"
+     }
+    },
+    {
+     "socket": "o",
+     "open": {
+      "board": "main",
+      "cred": {
+       "door": true
+      }
+     },
+     "expect": {
+      "status": 401,
+      "error": "relay/unauthorized",
+      "x_td_relay": "gate"
+     }
+    },
+    {
+     "socket": "a",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$hello": {
+       "session": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a0",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "request": {
+      "route": "login-nonce",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "gen": 2,
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "login",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "body": {
+       "$login": {
+        "dev": "alice",
+        "gen": 2
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "token": {
+        "$token": {
+         "key": "alice",
+         "gen": 2
+        }
+       },
+       "gen": 2,
+       "push": "$push"
+      }
+     }
+    },
+    {
+     "socket": "a",
+     "expect": {
+      "closed": 4003
+     }
+    },
+    {
+     "socket": "a0",
+     "expect": {
+      "closed": 4003
+     }
+    },
+    {
+     "socket": "p",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "error": "relay/token_stale"
+     }
+    },
+    {
+     "socket": "a2",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a2",
+     "send": {
+      "$hello": {
+       "session": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "b",
+     "send": {
+      "$hello": {
+       "session": "02020202020202020202020202020202"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 0,
+        "last_seq": 0,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 3000,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 2
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 2
+      },
+      "params": {
+       "op": "revoke"
+      },
+      "body": {
+       "$admin": {
+        "op": "revoke",
+        "signer": "alice",
+        "args": {
+         "dev": "bob"
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "closed": 4003
+     }
+    },
+    {
+     "socket": "a2",
+     "expect": {
+      "silent": true
+     }
+    },
+    {
+     "socket": "q",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 403,
+      "error": "relay/revoked"
+     }
+    },
+    {
+     "socket": "a3",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a4",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 2
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "request": {
+      "route": "create",
+      "board": "main",
+      "cred": {
+       "create": true
+      },
+      "body": {
+       "$create": {
+        "board": "main"
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "socket": "a2",
+     "send": {
+      "$sock_append": {
+       "req": 3,
+       "batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 3,
+        "status": 401,
+        "code": "relay/token_stale"
+       }
+      ],
+      "closed": 4003
+     }
+    },
+    {
+     "socket": "a3",
+     "send": {
+      "$hello": {
+       "session": "05050505050505050505050505050505"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a3",
+     "send": {
+      "$sock_read": {
+       "req": 4,
+       "after": 0,
+       "limit": 1
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 4,
+        "status": 401,
+        "code": "relay/token_stale"
+       }
+      ],
+      "closed": 4003
+     }
+    },
+    {
+     "request": {
+      "route": "hello",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 3
+      }
+     },
+     "expect": {
+      "status": 200,
+      "storage": {
+       "log": [
+        1,
+        2
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "the slot notice goes to the ticket's creator, the state notice to everyone",
+   "clauses": [
+    "RELAY-SOCK-008",
+    "RELAY-FENCE-001",
+    "RELAY-FENCE-002",
+    "RELAY-SOCK-006",
+    "RELAY-SOCK-001"
+   ],
+   "targets": [
+    "core",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "b728e1c6be0a7a043619413e7d6131ba",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 2,
+        "chain": {
+         "$chain": 2
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "socket": "a",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$hello": {
+       "session": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 1,
+        "last_seq": 2,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2999,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "b",
+     "send": {
+      "$hello": {
+       "session": "02020202020202020202020202020202"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 0,
+        "last_seq": 0,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 3000,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "pair-open",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$cat": [
+        {
+         "$tid": "0101010101010101010101010101010101010101010101010101010101010101"
+        },
+        {
+         "$slot": {
+          "label": "a",
+          "body_len": 48
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "slot-post",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "params": {
+       "tid": {
+        "$tid": "0101010101010101010101010101010101010101010101010101010101010101"
+       },
+       "label": "b"
+      },
+      "proof": "0101010101010101010101010101010101010101010101010101010101010101",
+      "body": {
+       "$slot": {
+        "label": "b",
+        "body_len": 119
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "socket": "a",
+     "expect": {
+      "messages": [
+       {
+        "type": "slot",
+        "tid": {
+         "$tid": "0101010101010101010101010101010101010101010101010101010101010101"
+        },
+        "label": 66
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "silent": true
+     }
+    },
+    {
+     "request": {
+      "route": "slot-post",
+      "board": "main",
+      "cred": {
+       "door": true
+      },
+      "params": {
+       "tid": {
+        "$tid": "0101010101010101010101010101010101010101010101010101010101010101"
+       },
+       "label": "b"
+      },
+      "proof": "0101010101010101010101010101010101010101010101010101010101010101",
+      "body": {
+       "$slot": {
+        "label": "b",
+        "body_len": 119
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "slot-post",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "tid": {
+        "$tid": "0101010101010101010101010101010101010101010101010101010101010101"
+       },
+       "label": "c"
+      },
+      "body": {
+       "$slot": {
+        "label": "c",
+        "body_len": 64
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "socket": "a",
+     "expect": {
+      "silent": true
+     }
+    },
+    {
+     "request": {
+      "route": "admin-nonce",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$dev": "alice"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "nonce": "$any",
+       "expires": {
+        "$time": 120000
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "admin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "op": "fence"
+      },
+      "body": {
+       "$admin": {
+        "op": "fence",
+        "signer": "alice",
+        "args": {
+         "host": "new.relay.test",
+         "door": "0102030405",
+         "home_gen": 2
+        },
+        "extra": {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2
+         }
+        }
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "socket": "a",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          3
+         ],
+         "truncated": false,
+         "head_seq": 3,
+         "fenced": true
+        }
+       },
+       {
+        "type": "state",
+        "state": 2,
+        "has_fence": 1,
+        "fence": {
+         "host": "new.relay.test",
+         "door": "0102030405",
+         "home_gen": 2
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          3
+         ],
+         "truncated": false,
+         "fenced": true
+        }
+       },
+       {
+        "type": "state",
+        "state": 2,
+        "has_fence": 1,
+        "fence": {
+         "host": "new.relay.test",
+         "door": "0102030405",
+         "home_gen": 2
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_append": {
+       "req": 2,
+       "batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "error",
+        "req": 2,
+        "status": 403,
+        "code": "relay/fenced"
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "send": {
+      "$sock_read": {
+       "req": 3,
+       "after": 2,
+       "limit": 5
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "page",
+        "req": 3,
+        "page": {
+         "head_seq": 3,
+         "seqs": [
+          3
+         ],
+         "fenced": true
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "c",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "c",
+     "send": {
+      "$hello": {
+       "session": "02020202020202020202020202020202"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 3,
+        "last_ctr": 0,
+        "last_seq": 0,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 2,
+        "caps": 1,
+        "appends_left": 3000,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 1,
+        "fence": {
+         "host": "new.relay.test",
+         "door": "0102030405",
+         "home_gen": 2
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "closed": 4002
+     }
+    }
+   ]
+  },
+  {
+   "name": "a push is split as pages are",
+   "clauses": [
+    "RELAY-SOCK-008",
+    "RELAY-READ-001"
+   ],
+   "targets": [
+    "core",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "e172a60d0aa65e8ac9daa708ad7eb490",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 2,
+        "chain": {
+         "$chain": 2
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "socket": "b",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "b",
+     "send": {
+      "$hello": {
+       "session": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 2,
+        "last_ctr": 0,
+        "last_seq": 0,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 3000,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "request": {
+      "route": "append",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 2,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 3,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 4,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 5,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 6,
+          "body_len": 262032
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "results": [
+       {
+        "status": "new",
+        "seq": 3
+       },
+       {
+        "status": "new",
+        "seq": 4
+       },
+       {
+        "status": "new",
+        "seq": 5
+       },
+       {
+        "status": "new",
+        "seq": 6
+       },
+       {
+        "status": "new",
+        "seq": 7
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          3,
+          4,
+          5,
+          6
+         ],
+         "truncated": false,
+         "head_seq": 7,
+         "more": true
+        }
+       },
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          7
+         ],
+         "truncated": false,
+         "head_seq": 7,
+         "more": false
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "open": {
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 101
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$hello": {
+       "session": "02020202020202020202020202020202"
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "welcome",
+        "head_seq": 7,
+        "last_ctr": 6,
+        "last_seq": 7,
+        "relay_now": {
+         "$time": 0
+        },
+        "floor": 1,
+        "purge_floor": 1,
+        "state": 1,
+        "caps": 1,
+        "appends_left": 2994,
+        "door": {
+         "$door": true
+        },
+        "has_fence": 0
+       }
+      ]
+     }
+    },
+    {
+     "socket": "a",
+     "send": {
+      "$sock_append": {
+       "req": 1,
+       "batch": [
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 7,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 8,
+          "body_len": 262032
+         }
+        },
+        {
+         "$frame": {
+          "author": "alice",
+          "ctr": 9,
+          "body_len": 262032
+         }
+        }
+       ]
+      }
+     },
+     "expect": {
+      "messages": [
+       {
+        "type": "result",
+        "req": 1,
+        "results": [
+         {
+          "status": "new",
+          "seq": 8
+         },
+         {
+          "status": "new",
+          "seq": 9
+         },
+         {
+          "status": "new",
+          "seq": 10
+         }
+        ]
+       },
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          8,
+          9,
+          10
+         ],
+         "truncated": false,
+         "head_seq": 10,
+         "more": false
+        }
+       }
+      ]
+     }
+    },
+    {
+     "socket": "b",
+     "expect": {
+      "messages": [
+       {
+        "type": "push",
+        "page": {
+         "seqs": [
+          8,
+          9,
+          10
+         ],
+         "truncated": false
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -8,6 +8,19 @@ pub(crate) mod private {
 }
 
 /// The only way random bytes enter the crate (SEAL-GEN-004, SEAL-GEN-005; seal.md §26).
+///
+/// The trait is sealed: another crate cannot implement it, since its
+/// supertrait is private to this crate.
+///
+/// ```compile_fail,E0277
+/// struct Mine;
+/// impl taskdeck_seal::Entropy for Mine {
+///     fn fill(&mut self, out: &mut [u8]) -> Result<(), taskdeck_seal::SealError> {
+///         out.fill(4);
+///         Ok(())
+///     }
+/// }
+/// ```
 pub trait Entropy: private::Sealed {
     /// Fills `out`, or fails with `seal/entropy` (SEAL-GEN-004).
     fn fill(&mut self, out: &mut [u8]) -> Result<(), SealError>;
@@ -20,7 +33,7 @@ impl private::Sealed for OsEntropy {}
 
 impl Entropy for OsEntropy {
     fn fill(&mut self, out: &mut [u8]) -> Result<(), SealError> {
-        unimplemented!()
+        getrandom::fill(out).map_err(|_| SealError::Entropy)
     }
 }
 
@@ -35,7 +48,8 @@ pub struct FixedEntropy {
 impl FixedEntropy {
     /// Replays `bytes`; passes `TEST_ENTROPY_MARKER` to `std::hint::black_box` (SEAL-GEN-014).
     pub fn new(bytes: Vec<u8>) -> Self {
-        unimplemented!()
+        std::hint::black_box(TEST_ENTROPY_MARKER);
+        FixedEntropy { bytes, next: 0 }
     }
 }
 
@@ -44,10 +58,19 @@ impl private::Sealed for FixedEntropy {}
 
 #[cfg(feature = "test-entropy")]
 impl Entropy for FixedEntropy {
+    /// Hands out the next `out.len()` bytes; when fewer remain, fails with
+    /// `seal/entropy` and hands out nothing (SEAL-GEN-004).
     fn fill(&mut self, out: &mut [u8]) -> Result<(), SealError> {
-        unimplemented!()
+        let end = self.next.checked_add(out.len()).ok_or(SealError::Entropy)?;
+        let src = self.bytes.get(self.next..end).ok_or(SealError::Entropy)?;
+        out.copy_from_slice(src);
+        self.next = end;
+        Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 /// The marker a `test-entropy` build contains and no other build does (SEAL-GEN-014; seal.md §26).
 #[cfg(feature = "test-entropy")]

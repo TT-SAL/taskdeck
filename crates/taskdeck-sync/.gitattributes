@@ -1,0 +1,5 @@
+# Every file of the crate is kept as committed bytes on every checkout (no
+# line-ending conversion under core.autocrlf, which Windows runners set):
+# tests read the manifest, the sources and the vector files as text and
+# compare them byte for byte.
+* -text

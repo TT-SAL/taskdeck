@@ -22,7 +22,10 @@ x25519-dalek = { workspace = true, features = ["static_secrets", "precomputed-ta
 # DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20-Poly1305 (SYNC.md §5.1).
 hpke = { workspace = true, features = ["alloc", "x25519", "chacha"] }
 hkdf = { workspace = true }
-sha2 = { workspace = true }
+# `zeroize`: the SHA-256 and SHA-512 states, and through them the HMAC and HKDF
+# states, are wiped on drop; they take in the seed, the roots and the private
+# keys (SYNC_PLAN.md §3.4, SEAL-GEN-006).
+sha2 = { workspace = true, features = ["zeroize"] }
 # `OsEntropy` (SEAL-GEN-005).
 getrandom = { workspace = true }
 zeroize = { workspace = true, features = ["derive"] }

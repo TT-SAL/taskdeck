@@ -74,6 +74,7 @@ Decisions the owner made on 2026-11-21, and their consequences. Sessions do not 
 | Development machine | A separate account or VM | Cloud sessions. CI is the Windows, macOS and Android test bench |
 | Cost | EUR 0, optional domain and signing token | Unchanged. The EUR 0 options are the default; nothing in the plan may require spending |
 | Effort table (§10) | 42–53 focused weeks of unassisted work | Superseded by this plan |
+| Lost recovery sheet | one member proposes, every device shows a banner for 72 hours, another member confirms | **Dropped** (the owner, 2026-11-23): the recovery key changes only with the current sheet, and a lost sheet means Reset trust. One compromised device could run the old path alone and at once |
 
 Defaults taken for SYNC.md's open questions: device-local time zones (3); overwrite notices, not refusals, for stale edits (8); no paid crypto review (9); phone extras after cutover (10); no push (7).
 
@@ -252,7 +253,7 @@ Then the simulator: seeded and deterministic, with a model relay that follows `s
 
 Gate: 1,000 seeds per CI run with these invariants; every failing seed becomes a regression test.
 1. Devices that are honest and connected converge to one state hash.
-2. An acknowledged entry is never lost and is applied exactly once everywhere.
+2. An acknowledged entry is never lost and is applied exactly once everywhere. A relay that forks, or rolls back under entries another device then overwrites, can lose entries; for those faults the promise is that the loss is never silent: a device that holds the entry raises an alarm with evidence (`engine.md` §31.7; the owner's decision of 2026-11-25). A device that the user retires (re-pairs as a new device) while such a relay keeps it cut off is a known limit: what only the forked copy acknowledged to it is lost with no alarm, and a refusal of its own entry that it never read is not reported (SYNC.md §11; the owner's decision of 2026-11-25).
 3. A queued edit survives any crash and is sent exactly once.
 4. Tampering always raises an alarm with evidence and never changes state.
 5. No relay answer deletes local data or keys.
@@ -306,7 +307,7 @@ Read: `spec/device.md`; DOCUMENTATION.md §14, §16–§19, §22; SYNC.md §3, �
 
 1. Put `TaskApp` on the facade in local-only mode. With no sync configured, the wall calendar behaves exactly as today. The UI keeps its own display order and never reorders replicated data. Times convert to local at the edge. The notepad edits a draft. The palette and the home place become board settings.
 2. Settings, SYNC, part one: create board; pair with the typed code and the six digits, with capture excluded while the sheet is open; the device list; revoke and replace; sync status and last seen; the fingerprint; banners for every membership change; the notices list; the notes merge view; the clock-confirm prompt; what blocks a rules upgrade. Windows Hello or Touch ID before membership changes.
-3. Settings, SYNC, part two (needs all of `device` and `recovery` merged): alarm evidence and adopting a state by fingerprint; the halted view and Skip; restore to a point; purge history, and the retention wording in the Forget dialog; move board; reset trust; the recovery sheet, printed through the OS dialog and never through a file; the recovery-key change with its 72-hour propose, confirm and cancel; backup destinations and status; uploading the shared picture.
+3. Settings, SYNC, part two (needs all of `device` and `recovery` merged): alarm evidence and adopting a state by fingerprint; the halted view and Skip; restore to a point; purge history, and the retention wording in the Forget dialog; move board; reset trust; the recovery sheet, printed through the OS dialog and never through a file; the recovery-key change, with the current sheet; backup destinations and status; uploading the shared picture.
 4. Import and cutover: `TaskDeck --import-check <folder>`; "Create board from this folder"; the old files moved aside untouched; "Export legacy".
 5. Remove what is replaced, with its tests: the `taskdeck-server` binary, the phone server, `src/phone.html` and the feed, tokens and QR codes, `sync.rs`, the old fetch threads, the fixture generator, and their dependencies.
 6. Try the app under Xvfb in the container for screenshots. Useful if it works; not a gate.

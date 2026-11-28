@@ -1,0 +1,1236 @@
+{
+  "spec": "engine.md §8.2, §8.3, §8.5",
+  "cases": [
+    {
+      "name": "no record: the view is the confirmed state",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [],
+      "view": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": []
+    },
+    {
+      "name": "successes: set, add, del, create, name, forget on top of each other",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "0104000000000000002c",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "0202fffffffffffffff9",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "0309",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 4,
+          "kind": "cmd",
+          "payload": "0400000100000000020000012c",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 5,
+          "kind": "cmd",
+          "payload": "0500000100000000020000012d",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 6,
+          "kind": "cmd",
+          "payload": "060000020000000004",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000301000000000000000a0000000000000008000202fffffffffffffffe000000000000000c000104000000000000002c000000000000000b00010000000200000100000000010000006400000100000000020000012d00020001000000000000000200020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 13,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 4,
+          "provisional_seq": 14,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 5,
+          "provisional_seq": 15,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 6,
+          "provisional_seq": 16,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "benign repeats succeed: del of an absent key, forget of an absent item",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "034d",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "060000010000000009",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "014d0000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000401000000000000000a0000000000000008000202000000000000000500000000000000030001090000000000000000000000000000000000004d0000000000000001000000000000000d0001000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 13,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "a refusal (Fail) is doomed with its code and leaves the view unchanged",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "ENG-PEND-002",
+        "§8.3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "01040000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "0703",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "02040000000000000002",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000401000000000000000a0000000000000008000202000000000000000500000000000000030001040000000000000003000000000000000d000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": "engine/toy_fail",
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 13,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "a Panic is doomed with engine/trial_panic; the view is rebuilt from the records before it",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "ENG-PEND-002",
+        "§8.2 step 3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "01040000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "0500000100000000010000006f",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "08",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 4,
+          "kind": "cmd",
+          "payload": "02040000000000000002",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000401000000000000000a0000000000000008000202000000000000000500000000000000030001040000000000000003000000000000000e0001090000000000000000000000000000000000000000000200000100000000010000006f0000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 13,
+          "doomed": "engine/trial_panic",
+          "notices": []
+        },
+        {
+          "order": 4,
+          "provisional_seq": 14,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "a Panic after a doomed record: the rebuild skips the doomed one",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "ENG-PEND-002",
+        "§8.2 step 3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "02320000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "01320000000000000009",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "08",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 4,
+          "kind": "cmd",
+          "payload": "02320000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000401000000000000000a00000000000000080002020000000000000005000000000000000300010900000000000000000000000000000000000032000000000000000a000000000000000e0001000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": "engine/toy_gone",
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 13,
+          "doomed": "engine/trial_panic",
+          "notices": []
+        },
+        {
+          "order": 4,
+          "provisional_seq": 14,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "a doomed record followed by one that succeeds; provisional seqs count the doomed one",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "ENG-PEND-001",
+        "§8.3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "05000001000000000700000005",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "01010000000000000063",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f5931000000010003010000000000000063000000000000000c00010200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": "engine/toy_gone",
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "a doomed Create; records that build on another pending record",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 3",
+        "§8.3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "04000001000000000100000005",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "04000001000000000200000007",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "05000001000000000200000008",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 4,
+          "kind": "cmd",
+          "payload": "05000001000000000300000009",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000030000010000000001000000640000010000000002000000080000020000000004000000c800020001000000000000000200020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": "engine/toy_bad_id",
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 13,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 4,
+          "provisional_seq": 14,
+          "doomed": "engine/toy_gone",
+          "notices": []
+        }
+      ],
+      "note": "record 1 re-mints n = 1, not above device 1's mark 1: doomed; record 3 names the item record 2 created; record 4 names an item no record created"
+    },
+    {
+      "name": "records already seen at or below B are excluded; one seen above B is kept",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 1"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "01040000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 8,
+          "seen": 9
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "01040000000000000002",
+          "at_ms": 1700000000000,
+          "based_on_seq": 9,
+          "seen": 10
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "01040000000000000003",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": 11
+        },
+        {
+          "order": 4,
+          "kind": "cmd",
+          "payload": "0204000000000000000a",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000401000000000000000a000000000000000800020200000000000000050000000000000003000104000000000000000d000000000000000c000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 3,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 4,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "beat, ctl and snap records are excluded and take no provisional seq",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 1"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "beat",
+          "payload": null,
+          "at_ms": 1700000000000,
+          "based_on_seq": 0,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "01040000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "ctl",
+          "payload": null,
+          "at_ms": 1700000000000,
+          "based_on_seq": 0,
+          "seen": null
+        },
+        {
+          "order": 4,
+          "kind": "snap",
+          "payload": null,
+          "at_ms": 1700000000000,
+          "based_on_seq": 0,
+          "seen": null
+        },
+        {
+          "order": 5,
+          "kind": "cmd",
+          "payload": "02040000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000401000000000000000a0000000000000008000202000000000000000500000000000000030001040000000000000002000000000000000c000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 2,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 5,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "a Set over another device's newer stamp shows a notice (never recorded)",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 3",
+        "ENG-SM-004",
+        "§13.4"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "01010000000000000003",
+          "at_ms": 1700000000000,
+          "based_on_seq": 5,
+          "seen": null
+        }
+      ],
+      "view": "544f5931000000010003010000000000000003000000000000000b00010200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": [
+            "000000000000000b00010002000000000000000801"
+          ]
+        }
+      ],
+      "note": "key 1 stamped (seq 8, device 2); based_on 5 < 8 and device 2 is not this device"
+    },
+    {
+      "name": "the same Set composed after seeing the stamp shows no notice",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "01010000000000000003",
+          "at_ms": 1700000000000,
+          "based_on_seq": 9,
+          "seen": null
+        }
+      ],
+      "view": "544f5931000000010003010000000000000003000000000000000b00010200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "a Set over this device's own stamp, or a stamp of device 0, shows no notice",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "01020000000000000003",
+          "at_ms": 1700000000000,
+          "based_on_seq": 1,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "01090000000000000003",
+          "at_ms": 1700000000000,
+          "based_on_seq": 0,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000301000000000000000a00000000000000080002020000000000000003000000000000000b0001090000000000000003000000000000000c0001000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "based_on above B is taken as B: no toy_bad_ctx for the first record",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 3"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "01010000000000000003",
+          "at_ms": 1700000000000,
+          "based_on_seq": 15,
+          "seen": null
+        }
+      ],
+      "view": "544f5931000000010003010000000000000003000000000000000b00010200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        }
+      ],
+      "note": "based_on = min(15, 10) = 10 < provisional seq 11; with 15 the toy would refuse with toy_bad_ctx"
+    },
+    {
+      "name": "based_on = min(r.based_on.seq, B) decides a Set notice",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 3"
+      ],
+      "rules2": false,
+      "confirmed": "544f5931000000010001070000000000000001000000000000000c0002000000000000",
+      "board_seq": 10,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "011e0000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "011e0000000000000002",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "011e0000000000000003",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 4,
+          "kind": "cmd",
+          "payload": "011e0000000000000004",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 5,
+          "kind": "cmd",
+          "payload": "011e0000000000000005",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 6,
+          "kind": "cmd",
+          "payload": "01070000000000000009",
+          "at_ms": 1700000000000,
+          "based_on_seq": 15,
+          "seen": null
+        }
+      ],
+      "view": "544f5931000000010002070000000000000009000000000000001000011e0000000000000005000000000000000f0001000000000000",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 13,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 4,
+          "provisional_seq": 14,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 5,
+          "provisional_seq": 15,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 6,
+          "provisional_seq": 16,
+          "doomed": null,
+          "notices": [
+            "000000000000001000010002000000000000000c07"
+          ]
+        }
+      ],
+      "note": "key 7 carries a stamp seq 12 above B (a state the toy loads); the 6th record has seq 16 and based_on min(15, 10) = 10 < 12, so it shows a notice; with based_on 15 it would not"
+    },
+    {
+      "name": "a device with no device_no shows the confirmed state alone",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 last paragraph"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": null,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "01040000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "04000001000000000200000003",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "note": "the spec gives the view only; provisional seqs and doomed flags of such a device are not stated, so the case has no 'unapplied'"
+    },
+    {
+      "name": "a Create whose id depends on the device's mark",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§5.3 apply Create"
+      ],
+      "rules2": false,
+      "confirmed": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000020000010000000001000000640000020000000004000000c800020001000000000000000100020000000000000004",
+      "board_seq": 10,
+      "device_no": 2,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "04000002000000000400000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "04000002000000000500000002",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "04000002000000000500000003",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 4,
+          "kind": "cmd",
+          "payload": "04000001000000000900000004",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        },
+        {
+          "order": 5,
+          "kind": "cmd",
+          "payload": "04000002000000000900000005",
+          "at_ms": 1700000000000,
+          "based_on_seq": 10,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000301000000000000000a000000000000000800020200000000000000050000000000000003000109000000000000000000000000000000000000000000040000010000000001000000640000020000000004000000c800000200000000050000000200000200000000090000000500020001000000000000000100020000000000000009",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 11,
+          "doomed": "engine/toy_bad_id",
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 12,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 13,
+          "doomed": "engine/toy_bad_id",
+          "notices": []
+        },
+        {
+          "order": 4,
+          "provisional_seq": 14,
+          "doomed": "engine/toy_bad_id",
+          "notices": []
+        },
+        {
+          "order": 5,
+          "provisional_seq": 15,
+          "doomed": null,
+          "notices": []
+        }
+      ],
+      "note": "device 2's mark is 4: n = 4 is refused, 5 succeeds and raises the mark, 5 again is refused, a high part of 1 is refused, 9 succeeds"
+    },
+    {
+      "name": "a Create on a device without a mark",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§5.3 apply Create"
+      ],
+      "rules2": false,
+      "confirmed": "544f5931000000010000000000000000",
+      "board_seq": 3,
+      "device_no": 7,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "04000007000000000100000046",
+          "at_ms": 1700000000000,
+          "based_on_seq": 3,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "04000007000000000000000047",
+          "at_ms": 1700000000000,
+          "based_on_seq": 3,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000000000001000007000000000100000046000100070000000000000001",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 4,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 5,
+          "doomed": "engine/toy_bad_id",
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "Mul under rules 2, Add overflow, Add on an absent key",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§5.3 apply"
+      ],
+      "rules2": true,
+      "confirmed": "544f593100000002000103000000000000000600000000000000040001000000000000",
+      "board_seq": 20,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "0903fffffffffffffffc",
+          "at_ms": 1700000000000,
+          "based_on_seq": 20,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "02038000000000000000",
+          "at_ms": 1700000000000,
+          "based_on_seq": 20,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "0203800000000000001e",
+          "at_ms": 1700000000000,
+          "based_on_seq": 20,
+          "seen": null
+        },
+        {
+          "order": 4,
+          "kind": "cmd",
+          "payload": "02080000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 20,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000002000103800000000000000600000000000000170001000000000000",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 21,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 22,
+          "doomed": "engine/toy_overflow",
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 23,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 4,
+          "provisional_seq": 24,
+          "doomed": "engine/toy_gone",
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "Mul under rules 1 is doomed with toy_rules; overflow of Add",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§5.3 apply"
+      ],
+      "rules2": false,
+      "confirmed": "544f5931000000010001057ffffffffffffffe00000000000000060002000000000000",
+      "board_seq": 6,
+      "device_no": 2,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "09050000000000000002",
+          "at_ms": 1700000000000,
+          "based_on_seq": 6,
+          "seen": null
+        },
+        {
+          "order": 2,
+          "kind": "cmd",
+          "payload": "02050000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 6,
+          "seen": null
+        },
+        {
+          "order": 3,
+          "kind": "cmd",
+          "payload": "02050000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 6,
+          "seen": null
+        }
+      ],
+      "view": "544f5931000000010001057fffffffffffffff00000000000000080002000000000000",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 7,
+          "doomed": "engine/toy_rules",
+          "notices": []
+        },
+        {
+          "order": 2,
+          "provisional_seq": 8,
+          "doomed": null,
+          "notices": []
+        },
+        {
+          "order": 3,
+          "provisional_seq": 9,
+          "doomed": "engine/toy_overflow",
+          "notices": []
+        }
+      ]
+    },
+    {
+      "name": "B = 1: the first provisional seq is 2",
+      "clauses": [
+        "ENG-PEND-001",
+        "§8.2",
+        "§5.3",
+        "§8.2 step 3",
+        "§5.3 apply step 1"
+      ],
+      "rules2": false,
+      "confirmed": "544f5931000000010000000000000000",
+      "board_seq": 1,
+      "device_no": 1,
+      "records": [
+        {
+          "order": 1,
+          "kind": "cmd",
+          "payload": "01010000000000000001",
+          "at_ms": 1700000000000,
+          "based_on_seq": 1,
+          "seen": null
+        }
+      ],
+      "view": "544f593100000001000101000000000000000100000000000000020001000000000000",
+      "unapplied": [
+        {
+          "order": 1,
+          "provisional_seq": 2,
+          "doomed": null,
+          "notices": []
+        }
+      ]
+    }
+  ]
+}

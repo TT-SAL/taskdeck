@@ -1,0 +1,14 @@
+{
+  "name": "taskdeck-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The TaskDeck blind relay: relay-core.js, the Cloudflare Worker and the Node 22 standby (docs/sync/spec/relay.md)",
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.166.0"
+  }
+}

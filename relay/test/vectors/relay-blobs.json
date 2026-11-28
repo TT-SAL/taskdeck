@@ -1,0 +1,2960 @@
+{
+ "spec": "relay.md §10.7, §13",
+ "cases": [
+  {
+   "name": "a blob is uploaded in parts and served once it is complete",
+   "clauses": [
+    "RELAY-BLOB-001",
+    "RELAY-BLOB-002",
+    "RELAY-BLOB-003",
+    "RELAY-BLOB-004",
+    "RELAY-ROWS-001"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "f45a7cd7d1dda67e46af0896897094b2",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 1
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 1
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 2,
+        "chain": {
+         "$chain": 2
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 4,
+        "seq": 0,
+        "size": 1048676
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "json": {
+       "id": "01010101010101010101010101010101",
+       "parts": 2
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "blob-meta",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101"
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "id": "01010101010101010101010101010101",
+       "purpose": 4,
+       "seq": 0,
+       "author": {
+        "$dev": "alice"
+       },
+       "size": 1048676,
+       "parts": 2,
+       "sha256": {
+        "$hash": {
+         "$hex": "01010101010101010101010101010101"
+        }
+       },
+       "received": 0,
+       "complete": false
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-get",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 0
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/blob_incomplete"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-list",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "blobs": []
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "received": 1,
+       "complete": false
+      },
+      "rows_written": 2
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "received": 1,
+       "complete": false
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 0,
+        "fill": 9
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/part_conflict"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 1
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 1
+       }
+      }
+     },
+     "expect": {
+      "status": 403,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/forbidden"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 1
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 1,
+        "len": 99
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 1
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 1,
+        "len": 101
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 0,
+        "len": 1048575
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 2
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 2
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-get",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 0
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/blob_incomplete"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 1
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 1
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "received": 2,
+       "complete": true
+      },
+      "rows_written": 2
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 1
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 1
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "received": 2,
+       "complete": true
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-get",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 0
+      }
+     },
+     "expect": {
+      "status": 200,
+      "x_td_relay": "object",
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 0
+       }
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-get",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 1
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-get",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 2
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-list",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "blobs": [
+        {
+         "id": "01010101010101010101010101010101",
+         "purpose": 4,
+         "seq": 0,
+         "author": {
+          "$dev": "alice"
+         },
+         "size": 1048676,
+         "parts": 2,
+         "sha256": {
+          "$hash": {
+           "$hex": "01010101010101010101010101010101"
+          }
+         },
+         "received": 2,
+         "complete": true
+        }
+       ]
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-meta",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "02020202020202020202020202020202"
+      }
+     },
+     "expect": {
+      "status": 404,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_blob"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-get",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "02020202020202020202020202020202",
+       "part": 0
+      }
+     },
+     "expect": {
+      "status": 404,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_blob"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "02020202020202020202020202020202",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 404,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_blob"
+      },
+      "rows_written": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "what blob-begin checks, in order",
+   "clauses": [
+    "RELAY-BLOB-001",
+    "RELAY-BLOB-008",
+    "RELAY-GEN-008",
+    "RELAY-GEN-003"
+   ],
+   "targets": [
+    "core",
+    "standby",
+    "worker"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "57bf9035ff00a8743e04ffd8299b8640",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "fill_log": {
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "author": "alice",
+       "from_ctr": 1,
+       "count": 64
+      }
+     },
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 65
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 65
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 66,
+        "chain": {
+         "$chain": 66
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 66,
+        "purpose": 4,
+        "seq": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67108865,
+        "purpose": 4,
+        "seq": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": "ffffffffffffffff",
+        "purpose": 4,
+        "seq": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 0,
+        "seq": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 5,
+        "seq": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 1,
+        "seq": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 1,
+        "seq": 63
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 1,
+        "seq": 65
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 1,
+        "seq": 128
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 2,
+        "seq": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 2,
+        "seq": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 3,
+        "seq": 2
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 3,
+        "seq": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 4,
+        "seq": 1
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "09090909090909090909090909090909",
+        "size": 67,
+        "purpose": 2,
+        "seq": "0020000000000000"
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "id": "01010101010101010101010101010101",
+       "parts": 1
+      },
+      "rows_written": 1
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "id": "01010101010101010101010101010101",
+       "parts": 1
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 1,
+        "seq": 64,
+        "size": 68
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/blob_exists"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 2,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/blob_exists"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67,
+        "sha256": "0707070707070707070707070707070707070707070707070707070707070707"
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/blob_exists"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/blob_exists"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "02020202020202020202020202020202",
+        "purpose": 3,
+        "seq": 1,
+        "size": 67108864
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "id": "02020202020202020202020202020202",
+       "parts": 64
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "03030303030303030303030303030303",
+        "purpose": 3,
+        "seq": 1,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/blob_exists"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "02020202020202020202020202020202",
+        "purpose": 3,
+        "seq": 1,
+        "size": 67108864
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "id": "02020202020202020202020202020202",
+       "parts": 64
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "04040404040404040404040404040404",
+        "purpose": 2,
+        "seq": 66,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "05050505050505050505050505050505",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 409,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/blob_quota"
+      },
+      "rows_written": 0
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "id": "04040404040404040404040404040404",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "received": 1,
+       "complete": true
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "05050505050505050505050505050505",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "storage": {
+       "blobs": [
+        {
+         "id": "01010101010101010101010101010101",
+         "slot": 1
+        },
+        {
+         "id": "02020202020202020202020202020202",
+         "slot": 2
+        },
+        {
+         "id": "04040404040404040404040404040404",
+         "slot": 3
+        },
+        {
+         "id": "05050505050505050505050505050505",
+         "slot": 4,
+         "author": {
+          "$dev": "bob"
+         },
+         "received": 0,
+         "complete": 0
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "blobs left unfinished, and pairing snapshots, go after an hour",
+   "clauses": [
+    "RELAY-BLOB-006",
+    "RELAY-BLOB-007"
+   ],
+   "targets": [
+    "core",
+    "standby"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "393faa33b4bf69fd502bd74420fd489f",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    }
+   },
+   "steps": [
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 4,
+        "seq": 0,
+        "size": 1048676
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 1048676,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "02020202020202020202020202020202",
+        "purpose": 2,
+        "seq": 1,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "02020202020202020202020202020202",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "received": 1,
+       "complete": true
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "03030303030303030303030303030303",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "03030303030303030303030303030303",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "clock_ms": 1795003599999,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "04040404040404040404040404040404",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 1,
+      "storage": {
+       "count": {
+        "blobs": 4,
+        "parts": 3
+       }
+      }
+     }
+    },
+    {
+     "clock_ms": 1795003600000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "05050505050505050505050505050505",
+        "purpose": 4,
+        "seq": 0,
+        "size": 66
+       }
+      }
+     },
+     "expect": {
+      "status": 400,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/bad_blob"
+      },
+      "rows_written": 4,
+      "storage": {
+       "blobs": [
+        {
+         "id": "03030303030303030303030303030303"
+        },
+        {
+         "id": "04040404040404040404040404040404"
+        }
+       ],
+       "count": {
+        "parts": 1
+       }
+      }
+     }
+    },
+    {
+     "clock_ms": 1795007199999,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "06060606060606060606060606060606",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2,
+      "storage": {
+       "blobs": [
+        {
+         "id": "03030303030303030303030303030303"
+        },
+        {
+         "id": "06060606060606060606060606060606"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "the newest three snapshots stay, and each author's newest",
+   "clauses": [
+    "RELAY-BLOB-005",
+    "RELAY-BLOB-007",
+    "RELAY-ROWS-001"
+   ],
+   "targets": [
+    "core",
+    "standby"
+   ],
+   "setup": {
+    "keys": {
+     "rec": {
+      "seed": "406ea94d2a282f51b7bf75961b3f6f451ea521898ee8e4ecfa5497ff432136d9"
+     },
+     "rec2": {
+      "seed": "601477a4d1e5778ea15d49216727e80cc794c8de6e4e04d6dd170ca9f7dac4a0"
+     },
+     "alice": {
+      "seed": "d7258a3b7d43ca1cd07b61a0999872ff60e30b743b79ea1f48ace40b1606ab9d"
+     },
+     "bob": {
+      "seed": "81efc1caf9812b36e07a48d5268e3b5bc48397197b4d5cb3008709576d42f990"
+     },
+     "carol": {
+      "seed": "8eb214c69f0bdc5fcdeca36d04c75c7204020776f4ec9a3a30f84667d2f8599b"
+     },
+     "dave": {
+      "seed": "b00c6eb651de49d9cdd12aaee777f98677c2845e459ee3e5f8e85e02429365c3"
+     },
+     "mallory": {
+      "seed": "f5fda7279333a092f9774792b52ed8b7892e30e1e59c071aa702e4e734386d81"
+     },
+     "x01": {
+      "seed": "c541dd567722aa2e735b5196f09abc2c43495194dd4a5de6eb0a97597e385390"
+     },
+     "x02": {
+      "seed": "78cbbea39ae17cf461e1b2d1c12348501f2e65fda21a989b0c97edd2e45d2a0e"
+     },
+     "x03": {
+      "seed": "e0396324fd4b366b168024b336200cb9c084e588da6ad6a424a86b34afa7cf3d"
+     },
+     "x04": {
+      "seed": "1cbcd73eceec3dbc0fc203d9b7a63c4a36368dcd7f0015e87219c53d2d00f38e"
+     },
+     "x05": {
+      "seed": "715822475f914aeee62a210afab07db0cf32a1072f9f4fd5a4d06b57c90318d7"
+     },
+     "x06": {
+      "seed": "f91ceeed2c0bb338053ecef97dd3162c83c5510a1899465faaacd0147270f7b3"
+     },
+     "x07": {
+      "seed": "515015d9ab078ce6103a49b0618c74da2b71e205cd5f47fc0d28e92b242966c6"
+     },
+     "x08": {
+      "seed": "30041a745f3cba26c91f697406419a964f72894a64a66add400bb9d33ac1d4a5"
+     },
+     "x09": {
+      "seed": "1ef715c81a83919eea91a82351b88a56fdc0a7554214afaac1fbc19d6597c067"
+     },
+     "x10": {
+      "seed": "a5fa98fbf2a6c8dd54ac0ee7204ee5efff2ffdd5c0828a019948aa51534b03da"
+     },
+     "x11": {
+      "seed": "0e7d7eaabe1c1fe60e0bc07017e65d425963be2bc453f9232a063615e9ffc6d0"
+     },
+     "x12": {
+      "seed": "b10f1e5a1eee54006e1dab34e420265838a3318837d54943eaea5c24b275cfc9"
+     },
+     "x13": {
+      "seed": "619eb578b0c6b23784272caaff31b03d6638bcf744eeeb8e667c13c162b8b235"
+     },
+     "x14": {
+      "seed": "83caaaade6cb5608c12752b417b97978032605aeda031d6a93363e7bc9b4454d"
+     },
+     "x15": {
+      "seed": "815840c1024ba1614b2304f51cde6589afa6fb7f692abbf2561170a6438e8167"
+     },
+     "x16": {
+      "seed": "2407c18b15fe4a5cd4d2031a8c6e79ce8780e4a303b1b8fc2bb61764847c3253"
+     }
+    },
+    "boards": {
+     "main": {
+      "salt": "f84d4816cfd9888f7e32146a6c7e0979",
+      "recovery": "rec",
+      "first": "alice"
+     }
+    },
+    "state": [
+     {
+      "fill_log": {
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "author": "alice",
+       "from_ctr": 1,
+       "count": 64
+      }
+     },
+     {
+      "request": {
+       "route": "admin-nonce",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "body": {
+        "$dev": "alice"
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "nonce": "$any",
+        "expires": {
+         "$time": 120000
+        }
+       }
+      }
+     },
+     {
+      "request": {
+       "route": "admin",
+       "board": "main",
+       "cred": {
+        "token": "alice",
+        "gen": 1
+       },
+       "params": {
+        "op": "register"
+       },
+       "body": {
+        "$admin": {
+         "op": "register",
+         "signer": "alice",
+         "args": {
+          "dev": "bob",
+          "sign_pk": "bob",
+          "frame_hash": {
+           "$hash": {
+            "$frame": {
+             "author": "alice",
+             "ctr": 65
+            }
+           }
+          }
+         },
+         "extra": {
+          "$frame": {
+           "author": "alice",
+           "ctr": 65
+          }
+         }
+        }
+       }
+      },
+      "expect": {
+       "status": 200,
+       "json": {
+        "seq": 66,
+        "chain": {
+         "$chain": 66
+        },
+        "token": {
+         "$token": {
+          "key": "bob"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "steps": [
+    {
+     "clock_ms": 1795000001000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "01010101010101010101010101010101",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "01010101010101010101010101010101",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2
+     }
+    },
+    {
+     "clock_ms": 1795000002000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "02020202020202020202020202020202",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "02020202020202020202020202020202",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2
+     }
+    },
+    {
+     "clock_ms": 1795000003000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "03030303030303030303030303030303",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "03030303030303030303030303030303",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2
+     }
+    },
+    {
+     "clock_ms": 1795000004000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "04040404040404040404040404040404",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "04040404040404040404040404040404",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "received": 1,
+       "complete": true
+      },
+      "rows_written": 4,
+      "storage": {
+       "blobs": [
+        {
+         "id": "02020202020202020202020202020202"
+        },
+        {
+         "id": "03030303030303030303030303030303"
+        },
+        {
+         "id": "04040404040404040404040404040404"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000005000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "05050505050505050505050505050505",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "id": "05050505050505050505050505050505",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 4,
+      "storage": {
+       "blobs": [
+        {
+         "id": "03030303030303030303030303030303"
+        },
+        {
+         "id": "04040404040404040404040404040404"
+        },
+        {
+         "id": "05050505050505050505050505050505"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000006000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "06060606060606060606060606060606",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "06060606060606060606060606060606",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 4,
+      "storage": {
+       "blobs": [
+        {
+         "id": "04040404040404040404040404040404"
+        },
+        {
+         "id": "05050505050505050505050505050505"
+        },
+        {
+         "id": "06060606060606060606060606060606"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000007000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "07070707070707070707070707070707",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "07070707070707070707070707070707",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 4,
+      "storage": {
+       "blobs": [
+        {
+         "id": "05050505050505050505050505050505"
+        },
+        {
+         "id": "06060606060606060606060606060606"
+        },
+        {
+         "id": "07070707070707070707070707070707"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000008000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "08080808080808080808080808080808",
+        "purpose": 1,
+        "seq": 64,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "08080808080808080808080808080808",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2,
+      "storage": {
+       "blobs": [
+        {
+         "id": "05050505050505050505050505050505"
+        },
+        {
+         "id": "06060606060606060606060606060606"
+        },
+        {
+         "id": "07070707070707070707070707070707"
+        },
+        {
+         "id": "08080808080808080808080808080808"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-list",
+      "board": "main",
+      "cred": {
+       "read_token": "alice",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 401,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/unauthorized"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-list",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      }
+     },
+     "expect": {
+      "status": 200,
+      "json": {
+       "blobs": [
+        {
+         "id": "08080808080808080808080808080808",
+         "purpose": 1,
+         "seq": 64,
+         "author": {
+          "$dev": "alice"
+         },
+         "size": 67,
+         "parts": 1,
+         "sha256": {
+          "$hash": {
+           "$hex": "08080808080808080808080808080808"
+          }
+         },
+         "received": 1,
+         "complete": true
+        },
+        {
+         "id": "07070707070707070707070707070707",
+         "purpose": 1,
+         "seq": 64,
+         "author": {
+          "$dev": "alice"
+         },
+         "size": 67,
+         "parts": 1,
+         "sha256": {
+          "$hash": {
+           "$hex": "07070707070707070707070707070707"
+          }
+         },
+         "received": 1,
+         "complete": true
+        },
+        {
+         "id": "06060606060606060606060606060606",
+         "purpose": 1,
+         "seq": 64,
+         "author": {
+          "$dev": "alice"
+         },
+         "size": 67,
+         "parts": 1,
+         "sha256": {
+          "$hash": {
+           "$hex": "06060606060606060606060606060606"
+          }
+         },
+         "received": 1,
+         "complete": true
+        },
+        {
+         "id": "05050505050505050505050505050505",
+         "purpose": 1,
+         "seq": 64,
+         "author": {
+          "$dev": "bob"
+         },
+         "size": 67,
+         "parts": 1,
+         "sha256": {
+          "$hash": {
+           "$hex": "05050505050505050505050505050505"
+          }
+         },
+         "received": 1,
+         "complete": true
+        }
+       ]
+      }
+     }
+    },
+    {
+     "clock_ms": 1795000009000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "11111111111111111111111111111111",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "11111111111111111111111111111111",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2
+     }
+    },
+    {
+     "clock_ms": 1795000010000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "12121212121212121212121212121212",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "12121212121212121212121212121212",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2
+     }
+    },
+    {
+     "clock_ms": 1795000011000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "13131313131313131313131313131313",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "bob",
+       "gen": 1
+      },
+      "params": {
+       "id": "13131313131313131313131313131313",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 2
+     }
+    },
+    {
+     "clock_ms": 1795000012000,
+     "request": {
+      "route": "blob-begin",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "body": {
+       "$blob_begin": {
+        "id": "14141414141414141414141414141414",
+        "purpose": 4,
+        "seq": 0,
+        "size": 67
+       }
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    },
+    {
+     "request": {
+      "route": "blob-put",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "14141414141414141414141414141414",
+       "part": 0
+      },
+      "body": {
+       "$part": {
+        "size": 67,
+        "index": 0
+       }
+      }
+     },
+     "expect": {
+      "status": 200,
+      "rows_written": 4,
+      "storage": {
+       "count": {
+        "blobs": 7
+       }
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-get",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "11111111111111111111111111111111",
+       "part": 0
+      }
+     },
+     "expect": {
+      "status": 404,
+      "x_td_relay": "object",
+      "json": {
+       "error": "relay/no_blob"
+      }
+     }
+    },
+    {
+     "request": {
+      "route": "blob-get",
+      "board": "main",
+      "cred": {
+       "token": "alice",
+       "gen": 1
+      },
+      "params": {
+       "id": "13131313131313131313131313131313",
+       "part": 0
+      }
+     },
+     "expect": {
+      "status": 200
+     }
+    }
+   ]
+  }
+ ]
+}

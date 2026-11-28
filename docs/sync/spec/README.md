@@ -239,7 +239,7 @@ One or two lines per term. "Defined in" names the spec that defines the term nor
 | move code | The code shown on the device that moves the board; typed on each other device before it follows. | `engine.md` |
 | restore tail | Re-uploading frames at their original seqs after a relay rollback. | `relay.md`, `engine.md` |
 | duty | Work some device must do (snapshot, beat, compaction, backup); done by whichever device is awake. | `engine.md`, `device.md` |
-| timed window | A period that spans entries and the clock, such as the 72-hour recovery-key change. | `engine.md` |
+| timed window | A period that spans entries and the clock, such as the stale-epoch window. | `engine.md` |
 | facade | The device runtime's public API, which the desktop app and the Android bridge call. | `device.md` |
 | bridge | The channel between the phone page in the WebView and native code; replaces the page's network calls. | `bridge.md` |
 | fetcher | A device's HTTP client for ICS feeds or weather. | `device.md` |
@@ -497,7 +497,7 @@ The table that maps every requirement of SYNC.md §3 to §9 to a clause id, a st
 | §5.5 | wiped: The seed is typed into a trusted desktop or taskdeck-recover and wiped after use | DEV-SHEET-001, SEAL-SHEET-003 |
 | §5.5 | powers: The recovery key signs control entries: revoke, reinstate one device, rotate, Skip, Fence, change the recovery key | SEAL-MEM-026, RELAY-REVOKE-004, DEV-BKP-014, DEV-BKP-015 |
 | §5.5 | new recovery key: A new recovery key needs the current sheet | SEAL-MEM-011 |
-| §5.5 | lost sheet: If the sheet is lost, one member proposes, every device shows a banner for 72 hours, a different member confirms; any member or the old key can cancel | SEAL-MEM-023, SEAL-MEM-024, ENG-WINDOW-002, ENG-BANNER-002 |
+| §5.5 | lost sheet: If the sheet is lost, one member proposes, every device shows a banner for 72 hours, a different member confirms; any member or the old key can cancel | plan §2: Lost recovery sheet |
 | §5.5 | pinned fingerprint: Backup writers pin the recovery fingerprint confirmed on their own screens | DEV-BKP-007, SEAL-BKP-006 |
 | §5.5 | recover tool start: Total loss: run taskdeck-recover from the offline USB, checked against the sheet's fingerprint | stage: recovery |
 | §5.5 | recover inputs: The tool takes host and board id from the sheet | SEAL-BKP-004, DEV-BKP-011 |
