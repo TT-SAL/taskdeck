@@ -44,9 +44,12 @@ These override SYNC_PLAN.md where they differ; everything else of plan §3 holds
 8. **Then stop and report:** what works, every place the parts did not fit, what it cost, and what
    the lead would do next. The rest of the stage does not start.
 
-**The owner, 2026-11-28:** agents are generally never on the `max` effort level, only the most
-important security or otherwise critical ones. The lead sets `effort` on every agent: `high` for
-the builders, `medium` for the harness and spec drafting; none of this milestone's agents is `max`.
+**The owner, 2026-11-28 (two messages):** agents are generally never on the `max` effort level,
+only the most important security or otherwise critical ones; and agents whose instructions are
+thorough and whose work needs little judgment may run on `sonnet`, at `high` effort (Sonnet is not
+usable on the lowest levels). The lead sets model and effort on every agent: the builders (adapters,
+store, runtime, pairing, facade) and spec drafting on `opus` at `high`; the end-to-end harness, a
+mechanical task with a full brief, on `sonnet` at `high`; none of this milestone's agents on `max`.
 
 The lead may open pull requests from its branch into `day-planner` and merge them itself once CI is
 green. It asks the owner only about what plan §3.5 lists; otherwise it decides, records the decision
@@ -102,7 +105,10 @@ meet each case, then judged by the lead here). None yet.
 
 | Workflow | Agents | Report | Transcripts | Booked | Running total |
 |---|---|---|---|---|---|
-| | | | | | 0 |
+| W1a, first launch (wf_90de5f43-084), stopped at once by the lead to move H to `sonnet` (the owner's message) | 2 | — | 0.17 M | 0.17 M | 0.17 M |
+
+Each agent costs about 83,000 tokens of cache writes before it does anything (its system prompt and
+tool definitions), so the stage uses few, larger agents.
 
 ## Workflows
 
