@@ -91,6 +91,19 @@ findings go to `docs/sync/status/device/fit.md` as they are met.
 - **L4. The standby is reached over plain `http` on `127.0.0.1`** (device.md §11.1 item 1, behind
   `test-trust`), not over TLS with a test certificate; `TrustRoots::Extra` comes with the Worker
   runs.
+- **L6. A change to an exited stage's path goes first, in its own pull request, even when the CI
+  of this stage's work needs it** (plan §3.2, which the owner said holds in full): #41 was closed,
+  the branch restarted from `day-planner` with the CI fix alone (#42), the W1a commits kept on the
+  local ref `backup/w1a` and replayed after it merged. (`engine` put its own read rule into its work
+  pull request, TT-SAL/taskdeck#28; this stage does not follow that.)
+- **L7. SEAL-FRAME-005 is narrowed to what the engine does** (spec change of W1a, f1-12): "at most
+  once per (author, `ctr`)" becomes "the stored bytes for the same entry, epoch and counter; a new
+  sealing under that counter only for another entry, or the same entry under another epoch, after
+  the engine cleared that counter's frame" (`engine.md` ENG-SEALER-005, ENG-RECON-003, §11.4,
+  §24.3). The old text contradicted the engine's re-sealing, which the fake has done through every
+  simulator run; SYNC.md §4.3 rule 2 (a retry gets the same bytes) is unchanged. The lead reads this
+  as a contradiction between two specs put right, not a MUST weakened; **flagged to the owner**,
+  who may reverse it.
 - **L5. Tokens are booked as `seal` books them**: per workflow, the workflow's own report and the
   sum over its agents' transcripts of input, cache writes and output
   (`docs/sync/status/foundation/tools/tokens.py <journal.jsonl>`, its `in+cw+out`); the higher is
@@ -99,14 +112,22 @@ findings go to `docs/sync/status/device/fit.md` as they are met.
 ## Where the parts did not fit
 
 The full list, with evidence, is `docs/sync/status/device/fit.md` (written by the agents as they
-meet each case, then judged by the lead here). W1a found 31 (h-1 to h-3, f1-1 to f1-15, f2-1 to
-f2-13); their judgement and the spec change for them come with workflow W1a-spec. The ones that
-weigh most: f1-5 (a genesis snapshot of a non-empty board is circular as the spec stands: its body
-needs the frame that names its hash; only an empty board can be created today), f1-3 (seal has no
-opener for one own frame outside `classify`), f1-1 and f1-2 (seal's `Membership` and `Receipt` give
-the engine's adapter less than the traits need, so the adapter parses the §13.2 bytes itself), f2-12
-(`KeyLost` cannot show the old device's name), h-1 (the standby's origin must name a port that port 0
-only learns after the start).
+meet each case). The lead's judgement, workflow by workflow:
+
+**W1a (31): 21 spec, 6 crate, 4 none, none for the owner.** The spec change is one pull request
+(`spec/w1a`, after the W1a work).
+
+| Fit | Verdict | What |
+|---|---|---|
+| h-3 | spec | `device.md` §19.2 "Answers": a result's members sit beside `id` and `ok`; every Result cell filled; `wait` takes `since`, `timeout_ms`; new DEV-CTL-003, DEV-CTL-004 |
+| f1-2, f1-6, f1-11 | spec | `engine.md` §5.1/§6.1: a receipt's `author`, `ctr`, `frame_hash` defined where seal's `Receipt` lacks them; `rebind` refuses a foreign origin state (`device/record_format`); `reset` may also fail `core/cap` |
+| f1-7, f1-8, f1-9, f1-14, f1-15 | spec | `device.md` §6.4.7, §8.3, §15.7, §24: the identity export has no board id (from `store.tds`); the genesis anchor stays until a purge deletes `R_1`; a 17th pending rotation is `device/pending_roots`; a root is checked once, when learned; the adapter keeps a snapshot's history |
+| f1-12 | spec | `seal.md` SEAL-FRAME-005 narrowed to the engine's re-sealing (decision L7, flagged to the owner) |
+| f2-1, f2-2, f2-3, f2-5 to f2-10, f2-12, f2-13 | spec | `device.md` §5.4, §6.1, §6.5, §7.1, §7.3 to §7.5, §12.6, §21, §25: the store maps the engine's records itself; `Option` only as a named field; segment closing (DEV-STORE-003); the lock and key-store files outside the `FileLayer` (DEV-FILE-001); `device/write_failed` for any failed write; quarantine stamps; absent files at open; a stale `bootstrap.tdk`; a gap above the checkpoint (new DEV-FILE-012); `KeyLost` shows only what `store.tds` holds; `read_identity_dir` is `recovery`'s |
+| h-2, f1-13, f2-4, f2-11 | none | the harness's own choice; already what the spec says; implementation details |
+| h-1 | crate | `relay`: `startStandby` takes the bound port into the origin (now: the harness reserves a port and retries) |
+| f1-1, f1-3, f1-4, f1-10 | crate | `seal`'s API gives the adapter too little: `Membership` not `Clone` and no field accessors (the adapter parses §13.2 itself); no opener for one own frame (a probe `classify`); no `genesis_membership` (the adapter lays out `M_1` by §13.3); no inflated length from `seal_snapshot`. Each workaround is honest and tested |
+| **f1-5** | **crate, open** | **A genesis snapshot of a non-empty board is circular as `seal.md` stands** (its body at S = 1 needs `C_1` and the history record of seq 1, which contain the frame that names the body's hash). Proposed rule: a genesis snapshot carries a zero chain and an empty history, which the reader fills from `frame_1` (`seal.md` §20.4, §20.5, SEAL-BLOB-006, `blob.rs`, a vector). Only an empty board can be created until it is done; **"Create board from this folder" (`desktop`'s migration) needs it**, so it is due before that task |
 
 ## Token ledger
 
@@ -114,6 +135,7 @@ only learns after the start).
 |---|---|---|---|---|---|
 | W1a, first launch (wf_90de5f43-084), stopped at once by the lead to move H to `sonnet` (the owner's message) | 2 | — | 0.17 M | 0.17 M | 0.17 M |
 | W1a (wf_94e3dd4d-937): H 0.18 M (sonnet), F1 0.46 M, F2 0.44 M | 3 | 0.89 M | 1.09 M | 1.09 M | 1.26 M |
+| W1a-spec (wf_8d2bf413-830): S1 | 1 | 0.22 M | 0.27 M | 0.27 M | 1.53 M |
 
 Each agent costs about 83,000 tokens of cache writes before it does anything (its system prompt and
 tool definitions), so the stage uses few, larger agents.
@@ -123,6 +145,7 @@ tool definitions), so the stage uses few, larger agents.
 | Run | Workflow | State | Result |
 |---|---|---|---|
 | wf_90de5f43-084 | W1a, first launch | stopped by the lead at once | nothing kept (H moved to `sonnet`) |
+| wf_8d2bf413-830 | W1a-spec: S1, brief `w1a-spec.md` | done (8 min, 61 tool uses) | the 31 findings judged (21 spec, 6 crate, 4 none, none for the owner); one commit on the local branch `spec/w1a` (`device.md`, `engine.md`, `seal.md`, `CHANGES.md`); `spec-lint` ok. Reviewed by the lead in full |
 | wf_94e3dd4d-937 | W1a: H ∥ (F1 → F2), briefs `h-harness.md`, `f1-adapters.md`, `f2-store.md` | done, integrated (43 min, 201 tool uses) | H: the harness (`tests/e2e/harness/`: `Standby`, `Ctl` with typed helpers, Node 22 lookup), the standby smoke test and seven tests of the harness against a Node stand-in device, `tests/e2e/ci.sh`. F1: `CoreMachine`, `SealSealer`, `SealMembership` (`src/adapt/`), the engine in process on them from genesis through an edit, a restart and a second edit, 33 tests. F2: the sealed store (`src/store/`: file layer, data folder and lock, the §6.4 encodings, record JSON, `IdentityStore` with `persist`, `read_log`, `read_base`, `open` with torn and bad tails), `FileKeyStore` and `MemoryKeyStore`, 17 tests and F1's flow from disk. 31 findings (`fit.md` h-1 to h-3, f1-1 to f1-15, f2-1 to f2-13) |
 
 **The lead's gate run of W1a** (2026-11-28): `scripts/ci/stage.sh device` (51 unit tests; the e2e
@@ -138,7 +161,8 @@ job is its compile check (no Windows target in the container).
 
 | Pull request | What | On day-planner |
 |---|---|---|
-| TT-SAL/taskdeck#41 | W1a: adapters, store, harness | (waiting for CI) |
+| TT-SAL/taskdeck#41 | W1a: adapters, store, harness | closed: its `changes` job failed (`reads.sh`: a change under `tests/e2e/` did not mark the areas a change to the crate marks); its work follows in a new pull request after #42 |
+| TT-SAL/taskdeck#42 | ci: `tests/e2e/*` marks every area a change to the device crate marks (foundation's paths, a pull request of its own; noted in `foundation.md`) | |
 
 ## Gate
 
