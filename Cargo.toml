@@ -50,14 +50,12 @@ flate2 = "1.1.9"
 image = { version = "0.25.10", default-features = false }
 tempfile = "3.27.0"
 base64 = "0.22.1"
-url = "2.5.8"
+url = "2.5.9"
 subtle = "2.6.1"
 windows = { version = "0.62.2", default-features = false }
-# SYNC.md §5.1 names zeroize 1.9.2, published 2026-11-17: inside the seven-day
-# cooldown until 2026-11-24. Cargo.lock keeps the 1.9.0 it already holds; the
-# lead moves it to 1.9.2 (and this line to "=1.9.2") once the cooldown has
-# passed.
-zeroize = "1.9"
+# SYNC.md §5.1 names zeroize 1.9.2. Cargo.lock held 1.9.0 until that release's
+# seven-day cooldown had passed; it moved on 2026-11-28.
+zeroize = "=1.9.2"
 
 # SYNC.md §2.3: the core and the runtime.
 chrono = { version = "=0.4.45", default-features = false }

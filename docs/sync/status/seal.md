@@ -25,6 +25,12 @@ resumed.
    of its own, as SYNC_PLAN.md §3.3 asks for a script that is wrong: `scripts/tests/test-ci-changes.sh`
    (a race in that test's own pipe, which failed one CI run of the exit pull request). It is noted
    in `docs/sync/status/foundation.md` too.
+6. On 2026-11-28 the lead of stage `foundation` changed one file in this stage's paths, in a pull
+   request of its own (titled "deps: zeroize 1.9.2 and url 2.5.9"):
+   `crates/taskdeck-seal/fuzz/Cargo.lock` now holds `zeroize` 1.9.2, as the root lockfile does. The
+   root manifest pins `zeroize = "=1.9.2"` (SYNC.md §5.1) since then, and the fuzz crate's
+   `--locked` build and the lockfile test of L16 both follow it. It is noted in
+   `docs/sync/status/foundation.md` too.
 
 ## How this stage was run
 
@@ -433,7 +439,8 @@ vectors decoded and read; the dependency tree and both lockfiles.
 - Low, not this stage's file: the root manifest gives `serde`, `serde_json`, `flate2`, `subtle`,
   `zeroize` and `proptest` as caret requirements (the lockfile holds them; the manifest's own
   comment plans `zeroize = "=1.9.2"` once its cooldown ends on 2026-11-24). For whoever next
-  changes the root manifest, in a pull request of its own.
+  changes the root manifest, in a pull request of its own. (2026-11-28: `zeroize` is `=1.9.2` now;
+  the other five are as listed.)
 
 ## Decisions (with reasons)
 
