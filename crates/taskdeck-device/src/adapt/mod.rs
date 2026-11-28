@@ -15,3 +15,15 @@ pub use seal_sealer::{GenesisInput, SealSealer};
 
 #[cfg(test)]
 mod flow_tests;
+
+pub(crate) use seal_sealer::snap_to_seal;
+
+/// `M_0` (seal.md §13.3): the membership layout with every field zero.
+pub(crate) fn membership_zero() -> Option<Vec<u8>> {
+    membership::Fields::default().encode()
+}
+
+/// The home generation a membership records (seal.md §13.1).
+pub(crate) fn home_gen_of(bytes: &[u8]) -> Option<u32> {
+    membership::Fields::parse(bytes).map(|f| f.home_gen)
+}

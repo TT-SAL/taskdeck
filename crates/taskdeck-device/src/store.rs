@@ -49,7 +49,7 @@ pub use folder::{
     read_active, read_pending, read_store_descriptor, sync_dir, take_lock, write_pending,
 };
 pub use identity_dir::{IdentityStore, NewIdentity, Opened, base_name, segment_name};
-pub use settings::DeviceSettings;
+pub use settings::{DeviceSettings, RelayToken};
 
 /// Encodes a value as record JSON (device.md §6.5): the canonical encoding
 /// (`core.md` §4.2) of its `serde` value. The engine's records have no

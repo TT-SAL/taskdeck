@@ -143,6 +143,11 @@ pub struct NewIdentity<'a> {
     pub bootstrap: &'a Bootstrap,
     /// The sealed genesis snapshot of an imported board (device.md §6.1, §18.1 step 4).
     pub genesis_blob: Option<&'a [u8]>,
+    /// A joining device's history records from its bootstrap snapshot,
+    /// ascending by seq (`HistoryRecord::to_bytes`), written to
+    /// `history.tdk` before `bootstrap.tdk` (device.md §18.3, DEV-PAIR-006);
+    /// empty for a creating device.
+    pub history: &'a [(u64, Vec<u8>)],
 }
 
 /// An open identity directory (device.md §6.1, §7).
@@ -305,7 +310,7 @@ impl IdentityStore {
 
     fn put_settings(&self) -> Result<(), DeviceError> {
         let b = self.settings.to_bytes()?;
-        self.replace_sealed(DEVICE, 12, &[&b])?;
+        self.replace_sealed(DEVICE, 12, &[&b[..]])?;
         Ok(())
     }
 
@@ -574,7 +579,7 @@ impl IdentityStore {
             files.sync_dir(parent).map_err(io)?;
         }
         replace_raw(&*files, dir, STORE_TDS, &new.descriptor.encode())?;
-        let store = IdentityStore {
+        let mut store = IdentityStore {
             files,
             dir: dir.to_path_buf(),
             board: BoardId(new.descriptor.board_id),
@@ -592,6 +597,14 @@ impl IdentityStore {
         store.put_settings()?;
         if let Some(g) = new.genesis_blob {
             store.replace_raw(GENESIS, g)?;
+        }
+        if !new.history.is_empty() {
+            if new.history.windows(2).any(|w| w[0].0 >= w[1].0) {
+                return Err(codec::fmt());
+            }
+            let recs: Vec<Vec<u8>> = new.history.iter().map(|(_, b)| b.clone()).collect();
+            store.append_sealed(HISTORY, 11, &recs)?;
+            store.history_last = new.history.last().map_or(0, |(s, _)| *s);
         }
         let b = codec::encode_bootstrap(new.bootstrap)?;
         store.replace_sealed(BOOTSTRAP, 17, &[&b])?;

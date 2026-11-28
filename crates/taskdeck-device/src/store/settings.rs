@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Number, Value};
 use taskdeck_core::ids::IdMinter;
+use zeroize::{Zeroize, Zeroizing};
 
 use super::codec::{RECORD_FORMAT, err, fmt};
 use super::rjson::RECORD_RANGE;
@@ -30,11 +31,31 @@ const OTHER_FIELDS: &[&str] = &[
     "quarantined",
     "reminders",
     "requests",
-    "tokens",
     "weather_source",
 ];
 
 const MAX_INT: u64 = (1 << 53) - 1;
+
+/// A relay token and capability stored for one host (device.md §10.3, §16
+/// `tokens`). The token is opaque (SEAL-KEY-015), held zeroizing, and never
+/// printed: `Debug` shows its host, generation and `push` only (DEV-NET-005).
+#[derive(Clone, PartialEq, Eq)]
+pub struct RelayToken {
+    pub host: String,
+    pub generation: u32,
+    /// Absent until the device has learned the relay's capability.
+    pub push: Option<bool>,
+    pub token: Zeroizing<String>,
+}
+
+impl std::fmt::Debug for RelayToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RelayToken").field("host", &self.host).field("gen", &self.generation).field("push", &self.push).finish_non_exhaustive()
+    }
+}
+
+/// At most 4 tokens (device.md §16).
+const TOKENS_MAX: usize = 4;
 
 /// The record of `device.tdk` (device.md §16).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +67,8 @@ pub struct DeviceSettings {
     pub minter: Option<IdMinter>,
     /// Default `false`.
     pub history_complete: bool,
+    /// Default `[]`; ascending by host, distinct.
+    pub tokens: Vec<RelayToken>,
     /// Every other field of the table, by name, as written.
     pub other: BTreeMap<String, Value>,
 }
@@ -59,6 +82,7 @@ impl DeviceSettings {
             floor_chain: None,
             minter: None,
             history_complete: false,
+            tokens: Vec::new(),
             other: BTreeMap::new(),
         }
     }
@@ -94,12 +118,52 @@ impl DeviceSettings {
             o.insert("item".into(), Value::Number(Number::from(mi.next_item)));
             m.insert("minter".into(), Value::Object(o));
         }
+        if !self.tokens.is_empty() {
+            if self.tokens.len() > TOKENS_MAX || self.tokens.windows(2).any(|w| w[0].host >= w[1].host) {
+                return Err(err(RECORD_RANGE));
+            }
+            let mut a = Vec::with_capacity(self.tokens.len());
+            for t in &self.tokens {
+                if !token_ok(&t.host, &t.token) {
+                    return Err(err(RECORD_RANGE));
+                }
+                let mut o = Map::new();
+                o.insert("gen".into(), Value::Number(Number::from(t.generation)));
+                o.insert("host".into(), Value::String(t.host.clone()));
+                if let Some(p) = t.push {
+                    o.insert("push".into(), Value::Bool(p));
+                }
+                o.insert("token".into(), Value::String(t.token.to_string()));
+                a.push(Value::Object(o));
+            }
+            m.insert("tokens".into(), Value::Array(a));
+        }
         Ok(Value::Object(m))
     }
 
-    /// The canonical bytes (device.md §16).
-    pub fn to_bytes(&self) -> Result<Vec<u8>, DeviceError> {
-        let b = taskdeck_core::canon::encode(&self.to_value()?).map_err(|_| err(RECORD_RANGE))?;
+    /// The token stored for `host`, if any.
+    pub fn token(&self, host: &str) -> Option<&RelayToken> {
+        self.tokens.iter().find(|t| t.host == host)
+    }
+
+    /// Stores `t`, replacing the token of its host (ascending by host). A
+    /// fifth host replaces the first host other than `t`'s (device.md §16:
+    /// at most 4).
+    pub fn put_token(&mut self, t: RelayToken) {
+        self.tokens.retain(|x| x.host != t.host);
+        if self.tokens.len() >= TOKENS_MAX {
+            self.tokens.remove(0);
+        }
+        let at = self.tokens.partition_point(|x| x.host < t.host);
+        self.tokens.insert(at, t);
+    }
+
+    /// The canonical bytes (device.md §16), zeroizing: they may hold tokens.
+    pub fn to_bytes(&self) -> Result<Zeroizing<Vec<u8>>, DeviceError> {
+        let mut v = self.to_value()?;
+        let b = taskdeck_core::canon::encode(&v).map_err(|_| err(RECORD_RANGE));
+        wipe_tokens(&mut v);
+        let b = Zeroizing::new(b?);
         if b.len() > SETTINGS_MAX { Err(err(RECORD_RANGE)) } else { Ok(b) }
     }
 
@@ -107,7 +171,13 @@ impl DeviceSettings {
     /// at its default), the fields the store reads checked against the table,
     /// no field the table lacks; else `device/record_format`.
     pub fn from_bytes(b: &[u8]) -> Result<DeviceSettings, DeviceError> {
-        let v = taskdeck_core::canon::parse(b, SETTINGS_MAX).map_err(|_| err(RECORD_FORMAT))?;
+        let mut v = taskdeck_core::canon::parse(b, SETTINGS_MAX).map_err(|_| err(RECORD_FORMAT))?;
+        let r = Self::from_value(&v);
+        wipe_tokens(&mut v);
+        r
+    }
+
+    fn from_value(v: &Value) -> Result<DeviceSettings, DeviceError> {
         let m = v.as_object().ok_or_else(fmt)?;
         let mut s = DeviceSettings::new("");
         let mut name = None;
@@ -150,6 +220,26 @@ impl DeviceSettings {
                         next_block: get("block")?,
                     });
                 }
+                "tokens" => {
+                    let a = v.as_array().filter(|a| !a.is_empty() && a.len() <= TOKENS_MAX).ok_or_else(fmt)?;
+                    for t in a {
+                        let o = t.as_object().ok_or_else(fmt)?;
+                        let push = match o.get("push") {
+                            None => None,
+                            Some(p) => Some(p.as_bool().ok_or_else(fmt)?),
+                        };
+                        if o.len() != 3 + usize::from(push.is_some()) {
+                            return Err(fmt());
+                        }
+                        let generation = o.get("gen").and_then(Value::as_u64).and_then(|g| u32::try_from(g).ok()).ok_or_else(fmt)?;
+                        let host = o.get("host").and_then(Value::as_str).ok_or_else(fmt)?.to_string();
+                        let token = Zeroizing::new(o.get("token").and_then(Value::as_str).ok_or_else(fmt)?.to_string());
+                        if !token_ok(&host, &token) || s.tokens.last().is_some_and(|l| l.host >= host) {
+                            return Err(fmt());
+                        }
+                        s.tokens.push(RelayToken { host, generation, push, token });
+                    }
+                }
                 k if OTHER_FIELDS.contains(&k) => {
                     s.other.insert(k.to_string(), v.clone());
                 }
@@ -158,6 +248,22 @@ impl DeviceSettings {
         }
         s.device_name = name.ok_or_else(fmt)?;
         Ok(s)
+    }
+}
+
+/// A host of `seal.md` §5.4 and an ASCII token of 1 to 512 bytes (§16).
+fn token_ok(host: &str, token: &str) -> bool {
+    taskdeck_seal::relay_origin(host).is_ok() && (1..=512).contains(&token.len()) && token.bytes().all(|b| b.is_ascii_graphic())
+}
+
+/// Overwrites the token strings of a settings value before it is dropped.
+fn wipe_tokens(v: &mut Value) {
+    if let Some(Value::Array(a)) = v.get_mut("tokens") {
+        for t in a {
+            if let Some(Value::String(s)) = t.get_mut("token") {
+                s.zeroize();
+            }
+        }
     }
 }
 

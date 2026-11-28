@@ -249,3 +249,59 @@ Every case met while the real core, seal and relay are wired into the engine, or
 - Done here: the typed helpers return the whole answer line and read `canonical`, `state_hash`, `sheet`, `address`, `recovery_fp`, `code`, `wall_ms`, `any` at the top level; `wait` sends `since` and `timeout_ms`. F3 writes the device; if it differs, the helpers of `tests/e2e/harness/ctl.rs` change, not the tests.
 - Proposed fix: spec change in §19.2: "a result's fields are written in the answer beside `id` and `ok`; a record is written as its JSON object, `Submitted` and tickets as the fields of their records; `wait`'s answer is the fields of `Changes`; an unknown `cmd` is answered `{"id": <id>, "ok": false, "error": "device/ctl_request"}`".
 - Evidence: `smoke::ctl_drives_a_device_by_the_protocol` (against the stand-in; no device exists yet).
+
+## f3-1. The manual clock starts ten months before the standby's clock, and the clock guard blocks composing
+- Kind: misfit
+- Where: device.md §19.1 (`--clock manual`, "starting at 2026-01-05T12:00:00Z"), engine.md §27.2 (ENG-CLOCK-002), relay/standby.js (`now = Date.now`)
+- Says / does: the standby stamps `relay_now` with the real clock, the device's manual clock starts at 2026-01-05; the skew is months, so the engine refuses every `Enqueue` with `engine/clock_unconfirmed` and composes no beat. `confirm_clock` does not help: the confirmation lasts only while the skew stays within five minutes of the confirmed one, and every `clock advance_ms` moves it.
+- Done here: the end-to-end tests set each device's manual clock to the real time right after it starts (`clock set_ms`), and `set_ms` moves `wall_ms` alone, not `mono_ms`, so that the jump is not months of monotonic time (`ctl::ManualClock`). A test's steps (30 s per poll) keep the skew under an hour.
+- Proposed fix: device.md §19.1: "`--clock manual` starts at the host's clock when `run` starts (or at `--clock manual:<ms>`); `clock set_ms` sets the wall clock and leaves the monotonic clock; `advance_ms` moves both." Or the harness gives the standby a clock the test drives (`startStandby({ now })` exists).
+- Evidence: `tests/e2e/first_sync.rs` before the change: `{"error":"engine/clock_unconfirmed","id":16,"ok":false}` answering the first `submit`
+
+## f3-2. Decision: with `test-trust`, a loopback host is reached over `http`, chosen by the host
+- Kind: decision
+- Where: device.md §11.1 item 1, DEV-NET-001, DEV-TRUST-004; `RelayTarget { host, door, home_gen }` (engine.md §37) carries no scheme; `net::http::origin_for`, `create::relay_host`
+- Says / does: §11.1 allows `http` relay targets on `127.0.0.1`, `[::1]` or `localhost`; a stored relay target has only a host, so nothing records which scheme a board was created with.
+- Done here: with the feature, a host whose name is `127.0.0.1` or `localhost` is reached over `http`, every other over `https`; without it, every host over `https`. `begin_create` takes `https://host`, a bare host, or (with the feature, loopback only) `http://host`; any other `scheme://` is `device/insecure_url`. `[::1]` cannot be a host of `seal.md` §5.4 (no brackets), so it is not offered. The login origin stays `relay_origin(host)` = `https://<host>`, which is what the standby signs (h-1).
+- Proposed fix: device.md §11.1 item 1: "the scheme is not stored: with the feature, a relay target whose host is `127.0.0.1` or `localhost` (with any port) is reached over `http`; `[::1]` is not a host of `seal.md` §5.4."
+- Evidence: `net::http::tests::origins`; `first_sync::one_device_round_trip`
+
+## f3-3. `board` in devicectl: the state hash exists only for the confirmed state
+- Kind: spec-unclear
+- Where: device.md §19.2 row `board` ("`view().board()`", "the board bytes and the state hash with the current membership")
+- Says / does: `view().board()` is the pending view (§4.4), which has no membership seq to hash with; engine.md §18 defines the state hash of a confirmed state and `M_B`.
+- Done here: `board` answers the confirmed board's canonical bytes and `state_hash(1, board_hash, M_B)`, from the published view (`Published::confirmed_state`, a new read beside `board()`); in local-only mode it is `device/needs_sync`.
+- Proposed fix: §19.2: "`board` | `view().confirmed_state()` | the confirmed board's bytes and the state hash of it and `M_B`"; add `Published::confirmed_state(&self) -> Option<(&[u8], [u8; 32])>` to §25.
+- Evidence: `first_sync::one_device_round_trip` (equal before and after the restart)
+
+## f3-4. Decision: the https thread starts at the first HTTPS request in any mode
+- Kind: decision
+- Where: device.md §4.2 (`taskdeck-https`: "synced mode, at the first HTTPS request"), §18.1 steps 3 and 8, §18.3 (the joining device's requests), DEV-THREAD-002
+- Says / does: a create and a join send requests before the device is in synced mode, and the sync thread may not do network I/O.
+- Done here: one `taskdeck-https` thread per facade, started at the first request of any mode (`runtime::Net::submit`), joined by `shutdown`. Engine effects, the create flow's `door` and `create` (waited for on the caller's thread) and both pairing machines' requests (answered to the sync thread's queue) all go through it, one at a time in queue order.
+- Proposed fix: §4.2 table, `https` row, Started: "at the first HTTPS request, in any mode".
+- Evidence: `first_sync::one_device_round_trip`
+
+## f3-5. Decision: a token the transport learns is made durable by the sync thread while the transport waits
+- Kind: decision
+- Where: device.md §10.3 (DEV-LOGIN-001: durable before use), §4.2 (`https` never does file I/O; the sync thread never waits for another thread)
+- Says / does: the login runs on the https thread, which may not write `device.tdk`; the token must be durable before the next request uses it.
+- Done here: the transport hands the token to the sync thread (`net::Back::StoreToken`) and blocks until the sync thread has replaced `device.tdk` and acknowledged; the same for the `push` learned from `caps`. The tokens are typed in `DeviceSettings.tokens` (`store::RelayToken`, the token `Zeroizing`, `Debug` without it; the record's JSON value is wiped after encoding and decoding), closing f2-4 for `tokens`.
+- Proposed fix: §10.3: "the transport hands a token to the sync thread and sends nothing with it before the sync thread has made it durable."
+- Evidence: `store::tests::settings_tokens_round_trip`; `first_sync::one_device_round_trip` (the create token, then `caps` storing `push: false`)
+
+## f3-6. Shortcuts of this milestone in the transport and the runtime
+- Kind: decision
+- Where: device.md §10.5 to §10.8, §11.1, §19.2; `net`, `runtime`, `ctl`
+- Says / does: the stage's plan defers the socket, backoff and budgets (status file, decision 3).
+- Done here (each a shortcut to undo later): no socket thread: `Connect` always ends in `Connected { push: false }` and every relay is polled over HTTPS, a push relay too; a `Connect` after a failed one waits a fixed 1,000 ms instead of the backoff of §10.7; no request budget (§10.8; `requests_today` is 0); `MissedRoots` is never sent (a login's `wraps` is parsed by presence and dropped: no reinstatement yet); a blob upload sends every part and does not resume from `blob-meta` (DEV-NET-010); admin operations other than `register` and `revoke` are answered `device/not_built`; devicectl answers every command of §19.2 other than the seventeen F3 built with `device/ctl_request`, writes one `changed` event per change it sees (a thread waiting on the counters, so close publishes coalesce), maps only part of the engine's `Status` in `status`, and refuses `--trust-pem`, `--crash-at` and `--zone table:`; `DeviceStatus.backup`, `.picture`, `.weather_age_ms` are empty; `release_fp` is empty (no release key yet); the local-only board is not loaded (`view().board()` is empty there).
+- Proposed fix: none (the plan's later tasks).
+- Evidence: the code comments at each place (`net/mod.rs` module doc, `ctl.rs` module doc)
+
+## f3-7. Codes the spec does not name
+- Kind: spec-silent
+- Where: device.md §21; §18.1 step 1 (a create secret not of 64 lowercase hex), §17.10 `join_sas`, §18.3 (a pairing request with no answer)
+- Says / does: these failures have no code.
+- Done here: `device/create_secret` (a malformed create secret, before any request), `device/sas_format` (digits that are not six ASCII digits after removing spaces and hyphens; costs no attempt), `device/relay_unreachable` (a pairing or create request with no answer, as `Aborted { code }`), `device/relay_refused` (a relay refusal of a pairing request whose code is not one of the pairing routes'; `PairState::Aborted` holds a `&'static str`), `device/not_built` (above).
+- Proposed fix: §21: add `device/create_secret`, `device/sas_format`, `device/relay_unreachable`; give `PairState::Aborted` a `String` code so a relay code passes through as it is.
+- Evidence: `pairing::code_of`, `create::begin`
