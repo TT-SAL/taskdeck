@@ -15,6 +15,7 @@
 //! `taskdeck_core::apply` to check the engine's confirmed state.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
 
 use taskdeck_core::apply as capply;
 use taskdeck_core::board::BoardData;
@@ -33,6 +34,8 @@ use taskdeck_sync::{
 };
 
 use super::{CoreMachine, GenesisInput, SealSealer};
+use crate::store::{self as dstore, DeviceSettings, FolderState, IdentityStore, NewIdentity, StoreDescriptor};
+use crate::{FileLayer, KeyStore, OsFiles};
 
 type E = Engine<CoreMachine, SealSealer>;
 
@@ -114,6 +117,98 @@ impl Store {
     }
 }
 
+// ---------------------------------------------------------------- the data folder
+
+/// The device's store on disk (task F2): a data folder in a temporary
+/// directory, its lock held, `L_d` in the test key store, the identity
+/// directory written as device.md §18.1 step 7 and activated as step 10.
+/// Every write goes to it as well as to the in-memory store, local reads
+/// are answered from it, and a restart reads it back.
+struct Disk {
+    _tmp: tempfile::TempDir,
+    data: std::path::PathBuf,
+    files: Arc<dyn FileLayer>,
+    keys: Box<dyn KeyStore>,
+    lock: dstore::Lock,
+    store: Option<IdentityStore>,
+}
+
+/// The key store of the flow: `FileKeyStore` in the temporary directory
+/// with `test-trust` (device.md §12.6); without it, a map.
+#[cfg(feature = "test-trust")]
+fn key_store(dir: &std::path::Path) -> Box<dyn KeyStore> {
+    Box::new(crate::FileKeyStore::new(dir.join("keys")))
+}
+
+#[cfg(not(feature = "test-trust"))]
+fn key_store(_: &std::path::Path) -> Box<dyn KeyStore> {
+    type Keys = BTreeMap<([u8; 16], [u8; 16]), zeroize::Zeroizing<[u8; 32]>>;
+    #[derive(Default)]
+    struct Map(std::sync::Mutex<Keys>);
+    impl KeyStore for Map {
+        fn kind(&self) -> u8 {
+            5
+        }
+        fn create(
+            &self,
+            b: &[u8; 16],
+            d: &[u8; 16],
+            k: &zeroize::Zeroizing<[u8; 32]>,
+        ) -> Result<(), crate::KeyStoreError> {
+            self.0.lock().map_err(|_| crate::KeyStoreError::Failed)?.insert((*b, *d), k.clone());
+            Ok(())
+        }
+        fn load(&self, b: &[u8; 16], d: &[u8; 16]) -> Result<zeroize::Zeroizing<[u8; 32]>, crate::KeyStoreError> {
+            let m = self.0.lock().map_err(|_| crate::KeyStoreError::Failed)?;
+            m.get(&(*b, *d)).cloned().ok_or(crate::KeyStoreError::NotFound)
+        }
+        fn delete(&self, b: &[u8; 16], d: &[u8; 16]) -> Result<(), crate::KeyStoreError> {
+            self.0.lock().map_err(|_| crate::KeyStoreError::Failed)?.remove(&(*b, *d));
+            Ok(())
+        }
+    }
+    Box::new(Map::default())
+}
+
+impl Disk {
+    /// A new identity: `L_d` drawn, the key store first, then the
+    /// directory with `store.tds`, `identity.tdk`, `device.tdk` and
+    /// `bootstrap.tdk`, then `pending.tds`; then activated.
+    fn create(board: [u8; 16], dev: [u8; 16], identity: &[u8], bootstrap: &Bootstrap, at_ms: i64) -> Disk {
+        let tmp = tempfile::tempdir().expect("a temporary directory");
+        let data = tmp.path().join("taskdeck_data");
+        let files: Arc<dyn FileLayer> = Arc::new(OsFiles);
+        let lock = dstore::take_lock(&data);
+        assert!(lock.is_held());
+        let keys = key_store(tmp.path());
+        let mut l_d = zeroize::Zeroizing::new([0u8; 32]);
+        OsEntropy.fill(&mut l_d[..]).expect("entropy");
+        let mut settings = DeviceSettings::new("Desk");
+        settings.history_complete = true;
+        settings.minter = Some(IdMinter::new(1));
+        let new = NewIdentity {
+            descriptor: StoreDescriptor { board_id: board, dev, key_store: keys.kind(), created_ms: at_ms },
+            identity,
+            settings,
+            bootstrap,
+            genesis_blob: None,
+        };
+        let store = dstore::create_identity(files.clone(), &data, &*keys, &l_d, new).expect("created");
+        dstore::activate(&*files, &data, &board, &dev).expect("activated");
+        Disk { _tmp: tmp, data, files, keys, lock, store: Some(store) }
+    }
+
+    /// Closes the store and reads the data folder back (device.md §5.4, §7.4).
+    fn reopen(&mut self, now: i64) -> dstore::Opened {
+        self.store = None;
+        match dstore::open_folder(self.files.clone(), &self.data, &self.lock, false, &*self.keys, "build-1", now) {
+            Ok(FolderState::Synced(o)) => *o,
+            Ok(_) => panic!("not synced"),
+            Err(e) => panic!("does not open: {e:?}"),
+        }
+    }
+}
+
 // ---------------------------------------------------------------- the device
 
 type PendingRead = (u64, Option<(u64, u64)>, u64);
@@ -134,6 +229,8 @@ struct Node {
     identity0: Vec<u8>,
     board_id: [u8; 16],
     draining: bool,
+    /// The store on disk, when the flow runs over it.
+    disk: Option<Disk>,
 }
 
 impl Node {
@@ -163,10 +260,14 @@ impl Node {
                 for op in &ops {
                     self.store.apply(op);
                 }
+                if let Some(d) = self.disk.as_mut() {
+                    let store = d.store.as_mut().expect("open");
+                    store.persist(&ops, &self.e.sealer().history()).expect("durable");
+                }
                 self.feed(Event::Persisted { id });
             }
             if let Some((req, range, seq)) = self.reads.pop_front() {
-                let result = match range {
+                let mut result = match range {
                     Some((from, to)) => {
                         let v: Vec<LogRecord> = (from..=to).filter_map(|s| self.store.log.get(&s).cloned()).collect();
                         if v.len() as u64 == to - from + 1 {
@@ -180,6 +281,17 @@ impl Node {
                         None => LocalReadResult::Missing { code: "device/missing" },
                     },
                 };
+                // From the files when the flow runs on disk: the same records.
+                if let Some(store) = self.disk.as_mut().and_then(|d| d.store.as_mut()) {
+                    let from_disk = match range {
+                        Some((from, to)) => store.read_log(from, to),
+                        None => store.read_base(seq, self.wall).0,
+                    };
+                    if !matches!(result, LocalReadResult::Missing { .. }) {
+                        assert_eq!(from_disk, result, "the files hold what the writes confirmed");
+                    }
+                    result = from_disk;
+                }
                 self.feed(Event::LocalRead { req, result });
             }
         }
@@ -188,7 +300,16 @@ impl Node {
 
     fn start(&mut self) {
         self.session = self.session.wrapping_add(1);
-        let loaded = self.store.loaded([self.session; 16], self.bootstrap.clone());
+        let mut loaded = self.store.loaded([self.session; 16], self.bootstrap.clone());
+        if let Some(d) = self.disk.as_mut() {
+            // The first `Start` of a creating device reads the identity
+            // directory it just wrote (device.md §18.1 step 10).
+            let o = d.reopen(self.wall);
+            assert!(o.warnings.is_empty(), "{:?}", o.warnings);
+            assert_eq!(o.loaded, Loaded { session: o.loaded.session, ..loaded.clone() }, "Loaded from the files");
+            loaded = o.loaded;
+            d.store = Some(o.store);
+        }
         self.feed(Event::Start(loaded));
     }
 
@@ -198,7 +319,20 @@ impl Node {
     fn restart(&mut self) {
         let history: Vec<Vec<u8>> = self.e.sealer().history().into_iter().map(|(_, b)| b).collect();
         let identity = self.store.identity.clone().unwrap_or_else(|| self.identity0.clone());
-        let sealer = SealSealer::open(self.board_id, &identity, &history).expect("the identity opens");
+        let sealer = match self.disk.as_mut() {
+            None => SealSealer::open(self.board_id, &identity, &history).expect("the identity opens"),
+            Some(d) => {
+                // The new process reads the data folder: the identity and the
+                // history from their files (device.md §6.4.7, §6.4.8).
+                let o = d.reopen(self.wall);
+                assert_eq!(&o.identity[..], &identity[..], "identity.tdk");
+                assert_eq!(o.history, history, "history.tdk");
+                assert!(!o.history.is_empty(), "genesis is a control entry");
+                let sealer = o.sealer().expect("the identity opens");
+                d.store = Some(o.store);
+                sealer
+            }
+        };
         self.e = Engine::new(CoreMachine::new(), sealer, Config {});
         self.pq.clear();
         self.fx.clear();
@@ -514,6 +648,20 @@ fn read_back(relay: &Relay, anchor: &GenesisAnchor, root1: &EpochRoot) -> (Board
 /// edit after it.
 #[test]
 fn genesis_edit_restart_edit() {
+    flow(false);
+}
+
+/// The same flow over the store of device.md §6 and §7 (task F2): every
+/// write executed on the data folder's files, local reads answered from
+/// them, `Loaded` at each `Start` read back from them and equal to the
+/// writes, and the restart's sealer built from `identity.tdk` and
+/// `history.tdk`.
+#[test]
+fn genesis_edit_restart_edit_on_disk() {
+    flow(true);
+}
+
+fn flow(on_disk: bool) {
     // The keys a creating device draws (device.md §18.1 step 3).
     let seed = RecoverySeed::generate(&mut OsEntropy).expect("a seed");
     let recovery = seed.keys();
@@ -547,6 +695,8 @@ fn genesis_edit_restart_edit() {
     let identity0 = sealer.export_identity().to_vec();
 
     let mut relay = Relay::create(board_id.0, &frame_1, dev_r.0, me.dev.0);
+    let bootstrap = Bootstrap::Genesis { board: sm.canonical_bytes(&genesis_board), frame_1: frame_1.clone(), relay: target() };
+    let disk = on_disk.then(|| Disk::create(board_id.0, me.dev.0, &identity0, &bootstrap, at0));
     let mut n = Node {
         e: Engine::new(CoreMachine::new(), sealer, Config {}),
         store: Store::default(),
@@ -557,14 +707,11 @@ fn genesis_edit_restart_edit() {
         fx: VecDeque::new(),
         notes: Vec::new(),
         session: 0,
-        bootstrap: Some(Bootstrap::Genesis {
-            board: sm.canonical_bytes(&genesis_board),
-            frame_1: frame_1.clone(),
-            relay: target(),
-        }),
+        bootstrap: Some(bootstrap),
         identity0,
         board_id: board_id.0,
         draining: false,
+        disk,
     };
     n.start();
 
