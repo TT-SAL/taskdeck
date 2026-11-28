@@ -114,6 +114,13 @@ findings go to `docs/sync/status/device/fit.md` as they are met.
 The full list, with evidence, is `docs/sync/status/device/fit.md` (written by the agents as they
 meet each case). The lead's judgement, workflow by workflow:
 
+**W1b (13: f3-1 to f3-13):** judged with workflow W1b-spec (running). The two that weigh most:
+f3-1 (`taskdeck-devicectl`'s manual clock starts at 2026-01-05 while the standby runs on the real
+clock, so the engine's clock guard refuses composing until a test moves the clock; the tests set it
+to the real time now) and f3-9 (the six open points of the pairing runtime that `seal` left,
+decided as the code does them). One misfit with seal's API: `ExistingEvent::RegisterFailed` takes a
+`SealError` where the engine reports a code (f3-10).
+
 **W1a (31): 21 spec, 6 crate, 4 none, none for the owner.** The spec change is one pull request
 (`spec/w1a`, after the W1a work).
 
@@ -136,6 +143,7 @@ meet each case). The lead's judgement, workflow by workflow:
 | W1a, first launch (wf_90de5f43-084), stopped at once by the lead to move H to `sonnet` (the owner's message) | 2 | — | 0.17 M | 0.17 M | 0.17 M |
 | W1a (wf_94e3dd4d-937): H 0.18 M (sonnet), F1 0.46 M, F2 0.44 M | 3 | 0.89 M | 1.09 M | 1.09 M | 1.26 M |
 | W1a-spec (wf_8d2bf413-830): S1 | 1 | 0.22 M | 0.27 M | 0.27 M | 1.53 M |
+| W1b (wf_13a69fd0-1d0): F3 alone (no continuation needed) | 1 | 0.52 M | 0.72 M | 0.72 M | 2.25 M |
 
 Each agent costs about 83,000 tokens of cache writes before it does anything (its system prompt and
 tool definitions), so the stage uses few, larger agents.
@@ -145,8 +153,19 @@ tool definitions), so the stage uses few, larger agents.
 | Run | Workflow | State | Result |
 |---|---|---|---|
 | wf_90de5f43-084 | W1a, first launch | stopped by the lead at once | nothing kept (H moved to `sonnet`) |
+| wf_13a69fd0-1d0 | W1b: F3, brief `f3-first-sync.md` | done, integrated (37 min, 138 tool uses; F3b not needed) | part A (2fa2ab2): the sync thread and its loop (`src/runtime.rs`), the transport on `taskdeck-https` (`src/net/`: ureq, no proxy, no redirects, the §10.2 headers, login, `caps`, `hello`, `read`, `append`, `register`, `revoke`, blobs; answers parsed strictly, classified as §10.6 says; tokens typed and durable before use), the facade's open, shutdown, changes, `wait_for_change`, `submit`, `submit_json`, `view`, `status`, creating a board (`src/create.rs`), devicectl's protocol (`src/ctl.rs`); `one_device_round_trip` passes. Part B (348860c): both pairing roles on the sync thread (`src/pairing.rs`), `SealSealer::join_identity` checking each bundle root against its commitment, the join persisted and started with `Bootstrap::Join`; `first_sync` passes. W1a's follow-ups done (DEV-FILE-012, f2-6, DEV-CTL-003/004 cited). 13 findings (f3-1 to f3-13) |
 | wf_8d2bf413-830 | W1a-spec: S1, brief `w1a-spec.md` | done (8 min, 61 tool uses) | the 31 findings judged (21 spec, 6 crate, 4 none, none for the owner); one commit on the local branch `spec/w1a` (`device.md`, `engine.md`, `seal.md`, `CHANGES.md`); `spec-lint` ok. Reviewed by the lead in full |
 | wf_94e3dd4d-937 | W1a: H ∥ (F1 → F2), briefs `h-harness.md`, `f1-adapters.md`, `f2-store.md` | done, integrated (43 min, 201 tool uses) | H: the harness (`tests/e2e/harness/`: `Standby`, `Ctl` with typed helpers, Node 22 lookup), the standby smoke test and seven tests of the harness against a Node stand-in device, `tests/e2e/ci.sh`. F1: `CoreMachine`, `SealSealer`, `SealMembership` (`src/adapt/`), the engine in process on them from genesis through an edit, a restart and a second edit, 33 tests. F2: the sealed store (`src/store/`: file layer, data folder and lock, the §6.4 encodings, record JSON, `IdentityStore` with `persist`, `read_log`, `read_base`, `open` with torn and bad tails), `FileKeyStore` and `MemoryKeyStore`, 17 tests and F1's flow from disk. 31 findings (`fit.md` h-1 to h-3, f1-1 to f1-15, f2-1 to f2-13) |
+
+**The lead's gate run of W1b** (2026-11-28): `scripts/ci/stage.sh device` passes (61 unit tests;
+the e2e suite's 10 tests, `one_device_round_trip` and `first_sync` among them), the `test-trust`
+build (65 tests, clippy), and the e2e suite twice more (with the agent's runs: five runs of the whole
+suite and ten of `first_sync`, none failing). Nothing outside `device`'s paths changed (no engine,
+core, seal, relay, spec or shared file); no `unsafe` beyond `platform::windows`; no ignored test;
+`unimplemented!()` 113 left. The lead read the two tests' assertions: after pairing, B holds A's
+board bytes and state hash; an edit from each reaches the other and the hashes agree; both restart
+and hold the board, both edits in it. The relay's JSON answers go through `serde_json` with a depth
+bound (8) and duplicate keys and floats refused, each body read under a byte limit, redirects off.
 
 **The lead's gate run of W1a** (2026-11-28): `scripts/ci/stage.sh device` (51 unit tests; the e2e
 target's 8; clippy) and the `test-trust` build (53 tests, clippy) pass; `Cargo.lock` and every path
@@ -164,6 +183,7 @@ job is its compile check (no Windows target in the container).
 | TT-SAL/taskdeck#41 | W1a: adapters, store, harness | closed: its `changes` job failed (`reads.sh`: a change under `tests/e2e/` did not mark the areas a change to the crate marks); its work follows in a new pull request after #42 |
 | TT-SAL/taskdeck#43 | W1a: adapters, store, harness (the work of #41, after #42) | 93ce6ef |
 | TT-SAL/taskdeck#44 | spec: W1a's 31 findings (device, engine, seal; SEAL-FRAME-005 flagged, L7) | 6b870c6 |
+| TT-SAL/taskdeck#45 | W1b: the first sync (runtime, transport, create, pairing, devicectl, the two e2e tests) | |
 | TT-SAL/taskdeck#42 | ci: `tests/e2e/*` marks every area a change to the device crate marks (foundation's paths, a pull request of its own; noted in `foundation.md`); CI green on every job, the engine's 50 seeds included | 4c14329 |
 
 ## Gate
