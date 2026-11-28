@@ -18,6 +18,13 @@ name = "taskdeck-devicectl"
 path = "src/bin/taskdeck-devicectl.rs"
 required-features = ["test-trust"]
 
+# The end-to-end suite (device.md §20.1): the harness and the scenarios of
+# `tests/e2e/`, which drive `taskdeck-devicectl` against the standby relay.
+[[test]]
+name = "e2e"
+path = "../../tests/e2e/main.rs"
+required-features = ["test-trust"]
+
 # DEV-GEN-011: exactly these outside the dev-dependencies.
 [dependencies]
 taskdeck-core = { workspace = true }
