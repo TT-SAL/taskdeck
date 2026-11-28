@@ -922,7 +922,7 @@ fn a_skip_whose_target_another_device_skipped_first_is_done() {
     }
 }
 
-// spec: ENG-SKIP-002 ENG-CKPT-003
+// spec: ENG-SKIP-002 ENG-SKIP-003 ENG-CKPT-003
 #[test]
 fn a_base_written_before_a_skip_is_written_again_without_the_target() {
     use sha2::Digest as _;

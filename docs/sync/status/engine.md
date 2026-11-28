@@ -1,12 +1,14 @@
 # Stage `engine`: status
 
-**State: in progress.** Not final. Lead: the session of 2026-11-24 on branch
-`claude/cool-franklin-c6e6um`. The journal (`engine/journal.md`) holds every decision and finding
-in the order it happened; this file is the current truth and is rewritten, not appended to.
+**State: paused before its exit** (the owner's decision of 2026-11-27, below). Not final. Lead:
+the session on branch `claude/cool-franklin-c6e6um`. The journal (`engine/journal.md`) holds every
+decision and finding in the order it happened; this file is the current truth, rewritten, not
+appended to. It has two readers: the device session that works while the stage is paused, and
+the lead when the stage goes on.
 
-## Resuming: read this first
+## The owner's decision of 2026-11-27
 
-**The owner's decision of 2026-11-27 (the order changed).** The stage pauses before its exit.
+The stage pauses before its exit.
 A device session first wires the real core, seal and relay into the engine and runs one board end
 to end (those parts have only met fakes so far); whatever it finds comes back here before the
 exit review, so the review runs once. Before the pause the lead does, in order: E2 with the next
@@ -16,58 +18,141 @@ is the nightly job's, §6.11; a failing seed met anyway is listed here as open);
 request "(stage in progress, not the exit)" merged with CI green on the three systems; this file
 rewritten for the device session and for the lead's later self; then stop (no task E, no exit
 review). While the stage is paused, the device session may change `crates/taskdeck-sync/`
-through small pull requests of its own, noted in both status files.
+through small pull requests of its own, noted in both status files. On 2026-11-28 E2 proved
+larger than proposed (its followers need a simulator task), and the owner chose to leave it
+open: the spec change carries §7.12 and §17.3 with `WriteBase` only (TT-SAL/taskdeck#38).
 
-**Where things stand (2026-11-25, end of the day; the owner asked to wrap up, to be continued in a few days):**
+## For the device session
 
-- Merged into day-planner: TT-SAL/taskdeck#28, #29, #31, #32, #33 (561d084), #34 (d96b360),
-  #35 (eda5051), #36 (fa138b2). TT-SAL/taskdeck#30 was closed for a parking cycle. **No engine
-  pull request is open.** The stage branch `claude/cool-franklin-c6e6um` is day-planner fa138b2
-  plus the engine's later commits: task D9 (4ddd4ad), the fix of `gate` 5024 (ec4dbda) and the
-  fix of `gate` 5942 (the commit after it).
-- Tests on the branch (the lead's run after the 5942 fix): 249 unit tests, `regressions` (every
-  file passes, 5942.json included), `relay_conformance` (16), clippy pass; wasm, spec-lint (968)
-  and spec-coverage (244 of 244) last checked at the rebase onto fa138b2; `unimplemented!()`: 0.
-- The gate (task D9's runs, release build, `TD_SIM_ALL=1`, before the 5024 and 5942 fixes):
-  bases 100/1000/2000: 0 of 450 fail; 1,000 seeds from base 17163374614648704531: 1 fails
-  (17163374614648704878, E2 below); 1,000 seeds from base 5000: 2 fail (5024 and 5942, both
-  fixed since, each with a test that failed before and a regression file). Every named
-  configuration passes.
-- **Open: E2 (`gate` 17163374614648704878, base 17163374614648704531), larger than proposed;
-  stopped on 2026-11-28 to ask the owner.** Device 2's move sealed its `Fence` before it had
-  read entry 67 (device 1's key change, a new epoch); the relay's `fence` stored it at 68 and
-  fenced itself; every device classified 68 `seal/stale_epoch`, the mover ended the move with
-  that code (`move_entry_done`), and every device met `relay/fenced` with no accepted `Fence`
-  (`relay_protocol` alarms): the board has nowhere to write. The proposed fix (the mover goes on
-  as for a relay that is gone) moves the mover only: the other devices and the oracle follow a
-  move only by typing the code while their log holds an accepted `Fence` (`sim/world/load.rs`,
-  `st.moving`), and the simulator never drives `FollowAddress` or `OldRelayGone`, so they would
-  stay on the fenced relay. Fixing E2 also needs a simulator task (followers follow by address)
-  and maybe engine work for followers under `relay_protocol`; the race itself cannot be closed in
-  the engine (the relay's `fence` has no head condition). A test can build it: B's epoch change
-  sequenced between A's sealed `Fence` and its `admin:fence` (`serve_until_admin`).
-- **The next spec change** (one pull request, through the parking cycle of the journal) holds:
-  §7.12 D13 (the settlement writes of applied entries before any checkpoint or base at or above
-  them; 5024); §17.3 step 3 "rewrites every base at a seq from `t` to `s − 1` with the replay's
-  board and membership at that seq" with the §7.x table and `device.md`'s store table saying
-  `WriteBase` creates **or replaces** `base-<seq>.tdk` (5942); and E2's §28.3 wording.
-- Next, in order: E2; the lead's gate runs (450 samples, 1,000 seeds from at least two bases,
-  one of them the CI base of the commit, every named configuration); the engine's pull request
-  "(stage in progress, not the exit)", CI green on three systems (time the 1,000-seed step),
-  merged; task E (`engine-scenarios.json`, `engine-traces.json`, agents); `bash scripts/gate.sh
-  engine`; the one round of checks; the exit pull request.
-- Working copies from this session (`/home/user/wt/dbg` with debug prints, the spec worktree)
-  hold nothing to keep; a new container will not have them.
+The engine has met only stand-ins so far: the fake sealer, the toy state machine and the model
+relay. The device session wires the real `core`, `seal` and `relay` in and runs one board end to
+end; what it finds comes back to this stage before the exit review.
 
-1. Read this file, then the last 40 lines of `engine/journal.md`. Do not read `engine.md` (the
-   spec) in full again: use the clause index
-   (`python3 docs/sync/status/foundation/tools/clause-index.py docs/sync/spec /tmp/td-clauses.txt`,
-   output outside the repository) and the sections a step names.
-2. `git status`, `git log --oneline -5`, `git worktree list`, `git branch`. A restart loses running
-   workflows: look at "Workflows" below and at each working copy (`/home/user/wt/<task>`, branch
-   `wt/<task>`) before starting one again.
-3. The to-do list is `bash scripts/spec-coverage.sh engine` (clauses not yet cited) and
-   `grep -rn 'unimplemented!()' crates/taskdeck-sync/src | wc -l`.
+**Where things are** (`crates/taskdeck-sync/`, a library with no I/O):
+- The engine: `Engine::<SM, S>::new(sm, sealer, config)` and `Engine::handle(Input) -> Vec<Effect>`
+  (`src/engine/mod.rs`); the read accessors `status()`, `confirmed()`, `pending()`, `notices()`
+  (`src/engine/status.rs`). The public API is `engine.md` §37; what one `handle` call does is §4.
+- The two traits the real crates implement: `StateMachine` (`src/model.rs:47`, for `core`;
+  `engine.md` §5) and `Sealer` (`src/model.rs:328`, for `seal`; §6). The other public types are in
+  `src/{events,records,session,receive,snapshots,ops,ui}.rs`; `src/lib.rs` re-exports them and
+  holds `state_hash` (§18.3).
+- The stand-ins and how to call them: the fake sealer (`src/fake.rs`, `src/fake/`) and the toy
+  (`src/toy.rs`): `docs/sync/status/engine/api-fake-toy.md`; the model relay (`src/sim/relay*`,
+  checked against `relay/test/vectors/` by `tests/relay_conformance.rs`): `api-model-relay.md`;
+  the simulator (`src/sim/`, `tests/simulator.rs`, `tests/regressions.rs`): `api-simulator.md`.
+- The runtime's side of every effect (the store's action for each `PersistOp`, `ReadBase`,
+  `ReadLog`, sessions, ticks) is `device.md`; the order of writes is `engine.md` §7.12.
+
+**What I would warn the device session about:**
+- Persistence: each write is one `Effect::Persist`; apply its ops in order and answer `Persisted`
+  in the order of the writes. A local read must see every write emitted before it (§7.12 D11).
+  `WriteBase` creates `base-<seq>.tdk` or replaces it (TT-SAL/taskdeck#38): a Skip replay writes
+  bases again.
+- The engine reads no clock: `wall_ms` and `mono_ms` arrive with the inputs, and it asks for ticks
+  with `ScheduleTick`. The simulator delivers each tick at the time asked, the runtime renews a
+  stale token itself, and a poison entry is produced as `api-simulator.md` says: these are the
+  simulator's rulings, in no spec text yet.
+- Every call into `SM` and `Sealer` runs under `catch_unwind` (`guard`, `src/engine/mod.rs`): a
+  panic there becomes a halt or the local fault `engine/local_fault`. The release profile unwinds
+  (`scripts/check-release-panic.sh` proves it); the real crates must leave nothing broken behind a
+  panic. `classify` must be repeatable: the same input gives the same receipt (§6).
+- The fake follows `seal.md` as it was on 2026-11-25 (the differences found then are fixed and
+  listed in `api-fake-toy.md`); the toy is not `core` (its commands, notices and refusals are its
+  own). Where a real crate reads the spec otherwise than its stand-in, bring the difference here.
+- Test builds of `taskdeck-sync` always have the feature `sim` (L1); `Effect` and `PersistOp`
+  compare only in test builds or with `sim` (L2). The skeleton's withdrawn recovery-key path is
+  gone, as §37 states.
+- Known open, E2 (below): a move whose own `Fence` loses a race with a key change leaves the old
+  relay fenced with no accepted `Fence`, and the board has nowhere to write. An end-to-end run that
+  changes keys during a move can meet it.
+- While the stage is paused the device session may change `crates/taskdeck-sync/` through small
+  pull requests of its own, noted in its status file and under "Changes by the device session"
+  below. The stage's rule holds for everyone: the simulator, the model relay and the fake are not
+  changed to make a seed pass, and no invariant is loosened.
+
+## For the lead, when the stage goes on
+
+**Where things stand (2026-11-28):** everything the stage built is on day-planner: the spec
+change TT-SAL/taskdeck#38 and the engine's pull request "(stage in progress, not the exit)" that
+carries this file, merged with CI green on the three systems (its checks hold the gate's run: the
+1,000 seeds from the id of its merge commit, ENG-SIM-004). At that pull request: every unit test,
+`regressions` (26 files), `relay_conformance` (16), clippy and the wasm check pass;
+`spec-coverage engine` 244 of 244; `unimplemented!()` 0. Open: E2, and the lows below.
+
+**Left to do, in order:**
+1. What the device session brought back (its status file, and "Changes by the device session"
+   below): engine faults fixed by the lead, each with a test that failed before; spec changes in
+   pull requests of their own (plan §3.3).
+2. E2, if the owner wants it before the exit (see "Open, and lows").
+3. Task E (agents): `engine-scenarios.json` and `engine-traces.json`.
+4. `bash scripts/gate.sh engine` in the lead's own run.
+5. The one round of checks: spec ×2 (sections 4–17; 18–30 with plan §6.5, one also reading this
+   file for `device` and §36), works, gate power (faults injected into a scratch copy of the
+   engine; report those 1,000 seeds do not catch), hostile parties ×2, hygiene last; agents on
+   `opus`, at most two at a time, none checking what it wrote; findings only with a reproduction;
+   high and medium fixed with a test that failed before; low listed here. One round only.
+6. The exit pull request as plan §3.5 says (what was built, what was measured, what the next
+   stages need); this file `final`; tell the owner which sessions to start next.
+
+**On return:** read this file, then the end of `engine/journal.md`. `git fetch`; restart the stage
+branch from day-planner (it holds everything). For the spec use the clause index
+(`python3 docs/sync/status/foundation/tools/clause-index.py docs/sync/spec /tmp/td-clauses.txt`,
+output outside the repository), never `engine.md` in full. The to-do list: `bash
+scripts/spec-coverage.sh engine` and `grep -rn 'unimplemented!()' crates/taskdeck-sync/src | wc -l`.
+A restart loses running workflows: look at "Workflows" and at each working copy before starting
+one again.
+
+## Changes by the device session
+
+None yet. The device session notes here each pull request of its own that changes
+`crates/taskdeck-sync/` while the stage is paused.
+
+## Open, and lows
+
+- **E2 (`gate` 17163374614648704878 at base 17163374614648704531; first named by `seal`).**
+  Device 2's move sealed its `Fence` before it had read entry 67 (device 1's key change, a new
+  epoch); the old relay's `fence` stored it at 68 and fenced itself; every device classified 68
+  `seal/stale_epoch`, the mover ended the move with that code (`move_entry_done` in
+  `movement.rs`), and every device then met `relay/fenced` with no accepted `Fence`
+  (`relay_protocol` alarms). The engine alone cannot close the race (the relay's `fence` has no
+  head condition). A fix needs both halves: the mover goes on as for a relay that is gone (seed
+  with `last_seq = L`, its `Fence` appended to the new relay in stage 5), and the followers follow
+  by address (`FollowAddress`); the simulator drives neither `FollowAddress` nor `OldRelayGone`,
+  and its users type a move code only while their log holds an accepted `Fence`
+  (`src/sim/world/load.rs`), so that half is a simulator task. A test can build the race: B's key
+  change sequenced between A's sealed `Fence` and its `admin:fence` (`serve_until_admin`). The
+  owner decided on 2026-11-28 to leave it open.
+- Lows and questions for the round of checks (no seed fails for them today; details in the
+  journal): a move ends every alarm (`mv_switch`); `RelayBehind` can end at a relay head above `L`
+  without the chain at `L` (`gate` 5463, its first part); a `FollowAddress` whose candidate relay
+  refuses the login waits without a time limit; a `ResetTo` inside a Skip window (§28.1 against
+  §31.7, task D8); task D9's lows (coverage read from `log_reach` on any branch; a crash cut while
+  sealing counted) and questions (a beat refused late in a run; a snapshot duty counted alone); the
+  trial apply is `apply` on a copy, not `SM::trial_apply`; a `Disconnected` also drops requests in
+  flight to another relay (sent again; harmless).
+
+## Pull requests and spec changes
+
+All from this branch, one at a time (L4); every spec change a pull request of its own (§3.3).
+
+| Pull request | What | On day-planner |
+|---|---|---|
+| TT-SAL/taskdeck#27 | the crate's tests get the feature `sim` (L1) | cb8ac72 |
+| TT-SAL/taskdeck#28 | the engine as first written, the fake, the toy, the model relay, the first vectors | d21e05e |
+| TT-SAL/taskdeck#29 | spec: tau in `Loaded.chains`, `Sealer::membership_zero`, a Hello for a fresh head, `engine/restore_target` | e38d44e |
+| TT-SAL/taskdeck#30 | the engine's work after #29 | closed for a parking cycle; carried by the engine's pull request of 2026-11-28 |
+| TT-SAL/taskdeck#31 | spec: the owner's decisions on divergence, sign-in and Skip | 5b999eb |
+| TT-SAL/taskdeck#32 | spec, gate: removed relay state, a final refusal, the Skip window (§31.7) | fc18f4c |
+| TT-SAL/taskdeck#33 | spec: a fenced relay is read up to its `Fence` (ENG-RECV-007) and other rules from the gate | 561d084 |
+| TT-SAL/taskdeck#34 | spec, gate: Q7, Q8, the oracle follows every move | d96b360 |
+| TT-SAL/taskdeck#35 | spec: Q10, the evidence cut, ENG-CLASS-003, five clarifications | eda5051 |
+| TT-SAL/taskdeck#36 | spec, gate: Q9, a duty entry refused with a re-sealable code | fa138b2 |
+| TT-SAL/taskdeck#38 | spec: §7.12 D13, a Skip replay writes again the bases from its target on, `WriteBase` replaces | e5b4c98 |
+| the engine's pull request of 2026-11-28 | the engine's work since #28, with this file | merged with it |
+
+Not yet in any spec text: the simulator's rulings above; the 14 questions of
+`tests/vectors/README.md` and those of `api-fake-toy.md`, `api-model-relay.md`,
+`api-simulator.md`.
 
 ## How this stage is run (the owner's instructions, which override plan §3.1 and §7)
 
@@ -100,51 +185,10 @@ through small pull requests of its own, noted in both status files.
 - Usage: Fable is the scarce part. Read large files once; never `src/fake.rs` or the simulator's
   sources in full; short command output.
 
-## Steps (the engine, by the lead)
-
-| # | Step | State |
-|---|---|---|
-| 0 | Skeleton brought to §37 as it is now; derives; `sim` for tests; module layout | done |
-| 1 | start, records, enqueue, the pending view, the naming hold | written and tested (`core_tests.rs`, `engine-pending.json`) |
-| 2 | sessions, send, append results, reconcile, echoes | written; tested: `engine-reconcile.json` (welcomes, conflicts, gaps), `sess_tests.rs` (displaced, budget, echoes, tampered page, restored copy) |
-| 3 | receive: pages, dry run, persist, commit, apply; classes, refusals, notices | written; `engine-receipts.json` passes against `ScriptedSealer` (`script_tests.rs`) |
-| 4 | poison pills, halts, Skip (operation, frames, replay) | written; `engine-poison.json` passes (`poison_tests.rs`); read-ahead, Skip and Skip replay flows untested |
-| 5 | checkpoints, bases, hashes, retention | written; `engine-hash.json` passes; cadence, bases, retention untested |
-| 6 | beats, snapshot duty, verdicts, compaction, the clock, upgrade proposal, purge duty | written; the pure decisions pass `engine-duties.json` and `engine-clock.json`; the flows untested |
-| 7 | evidence stop, divergence stop, restore tail (repair.rs), adoption (ops.rs), rejoin and rebootstrap (boot.rs) | written; evidence stop tested; the rest untested |
-| 8 | epoch gate, re-sealing, revoked, missed roots, export and resubmit | written; epoch gate and a revoked device tested (`sess_tests.rs`); resubmit untested |
-| 9 | operations, pairing (ops.rs), the move, the move code, follow address (movement.rs) | written, untested (needs the model relay, task C) |
-| 10 | status, pending, notices, restore targets, purge preview | written; partly tested |
-| 11 | rules for every implementation (§4, §36 source rules, limits, clocks, persist failure, no deletion) | tested (`rules_tests.rs`) |
-
-**Step in progress:** TT-SAL/taskdeck#28 to green and merged; then the spec-change pull request
-(the list is under "Spec changes to make"); then task C merged, task D launched, the engine under
-the simulator. Meanwhile: flow tests for the clauses not yet cited.
-
-Every section of the spec has code. Left to test (17 clauses, `bash scripts/spec-coverage.sh engine`):
-- with `Node`/`Hub` (`kit_tests.rs`; `flow_tests.rs` has 9 flows): ENG-CTL-002 (needs a refused own
-  rotation), ENG-RULES-001/002 (needs a kit device with `rules2`), ENG-SNAP-004/005 and ENG-UI-003 (need
-  blobs: the model relay), ENG-SKIP-003, ENG-DIVERGE-001..004 and ENG-SEALER-003 (scripted sealer),
-  ENG-SESS-007.
-- with the model relay (`rkit_tests.rs` is the lead's driver over it, poll sessions; `relay_tests.rs` has
-  pairing, revoke, restore to a point, purge, the snapshot duty, compaction): the move (ENG-MOVE-*),
-  ENG-OPS-010 (close board), restore tail (ENG-EVID-004/007), rejoin (ENG-BOOT-*), ENG-OPS-003/005.
-- RELAY-* and ENG-SIM-* citations come with tasks C and D.
-
-The tests' own relay (`Hub` in `kit_tests.rs`) answers only Connect, Hello, Read and Append.
-
-Numbers at the start (2026-11-24, day-planner `99b510e`): `spec-coverage.sh engine` 233 clauses
-owned, 2 cited; `unimplemented!()` in `crates/taskdeck-sync/src`: 16.
-Now: `unimplemented!()` 1 (`sim.rs`: `run`, task D's); `spec-coverage.sh engine`: **234 of 234
-cited, 0 uncovered, 0 bad**. 145 lib tests, 16 relay conformance tests and 4 integration tests pass; all 197 cases of task
-B's seven families pass.
-
 ## Map of the code (`crates/taskdeck-sync/`)
 
 Types (the spec's §37, no logic; all `Clone, Debug, PartialEq, Eq`, small ones `Copy`, a few
-`Default`): `src/model.rs` (the two traits and the sealer's types, §5, §6; `Sealer::membership_zero`
-is new, spec change pending), `events.rs`, `records.rs` (`Loaded.chains` is `(seq, chain, tau)`,
-spec change pending), `session.rs`, `receive.rs`, `snapshots.rs`, `ops.rs`, `ui.rs`. `PersistOp`
+`Default`): `src/model.rs` (the two traits and the sealer's types, §5, §6; `Sealer::membership_zero`, TT-SAL/taskdeck#29), `events.rs`, `records.rs` (`Loaded.chains` is `(seq, chain, tau)`), `session.rs`, `receive.rs`, `snapshots.rs`, `ops.rs`, `ui.rs`. `PersistOp`
 and `Effect`: hand-written `Debug` (identity bytes never print), `PartialEq` only in test builds.
 `src/lib.rs`: module list, re-exports, `state_hash` (§18.3).
 
@@ -168,10 +212,11 @@ The engine, `src/engine/` (the lead's; agents do not read it). One struct `Engin
 | `ops.rs` | `opx` | `OpMem` (per operation: the stage's write, busy), `on_op` (checks, then per operation), `drive_ops`, `op_begin`/`op_stage`/`op_done`, Skip (`skip_allowed`, `skip_compose`), revoke (`revoke_compose`), purge (`purge_preview`, `local_purge`, `shred_step`, `purge_step`), restore (`restore_ok`, `restore_targets`, `restore_hash_ready`), adoption (`adopt_fetch`, `adopt_blob`, `adopt_board_ready`), `upgrade_step`, `own_entry_done` (an own record settled: moves its operation on), pairing (`on_pair_register`, `pair_uploaded`, `before_carried_seal`, `carried_done`, `pair_entry_done`), `host_ok`, `crockford` | §17.1, §22.3, §25, §28 |
 | `movement.rs` | `opx.mv` | the move in stages 1 to 6 (`move_drive`, `move_admin`, `move_seed`, `seed_replayed`, `move_tail`, `move_log`, `move_blob`, `move_report`), `fence_accepted`, `on_move_code`, `switch_relay`, follow address (`follow_begin`, `follow_welcome`, `follow_page`: a dry-run scan that persists nothing) | §28.3 |
 | `repair.rs` | `evid.tail` | restore tail: `repair_on_welcome`, `repair_step`, `restore_chunk`, `repairs_for`, `restore_result`, `repair_result` | §21.3 |
-| `boot.rs` | `boot` | hooks only so far | §19.7, §19.9 |
+| `boot.rs` | `boot` | rejoin and rebootstrap | §19.7, §19.9 |
 | `vectors_tests.rs` | — | loads task B's families: hash, clock, duties, pending | §35 |
 | `kit_tests.rs` | — | the lead's driver: `Store` (applies PersistOps, builds `Loaded`), `Node` (engine + store + clocks; `feed`, `persist_one`, `restart`, `enqueue`), `Hub` (a small relay: `append`, `welcome`, `page`, `serve`, `settle`), `creator(seed)`, `join(hub, a, seed, name)` | — |
 | `core_tests.rs` | — | tests of steps 1 to 3 | — |
+| other `*_tests.rs` | — | `flow_tests.rs` (flows on the hub), `rkit_tests.rs` (the lead's driver over the model relay) and `relay_tests.rs` (flows on it), `sess_tests.rs`, `reconcile_tests.rs`, `poison_tests.rs`, `script_tests.rs`, `rules_tests.rs`, `vectors_tests.rs` | — |
 
 Rules between the parts (see also the header of each file):
 - `L >= K >= B`. `pipe.queue` holds the classified entries `B+1..=K`. `mk`/`vk` are `M_K` and its
@@ -198,6 +243,8 @@ Agents' files: `src/fake.rs`, `src/fake/**`, `src/toy.rs`, `src/sim/splitmix.rs`
 - wasm: `cargo check --locked -p taskdeck-sync --target wasm32-unknown-unknown`, and again with `--features sim`
 - The gate: `bash scripts/gate.sh engine`
 - Does the skeleton match §37: `python3 docs/sync/status/engine/tools/apidiff.py` (prints nothing but the simulator's and the toy's names when it does)
+- The gate's simulator step as CI runs it: `SIM_SEEDS=1000 cargo test --locked -p taskdeck-sync --test simulator` (the seeds start at the first 16 hex digits of the commit id, ENG-SIM-004; `TD_SIM_BASE=<n>` sets the start)
+- One seed, every violation: `TD_SIM_SEED=<n> TD_SIM_CONFIG=gate TD_SIM_ALL=1 cargo test -q --release -p taskdeck-sync --test simulator one_seed -- --exact --nocapture` (`TD_SIM_FULL=1` for the trace; strip the poison entries' backtraces first, the journal has the filter)
 
 ## Decisions (with reasons) and deviations
 
@@ -214,32 +261,6 @@ Agents' files: `src/fake.rs`, `src/fake/**`, `src/toy.rs`, `src/sim/splitmix.rs`
   pull request "of its own" (shared files, a spec change) is the branch's only commits at that
   moment: push, wait for CI, squash-merge, restart the branch from `day-planner`, rebase the rest.
   While such a pull request waits for CI, later work stays local.
-
-## Pull requests
-
-| # | What | State |
-|---|---|---|
-| TT-SAL/taskdeck#27 | the dev-dependency on itself with `sim` (L1) | merged (squash `cb8ac72`); two macOS runner cancellations re-run |
-| TT-SAL/taskdeck#29 | the spec change (tau in `Loaded.chains`, `membership_zero`, a repeatable `classify`, ENG-DUTY-003, `engine/restore_target`, the closed board's move code, wordings) | open, CI running at 22:05 UTC |
-| TT-SAL/taskdeck#28 | the engine as written so far, the fake and the toy, the first vectors (stage in progress, not the exit) | merged (squash d21e05e). History: First CI run failed on Windows only: a test of task A reads `Cargo.toml` and `src/lib.rs` with `include_str!` and the checkout had CRLF; fixed with `crates/taskdeck-sync/.gitattributes` (`* -text`, as the seal crate does) |
-
-Order (L4, L5): #28 merges; the branch restarts from day-planner; the spec change is the branch's
-only commit in a pull request of its own; then work goes on.
-
-## Spec changes
-
-- **Merged on 2026-11-25** (both from this branch, each a pull request of its own, CI green on
-  every job that ran): TT-SAL/taskdeck#31, the behaviour change (day-planner 5b999eb), and
-  TT-SAL/taskdeck#32, the gate change (day-planner fc18f4c: §31.7 "removed relay state",
-  invariants 2, 3 and 4, SYNC_PLAN.md §6.5 item 2). The engine's work was rebased onto fc18f4c
-  (43 commits, no conflict); `spec-coverage engine`: 243 of 243 owned clauses cited, 0 bad.
-- The parking cycle, for the next spec change: close the engine's pull request, park the engine's
-  work on a local branch, make the branch day-planner plus the spec commit, pull request, CI,
-  merge, rebase the engine's work onto day-planner, push, open the engine's pull request again.
-- Not yet in any spec text: the simulator's rulings on ticks (delivered at the time asked), the
-  runtime renewing a stale token itself, how a poison entry is produced; the 14 questions of
-  `tests/vectors/README.md` and those of `api-fake-toy.md`, `api-model-relay.md`,
-  `api-simulator.md`. Still to decide: E2, T21, Q79.
 
 ## Workflows (agents)
 
@@ -264,7 +285,7 @@ harness under the session directory; its args are `{id, brief, dir, target, path
 | wf_394a4866-a90 | D8 what fails at 1,000 seeds: the checks' share (12 seeds) | `engine/briefs/d8-wide-gate.md` | done (write, two checks: one high fixed); applied to the branch as a patch from `wt/d8` fa40f7b (the lead ran its gate) | `src/sim/{check,script,world}.rs`, `src/sim/world/rt.rs`, `api-simulator.md`: deletions judged on the log a device followed at B (4986, 5685); the replay without a Skip's target applies a ResetTo with the comparison a board apply makes (5175). Reported engine faults 5197, 5271, 5463; spec questions A (4662, 4884, 5243: paired through a rolled-back state, closed, no alarm), E (5507, 5159, 5712: entries persisted before an evidence cut) and a ResetTo whose target lies in a Skip's window (§28.1 against §31.7, no seed) | 1,504,222 (4 agents, 517 tool uses, 105 min) |
 | wf_39597d35-ce1 | D9 a duty entry refused with a re-sealable code is reported by its duty going on (Q9) | `engine/briefs/d9-duty-entries.md` | done (write, one check: one medium fixed with a test); applied to the branch as a patch from `wt/d9` 2cae4ce (the lead ran its gate) | `src/sim/{check,script,world}.rs`, `src/sim/world/{end,load,rt}.rs`, `api-simulator.md`: invariant 2 takes a `snap` entry or beat refused `seal/stale_epoch`/`seal/old_epoch` whose own device's duty went on (a later own entry of that kind, the duty ended after three failures, or another device's snapshot at or above S reached its log); the simulated user re-pairs a machine once per retirement (gate 17163374614648705494). Reported: 1,000 seeds at 17163374614648704531 and at 5000 fail 3: 17163374614648704878 (spec question E2: a move's Fence refused after the relay fenced itself), 5024 and 5942 (engine faults). Lows: coverage read from `log_reach` on any branch; a crash-cut sealing write counted as a sealing | 1,078,991 (3 agents, 391 tool uses, 74 min) |
 
-## Open threads
+## The owner's decisions, and the questions as they were put
 
 ### The owner's decisions (2026-11-25: "We will go with your recommendations and what you believe is optimal")
 
@@ -407,8 +428,8 @@ tail of a move), which are sent again; harmless.
   `Fence`); unreachable in the gate (every move goes to the same second host).
 
 - E2 (left open by `seal`): an own `Fence` that loses a rotation race leaves the old relay fenced
-  with no accepted `Fence` (§28.3, §28.7). To decide when step 9 is built; may need a change under
-  `relay/`.
+  with no accepted `Fence` (§28.3, §28.7). Met by the gate on 2026-11-25; left open by the owner
+  on 2026-11-28 ("Open, and lows" above).
 - E4 (left open by `seal`): §24.3 re-seals a pending revocation's rotation, and §28.5 composes it
   again; the second record is refused `seal/ctl_target`. To decide in step 8.
 - Left open by `foundation` (T21): whether `MoveReport` carries the seed's first seq; whether the
@@ -442,13 +463,3 @@ tail of a move), which are sent again; harmless.
 - To change by the lead in the next spec pull request (no owner question): a page from a relay
   that an accepted `Fence` moved the board away from is not taken above that `Fence`, and the
   relay's head counts as the `Fence`'s seq (§12.3, §28.3; found with `gate` 2154's test).
-
-## What the next stages need to know
-
-(collected as the stage goes)
-
-- Test builds of `taskdeck-sync` always have the feature `sim` (L1); other builds never do.
-- The public types derive `Clone, Debug, PartialEq, Eq` (L2); `Effect` and `PersistOp` are
-  comparable only in test builds or with `sim`.
-- The skeleton had kept the withdrawn recovery-key path (`RecoveryMode`, `PendingRecovery`,
-  `Operation::ProposeRecoveryKey` and so on); it is gone, as §37 states.
