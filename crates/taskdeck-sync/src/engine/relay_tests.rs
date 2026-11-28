@@ -2428,3 +2428,52 @@ fn a_relay_without_a_row_for_the_device_closes_it_on_a_board_never_moved() {
     }
     assert_eq!(connects(&net), n);
 }
+
+// spec: ENG-OPS-003 ENG-MOVE-009
+#[test]
+fn a_mover_that_starts_again_past_its_fence_still_gives_the_move_code() {
+    // `gate` 3996381313176634013: the moving device's process stopped in stage 6 with its
+    // checkpoint at the Fence's seq; after the `Start` the Fence was never classified again, the
+    // code was never made, the move never ended, and the other devices stayed on the fenced relay.
+    const NEW: &str = "relay2.test";
+    let (mut net, mut a) = board(481);
+    let mut b = pair(&mut net, &mut a, 482, "Laptop", 1);
+    for k in 1..=4u64 {
+        a.set(k, k as u8, k as i64);
+    }
+    net.settle(&mut [&mut a, &mut b]);
+    net.add_relay(NEW);
+    a.feed(Event::Op { ticket: 9, op: Operation::Move { host: NEW.to_owned() } });
+    // A goes as far as its move's snapshot upload (stage 6, on the new relay) and stops there.
+    let mut at_upload = false;
+    for _ in 0..20_000 {
+        match a.fx.pop_front() {
+            Some(Effect::Blob { op: BlobRequest::Upload { purpose: 1, .. }, .. }) => {
+                at_upload = true;
+                break;
+            }
+            Some(fx) => {
+                net.answer(&mut a, fx);
+            }
+            None => a.tick(30_000),
+        }
+    }
+    assert!(at_upload, "the move reached its upload");
+    let fence = a.e.status().head.seq;
+    a.feed(Event::Shutdown);
+    assert!(a.store.ckpt.as_ref().is_some_and(|c| c.board_seq >= fence), "the checkpoint holds the Fence");
+    a.restart(483);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(op_result(&a, 9), Some(Ok(())));
+    let code = notes_of(&a, |x| match x {
+        crate::Notification::MoveCode { text } => Some(text.clone()),
+        _ => None,
+    })
+    .pop()
+    .expect("the move code");
+    assert_eq!(type_code(&mut b, &code), Ok(()));
+    a.set(30, 7, 70);
+    net.settle(&mut [&mut a, &mut b]);
+    assert_eq!(b.e.confirmed().0.keys[&7].0, 70);
+    assert_eq!(a.board_bytes(), b.board_bytes());
+}

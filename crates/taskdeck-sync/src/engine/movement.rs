@@ -78,9 +78,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.status_dirty = true;
     }
 
-    /// After a `Start` with a move pending, the Fence's frame hash is read back from the log.
+    /// After a `Start` with a move pending, or with this device's own move past its switch (stages
+    /// 6 and 7, whose code and report need the Fence: §28.3 "After a `Start`"), the Fence's frame
+    /// hash is read back from the log.
     pub(crate) fn fence_lookup(&mut self) {
-        if !self.fence_pending() || self.opx.mv.fence_req || self.pipe.tail {
+        let own_move = self.vk.home_seq > 0
+            && self.vk.home_gen == self.meta.relay.home_gen
+            && self.meta.ops.iter().any(|o| matches!(o.op, Operation::Move { .. }) && o.stage >= 6);
+        if !(self.fence_pending() || own_move) || self.opx.mv.fence_req || self.pipe.tail {
             return;
         }
         let seq = self.vk.home_seq;

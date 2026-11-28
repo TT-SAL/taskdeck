@@ -122,6 +122,15 @@ None yet. The device session notes here each pull request of its own that change
   (`src/sim/world/load.rs`), so that half is a simulator task. A test can build the race: B's key
   change sequenced between A's sealed `Fence` and its `admin:fence` (`serve_until_admin`). The
   owner decided on 2026-11-28 to leave it open.
+- **Three seeds of the engine pull request's first CI set (base 3996381313176633817, the merge
+  commit 3775ffa), not yet diagnosed; the owner is asked how to go on:**
+  `gate` 3996381313176633862 (fork: device 1 raises `relay_behind` at a welcome showing 250 and stays
+  `Reconciling` to the end, no stop, no read; invariants 3 and 6); 3996381313176634032 (rollback and
+  withholding: the check says a restore tail could have brought back seq 61 and its device sent none
+  in time; invariants 2 and 3 on devices 1 to 3); 3996381313176634077 (rollback, fork, two made-up
+  frames: device 1's entries acknowledged at 288 to 292 are not in the reference log; invariant 2).
+  Each is either an engine fault in the restore tail under a fork or rollback, or the check's
+  (a simulator task).
 - Lows and questions for the round of checks (no seed fails for them today; details in the
   journal): a move ends every alarm (`mv_switch`); `RelayBehind` can end at a relay head above `L`
   without the chain at `L` (`gate` 5463, its first part); a `FollowAddress` whose candidate relay
