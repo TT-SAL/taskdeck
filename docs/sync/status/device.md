@@ -64,7 +64,7 @@ findings go to `docs/sync/status/device/fit.md` as they are met.
 | Workflow | Agents | What | Pull requests |
 |---|---|---|---|
 | W1a | H ∥ (F1 → F2) | H: the end-to-end harness and a standby smoke test (`tests/e2e/`). F1: the adapters `StateMachine` over core and `Sealer` over seal, with an in-process engine test. F2: the sealed store, the key stores of `test-trust`, `Loaded` at open | the work; one spec change for what it found |
-| W1b | F3 → F4 | F3: transport, runtime, the facade's subset, creating a board, `taskdeck-devicectl`, one device end to end through the standby. F4: pairing (both roles, the snapshot blob it needs), the first-sync test in CI | "device: first sync"; one spec change |
+| W1b | F3 (a continuation agent F3b only if F3 does not finish) | one builder, brief `f3-first-sync.md`: transport, runtime, the facade's subset, creating a board, `taskdeck-devicectl`, one device end to end through the standby (part A); pairing (both roles, the snapshot blob it needs) and the first-sync test in CI (part B). One agent rather than two, because each agent's start costs about 83,000 tokens and a second would read the whole runtime again | "device: first sync"; one spec change |
 | W2 | to plan after W1b | the facade for `desktop`: local-only mode, the read queries | "device: facade"; one spec change |
 
 ## Decisions (with reasons)
@@ -162,6 +162,8 @@ job is its compile check (no Windows target in the container).
 | Pull request | What | On day-planner |
 |---|---|---|
 | TT-SAL/taskdeck#41 | W1a: adapters, store, harness | closed: its `changes` job failed (`reads.sh`: a change under `tests/e2e/` did not mark the areas a change to the crate marks); its work follows in a new pull request after #42 |
+| TT-SAL/taskdeck#43 | W1a: adapters, store, harness (the work of #41, after #42) | 93ce6ef |
+| TT-SAL/taskdeck#44 | spec: W1a's 31 findings (device, engine, seal; SEAL-FRAME-005 flagged, L7) | 6b870c6 |
 | TT-SAL/taskdeck#42 | ci: `tests/e2e/*` marks every area a change to the device crate marks (foundation's paths, a pull request of its own; noted in `foundation.md`); CI green on every job, the engine's 50 seeds included | 4c14329 |
 
 ## Gate
