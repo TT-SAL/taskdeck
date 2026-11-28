@@ -67,6 +67,7 @@ const _: () = {
     let _ = security_framework::passwords::get_generic_password;
 };
 
+mod platform;
 pub mod recovery_online;
 pub mod store;
 
@@ -119,6 +120,7 @@ pub struct OpenOptions {
 }
 
 /// The mode of an open data folder (device.md §5.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     LocalOnly,
     Synced,
@@ -135,6 +137,7 @@ pub struct IdentityInfo {
 }
 
 /// An identity recorded in `store.tds` (device.md §17.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredIdentity {
     pub board_id: [u8; 16],
     pub dev: [u8; 16],
@@ -144,6 +147,7 @@ pub struct StoredIdentity {
 }
 
 /// A warning `open` reports (device.md §17.2, §7.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OpenWarning {
     FolderLocked,
     FolderUnlockable,
@@ -163,6 +167,7 @@ pub struct OpenReport {
 }
 
 /// A facade error: a code of the catalogue (device.md §21, §17.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceError {
     pub code: &'static str,
     pub status: Option<u16>,
@@ -975,6 +980,7 @@ pub trait KeyStore: Send + Sync {
 }
 
 /// A key store failure (device.md §12.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyStoreError {
     NotFound,
     CannotUnwrap,
@@ -1022,47 +1028,12 @@ impl KeyStore for KeychainKeyStore {
     }
 }
 
-/// The test key store in plain files (device.md §12.6, §11.1 item 4).
+// The test key stores `FileKeyStore` and `MemoryKeyStore` (device.md §12.6,
+// §11.1 item 4) live in `keystore`.
 #[cfg(feature = "test-trust")]
-pub struct FileKeyStore {
-    pub dir: std::path::PathBuf,
-}
-
+pub mod keystore;
 #[cfg(feature = "test-trust")]
-impl KeyStore for FileKeyStore {
-    fn kind(&self) -> u8 {
-        unimplemented!()
-    }
-    fn create(&self, board: &[u8; 16], dev: &[u8; 16], key: &zeroize::Zeroizing<[u8; 32]>) -> Result<(), KeyStoreError> {
-        unimplemented!()
-    }
-    fn load(&self, board: &[u8; 16], dev: &[u8; 16]) -> Result<zeroize::Zeroizing<[u8; 32]>, KeyStoreError> {
-        unimplemented!()
-    }
-    fn delete(&self, board: &[u8; 16], dev: &[u8; 16]) -> Result<(), KeyStoreError> {
-        unimplemented!()
-    }
-}
-
-/// The test key store in a process map (device.md §12.6, §11.1 item 4).
-#[cfg(feature = "test-trust")]
-pub struct MemoryKeyStore {}
-
-#[cfg(feature = "test-trust")]
-impl KeyStore for MemoryKeyStore {
-    fn kind(&self) -> u8 {
-        unimplemented!()
-    }
-    fn create(&self, board: &[u8; 16], dev: &[u8; 16], key: &zeroize::Zeroizing<[u8; 32]>) -> Result<(), KeyStoreError> {
-        unimplemented!()
-    }
-    fn load(&self, board: &[u8; 16], dev: &[u8; 16]) -> Result<zeroize::Zeroizing<[u8; 32]>, KeyStoreError> {
-        unimplemented!()
-    }
-    fn delete(&self, board: &[u8; 16], dev: &[u8; 16]) -> Result<(), KeyStoreError> {
-        unimplemented!()
-    }
-}
+pub use keystore::{FileKeyStore, MemoryKeyStore};
 
 // AndroidKeyStore lives in taskdeck-android (device.md §12.5) and implements KeyStore there (bridge.md §21).
 
@@ -1097,41 +1068,7 @@ pub trait FileLayer: Send + Sync {
 /// The real file layer (device.md §7.1).
 pub struct OsFiles;
 
-impl FileLayer for OsFiles {
-    fn create_dir(&self, path: &std::path::Path) -> std::io::Result<()> {
-        unimplemented!()
-    }
-    fn write_new(&self, path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-        unimplemented!()
-    }
-    fn append(&self, path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-        unimplemented!()
-    }
-    fn sync(&self, path: &std::path::Path) -> std::io::Result<()> {
-        unimplemented!()
-    }
-    fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
-        unimplemented!()
-    }
-    fn remove(&self, path: &std::path::Path) -> std::io::Result<()> {
-        unimplemented!()
-    }
-    fn truncate(&self, path: &std::path::Path, len: u64) -> std::io::Result<()> {
-        unimplemented!()
-    }
-    fn sync_dir(&self, dir: &std::path::Path) -> std::io::Result<()> {
-        unimplemented!()
-    }
-    fn read(&self, path: &std::path::Path) -> std::io::Result<Vec<u8>> {
-        unimplemented!()
-    }
-    fn list(&self, dir: &std::path::Path) -> std::io::Result<Vec<std::ffi::OsString>> {
-        unimplemented!()
-    }
-    fn exists(&self, path: &std::path::Path) -> bool {
-        unimplemented!()
-    }
-}
+// `impl FileLayer for OsFiles` is in `store::os_files` (device.md §7.1).
 
 /// The file layer of the crash tests (device.md §7.6, §11.1 item 5).
 #[cfg(feature = "test-trust")]
@@ -1179,14 +1116,10 @@ impl FileLayer for CrashFiles {
 
 // ---------- adapters (decision D6, §4.1)
 
-/// The state machine over `taskdeck-core` (device.md §4.1, decision D6).
-pub struct CoreMachine {}
-
-/// The sealer over `taskdeck-seal` (device.md §4.1, decision D6).
-pub struct SealSealer {}
-
-// impl taskdeck_sync::StateMachine for CoreMachine and impl taskdeck_sync::Sealer for SealSealer are stage
-// device's to write (device.md §25); the skeleton carries the two structs without them.
+/// `CoreMachine` (`taskdeck_sync::StateMachine` over `taskdeck-core`) and
+/// `SealSealer` (`taskdeck_sync::Sealer` over `taskdeck-seal`), device.md §25.
+pub mod adapt;
+pub use adapt::{CoreMachine, SealSealer};
 
 // ---------- test-only (§11)
 
