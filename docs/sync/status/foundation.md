@@ -650,6 +650,14 @@ Decisions the lead took that the owner may want to overrule:
 Changes to this stage's paths after its exit, each in a small pull request of its own (SYNC_PLAN.md
 §3.2, §3.3).
 
+- **2026-11-28, by stage `device`'s lead: `scripts/ci/changes.sh`, `scripts/ci/README.md`,
+  `scripts/tests/test-ci-changes.sh`.** `device` builds its end-to-end suite as a test target of
+  `taskdeck-device` whose source is under `tests/e2e/` (`[[test]] path = "../../tests/e2e/main.rs"`,
+  the layout `scripts/gates/device.gate` names). `reads.sh` then requires a change under
+  `tests/e2e/` to mark every area a change to the crate marks, and `changes.sh` marked only
+  `device` (and `android` through it): the `changes` job of the first device pull request failed.
+  `tests/e2e/*` now also marks `foundation` and `recovery`; the test's case for it expects that.
+
 - **2026-11-23, by stage `seal`'s lead: `scripts/tests/test-ci-changes.sh`.** The test's helper
   piped its list of paths into `scripts/ci/changes.sh --paths-from -` under `pipefail`. For a head
   message that asks for `[ci full]`, `changes.sh` answers without reading its input; when it exits

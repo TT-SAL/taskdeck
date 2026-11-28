@@ -100,7 +100,7 @@ paths "seal" "foundation seal device recovery android" crates/taskdeck-seal/src/
 paths "seal: vectors also mean relay" "seal device recovery relay android" docs/sync/vectors/frame.json
 paths "engine, and the recovery tool whose device links it" "foundation engine device recovery android" crates/taskdeck-sync/src/lib.rs
 paths "device, and the recovery tool that links it" "foundation device recovery android" crates/taskdeck-device/src/lib.rs
-paths "device: e2e tests" "device android" tests/e2e/pairing.rs
+paths "device: e2e tests, the source of the crate's test target e2e (as the crate)" "foundation device recovery android" tests/e2e/pairing.rs
 paths "recovery: backup, and the device that links it" "foundation device recovery android" crates/taskdeck-backup/src/lib.rs
 paths "recovery: recover, and the device" "foundation device recovery android" crates/taskdeck-recover/src/main.rs
 paths "relay, and the device whose e2e tests use it" "device relay android" relay/relay-core.js
