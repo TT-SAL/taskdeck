@@ -6,6 +6,18 @@ in the order it happened; this file is the current truth and is rewritten, not a
 
 ## Resuming: read this first
 
+**The owner's decision of 2026-11-27 (the order changed).** The stage pauses before its exit.
+A device session first wires the real core, seal and relay into the engine and runs one board end
+to end (those parts have only met fakes so far); whatever it finds comes back here before the
+exit review, so the review runs once. Before the pause the lead does, in order: E2 with the next
+spec change (one pull request: §7.12, §17.3 with `WriteBase`, §28.3) and the engine fix; the
+gate of plan §6.5 only (the 1,000 seeds the CI step runs; no further bases or sample sets, that
+is the nightly job's, §6.11; a failing seed met anyway is listed here as open); the engine's pull
+request "(stage in progress, not the exit)" merged with CI green on the three systems; this file
+rewritten for the device session and for the lead's later self; then stop (no task E, no exit
+review). While the stage is paused, the device session may change `crates/taskdeck-sync/`
+through small pull requests of its own, noted in both status files.
+
 **Where things stand (2026-11-25, end of the day; the owner asked to wrap up, to be continued in a few days):**
 
 - Merged into day-planner: TT-SAL/taskdeck#28, #29, #31, #32, #33 (561d084), #34 (d96b360),
@@ -21,14 +33,19 @@ in the order it happened; this file is the current truth and is rewritten, not a
   (17163374614648704878, E2 below); 1,000 seeds from base 5000: 2 fail (5024 and 5942, both
   fixed since, each with a test that failed before and a regression file). Every named
   configuration passes.
-- **Open: E2 (`gate` 17163374614648704878, base 17163374614648704531).** A move's `Fence`
-  sealed under the epoch a K entry had just replaced was stored by the relay (fencing it) and
-  then refused `seal/stale_epoch`: the board is fenced with nowhere to write. Proposed (the
-  lead's choice, no owner question needed): §28.3 stage 2 says a move whose own `Fence` is
-  refused after the relay fenced itself goes on as for a relay that is gone (seed with
-  `last_seq = L`, the `Fence` appended to the new relay in stage 5). Spec change first (its own
-  pull request), then the engine change, a test that fails before, and the regression file
-  (`seeds_hold` prints its JSON when the seed is run on the build before the fix).
+- **Open: E2 (`gate` 17163374614648704878, base 17163374614648704531), larger than proposed;
+  stopped on 2026-11-28 to ask the owner.** Device 2's move sealed its `Fence` before it had
+  read entry 67 (device 1's key change, a new epoch); the relay's `fence` stored it at 68 and
+  fenced itself; every device classified 68 `seal/stale_epoch`, the mover ended the move with
+  that code (`move_entry_done`), and every device met `relay/fenced` with no accepted `Fence`
+  (`relay_protocol` alarms): the board has nowhere to write. The proposed fix (the mover goes on
+  as for a relay that is gone) moves the mover only: the other devices and the oracle follow a
+  move only by typing the code while their log holds an accepted `Fence` (`sim/world/load.rs`,
+  `st.moving`), and the simulator never drives `FollowAddress` or `OldRelayGone`, so they would
+  stay on the fenced relay. Fixing E2 also needs a simulator task (followers follow by address)
+  and maybe engine work for followers under `relay_protocol`; the race itself cannot be closed in
+  the engine (the relay's `fence` has no head condition). A test can build it: B's epoch change
+  sequenced between A's sealed `Fence` and its `admin:fence` (`serve_until_admin`).
 - **The next spec change** (one pull request, through the parking cycle of the journal) holds:
   §7.12 D13 (the settlement writes of applied entries before any checkpoint or base at or above
   them; 5024); §17.3 step 3 "rewrites every base at a seq from `t` to `s − 1` with the replay's
