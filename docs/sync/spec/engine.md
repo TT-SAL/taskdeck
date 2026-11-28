@@ -701,7 +701,7 @@ A checkpoint, or a base read later (`ReadBase`), whose board `SM::load` refuses 
 | `SetMarker` | `Marker` | replace the marker |
 | `ClearMarker` | | remove the marker |
 | `WriteCheckpoint` | `Checkpoint` | replace the checkpoint |
-| `WriteBase` | `Checkpoint` | create the base at its `board_seq` |
+| `WriteBase` | `Checkpoint` | create the base at its `board_seq`, replacing one at that seq (§17.3) |
 | `DeleteBases` | `seqs: Vec<u64>` | delete those bases |
 | `TruncateLogBelow` | `seq: u64, floor_chain: Option<Hash32>` | drop every log record below `seq`; `floor_chain` is `C_{seq−1}` when the engine holds it (its chain index, or a rejoin snapshot's `C_S`, §19.7), else `None`; the runtime keeps both (`device.md` §7.3) |
 | `AppendHashes` | `Vec<HashRecord>` | append |
@@ -732,6 +732,7 @@ A single `Persist` may carry several ops; the runtime writes them in order and r
 | D10 | `WriteMeta` with an operation's new stage | the relay call of that stage (§28) |
 | D11 | `WriteBase`, `AppendLog` | a `ReadBase` or `ReadLog` emitted after it (a local read sees every write the engine has made) |
 | D12 | `WriteMeta` with what the commit of a page recorded (the alarm of a `Skip`-class or refused frame, §13.1) | any `WriteCheckpoint` at or above that page's entries: nothing at or below a checkpoint is classified again after a `Start`, so the alarm would be lost with a crash in between |
+| D13 | the settlement of applied entries: their notice and refusal records (`Notices`) and the outbox `Drop`s of own entries seen accepted or refused | any `WriteCheckpoint` or `WriteBase` at or above those entries: nothing at or below a checkpoint is applied again after a `Start`, so a settlement cut off by a crash in between would never be written (an own record left in the outbox, a missing notice) |
 
 - **ENG-PERSIST-006** (engine) The engine MUST respect every dependency of the table of §7.12.
 
@@ -1313,13 +1314,13 @@ At the board apply of the accepted Skip at seq `s`, for each target `t` (`t < s 
 
 1. If `t` is the crash-halt entry, or the engine treated `t` as skipped when it applied it (the Skip's membership was committed before `t` reached the board, as when both arrive in one page), nothing more is needed. The engine keeps, for its current confirmed state, the set of seqs it treated as skipped.
 2. If `t` is a `beat` or `snap` entry, its reports and verdicts are removed from the registry; the board is unchanged.
-3. Otherwise (`t` is a `cmd` entry it applied) the engine **replays**: it reads the newest base with `board_seq < t` (`ReadBase`); loads its board and membership; re-classifies and re-applies the log from that base's seq + 1 to `s`, treating every target in `M_s.skips` as skipped; rewrites the hash records of every aligned seq from `t` to `s` (`AppendHashes`, the newer record winning, §7.5); replaces its notice and refusal records from `t` on by those of the replay (§13.4, ENG-REF-004); writes a checkpoint; and rebases.
+3. Otherwise (`t` is a `cmd` entry it applied) the engine **replays**: it reads the newest base with `board_seq < t` (`ReadBase`); loads its board and membership; re-classifies and re-applies the log from that base's seq + 1 to `s`, treating every target in `M_s.skips` as skipped; rewrites the hash records of every aligned seq from `t` to `s` (`AppendHashes`, the newer record winning, §7.5); writes again every base it holds at a seq from `t` to `s − 1`, which holds the target's effects, with the replay's board and membership at that seq (`WriteBase`, which replaces it), so that a later replay from that base or a snapshot written from it holds no target; replaces its notice and refusal records from `t` on by those of the replay (§13.4, ENG-REF-004); writes a checkpoint; and rebases.
 4. When no base below `t` exists, the device cannot replay: §19.9.
 
 An own entry that is skipped gets a refusal record with `engine/skipped`. Reports in the registry for seqs `S ≥ t` that arrived in entries below `s` are dropped, since they describe the state before the Skip. A device that knows the Skip before its board reaches `s` (the Skip is committed to `M_K`: the crash-halt case of step 1, or both in one page) neither registers nor compares such a report when it arrives. This holds for the state hash a `beat` reports and for the hash of a `snap` record, on which the device then gives no verdict.
 
 - **ENG-SKIP-002** (engine) After accepting a Skip of an entry it had applied, the engine MUST rebuild its confirmed state by replay from a base below the target, with every skipped target excluded, so that its state equals that of a device that never applied the target.
-- **ENG-SKIP-003** (engine) After a Skip replay, the engine MUST replace its state hashes for every aligned seq from the target to the Skip's seq and MUST stop comparing earlier reports for those seqs.
+- **ENG-SKIP-003** (engine) After a Skip replay, the engine MUST replace its state hashes for every aligned seq from the target to the Skip's seq and every base it holds at a seq from the target on, and MUST stop comparing earlier reports for those seqs.
 - **ENG-SKIP-005** (engine) Once a Skip at `s` of the target `t` is committed to `M_K`, the engine MUST NOT compare, or raise an alarm from, a state report or a snapshot hash for a seq at or above `t` that arrived in an entry below `s`.
 
 ### 17.4 The Skip floor (ruling S15)

@@ -466,7 +466,7 @@ A `Persist { id, ops }` (`engine.md` §7.11) is executed on the sync thread, op 
 | `SetMarker(m)` | replace `marker.tdk` |
 | `ClearMarker` | remove `marker.tdk` (nothing when absent) |
 | `WriteCheckpoint(c)` | replace `checkpoint.tdk`; then, if `bootstrap.tdk` exists, remove it, and then `genesis.tdb` when it exists |
-| `WriteBase(c)` | create `base-<c.board_seq>.tdk` |
+| `WriteBase(c)` | create `base-<c.board_seq>.tdk`, or replace it when it exists (`engine.md` §17.3) |
 | `DeleteBases(seqs)` | remove each `base-<seq>.tdk` |
 | `TruncateLogBelow(s, c)` | replace `device.tdk` with `log_floor = s` and `floor_chain = c`, the field absent when `c` is `None` (§16); then remove every segment whose last seq is below `s` |
 | `AppendHashes(records)` | append to `hashes.tdk` |
