@@ -139,6 +139,10 @@ classify() {
     # relay too: the relay's suite takes seal's published vectors.
     case "$p" in relay/* | docs/sync/vectors/*) mark relay ;; esac
     case "$p" in crates/taskdeck-device/* | tests/e2e/*) mark device ;; esac
+    # The device crate's test target `e2e` has its source under tests/e2e
+    # (crates/taskdeck-device/Cargo.toml, `[[test]] path`): every area a change
+    # under crates/taskdeck-device marks (scripts/ci/reads.sh).
+    case "$p" in tests/e2e/*) mark foundation; mark recovery ;; esac
     # The device too, and the engine it links: the recovery tool's online steps
     # link the device runtime (device.md §15.8).
     case "$p" in
