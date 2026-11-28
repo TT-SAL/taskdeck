@@ -73,17 +73,24 @@ end; what it finds comes back to this stage before the exit review.
 ## For the lead, when the stage goes on
 
 **Where things stand (2026-11-28):** everything the stage built is on day-planner: the spec
-change TT-SAL/taskdeck#38 and the engine's pull request "(stage in progress, not the exit)" that
-carries this file, merged with CI green on the three systems (its checks hold the gate's run: the
-1,000 seeds from the id of its merge commit, ENG-SIM-004). At that pull request: every unit test,
-`regressions` (26 files), `relay_conformance` (16), clippy and the wasm check pass;
-`spec-coverage engine` 244 of 244; `unimplemented!()` 0. Open: E2, and the lows below.
+change TT-SAL/taskdeck#38 and the engine's pull request TT-SAL/taskdeck#39 "(stage in progress, not
+the exit)", which carries this file. **The gate of §6.5 does not pass yet.** The first CI set of
+TT-SAL/taskdeck#39 (1,000 seeds from base 3996381313176633817) had 4 failing seeds: one was an
+engine fault, fixed (3996381313176634013); three are open (below). The owner decided on
+2026-11-28 that the pull request merges without the 1,000-seed CI step: `crates/taskdeck-sync/ci.sh`
+does not run it until it passes, and `gate.sh engine` runs it at the exit. CI ran the unit tests,
+the regression files and the simulator's default 50 seeds on the three systems. At the merge: 250
+unit tests, `regressions` (27 files), `relay_conformance` (16), clippy and the wasm checks pass;
+`spec-coverage engine` 244 of 244; `unimplemented!()` 0. Open: E2, the three seeds, the lows.
 
 **Left to do, in order:**
 1. What the device session brought back (its status file, and "Changes by the device session"
    below): engine faults fixed by the lead, each with a test that failed before; spec changes in
    pull requests of their own (plan §3.3).
-2. E2, if the owner wants it before the exit (see "Open, and lows").
+2. The gate: the three open seeds (and E2, if the owner wants it before the exit; see "Open, and
+   lows"), each diagnosed first (engine fault: the lead fixes it, the seed becomes a regression
+   file; the simulator's: an agent task); then the 1,000-seed step goes back into
+   `crates/taskdeck-sync/ci.sh` (its command is in that file's header) once a run passes.
 3. Task E (agents): `engine-scenarios.json` and `engine-traces.json`.
 4. `bash scripts/gate.sh engine` in the lead's own run.
 5. The one round of checks: spec ×2 (sections 4–17; 18–30 with plan §6.5, one also reading this
@@ -123,7 +130,7 @@ None yet. The device session notes here each pull request of its own that change
   change sequenced between A's sealed `Fence` and its `admin:fence` (`serve_until_admin`). The
   owner decided on 2026-11-28 to leave it open.
 - **Three seeds of the engine pull request's first CI set (base 3996381313176633817, the merge
-  commit 3775ffa), not yet diagnosed; the owner is asked how to go on:**
+  commit 3775ffa), not yet diagnosed; open until the exit (the owner's decision of 2026-11-28):**
   `gate` 3996381313176633862 (fork: device 1 raises `relay_behind` at a welcome showing 250 and stays
   `Reconciling` to the end, no stop, no read; invariants 3 and 6); 3996381313176634032 (rollback and
   withholding: the check says a restore tail could have brought back seq 61 and its device sent none
