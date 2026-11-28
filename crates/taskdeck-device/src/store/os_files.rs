@@ -6,8 +6,8 @@
 //!   `sync_all` is called on it; on Windows it does nothing, because the
 //!   write-through rename is durable on its own.
 //! - `rename`: on Windows `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING |
-//!   MOVEFILE_WRITE_THROUGH` (`platform_windows`, the one `unsafe` call of
-//!   the store); elsewhere `std::fs::rename`, which replaces atomically.
+//!   MOVEFILE_WRITE_THROUGH` (`crate::platform::windows`, the one module
+//!   where DEV-GEN-001 allows `unsafe`); elsewhere `std::fs::rename`, which replaces atomically.
 //! - `create_dir` creates the directory and any missing parent; an existing
 //!   directory is no error.
 
@@ -40,7 +40,7 @@ impl FileLayer for OsFiles {
     fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
         #[cfg(windows)]
         {
-            platform_windows::replace(from, to)
+            crate::platform::windows::replace(from, to)
         }
         #[cfg(not(windows))]
         {
@@ -83,33 +83,5 @@ impl FileLayer for OsFiles {
 
     fn exists(&self, path: &Path) -> bool {
         path.exists()
-    }
-}
-
-/// The Windows replace step (device.md §7.1; DEV-GEN-001 allows `unsafe` in
-/// the Windows platform code alone).
-#[cfg(windows)]
-#[allow(unsafe_code)]
-mod platform_windows {
-    use std::os::windows::ffi::OsStrExt as _;
-    use std::path::Path;
-
-    use windows::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW};
-    use windows::core::PCWSTR;
-
-    fn wide(p: &Path) -> Vec<u16> {
-        p.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
-    }
-
-    /// `MoveFileExW(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`.
-    pub(super) fn replace(from: &Path, to: &Path) -> std::io::Result<()> {
-        let f = wide(from);
-        let t = wide(to);
-        // SAFETY: both pointers name NUL-terminated UTF-16 buffers that live
-        // until the call returns; the call reads them and keeps neither.
-        let r = unsafe {
-            MoveFileExW(PCWSTR(f.as_ptr()), PCWSTR(t.as_ptr()), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
-        };
-        r.map_err(|e| std::io::Error::from_raw_os_error(e.code().0 & 0xFFFF))
     }
 }

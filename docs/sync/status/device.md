@@ -99,13 +99,21 @@ findings go to `docs/sync/status/device/fit.md` as they are met.
 ## Where the parts did not fit
 
 The full list, with evidence, is `docs/sync/status/device/fit.md` (written by the agents as they
-meet each case, then judged by the lead here). None yet.
+meet each case, then judged by the lead here). W1a found 31 (h-1 to h-3, f1-1 to f1-15, f2-1 to
+f2-13); their judgement and the spec change for them come with workflow W1a-spec. The ones that
+weigh most: f1-5 (a genesis snapshot of a non-empty board is circular as the spec stands: its body
+needs the frame that names its hash; only an empty board can be created today), f1-3 (seal has no
+opener for one own frame outside `classify`), f1-1 and f1-2 (seal's `Membership` and `Receipt` give
+the engine's adapter less than the traits need, so the adapter parses the §13.2 bytes itself), f2-12
+(`KeyLost` cannot show the old device's name), h-1 (the standby's origin must name a port that port 0
+only learns after the start).
 
 ## Token ledger
 
 | Workflow | Agents | Report | Transcripts | Booked | Running total |
 |---|---|---|---|---|---|
 | W1a, first launch (wf_90de5f43-084), stopped at once by the lead to move H to `sonnet` (the owner's message) | 2 | — | 0.17 M | 0.17 M | 0.17 M |
+| W1a (wf_94e3dd4d-937): H 0.18 M (sonnet), F1 0.46 M, F2 0.44 M | 3 | 0.89 M | 1.09 M | 1.09 M | 1.26 M |
 
 Each agent costs about 83,000 tokens of cache writes before it does anything (its system prompt and
 tool definitions), so the stage uses few, larger agents.
@@ -114,11 +122,23 @@ tool definitions), so the stage uses few, larger agents.
 
 | Run | Workflow | State | Result |
 |---|---|---|---|
+| wf_90de5f43-084 | W1a, first launch | stopped by the lead at once | nothing kept (H moved to `sonnet`) |
+| wf_94e3dd4d-937 | W1a: H ∥ (F1 → F2), briefs `h-harness.md`, `f1-adapters.md`, `f2-store.md` | done, integrated (43 min, 201 tool uses) | H: the harness (`tests/e2e/harness/`: `Standby`, `Ctl` with typed helpers, Node 22 lookup), the standby smoke test and seven tests of the harness against a Node stand-in device, `tests/e2e/ci.sh`. F1: `CoreMachine`, `SealSealer`, `SealMembership` (`src/adapt/`), the engine in process on them from genesis through an edit, a restart and a second edit, 33 tests. F2: the sealed store (`src/store/`: file layer, data folder and lock, the §6.4 encodings, record JSON, `IdentityStore` with `persist`, `read_log`, `read_base`, `open` with torn and bad tails), `FileKeyStore` and `MemoryKeyStore`, 17 tests and F1's flow from disk. 31 findings (`fit.md` h-1 to h-3, f1-1 to f1-15, f2-1 to f2-13) |
+
+**The lead's gate run of W1a** (2026-11-28): `scripts/ci/stage.sh device` (51 unit tests; the e2e
+target's 8; clippy) and the `test-trust` build (53 tests, clippy) pass; `Cargo.lock` and every path
+outside `device`'s are unchanged; no ignored test, no print outside tests; `unimplemented!()` 135 of
+the skeleton's 161 left, all in facade methods no task has built. **One defect, fixed by the lead:**
+DEV-GEN-001 allows `unsafe` only in the module `platform::windows`; F2 had put the Windows
+`MoveFileExW` call in `store/os_files.rs`'s module `platform_windows`. Moved, unchanged, to
+`src/platform.rs` (`crate::platform::windows`); its `// SAFETY:` comment was there. The Windows CI
+job is its compile check (no Windows target in the container).
 
 ## Pull requests
 
 | Pull request | What | On day-planner |
 |---|---|---|
+| TT-SAL/taskdeck#41 | W1a: adapters, store, harness | (waiting for CI) |
 
 ## Gate
 

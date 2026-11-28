@@ -67,6 +67,7 @@ const _: () = {
     let _ = security_framework::passwords::get_generic_password;
 };
 
+mod platform;
 pub mod recovery_online;
 pub mod store;
 
