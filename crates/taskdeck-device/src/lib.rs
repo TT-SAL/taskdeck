@@ -67,9 +67,18 @@ const _: () = {
     let _ = security_framework::passwords::get_generic_password;
 };
 
+mod create;
+/// `taskdeck-devicectl`'s protocol (device.md §19); test-only.
+#[cfg(feature = "test-trust")]
+#[doc(hidden)]
+pub mod ctl;
+mod net;
+mod pairing;
 mod platform;
 pub mod recovery_online;
+mod runtime;
 pub mod store;
+mod strict_json;
 
 // ---------- opening (§5, §17.2)
 
@@ -80,7 +89,26 @@ pub struct Device {
 }
 
 /// What a `Device` shares between its clones (device.md §4.5).
-struct Inner {}
+pub(crate) struct Inner {
+    pub(crate) shared: std::sync::Arc<runtime::Shared>,
+    /// The sync thread's channel; `None` once shut down.
+    pub(crate) tx: std::sync::Mutex<Option<std::sync::mpsc::Sender<runtime::Msg>>>,
+    sync: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+    pub(crate) net: std::sync::Arc<runtime::Net>,
+    pub(crate) clock: runtime::Clock,
+    /// devicectl's `linux` counts as a desktop (device.md §19.1).
+    pub(crate) desktop: bool,
+    android_api: Option<u32>,
+    /// The canonical data folder held in this process (DEV-THREAD-009).
+    folder: std::path::PathBuf,
+}
+
+/// The data folders open in this process (DEV-THREAD-009).
+static OPEN_FOLDERS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+fn derr(code: &'static str) -> DeviceError {
+    DeviceError { code, status: None, message: None }
+}
 
 /// The platform the facade runs on (device.md §17.2).
 pub enum Platform {
@@ -175,19 +203,196 @@ pub struct DeviceError {
 }
 
 impl Device {
-    /// Opens a data folder (device.md §17.2).
+    /// Opens a data folder (device.md §17.2, §5.4): the lock, the cloud
+    /// check, the folder read; the sync thread started with the engine's
+    /// `Start` in synced mode, or with nothing in local-only and `KeyLost`
+    /// mode (the local-only board itself is not built yet).
     pub fn open(options: OpenOptions) -> Result<(Device, OpenReport), DeviceError> {
-        unimplemented!()
+        #[cfg(feature = "test-trust")]
+        std::hint::black_box(TEST_TRUST_MARKER);
+        let OpenOptions { data_dir, platform, key_store, zone, trust: _, build_id, default_device_name, .. } = options;
+        #[cfg(feature = "test-trust")]
+        let (test_clock, test_files) = (options.clock, options.files);
+        let (desktop, android_api) = match platform {
+            Platform::Android { api } => (false, Some(api)),
+            _ => (true, None),
+        };
+        let lock = store::take_lock(&data_dir);
+        let folder = std::fs::canonicalize(&data_dir).unwrap_or_else(|_| data_dir.clone());
+        {
+            let mut open = OPEN_FOLDERS.lock().map_err(|_| derr("device/folder_in_use"))?;
+            if open.contains(&folder) {
+                return Err(derr("device/folder_in_use"));
+            }
+            open.push(folder.clone());
+        }
+        let release = |f: &std::path::Path| {
+            if let Ok(mut open) = OPEN_FOLDERS.lock() {
+                open.retain(|x| x != f);
+            }
+        };
+        let cloud = desktop && store::is_cloud_folder(&data_dir);
+        #[cfg(feature = "test-trust")]
+        let files: std::sync::Arc<dyn FileLayer> = test_files.unwrap_or_else(|| std::sync::Arc::new(OsFiles));
+        #[cfg(not(feature = "test-trust"))]
+        let files: std::sync::Arc<dyn FileLayer> = std::sync::Arc::new(OsFiles);
+        #[cfg(feature = "test-trust")]
+        let clock = runtime::Clock::new(test_clock);
+        #[cfg(not(feature = "test-trust"))]
+        let clock = runtime::Clock::new();
+        let state = match store::open_folder(files.clone(), &data_dir, &lock, cloud, &*key_store, &build_id, clock.wall_ms()) {
+            Ok(s) => s,
+            Err(e) => {
+                release(&folder);
+                return Err(e);
+            }
+        };
+        let mut warnings = Vec::new();
+        let (mode, opened, identity) = match state {
+            store::FolderState::LocalOnly { pending_create } => {
+                if pending_create {
+                    warnings.push(OpenWarning::PendingCreate);
+                }
+                (Mode::LocalOnly, None, None)
+            }
+            store::FolderState::KeyLost { descriptor, .. } => {
+                let info = IdentityInfo {
+                    board_id: descriptor.board_id,
+                    dev: descriptor.dev,
+                    device_name: String::new(),
+                    relay_address: None,
+                    key_fp: None,
+                };
+                (Mode::KeyLost, None, Some(info))
+            }
+            store::FolderState::Synced(o) => {
+                warnings.extend(o.warnings.iter().cloned());
+                let relay = o.loaded.meta.as_ref().map(|m| m.relay.clone()).or_else(|| match &o.loaded.bootstrap {
+                    Some(taskdeck_sync::Bootstrap::Genesis { relay, .. } | taskdeck_sync::Bootstrap::Join { relay, .. }) => {
+                        Some(relay.clone())
+                    }
+                    None => None,
+                });
+                let d = store::read_store_descriptor(&*files, o.store.dir());
+                let (board_id, dev) = d.map(|d| (d.board_id, d.dev)).unwrap_or(([0; 16], [0; 16]));
+                let info = IdentityInfo {
+                    board_id,
+                    dev,
+                    device_name: o.store.settings().device_name.clone(),
+                    relay_address: relay.map(|r| net::wire::address_text(&r.host, &board_id, &r.door)),
+                    key_fp: None,
+                };
+                (Mode::Synced, Some(o), Some(info))
+            }
+        };
+        if let Some(w) = lock.warning() {
+            warnings.push(w);
+        }
+        let zone = match zone {
+            ZoneSource::System => runtime::DeviceZone::Local(taskdeck_core::time::ChronoZone(chrono::Local)),
+            ZoneSource::Table(t) => runtime::DeviceZone::Table(t),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let net = std::sync::Arc::new(runtime::Net::new(tx.clone(), clock.clone()));
+        let shared = std::sync::Arc::new(runtime::Shared {
+            published: std::sync::Mutex::new(std::sync::Arc::new(Published::empty(mode))),
+            changes: std::sync::Mutex::new(Changes::default()),
+            changed: std::sync::Condvar::new(),
+        });
+        let identities = store::identities(&*files, &data_dir);
+        let start = runtime::Start {
+            shared: shared.clone(),
+            rx,
+            net: net.clone(),
+            clock: clock.clone(),
+            files,
+            data_dir,
+            key_store,
+            build_id,
+            zone,
+            default_name: default_device_name,
+            opened,
+            mode,
+            identities,
+            lock,
+            cloud,
+        };
+        let (init_tx, init_rx) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new().name("taskdeck-sync".into()).spawn(move || match runtime::Runtime::new(start) {
+            Ok(rt) => {
+                let _ = init_tx.send(Ok(()));
+                rt.run();
+            }
+            Err(e) => {
+                let _ = init_tx.send(Err(e));
+            }
+        });
+        let join = match spawned {
+            Ok(j) => j,
+            Err(_) => {
+                release(&folder);
+                return Err(derr("device/write_failed"));
+            }
+        };
+        match init_rx.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                let _ = join.join();
+                net.stop();
+                release(&folder);
+                return Err(e);
+            }
+            Err(_) => {
+                let _ = join.join();
+                net.stop();
+                release(&folder);
+                return Err(derr("device/store_corrupt"));
+            }
+        }
+        let inner = Inner {
+            shared,
+            tx: std::sync::Mutex::new(Some(tx)),
+            sync: std::sync::Mutex::new(Some(join)),
+            net,
+            clock,
+            desktop,
+            android_api,
+            folder,
+        };
+        let device = Device { inner: std::sync::Arc::new(inner) };
+        Ok((device, OpenReport { mode, warnings, import: None, identity }))
     }
 
     /// The current mode (device.md §17.2).
     pub fn mode(&self) -> Mode {
-        unimplemented!()
+        self.inner.shared.view().mode
     }
 
-    /// Stops the runtime (device.md §17.2).
+    /// Stops the runtime (device.md §17.2): the engine's `Shutdown` until
+    /// `ReadyToExit`, then every thread joined (DEV-THREAD-003).
     pub fn shutdown(&self) -> Result<(), DeviceError> {
-        unimplemented!()
+        let r = runtime::ask(&self.inner.tx, |reply| runtime::Call::Shutdown { reply })?;
+        if let Ok(mut g) = self.inner.tx.lock() {
+            *g = None;
+        }
+        let join = self.inner.sync.lock().ok().and_then(|mut g| g.take());
+        if let Some(j) = join {
+            let _ = j.join();
+        }
+        self.inner.net.stop();
+        if let Ok(mut open) = OPEN_FOLDERS.lock() {
+            open.retain(|x| *x != self.inner.folder);
+        }
+        r
+    }
+
+    /// The pairing calls are offered on desktops and from Android API 30
+    /// (DEV-FACADE-007).
+    fn api30(&self) -> Result<(), DeviceError> {
+        match self.inner.android_api {
+            Some(api) if api < 30 => Err(derr("device/needs_api30")),
+            _ => Ok(()),
+        }
     }
 
     /// Removes an inactive identity (device.md §17.2).
@@ -209,19 +414,40 @@ impl Device {
 
     /// The change counters (device.md §17.3).
     pub fn changes(&self) -> Changes {
-        unimplemented!()
+        self.inner.shared.changes()
     }
 
-    /// Waits until `any` passes `since_any` or the timeout (device.md §17.3).
+    /// Waits until `any` passes `since_any` or the timeout, at most
+    /// 60,000 ms (device.md §17.3, DEV-NOTIFY-003).
     pub fn wait_for_change(&self, since_any: u64, timeout_ms: u32) -> Changes {
-        unimplemented!()
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(u64::from(timeout_ms.min(60_000)));
+        let shared = &self.inner.shared;
+        let mut g = match shared.changes.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        loop {
+            if g.any > since_any {
+                return *g;
+            }
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return *g;
+            }
+            g = match shared.changed.wait_timeout(g, left) {
+                Ok((g, _)) => g,
+                Err(p) => p.into_inner().0,
+            };
+        }
     }
 
     // ---------- intents (§17.4)
 
-    /// Submits an intent (device.md §17.4).
+    /// Submits an intent (device.md §17.4): compiled on the sync thread
+    /// against the pending view, enqueued in the same turn (DEV-FACADE-001),
+    /// answered after the engine's `Enqueued` (DEV-FACADE-002).
     pub fn submit(&self, intent: taskdeck_core::intent::Intent) -> Result<Submitted, DeviceError> {
-        unimplemented!()
+        runtime::ask(&self.inner.tx, |reply| runtime::Call::Submit { intent: Box::new(intent), hold: false, reply })?
     }
 
     /// Submits a named intent, held for coalescing (device.md §17.4).
@@ -234,21 +460,45 @@ impl Device {
         unimplemented!()
     }
 
-    /// Submits an intent given as JSON (device.md §17.4).
+    /// Submits an intent given as JSON (device.md §17.4): `parse_intent`
+    /// (`core.md` §12.2), then `submit`.
     pub fn submit_json(&self, text: &str) -> Result<Submitted, DeviceError> {
-        unimplemented!()
+        let intent = taskdeck_core::intent::parse_intent(text)
+            .map_err(|e| DeviceError { code: e.code, status: Some(e.status), message: Some(e.message) })?;
+        self.submit(intent)
     }
 
     // ---------- reads (§17.5)
 
-    /// The published view (device.md §17.5, §4.4).
+    /// The published view (device.md §17.5, §4.4, DEV-THREAD-006).
     pub fn view(&self) -> std::sync::Arc<Published> {
-        unimplemented!()
+        self.inner.shared.view()
     }
 
-    /// The device status (device.md §17.8).
+    /// The device status (device.md §17.8), from the published view. The
+    /// socket, the request budget, the weather, the picture and backups are
+    /// not built yet: they show as absent.
     pub fn status(&self) -> DeviceStatus {
-        unimplemented!()
+        let p = self.view();
+        DeviceStatus {
+            engine: p.status.clone(),
+            mode: p.mode,
+            relay_address: p.relay_address.clone(),
+            socket_open: false,
+            requests_today: 0,
+            weather_age_ms: None,
+            picture: PictureStatus::None,
+            backup: BackupStatus {
+                off_reason: None,
+                destinations: Vec::new(),
+                last_nightly_day: None,
+                last_segment: None,
+                alarms: Vec::new(),
+                pin_needed: None,
+            },
+            pairing: p.pairing.clone(),
+            device_name: p.device_name.clone(),
+        }
     }
 
     // ---------- notes (§17.6)
@@ -426,9 +676,10 @@ impl Device {
 
     // ---------- flows (§17.10, §18)
 
-    /// Begins creating a board (device.md §17.10, §18.1).
+    /// Begins creating a board (device.md §17.10, §18.1 steps 1 to 4).
     pub fn begin_create(&self, request: CreateRequest) -> Result<CreateFlow, DeviceError> {
-        unimplemented!()
+        let flow = create::begin(&self.inner, request)?;
+        Ok(CreateFlow { flow: Some(Box::new(flow)) })
     }
 
     /// Resumes a pending create (device.md §17.10, §18.1).
@@ -446,29 +697,41 @@ impl Device {
         unimplemented!()
     }
 
-    /// Starts pairing a new device (device.md §17.10, §18.3).
+    /// Starts pairing a new device (device.md §17.10, §18.3); returns once
+    /// the relay holds the ticket.
     pub fn pair_start(&self) -> Result<PairSheet, DeviceError> {
-        unimplemented!()
+        self.api30()?;
+        runtime::ask(&self.inner.tx, |reply| runtime::Call::Pair(pairing::PairCall::Start { reply }))?
     }
 
-    /// Confirms the pairing (device.md §17.10, §18.3).
+    /// Confirms the pairing: the user saw the new device accept the digits
+    /// (device.md §17.10, §18.3; `UserConfirmed` only here, SEAL-PAIR-008).
     pub fn pair_confirm(&self) -> Result<(), DeviceError> {
-        unimplemented!()
+        self.api30()?;
+        runtime::ask(&self.inner.tx, |reply| runtime::Call::Pair(pairing::PairCall::Confirm { reply }))?
     }
 
     /// Cancels the pairing (device.md §17.10, §18.3).
     pub fn pair_cancel(&self) -> Result<(), DeviceError> {
-        unimplemented!()
+        runtime::ask(&self.inner.tx, |reply| runtime::Call::Pair(pairing::PairCall::Cancel { reply }))?
     }
 
-    /// Joins a board (device.md §17.10, §18.3).
+    /// Joins a board (device.md §17.10, §18.3): the address (RELAY-ADDR-002)
+    /// and the code's check characters (SEAL-CODE-002, DEV-PAIR-003) are
+    /// checked before any request; progress shows in `status().pairing`.
     pub fn join(&self, address: &str, code: zeroize::Zeroizing<String>, device_name: &str) -> Result<(), DeviceError> {
-        unimplemented!()
+        let (host, board, door) = net::wire::parse_address(address).map_err(derr)?;
+        taskdeck_seal::pair::parse_code(&code).map_err(|e| derr(e.code()))?;
+        let name = device_name.to_string();
+        runtime::ask(&self.inner.tx, |reply| {
+            runtime::Call::Pair(pairing::PairCall::Join { host, board, door, code, name, reply })
+        })?
     }
 
     /// Enters the SAS digits while joining (device.md §17.10, §18.3).
     pub fn join_sas(&self, digits: &str) -> Result<(), DeviceError> {
-        unimplemented!()
+        let digits = zeroize::Zeroizing::new(digits.to_string());
+        runtime::ask(&self.inner.tx, |reply| runtime::Call::Pair(pairing::PairCall::Sas { digits, reply }))?
     }
 
     /// Pairs this device again (device.md §17.10, §18.4).
@@ -589,6 +852,7 @@ pub struct ImportCheck {
 // ---------- change counters, results, views (§17.3 to §17.8)
 
 /// The change counters (device.md §17.3).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Changes {
     pub any: u64,
     pub view: u64,
@@ -612,17 +876,49 @@ pub struct Submitted {
 }
 
 /// A published view (device.md §4.4, §17.5).
-pub struct Published {}
+pub struct Published {
+    pub(crate) board: std::sync::Arc<taskdeck_core::board::BoardData>,
+    pub(crate) version: u64,
+    pub(crate) status: Option<taskdeck_sync::Status>,
+    pub(crate) mode: Mode,
+    /// The confirmed board's canonical bytes and its state hash with the
+    /// current membership (hash version 1), in synced mode.
+    pub(crate) confirmed: Option<(Vec<u8>, [u8; 32])>,
+    pub(crate) pairing: PairState,
+    pub(crate) relay_address: Option<String>,
+    pub(crate) device_name: String,
+    pub(crate) identities: Vec<StoredIdentity>,
+}
 
 impl Published {
-    /// The board (device.md §17.5).
+    pub(crate) fn empty(mode: Mode) -> Published {
+        Published {
+            board: std::sync::Arc::new(taskdeck_core::board::BoardData::empty()),
+            version: 0,
+            status: None,
+            mode,
+            confirmed: None,
+            pairing: PairState::Idle,
+            relay_address: None,
+            device_name: String::new(),
+            identities: Vec::new(),
+        }
+    }
+
+    /// The confirmed board's canonical bytes and the state hash of it and
+    /// the current membership, in synced mode (devicectl's `board`, §19.2).
+    pub fn confirmed_state(&self) -> Option<(&[u8], [u8; 32])> {
+        self.confirmed.as_ref().map(|(b, h)| (&b[..], *h))
+    }
+
+    /// The board (device.md §17.5): the engine's pending view.
     pub fn board(&self) -> &taskdeck_core::board::BoardData {
-        unimplemented!()
+        &self.board
     }
 
     /// The view's version (device.md §17.5).
     pub fn version(&self) -> u64 {
-        unimplemented!()
+        self.version
     }
 
     /// The zone the view was built with (device.md §17.5).
@@ -851,13 +1147,26 @@ pub struct CreateRequest {
 }
 
 /// A board being created; holds the seed, keys and genesis (device.md §18.1).
+/// Every secret inside erases itself on drop (DEV-SHEET-001).
 #[derive(zeroize::ZeroizeOnDrop)]
-pub struct CreateFlow {}
+pub struct CreateFlow {
+    #[zeroize(skip)]
+    flow: Option<Box<create::Flow>>,
+}
 
 impl CreateFlow {
     /// The recovery sheet (device.md §18.1).
     pub fn sheet(&self) -> SheetData {
-        unimplemented!()
+        match &self.flow {
+            Some(f) => f.sheet(),
+            None => SheetData {
+                seed_groups: zeroize::Zeroizing::new(String::new()),
+                relay_address: String::new(),
+                recovery_fp: String::new(),
+                release_fp: String::new(),
+                date: chrono::NaiveDate::default(),
+            },
+        }
     }
 
     /// The import report of the source (device.md §18.1, §18.2).
@@ -865,14 +1174,16 @@ impl CreateFlow {
         unimplemented!()
     }
 
-    /// Checks the typed sheet (device.md §18.1).
+    /// Checks the typed sheet (device.md §18.1 step 6).
     pub fn confirm_sheet(&mut self, typed: &str) -> Result<(), DeviceError> {
-        unimplemented!()
+        self.flow.as_mut().ok_or_else(|| derr("device/closed"))?.confirm_sheet(typed)
     }
 
-    /// Creates the board (device.md §18.1).
-    pub fn finish(self) -> Result<CreatedBoard, DeviceError> {
-        unimplemented!()
+    /// Creates the board (device.md §18.1 steps 7 to 10); the facade then
+    /// runs in synced mode.
+    pub fn finish(mut self) -> Result<CreatedBoard, DeviceError> {
+        let f = self.flow.take().ok_or_else(|| derr("device/closed"))?;
+        f.finish()
     }
 }
 
@@ -918,6 +1229,7 @@ pub struct PairSheet {
 }
 
 /// The state of a pairing (device.md §18.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PairState {
     Idle,
     ShowingCode,

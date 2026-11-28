@@ -22,6 +22,7 @@ workspace member of its own, no dependency of its own.
 | `harness/ctl.rs` | `Ctl`: a `taskdeck-devicectl` process driven by the protocol of §19.2, with typed helpers |
 | `harness/http.rs` | `http_get`, `http_request`: a minimal client over `TcpStream` (the base of the hostile proxy) |
 | `harness/node.rs` | `find_node`: Node 22 or later (`TD_NODE`, then `PATH`, then the runner's tool cache) |
+| `first_sync.rs` | the milestone "device: first sync": `one_device_round_trip` and `first_sync` (two devices pair, edit both ways, restart) |
 | `smoke.rs` | tests of the harness itself: the standby alone, and `Ctl` against a stand-in |
 | `stand_in_device.mjs` | the stand-in device of `smoke.rs` (a few commands of the protocol; not a model of the device) |
 | `ci.sh` | the CI entry |
@@ -100,5 +101,8 @@ fn one_device_round_trip() {
   Anything that has to wait for real time (a poll interval of the standby's polling) waits through `wait_until`
   with a timeout, never with `sleep`.
 
-The first scenarios (one device round trip, then the first sync) are written by tasks F3 and F4 with these
-helpers; the fifteen of §20.2 follow.
+The first scenarios (one device round trip, then the first sync) are in `first_sync.rs`; the fifteen of
+§20.2 follow. The standby runs on the real clock and `--clock manual` starts at 2026-01-05, which the
+engine's clock guard refuses (more than an hour of skew): `first_sync.rs` sets each device's clock to the
+real time right after it starts (`clock set_ms`, which moves the wall clock only), and again after a
+restart (finding f3-1).

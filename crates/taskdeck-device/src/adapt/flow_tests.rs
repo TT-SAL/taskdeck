@@ -192,6 +192,7 @@ impl Disk {
             settings,
             bootstrap,
             genesis_blob: None,
+            history: &[],
         };
         let store = dstore::create_identity(files.clone(), &data, &*keys, &l_d, new).expect("created");
         dstore::activate(&*files, &data, &board, &dev).expect("activated");

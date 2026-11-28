@@ -349,6 +349,50 @@ impl SealSealer {
         self.board.0
     }
 
+    /// A copy of this device's keys, for the transport's login and admin
+    /// signatures (device.md §10.3, §10.5); it zeroizes on drop.
+    pub(crate) fn device_keys(&self) -> Option<DeviceKeys> {
+        DeviceKeys::from_identity_bytes(&self.keys.to_identity_bytes()).ok()
+    }
+
+    /// The roots a pairing bundle carries (seal.md §17.8, engine.md
+    /// ENG-OPS-006): those of `epoch` and of `epoch − 1` when `epoch` is 2
+    /// or more, ascending, never a later root; only the ones this sealer
+    /// holds.
+    pub(crate) fn bundle_roots(&self, epoch: u32) -> Vec<(u32, EpochRoot)> {
+        let lo = if epoch >= 2 { epoch - 1 } else { epoch };
+        self.roots.range(lo..=epoch).map(|(e, r)| (*e, copy_root(r))).collect()
+    }
+
+    /// The identity bytes of a joining device (device.md §6.4.7, §18.3):
+    /// its keys and the bundle's roots, no pending root, no anchor. Each
+    /// root is checked against the commitment the snapshot's membership
+    /// records for its epoch before it is kept (SEAL-KEY-013); a root with
+    /// no commitment there or a mismatch is `seal/bundle_invalid`, bytes
+    /// that are not a membership `seal/membership_format`.
+    pub fn join_identity(
+        board_id: [u8; 16],
+        keys: &DeviceKeys,
+        roots: &[(u32, EpochRoot)],
+        membership: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, SealerError> {
+        let m = SealMembership::new(Membership::from_canonical_bytes(membership).map_err(se)?);
+        let board = BoardId(board_id);
+        if m.seal().board() != board {
+            return Err(code("seal/bundle_invalid"));
+        }
+        let bytes = keys.to_identity_bytes();
+        let own = DeviceKeys::from_identity_bytes(&bytes).map_err(se)?;
+        let mut s = SealSealer::blank(own, board)?;
+        for (e, r) in roots {
+            let ok = m.commitment(*e).is_some_and(|c| bool::from(r.commitment(&board, *e).ct_eq(&c)));
+            if !ok || s.roots.insert(*e, copy_root(r)).is_some() {
+                return Err(code("seal/bundle_invalid"));
+            }
+        }
+        Ok(s.export_identity())
+    }
+
     /// The history records this sealer holds, ascending by seq, each as
     /// `HistoryRecord::to_bytes` (device.md §6.4.8): every accepted control
     /// entry it classified, those it was opened with, and those of the
@@ -555,7 +599,7 @@ fn snap_of(s: &seal::SnapAnnounce) -> SnapInfo {
     }
 }
 
-fn snap_to_seal(s: &SnapInfo) -> seal::SnapAnnounce {
+pub(crate) fn snap_to_seal(s: &SnapInfo) -> seal::SnapAnnounce {
     seal::SnapAnnounce {
         seq: s.seq,
         hash: s.hash,

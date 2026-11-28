@@ -8,4 +8,5 @@
 #![forbid(unsafe_code)]
 
 mod harness;
+mod first_sync;
 mod smoke;

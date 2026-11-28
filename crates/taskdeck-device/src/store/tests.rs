@@ -383,6 +383,7 @@ impl Folder {
             settings: DeviceSettings::new("Desk"),
             bootstrap,
             genesis_blob: Some(b"sealed genesis"),
+            history: &[],
         };
         let store = create_identity(files.clone(), &data, &keys, &Zeroizing::new([0x1d; 32]), new).expect("created");
         assert_eq!(read_pending(&*files, &data).expect("reads"), Some((BOARD, DEV)));
@@ -598,7 +599,7 @@ fn record_json_is_canonical_and_strict() {
 #[test]
 fn settings_round_trip_with_defaults() {
     let s = DeviceSettings::new("Desk");
-    assert_eq!(s.to_bytes().expect("encodes"), br#"{"device_name":"Desk"}"#);
+    assert_eq!(&s.to_bytes().expect("encodes")[..], br#"{"device_name":"Desk"}"#);
     let mut s2 = s.clone();
     s2.log_floor = 100;
     s2.floor_chain = Some([0xab; 32]);
@@ -611,6 +612,25 @@ fn settings_round_trip_with_defaults() {
     assert!(DeviceSettings::from_bytes(br#"{"device_name":"Desk","log_floor":1}"#).is_err(), "a default written");
     assert!(DeviceSettings::from_bytes(br#"{"device_name":"Desk","colour":1}"#).is_err(), "an unknown field");
     assert!(DeviceSettings::from_bytes(br#"{"log_floor":2}"#).is_err(), "no name");
+}
+
+/// §16 `tokens` and §10.3: typed, ascending by host, `push` absent until
+/// learned, a token that is not ASCII refused; `Debug` shows no token
+/// (DEV-NET-005).
+#[test]
+fn settings_tokens_round_trip() {
+    let tok = |host: &str, push| super::RelayToken { host: host.into(), generation: 1, push, token: zeroize::Zeroizing::new(format!("TD1.{host}")) };
+    let mut s = DeviceSettings::new("Desk");
+    s.put_token(tok("relay.b", None));
+    s.put_token(tok("relay.a", Some(false)));
+    s.put_token(super::RelayToken { generation: 2, ..tok("relay.b", Some(true)) });
+    assert_eq!(s.tokens.iter().map(|t| (t.host.as_str(), t.generation)).collect::<Vec<_>>(), vec![("relay.a", 1), ("relay.b", 2)]);
+    let b = s.to_bytes().expect("encodes");
+    assert!(String::from_utf8_lossy(&b).contains(r#""tokens":[{"gen":1,"host":"relay.a","push":false,"token":"TD1.relay.a"}"#));
+    assert_eq!(DeviceSettings::from_bytes(&b).expect("decodes"), s);
+    assert!(!format!("{s:?}").contains("TD1."), "Debug prints no token");
+    assert!(DeviceSettings::from_bytes(br#"{"device_name":"D","tokens":[{"gen":1,"host":"a","token":"x y"}]}"#).is_err());
+    assert!(DeviceSettings::from_bytes(br#"{"device_name":"D","tokens":[]}"#).is_err(), "a default written");
 }
 
 // ---------------------------------------------------------------- persist and open
@@ -888,6 +908,76 @@ fn corrupt_files_at_open() {
     assert_eq!(f.open().err().map(|e| e.code), Some("device/store_corrupt"));
 }
 
+/// DEV-FILE-012 (finding f2-10): the records above the checkpoint must
+/// continue from `board_seq + 1`; a segment missing between them fails the
+/// open with `device/store_corrupt` naming kind 1.
+#[test]
+fn a_gap_above_the_checkpoint_fails_the_open_dev_file_012() {
+    let (f, mut store) = Folder::new(&genesis());
+    let ops = vec![
+        PersistOp::AppendLog(recs(1, 16_384)),
+        PersistOp::AppendLog(recs(16_385, 32_768)),
+        PersistOp::AppendLog(recs(32_769, 32_770)),
+        PersistOp::WriteCheckpoint(ckpt(10)),
+        PersistOp::WriteMeta(meta(1)),
+    ];
+    store.persist(&ops, &[]).expect("persisted");
+    drop(store);
+    assert!(f.open().is_ok(), "consecutive from the checkpoint");
+    let middle = f.dir().join(segment_name(16_385));
+    std::fs::rename(&middle, f.dir().join("aside")).expect("moved");
+    let e = f.open().err().expect("a gap above the checkpoint");
+    assert_eq!((e.code, e.message.as_deref()), ("device/store_corrupt", Some("kind 1")));
+}
+
+/// Finding f2-6, device.md §7.4: a write of the open itself (here the
+/// removal of a leftover `*.tmp`) that fails is `device/write_failed`.
+#[test]
+fn a_failed_write_at_open_is_write_failed() {
+    struct NoRemove(OsFiles);
+    impl FileLayer for NoRemove {
+        fn create_dir(&self, p: &Path) -> std::io::Result<()> {
+            self.0.create_dir(p)
+        }
+        fn write_new(&self, p: &Path, b: &[u8]) -> std::io::Result<()> {
+            self.0.write_new(p, b)
+        }
+        fn append(&self, p: &Path, b: &[u8]) -> std::io::Result<()> {
+            self.0.append(p, b)
+        }
+        fn sync(&self, p: &Path) -> std::io::Result<()> {
+            self.0.sync(p)
+        }
+        fn rename(&self, a: &Path, b: &Path) -> std::io::Result<()> {
+            self.0.rename(a, b)
+        }
+        fn remove(&self, _: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::other("refused"))
+        }
+        fn truncate(&self, p: &Path, n: u64) -> std::io::Result<()> {
+            self.0.truncate(p, n)
+        }
+        fn sync_dir(&self, p: &Path) -> std::io::Result<()> {
+            self.0.sync_dir(p)
+        }
+        fn read(&self, p: &Path) -> std::io::Result<Vec<u8>> {
+            self.0.read(p)
+        }
+        fn list(&self, p: &Path) -> std::io::Result<Vec<std::ffi::OsString>> {
+            self.0.list(p)
+        }
+        fn exists(&self, p: &Path) -> bool {
+            self.0.exists(p)
+        }
+    }
+    let (f, store) = Folder::new(&genesis());
+    drop(store);
+    std::fs::write(f.dir().join("meta.tdk.tmp"), b"left over").expect("writes");
+    let files: Arc<dyn FileLayer> = Arc::new(NoRemove(OsFiles));
+    let r = open_folder(files, &f.data, &f.lock, false, &f.keys, "build-1", NOW);
+    assert_eq!(r.err().map(|e| e.code), Some("device/write_failed"));
+}
+
 /// DEV-FILE-005: after a failed write every later write is refused until
 /// the next open.
 #[test]
@@ -944,6 +1034,7 @@ fn the_steps_of_5_4() {
         settings: DeviceSettings::new("Desk"),
         bootstrap: &genesis(),
         genesis_blob: None,
+        history: &[],
     };
     let wrong = Keys::default();
     let other_kind = NewIdentity { descriptor: StoreDescriptor { key_store: 4, ..new.descriptor }, ..new };
@@ -954,6 +1045,7 @@ fn the_steps_of_5_4() {
         settings: DeviceSettings::new("Desk"),
         bootstrap: &genesis(),
         genesis_blob: None,
+        history: &[],
     };
     drop(create_identity(files.clone(), &data, &keys, &Zeroizing::new([1; 32]), new).expect("created"));
     assert!(keys.load(&BOARD, &DEV).is_ok(), "the key first");
