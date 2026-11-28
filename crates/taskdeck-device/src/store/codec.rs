@@ -149,11 +149,9 @@ pub fn decode_log_page(bytes: &[u8]) -> Result<Vec<LogRecord>, DeviceError> {
     Ok(out)
 }
 
-/// The records of an `AppendLog` as page plaintexts: each of at most 256
-/// entries and at most 67,108,864 bytes (device.md §6.4.1), and none
-/// crossing a multiple of `room` entries counted from the start, where
-/// `room(i)` is how many entries the segment that would receive the `i`-th
-/// entry still takes (DEV-STORE-003).
+/// The records of an `AppendLog` cut into pages: each of at most 256
+/// entries and at most 67,108,864 plaintext bytes (device.md §6.4.1). The
+/// store cuts the records at a segment's boundary first (DEV-STORE-003).
 pub(crate) fn split_log(records: &[LogRecord]) -> Vec<&[LogRecord]> {
     let mut out = Vec::new();
     let mut start = 0;

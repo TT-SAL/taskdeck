@@ -121,3 +121,107 @@ Every case met while the real core, seal and relay are wired into the engine, or
 - Done here: the sealer keeps every record (from `open`, from each accepted control entry, from opened snapshots) and `history()` lists them for the store to write those above `history.tdk`'s last seq.
 - Proposed fix: none now; F2 may read `history.tdk` on demand instead if memory matters (at most 1,048,576 records).
 - Evidence: `adapt::seal_sealer::tests::an_own_rotation_is_pending_until_accepted` (history holds 1 and 2)
+
+## f2-1. The engine's records have no `serde`, so `record_json<T: Serialize>` cannot write them
+- Kind: misfit
+- Where: device.md §6.5, §25 `store::record_json`; engine.md §37 (`Registry`, `OutboxRecord`, `Meta` and their parts); `crates/taskdeck-device/src/store/rjson.rs`
+- Says / does: §6.5 maps the engine's Rust types to canonical JSON and §25 gives `record_json<T: serde::Serialize>`; none of `taskdeck_sync`'s record types implement `Serialize`, and the derive's output (`null` for `None`, externally tagged enums in Rust case) is not §6.5's mapping anyway.
+- Done here: the mapping is written out over `serde_json::Value` (trait `Rj`, one impl per type of §37, about 30), encoded and parsed with `taskdeck_core::canon`. `record_json`/`from_record_json` stay generic for the device's own records.
+- Proposed fix: device.md §25: name the three functions `registry_json`, `outbox_record_json`, `meta_json` (and their readers) instead of a generic `Serialize` bound; or engine derives behind a feature, with §6.5's attributes.
+- Evidence: `store::tests::record_json_is_canonical_and_strict`
+
+## f2-2. §6.5 maps `Option<T>` only as a named field
+- Kind: spec-unclear
+- Where: device.md §6.5 table, first row
+- Says / does: "a field of type `Option<T>` that is `None` is absent"; an `Option` in a tuple, a `Vec` or a tuple variant has no mapping. Today every `Option` of §37's records is a named field.
+- Done here: `rjson` maps `Option` only as a field (`Obj::o`, `Fields::o`); an `Option` elsewhere would not compile.
+- Proposed fix: §6.5: "`Option<T>` occurs only as a named field; a new record type that needs one elsewhere extends this table."
+- Evidence: `store::tests::record_json_is_canonical_and_strict`
+
+## f2-3. When a log segment is closed
+- Kind: spec-unclear
+- Where: device.md §6.1 last paragraph, DEV-STORE-003
+- Says / does: "a segment is closed when it holds 16,384 entries or 67,108,864 bytes"; silent on whether one `AppendLog` may cross the count, and on which bytes count.
+- Done here: an `AppendLog` is cut at the entry boundary, so a segment holds at most 16,384 entries; the bytes are the file's length, checked before each page record, so a segment may pass 67,108,864 bytes by one page record. `IdentityStore::append_log`.
+- Proposed fix: §6.1: "a page record never crosses a segment's 16,384th entry; a segment whose file has reached 67,108,864 bytes takes no further page."
+- Evidence: `store::tests::segments_roll_over_truncate_and_quarantine` (the second segment starts at 16,385)
+
+## f2-4. `device.tdk`'s fields that the store does not own
+- Kind: decision
+- Where: device.md §16 table; `store::settings::DeviceSettings`
+- Says / does: the record has 16 fields; the store reads `device_name`, `log_floor`, `floor_chain`, `minter`, `history_complete`; the rest (tokens, backup, look, requests, ...) are the transport's, the fetchers', the backups'.
+- Done here: those five are typed and checked; the others are carried verbatim in `DeviceSettings::other`, checked only by name and by the canonical parser (which refuses a field written at its default). The relay `tokens` are secrets held in plain `serde_json::Value`s, which nothing in the spec forbids (SEAL-FILE-004 names kind 7 only).
+- Proposed fix: none; the tasks that own them type them (F3 the tokens and `requests`, in `Zeroizing` for the token).
+- Evidence: `store::tests::settings_round_trip_with_defaults`
+
+## f2-5. The `FileLayer` has no lock, and the test key stores write outside it
+- Kind: spec-silent
+- Where: device.md §7.1 (DEV-FILE-001 "every file system call through its `FileLayer`"), §5.2, §12.6
+- Says / does: the lock is a held `File` with `try_lock`, which no `FileLayer` call gives; a key store keeps its own files (§12.5 says so for `AndroidKeyStore` only).
+- Done here: `store::take_lock` uses `std::fs` directly; `FileKeyStore` writes `<dir>/<board>-<dev>.testkey` with `std::fs` by the replace steps. Neither is a write boundary of `CrashFiles`.
+- Proposed fix: §7.1: "the lock file (§5.2) and the key stores' files (§12) are outside the `FileLayer`."
+- Evidence: `store::tests::a_second_open_of_a_locked_folder`, `keystore::tests::file_key_store_round_trips`
+
+## f2-6. No code for a failed store write
+- Kind: spec-silent
+- Where: device.md §7.3, §7.4, §21
+- Says / does: a failed write boundary of a `Persist` delivers `PersistFailed` (no code); a failed write at open (removing `*.tmp`, truncating a torn tail, renaming a quarantined file) has no code at all. `device/write_failed` is "a plain-file write failed".
+- Done here: both use `device/write_failed`; the persist error only feeds `PersistFailed`, the open error is returned by `IdentityStore::open`.
+- Proposed fix: §21: widen `device/write_failed` to "a write to the data folder failed", raised by `open` too.
+- Evidence: `store::tests::a_failed_write_stops_the_store`
+
+## f2-7. The quarantine stamp's zone, and how its age is read
+- Kind: spec-silent
+- Where: device.md §7.4 (`<name>.corrupt-<YYYYMMDD-HHMMSS>`), §7.5 (removed after 30 days "by the device clock")
+- Says / does: the zone of the stamp is not stated (§18.2's `pre-sync-` stamp is local time); nor whether the age is the stamp's or the file's modification time.
+- Done here: UTC of the device clock (`now_ms` passed to `open`), and the age is read from the stamp in the name (`identity_dir::stamp`, `stamp_ms`).
+- Proposed fix: §7.4: "the stamp is UTC of the device clock; §7.5 reads the age from it."
+- Evidence: `store::tests::corrupt_files_at_open` (a 2020 stamp removed, a recent one kept)
+
+## f2-8. Absent files at open other than `checkpoint.tdk` and `meta.tdk`
+- Kind: spec-silent
+- Where: device.md §7.4, the paragraph after the second table
+- Says / does: only the absence of `checkpoint.tdk` and `meta.tdk` is ruled.
+- Done here: `device.tdk` and `identity.tdk` absent are `device/store_corrupt` (both are written at creation); `bootstrap.tdk` absent with no checkpoint is `device/store_corrupt` (kind 17); an absent append file (`hashes.tdk`, `outbox.tdo`, `notices.tdk`, `history.tdk`, any segment) is empty, since the append procedure creates it at its first record.
+- Proposed fix: §7.4: list those cases.
+- Evidence: `store::tests::every_persist_op_through_disk_and_back` (the first reopen has no append file)
+
+## f2-9. A `bootstrap.tdk` left beside a checkpoint
+- Kind: decision
+- Where: device.md §7.3 `WriteCheckpoint` ("then, if `bootstrap.tdk` exists, remove it"), §7.4 order (bootstrap before checkpoint)
+- Says / does: a crash between the checkpoint's rename and the bootstrap's remove leaves both; §7.4 does not say which wins or whether to finish the remove.
+- Done here: when `checkpoint.tdk` exists, `bootstrap.tdk` is not read (`Loaded.bootstrap` absent, a damaged one not reported) and is removed by the next `WriteCheckpoint`; no removal at open, so DEV-FILE-011 holds.
+- Proposed fix: §7.4: "`bootstrap.tdk` is read only when there is no checkpoint."
+- Evidence: `store::tests::every_persist_op_through_disk_and_back`
+
+## f2-10. A gap in the log above the checkpoint
+- Kind: spec-silent
+- Where: device.md §7.4, DEV-STORE-006
+- Says / does: DEV-STORE-006 binds the writer; §7.4 does not say what a reader does with records above the checkpoint that are not consecutive from `board_seq + 1` (a removed or renamed segment).
+- Done here: such a tail is `device/store_corrupt` naming kind 1; below the checkpoint a gap (a quarantined segment) is allowed and those seqs are absent from `Loaded.chains`. Within a segment the pages must continue from the name's seq (else `record_format`).
+- Proposed fix: §7.4: "the records above the checkpoint's seq must be consecutive from `board_seq + 1`, else `device/store_corrupt`."
+- Evidence: `store::tests::segments_roll_over_truncate_and_quarantine`
+
+## f2-11. How the store finds the history records of §8.3
+- Kind: decision
+- Where: device.md §8.3 rows 1 and 2, DEV-RUN-003, DEV-RUN-006; `IdentityStore::persist(ops, history)`
+- Says / does: the store must write the history records of accepted control entries after an `AppendLog` and a snapshot's before the first `WriteCheckpoint`; it does not know which `Persist` follows a snapshot open.
+- Done here: `persist` takes the sealer adapter's `history()` (ascending). After an `AppendLog` it appends the records above `history.tdk`'s last seq and at or below the op's last seq; before every `WriteCheckpoint` those at or below its `board_seq`. A snapshot's records (all at or below `S`) thus go before the rejoin's checkpoint, and nothing is written twice.
+- Proposed fix: none.
+- Evidence: `store::tests::history_records_follow_the_log_and_the_checkpoint`; `adapt::flow_tests::genesis_edit_restart_edit_on_disk` (history.tdk equals the sealer's after the restart)
+
+## f2-12. `KeyLost` cannot show the old device's name
+- Kind: spec-wrong
+- Where: device.md §12.6 ("shows the old identity's board, `dev`, device name (from `store.tds` and the plaintext headers)"), §5.4 table row `KeyLost`
+- Says / does: `store.tds` (§6.2) holds board, `dev`, key store kind and `created_ms`; the sealed headers hold `dev` and `board_id`. The device name is only in `device.tdk`, sealed under `L_d`, which is lost.
+- Done here: `FolderState::KeyLost` carries the `StoreDescriptor` only.
+- Proposed fix: either drop "device name" from §12.6, or add a `device_name vb8` to `store.tds` (and its length to §6.2, §22).
+- Evidence: device.md §6.2 table
+
+## f2-13. `read_identity_dir` has no build id, clock or file layer
+- Kind: spec-unclear
+- Where: device.md §25 `store::read_identity_dir(dir, l_d) -> (Loaded, Vec<HistoryRecord>)`
+- Says / does: no caller is named; it cannot fill `Loaded.build_id`, has no device clock for the quarantine stamp and no `FileLayer`, and reading at open writes (tmp removal, tail truncation, quarantine).
+- Done here: implemented over `OsFiles` and `IdentityStore::open`, with the board and `dev` of the directory's `store.tds`, an empty `build_id` and the system clock; documented as writing what §7.4 writes.
+- Proposed fix: §25: name its caller, or replace it by `IdentityStore::open`.
+- Evidence: `crates/taskdeck-device/src/store.rs` `read_identity_dir`
