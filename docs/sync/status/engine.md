@@ -138,6 +138,9 @@ None yet. The device session notes here each pull request of its own that change
   frames: device 1's entries acknowledged at 288 to 292 are not in the reference log; invariant 2).
   Each is either an engine fault in the restore tail under a fork or rollback, or the check's
   (a simulator task).
+- **Met anyway, not diagnosed (open):** the push run of 1556c56 (1,000 seeds from base
+  1537633369139214929, the commit's own id) failed 3: `gate` 1537633369139215112,
+  1537633369139215286, 1537633369139215798 (the lead's run, release, 133 s, the same three).
 - Lows and questions for the round of checks (no seed fails for them today; details in the
   journal): a move ends every alarm (`mv_switch`); `RelayBehind` can end at a relay head above `L`
   without the chain at `L` (`gate` 5463, its first part); a `FollowAddress` whose candidate relay
