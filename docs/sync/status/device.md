@@ -162,7 +162,7 @@ job is its compile check (no Windows target in the container).
 | Pull request | What | On day-planner |
 |---|---|---|
 | TT-SAL/taskdeck#41 | W1a: adapters, store, harness | closed: its `changes` job failed (`reads.sh`: a change under `tests/e2e/` did not mark the areas a change to the crate marks); its work follows in a new pull request after #42 |
-| TT-SAL/taskdeck#42 | ci: `tests/e2e/*` marks every area a change to the device crate marks (foundation's paths, a pull request of its own; noted in `foundation.md`) | |
+| TT-SAL/taskdeck#42 | ci: `tests/e2e/*` marks every area a change to the device crate marks (foundation's paths, a pull request of its own; noted in `foundation.md`); CI green on every job, the engine's 50 seeds included | 4c14329 |
 
 ## Gate
 
