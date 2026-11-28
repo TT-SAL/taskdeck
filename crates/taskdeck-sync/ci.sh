@@ -8,8 +8,14 @@
 #      and with the feature `sim`: proof that it does no I/O (SYNC_PLAN.md
 #      §6.5); spec: ENG-GEN-002
 #
-# The simulator's 1,000 seeds and the regression files (the gate of
-# scripts/gates/engine.gate) are added here when the simulator lands.
+# The regression files and the simulator's default 50 seeds run in the
+# `cargo test -p taskdeck-sync` of stage.sh step 3. The simulator at 1,000
+# seeds (the rows `simulator` and `ci-seeds` of scripts/gates/engine.gate,
+# `env SIM_SEEDS=1000 cargo test --locked -p taskdeck-sync --test simulator`;
+# `base` is TD_SIM_BASE when set, else the first 16 hex digits of the commit
+# id; spec: ENG-SIM-004) becomes a step here once it passes; until then
+# `bash scripts/gate.sh engine` runs it (the owner's decision of 2026-11-28,
+# docs/sync/status/engine.md).
 set -uo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)" || exit 2

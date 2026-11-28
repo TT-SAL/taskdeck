@@ -104,7 +104,12 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         // Step 5: contiguity.
         let mut entries: Vec<(u64, Vec<u8>)> = Vec::with_capacity(page.entries.len());
         let mut next = self.l + 1;
+        // From a relay fenced at `f`, nothing above `f` is taken, without evidence (ENG-RECV-007).
+        let fenced = self.fenced_at();
         for e in page.entries {
+            if fenced.is_some_and(|f| e.seq > f) {
+                break;
+            }
             if e.seq <= self.l {
                 // A repeated push: the frame must be the one the log holds.
                 if let (Some(prev), Some(own)) = (self.chain_at(e.seq.wrapping_sub(1)), self.chain_at(e.seq)) {
@@ -372,6 +377,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                             },
                         );
                     }
+                    // ENG-EVID-003: the evidence stop this raised persists nothing from the relay,
+                    // the entries before the cut included: they rest on a chain the relay has not
+                    // shown to be this device's (§21.2).
+                    out.clear();
                     break;
                 }
                 _ => {}
@@ -413,6 +422,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             dry.push((seq, c));
             m = entry.m.clone();
             out.push(entry);
+            if is_ctl && !stash.from_log && view.home_seq == seq && view.home_gen > self.meta.relay.home_gen && !self.following() {
+                // §12.3 step 5 (ENG-RECV-007): this `Fence` fences the relay the page came from;
+                // what that relay shows above it is not taken, and the cut is the next entry.
+                break;
+            }
             if halt.is_some() {
                 // §16.3: the dry run ends after the halting entry; nothing after it is evidence.
                 break;
@@ -515,8 +529,23 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let Some(flight) = self.pipe.flight.take() else { return };
         let Some(first) = flight.entries.first().map(|e| e.seq) else { return };
         let mut last = first;
+        let b = self.b;
+        self.pipe.skip_at.retain(|x| x.1 > b);
         for e in flight.entries {
             last = e.seq;
+            if e.class == Class::Accept
+                && let Some(o) = e.opened.as_ref()
+            {
+                // An accepted Skip: what is reported below it for its target's seq or a later one
+                // is the state before the Skip (§17.3).
+                for item in &o.items {
+                    if let crate::CtlItem::Skip { seq: t, .. } = item
+                        && !self.pipe.skip_at.contains(&(*t, e.seq))
+                    {
+                        self.pipe.skip_at.push((*t, e.seq));
+                    }
+                }
+            }
             if !flight.from_log || e.seq > self.l {
                 self.push_chain(e.seq, e.chain, e.tau);
                 self.l = e.seq;
@@ -534,6 +563,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.pipe.pages_since_rebase += 1;
         }
         self.after_commit();
+        // What the commit recorded (the alarm of a `Skip`-class frame, the membership's effects)
+        // is written before the board applies these entries: a checkpoint above them never
+        // becomes durable without it, and below a checkpoint nothing is classified again.
+        self.flush_meta();
     }
 
     /// What one classified entry does when its membership is committed: alarms of

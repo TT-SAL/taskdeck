@@ -230,9 +230,11 @@ fn nothing_from_the_first_bad_entry_of_a_page_on_is_persisted() {
     n.s.plan(&f2, p);
     let f3 = other_frame(&mut n, 3, 8);
     n.page(11, &[f1, f2, f3]);
-    assert!(n.logged(11) && !n.logged(12) && !n.logged(13));
+    // The evidence stop raised by the dry run persists nothing of the page, the entry before the
+    // cut included (§12.3 step 6, ENG-CLASS-003, ENG-EVID-003).
+    assert!(!n.logged(11) && !n.logged(12) && !n.logged(13));
     let st = n.e.status();
-    assert_eq!((st.head.seq, st.board_seq), (11, 11));
+    assert_eq!((st.head.seq, st.board_seq), (10, 10));
     assert_eq!(st.alarms[0].kind, AlarmKind::Counter);
     assert_eq!(st.alarms[0].code.as_deref(), Some("seal/counter_gap"));
     assert_eq!(st.stops[0].action, StopAction::ReHome);

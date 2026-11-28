@@ -170,6 +170,16 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             && !self.exiting
     }
 
+    /// Everything of `eligible` but the stops.
+    fn eligible_but_for_stops(&self) -> bool {
+        self.current_member()
+            && self.caught_up()
+            && !self.halted()
+            && !self.clock_blocked()
+            && !self.pipe.tail
+            && !self.exiting
+    }
+
     /// Everything but the freshness of the head holds: a `Hello` would make the device eligible.
     fn eligible_but_stale(&self) -> bool {
         self.current_member()
@@ -189,10 +199,25 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.dead || !self.on {
             return;
         }
+        if self.sess.wait_welcome {
+            // §11.9: after a whole-request refusal nothing is repeated until the next welcome.
+            return;
+        }
         self.shred_step();
         self.fence_lookup();
+        if self.sess.fenced {
+            // §11.9: a fenced relay reads only. No repair, upload, admin call or duty entry goes
+            // to it; the device reads to its head and looks for the Fence.
+            self.reboot_step();
+            return;
+        }
         self.repair_step();
         self.reboot_step();
+        if self.divergence_only() && self.eligible_but_for_stops() {
+            // §22.2, ENG-DIVERGE-002: under the divergence stop only the beat, without verdicts.
+            self.beat_step(false);
+            return;
+        }
         if !self.eligible() {
             if self.eligible_but_stale() && self.duty_pending() {
                 // A duty waits only for a head newer than 600,000 ms: ask for one.
@@ -203,7 +228,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
             return;
         }
-        self.beat_step();
+        self.beat_step(true);
         self.snapshot_step();
         self.compact_step();
         self.upgrade_step();
@@ -212,16 +237,19 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     /// Would some duty act if the device were eligible?
     fn duty_pending(&self) -> bool {
-        self.beat_reason().is_some()
+        self.beat_reason(true).is_some()
             || self.meta.duties.snapshot.is_some()
             || self.meta.duties.purge.is_some()
             || self.meta.duties.upgrade.is_some()
-            || self.compact_day_open()
+            // A compaction is a duty only on a day on which there is something to compact.
+            || (self.compact_day_open() && self.compact_bound().is_some())
     }
 
     // ------------------------------------------------------------------ beats (§23)
 
-    fn beat_reason(&self) -> Option<u8> {
+    /// Why a beat is due now. `verdicts` false: the beat of the divergence stop, which carries
+    /// none, so pending verdicts do not make it due, and which goes at once on entering the stop.
+    fn beat_reason(&self, verdicts: bool) -> Option<u8> {
         if self.outbox.iter().any(|r| r.r.kind == Kind::Beat) {
             return None;
         }
@@ -229,12 +257,16 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let lists_differ = me.rules != self.sm.supported_rules()
             || me.envelopes != self.sealer.supported_envelopes()
             || me.hash_versions != self.sm.hash_versions();
-        beat_due(self.wall, self.meta.last_beat_ms, lists_differ, !self.registry.pending_verdicts.is_empty())
+        if !verdicts && self.evid.beat_now {
+            return Some(4);
+        }
+        let pending = verdicts && !self.registry.pending_verdicts.is_empty();
+        beat_due(self.wall, self.meta.last_beat_ms, lists_differ, pending)
     }
 
-    /// ENG-BEAT-001, ENG-BEAT-002.
-    fn beat_step(&mut self) {
-        if self.beat_reason().is_none() {
+    /// ENG-BEAT-001, ENG-BEAT-002; under the divergence stop, ENG-DIVERGE-002.
+    fn beat_step(&mut self, verdicts: bool) {
+        if self.beat_reason(verdicts).is_none() {
             return;
         }
         let aligned = self.b - self.b % lim::STRIDE;
@@ -243,7 +275,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         } else {
             None
         };
-        let mut acks = self.registry.pending_verdicts.clone();
+        let mut acks = if verdicts { self.registry.pending_verdicts.clone() } else { Vec::new() };
         acks.sort_by_key(|a| a.0);
         acks.dedup_by_key(|a| a.0);
         acks.truncate(64);
@@ -257,6 +289,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.enqueue_own(Kind::Beat, Body::Beat(info), Via::Append, None).is_some() {
             self.meta.last_beat_ms = self.wall;
             self.touch_meta();
+            if !verdicts {
+                self.evid.beat_now = false;
+            }
         }
     }
 
@@ -265,7 +300,17 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// At the board apply of the aligned `S`: is a snapshot due? Records the duty.
     pub(crate) fn snapshot_due_at(&mut self, s: u64, tau: i64) -> bool {
         let in_outbox = self.outbox.iter().any(|r| r.r.kind == Kind::Snap);
-        let due = snapshot_due(s, tau, &self.registry.snapshots, &self.own, in_outbox, self.duty.owed_mismatch > 0);
+        // A frame this device skipped lies above every snapshot it knows: one snapshot is due, so
+        // that a move's seed can start above that frame (§28.3 stage 3).
+        let above_skipped = self
+            .meta
+            .alarms
+            .iter()
+            .filter(|a| a.kind == crate::AlarmKind::SkippedFrame)
+            .filter_map(|a| a.seq)
+            .any(|x| x < s && self.registry.snapshots.iter().all(|r| r.info.seq <= x));
+        let owed = self.duty.owed_mismatch > 0 || above_skipped;
+        let due = snapshot_due(s, tau, &self.registry.snapshots, &self.own, in_outbox, owed);
         if due {
             self.meta.duties.snapshot = Some((s, tau, 0));
             self.duty.snap_rank = self.mb.as_ref().and_then(|m| rank_of(&self.sealer.view(m), &self.own));
@@ -404,32 +449,33 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     }
 
     /// §20.2 (ENG-COMPACT-001 to ENG-COMPACT-004).
-    fn compact_step(&mut self) {
-        if !self.compact_day_open() {
-            return;
-        }
+    /// Steps 1 and 2 of §20.2: the snapshot relied on (its seq is the first bound, then its
+    /// entry's seq and its blob) and the bound `b`. None: no compaction today.
+    fn compact_bound(&self) -> Option<(u64, [u8; 16], u64)> {
         // Step 1: the newest usable snapshot by another writer that this device acknowledged.
-        let Some(rec) = self
+        let rec = self
             .registry
             .snapshots
             .iter()
             .filter(|r| r.author != self.own && r.own == Some(Verdict::Ack) && usable(r, &self.own))
-            .max_by_key(|r| r.entry_seq)
-        else {
-            return;
-        };
+            .max_by_key(|r| r.entry_seq)?;
         let (s, x, blob_id) = (rec.info.seq, rec.entry_seq, rec.info.blob);
         // Step 2: the bound.
         if self.l <= lim::SKIP_WINDOW {
-            return;
+            return None;
         }
         let cutoff = self.wall.saturating_sub(31_622_400_000);
-        let Some(y) = self.last_seq_at_or_before(cutoff) else { return };
-        let mut b = s.min(self.l - lim::SKIP_WINDOW).min(y + 1);
-        let floor = self.sess.floor;
-        if b <= floor {
+        let y = self.last_seq_at_or_before(cutoff)?;
+        let b = s.min(self.l - lim::SKIP_WINDOW).min(y + 1);
+        (b > self.sess.floor).then_some((x, blob_id, b))
+    }
+
+    fn compact_step(&mut self) {
+        if !self.compact_day_open() {
             return;
         }
+        let Some((x, blob_id, mut b)) = self.compact_bound() else { return };
+        let floor = self.sess.floor;
         // Step 3: the keep list.
         let mut keep: Vec<u64> = self
             .vk

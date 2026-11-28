@@ -6,7 +6,12 @@
 //! at all when the old relay does not answer); 3 the replay for the seed's
 //! membership and material, then `Seed`; 4 `SeedTail`; 5 the new target and,
 //! if the old relay did not sequence the Fence, the Fence as an `append`
-//! there; 6 the snapshot upload; done when the Fence is seen in the log.
+//! there; 6 the snapshot upload; 7 once the Fence is seen in the log and
+//! reported; done when the snapshot is uploaded or given up. What a `Start`
+//! takes from memory (the door, the generation, whether the old relay
+//! sequenced the Fence) is read back from the durable records: the Fence
+//! record in the outbox, the Fence in `M_K`, the new target, and the seed's
+//! last seq in the operation's record (ENG-OPS-003).
 //! Following (`UserAction::MoveCode`, `Operation::FollowAddress`) changes the
 //! relay target only after the sealer checked a typed code against an accepted
 //! `Fence` (ENG-MOVE-001); a candidate relay is only read, in a dry run that
@@ -31,6 +36,8 @@ pub(crate) struct MoveState {
     pub home_gen: u32,
     /// Did the old relay sequence this move's Fence (the first case of stage 2)?
     pub old_answered: bool,
+    /// The user said the old relay is gone: stage 2 no longer waits for it.
+    pub gone: bool,
     pub fence_seq: Option<u64>,
     pub s: u64,
     pub first_seq: u64,
@@ -38,10 +45,17 @@ pub(crate) struct MoveState {
     pub blob: Option<SealedBlob>,
     pub info: Option<SnapInfo>,
     pub seed: Option<(Hash32, Vec<SeedDevice>)>,
+    /// The first seq the new relay does not hold yet, as its answers say.
     pub tail_next: u64,
+    /// The seq after the last frame of the `SeedTail` request in flight.
+    pub tail_sent: u64,
+    /// `Seed` requests this move may have sent, counting one for a `Start` at or after stage 3.
+    pub seeds: u8,
     pub upload_failures: u8,
     pub uploaded: bool,
-    pub reported: bool,
+    /// A `Start` found the move reported (stage 7): the runtime may have stopped before it
+    /// showed the code and the report, so both are emitted once more.
+    pub again: bool,
     // ---- following an address (the candidate relay)
     pub follow: Option<Follow>,
 }
@@ -64,9 +78,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.status_dirty = true;
     }
 
-    /// After a `Start` with a move pending, the Fence's frame hash is read back from the log.
+    /// After a `Start` with a move pending, or with this device's own move past its switch (stages
+    /// 6 and 7, whose code and report need the Fence: §28.3 "After a `Start`"), the Fence's frame
+    /// hash is read back from the log.
     pub(crate) fn fence_lookup(&mut self) {
-        if !self.fence_pending() || self.opx.mv.fence_req || self.pipe.tail {
+        let own_move = self.vk.home_seq > 0
+            && self.vk.home_gen == self.meta.relay.home_gen
+            && self.meta.ops.iter().any(|o| matches!(o.op, Operation::Move { .. }) && o.stage >= 6);
+        if !(self.fence_pending() || own_move) || self.opx.mv.fence_req || self.pipe.tail {
             return;
         }
         let seq = self.vk.home_seq;
@@ -270,15 +289,26 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     // ------------------------------------------------------------------ the moving device
 
+    /// `UserAction::OldRelayGone`: a move waiting in stage 2 for its relay goes on without it.
+    pub(crate) fn on_old_relay_gone(&mut self) {
+        if self.meta.ops.iter().any(|o| matches!(o.op, Operation::Move { .. }) && o.stage <= 2) {
+            self.opx.mv.gone = true;
+        }
+    }
+
     pub(crate) fn move_begin(&mut self, ticket: u64, op: Operation) {
         self.opx.mv.door = None;
         self.opx.mv.old_answered = false;
+        self.opx.mv.gone = false;
         self.opx.mv.fence_seq = None;
         self.opx.mv.blob = None;
         self.opx.mv.info = None;
         self.opx.mv.seed = None;
         self.opx.mv.uploaded = false;
-        self.opx.mv.reported = false;
+        self.opx.mv.seeds = 0;
+        self.opx.mv.again = false;
+        self.opx.mv.tail_next = 0;
+        self.opx.mv.tail_sent = 0;
         self.opx.mv.upload_failures = 0;
         self.op_begin(ticket, op, 1);
     }
@@ -299,6 +329,49 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.fx(Effect::Admin { req, op });
     }
 
+    /// After a `Start` the move's memory is gone and its stage is not (ENG-OPS-003): what the
+    /// durable records still say about it. False when none of them names the new relay's door.
+    fn mv_restore(&mut self, rec: &crate::OpRecord, host: &str) -> bool {
+        self.opx.mv.seeds = u8::from(rec.stage >= 3);
+        self.opx.mv.again = rec.stage >= 7;
+        self.opx.mv.carried = rec.mark;
+        if rec.stage >= 6 {
+            // The target changed in the write that recorded stage 6.
+            self.opx.mv.door = Some(self.meta.relay.door);
+            self.opx.mv.home_gen = self.meta.relay.home_gen;
+            // The old relay sequenced the Fence exactly when it lies inside the seeded tail.
+            self.opx.mv.old_answered =
+                self.vk.home_gen == self.meta.relay.home_gen && self.vk.home_seq > 0 && self.vk.home_seq <= rec.mark;
+            return true;
+        }
+        let waiting = self.outbox.iter().find(|r| r.r.op == Some(rec.ticket)).map(|r| r.r.via.clone());
+        if let Some(Via::Fence { door, .. }) = waiting {
+            // Stage 2: the Fence record is on its way; `move_entry_done` says when it is accepted.
+            self.opx.mv.door = Some(door);
+            return true;
+        }
+        if self.vk.home_seq > 0 && self.vk.home_gen == self.meta.relay.home_gen + 1 && self.vk.home_host == host {
+            // This move's Fence, sequenced by the old relay (the first case of stage 2).
+            self.opx.mv.door = Some(self.vk.home_door);
+            self.opx.mv.home_gen = self.vk.home_gen;
+            self.opx.mv.old_answered = true;
+            self.opx.mv.fence_seq = Some(self.vk.home_seq);
+            return true;
+        }
+        // No Fence record exists (the second and third cases of stage 2): the door is asked for again.
+        self.opx.mv.home_gen = self.vk.home_gen + 1;
+        false
+    }
+
+    /// Stage 4 is over: the seed's last seq goes into the record with stage 5.
+    fn mv_switch(&mut self, ticket: u64) {
+        let mark = self.opx.mv.carried;
+        if let Some(o) = self.meta.ops.iter_mut().find(|o| o.ticket == ticket) {
+            o.mark = mark;
+        }
+        self.op_stage(ticket, 5);
+    }
+
     /// Looks at the move's stage again.
     pub(crate) fn move_drive(&mut self, ticket: u64) {
         let Some(rec) = self.op_rec(ticket).cloned() else { return };
@@ -307,6 +380,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if !self.mv_ready(ticket) {
             return;
         }
+        if rec.stage >= 2 && self.opx.mv.door.is_none() && !self.mv_restore(&rec, &host) {
+            // Stage 1's call again, the stage kept: a relay has one door for a board.
+            return self.mv_admin(ticket, AdminRequest::Door { host });
+        }
         let relay_answers = matches!(self.sess.state, SessionState::Live | SessionState::Reconciling);
         match rec.stage {
             1 => {
@@ -314,7 +391,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.mv_admin(ticket, AdminRequest::Door { host });
             }
             2 => {
-                let Some(door) = self.opx.mv.door else { return self.op_stage(ticket, 1) };
+                let Some(door) = self.opx.mv.door else { return };
                 let home_gen = self.vk.home_gen + 1;
                 if self.opx.mv.fence_seq.is_some() {
                     // ENG-MOVE-006: the old relay is read through its Fence before the seed.
@@ -324,22 +401,29 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     }
                 } else if self.outbox.iter().any(|r| r.r.op == Some(ticket)) {
                     // The Fence record is on its way through the `fence` admin operation.
+                } else if let Some(code) = self.seed_bounds().err().filter(|_| relay_answers || self.opx.mv.gone) {
+                    // Nothing is fenced for a move whose seed cannot be made.
+                    self.op_done(ticket, Err(code));
                 } else if relay_answers && !self.evidence_stop() {
                     let via = Via::Fence { host: host.clone(), door, home_gen };
                     self.op_enqueue(ticket, CtlIntent::Fence { host, door, home_gen }, via);
                 } else if relay_answers {
                     // Under an evidence stop: fence the old relay without a frame.
                     self.mv_admin(ticket, AdminRequest::Fence { host, door, home_gen, frame: None });
-                } else {
-                    // The old relay does not answer: on to the seed at once.
+                } else if self.opx.mv.gone {
+                    // The user says the old relay is gone: on to the seed at once.
                     self.opx.mv.home_gen = home_gen;
                     self.op_stage(ticket, 3);
                 }
+                // Otherwise the move waits for the session: a relay that does not answer right
+                // now is not gone, and seeding without its Fence would leave it accepting entries.
             }
             3 => self.move_seed(ticket, host),
+            // After a `Start` the device seals and seeds again: a new seed replaces an unfinished one.
+            4 if self.opx.mv.seed.is_none() => self.op_stage(ticket, 3),
             4 => self.move_tail(ticket),
             5 => {
-                let Some(door) = self.opx.mv.door else { return self.op_stage(ticket, 1) };
+                let Some(door) = self.opx.mv.door else { return };
                 let home_gen = self.opx.mv.home_gen;
                 self.switch_relay(RelayTarget { host: host.clone(), door, home_gen });
                 if !self.opx.mv.old_answered && !self.outbox.iter().any(|r| r.r.op == Some(ticket)) {
@@ -348,35 +432,88 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 }
                 self.op_stage(ticket, 6);
             }
-            6 => {
+            6 | 7 => {
                 // The snapshot of stage 3, once the session on the new relay is Live (ENG-MOVE-007).
-                if self.sess.state == SessionState::Live && !self.opx.mv.uploaded && self.opx.mv.upload_failures < 3
-                    && let Some(blob) = self.opx.mv.blob.clone() {
+                if self.sess.state == SessionState::Live && !self.opx.mv.uploaded && self.opx.mv.upload_failures < 3 {
+                    if let Some(blob) = self.opx.mv.blob.clone() {
                         self.mv_busy(ticket, true);
                         let req = self.want(Want::OpBlob(ticket));
                         let seq = self.opx.mv.s;
                         self.fx(Effect::Blob { req, op: BlobRequest::Upload { purpose: 1, seq, blob } });
+                        return;
                     }
-                self.move_report(ticket);
+                    // After a `Start` it is sealed again, with a new id (§28.3 stage 6).
+                    self.move_reseal(ticket);
+                    if !self.mv_ready(ticket) {
+                        return;
+                    }
+                }
+                // Stage 7 is the report (ENG-MOVE-009): written with its stage, so a process makes it once.
+                if rec.stage == 6 {
+                    if let Some(notes) = self.move_notes() {
+                        for n in notes {
+                            self.notify_durable(n);
+                        }
+                        self.op_stage(ticket, 7);
+                    }
+                    return;
+                }
+                if self.opx.mv.again {
+                    let Some(notes) = self.move_notes() else { return };
+                    self.opx.mv.again = false;
+                    for n in notes {
+                        self.notify(n);
+                    }
+                }
+                // Done when the Fence is reported and the snapshot is uploaded or given up.
+                if self.opx.mv.uploaded || self.opx.mv.upload_failures >= 3 {
+                    self.op_done(ticket, Ok(()));
+                }
             }
             _ => {}
         }
     }
 
-    /// Stage 7: the Fence is seen in the log (ENG-MOVE-009).
-    fn move_report(&mut self, ticket: u64) {
-        if self.opx.mv.reported || self.fence_pending() || self.vk.home_gen != self.meta.relay.home_gen {
-            return;
+    /// Stage 7: the code and the report, once the Fence is seen in the log (ENG-MOVE-009).
+    fn move_notes(&self) -> Option<[Notification; 2]> {
+        if self.fence_pending() || self.vk.home_gen != self.meta.relay.home_gen {
+            return None;
         }
-        let Some((seq, hash)) = self.opx.mv.fence.filter(|f| f.0 == self.vk.home_seq) else { return };
-        self.opx.mv.reported = true;
+        let (seq, hash) = self.opx.mv.fence.filter(|f| f.0 == self.vk.home_seq)?;
         let text = self.sealer.move_code(seq, &hash);
-        self.notify_durable(Notification::MoveCode { text });
-        self.notify_durable(Notification::MoveReport {
+        let report = Notification::MoveReport {
             carried_through: self.opx.mv.carried,
             old_relay_answered: self.opx.mv.old_answered,
-        });
-        self.op_done(ticket, Ok(()));
+        };
+        Some([Notification::MoveCode { text }, report])
+    }
+
+    /// Stage 6 after a `Start`: the move's snapshot is sealed again from this device's state at `S`.
+    fn move_reseal(&mut self, ticket: u64) {
+        if self.jobs.busy() {
+            return;
+        }
+        let Ok((s, _)) = self.seed_bounds() else {
+            self.opx.mv.upload_failures = 3;
+            return;
+        };
+        let own = self.own;
+        let recorded = self.registry.snapshots.iter().any(|r| r.author == own && r.info.seq == s)
+            || self.outbox.iter().any(|r| matches!(&r.r.body, Body::Snap(i) if i.seq == s));
+        if recorded {
+            // Uploaded and announced before the `Start`.
+            self.opx.mv.uploaded = true;
+            return;
+        }
+        self.opx.mv.s = s;
+        self.opx.mv.first_seq = s + 1;
+        let mut job = Job::new(Purpose::Seed { ticket }, s, s);
+        job.want_states = vec![s];
+        if self.start_job(job) {
+            self.mv_busy(ticket, true);
+        } else {
+            self.opx.mv.upload_failures = 3;
+        }
     }
 
     /// The Fence record's entry reached the board head.
@@ -401,6 +538,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// The answer of one of the move's admin calls.
     pub(crate) fn move_admin(&mut self, ticket: u64, result: Result<AdminOk, RelayRefusal>) {
         let Some(stage) = self.op_rec(ticket).map(|o| o.stage) else { return };
+        if stage >= 2 && self.opx.mv.door.is_none() {
+            // The door asked for again after a `Start`.
+            return match result {
+                Ok(AdminOk { door: Some(d), .. }) => self.opx.mv.door = Some(d),
+                Ok(_) => self.op_done(ticket, Err("relay/refused")),
+                Err(r) => self.op_done(ticket, Err(super::send::intern(&r.code))),
+            };
+        }
         match (stage, result) {
             (1, Ok(ok)) => match ok.door {
                 Some(d) => {
@@ -418,19 +563,29 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.opx.mv.tail_next = self.opx.mv.first_seq;
                 self.op_stage(ticket, 4);
             }
+            (3, Err(r)) if r.code == "relay/exists" && self.opx.mv.seeds >= 2 => {
+                // A seed sent before (in this process or before a `Start`) had its whole tail
+                // stored: the board is open there, and what this device holds beyond that tail
+                // it carries as on any relay behind its log (§21.3).
+                self.mv_switch(ticket);
+            }
             (4, Ok(ok)) => {
-                if let Some(h) = ok.head {
-                    self.opx.mv.tail_next = h.seq + 1;
-                }
+                // Only an answer moves the tail on: a request nobody answered is sent again.
+                self.opx.mv.tail_next = ok.head.map_or(self.opx.mv.tail_sent, |h| h.seq + 1);
                 if self.opx.mv.tail_next > self.opx.mv.carried {
-                    self.op_stage(ticket, 5);
+                    self.mv_switch(ticket);
                 }
+            }
+            (4, Err(r)) if r.code == "relay/target" && self.opx.mv.tail_sent > self.opx.mv.carried => {
+                // The last request of the tail was stored and its answer lost: the board is open
+                // and takes no tail any more (`relay.md` §12.7).
+                self.mv_switch(ticket);
             }
             (4, Err(r)) if r.code == "relay/not_next" && r.head.is_some() => {
                 // Resume from the head the relay names.
                 self.opx.mv.tail_next = r.head.map_or(self.opx.mv.first_seq, |h| h.seq + 1);
                 if self.opx.mv.tail_next > self.opx.mv.carried {
-                    self.op_stage(ticket, 5);
+                    self.mv_switch(ticket);
                 }
             }
             (_, Err(r)) => self.op_done(ticket, Err(super::send::intern(&r.code))),
@@ -439,26 +594,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     }
 
     /// Stage 3: `S`, `first_seq`, then the replay that gives `M_{first_seq-1}` and the material at `S`.
-    fn move_seed(&mut self, ticket: u64, host: String) {
-        if let Some((chain_before, devices)) = self.opx.mv.seed.clone() {
-            // The replay is done and the fresh snapshot sealed: seed the new relay (ENG-MOVE-003).
-            let Some(info) = self.opx.mv.info.clone() else { return };
-            let last = self.opx.mv.carried;
-            let op = AdminRequest::Seed {
-                host,
-                home_gen: self.opx.mv.home_gen,
-                first_seq: self.opx.mv.first_seq,
-                chain_before,
-                last_seq: last,
-                chain_last: self.chain_at(last).unwrap_or(self.cb),
-                blob_id: info.blob,
-                devices,
-            };
-            return self.mv_admin(ticket, op);
-        }
-        if self.jobs.busy() {
-            return;
-        }
+    /// Stage 3's `S` and `first_seq` (§28.3), or why no seed can be made now.
+    fn seed_bounds(&self) -> Result<(u64, u64), &'static str> {
         // The newest usable snapshot this device acknowledged, or wrote and another acknowledged.
         let usable_seq = self
             .registry
@@ -474,17 +611,83 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let mut first = (s + 1).min(self.vk.purge_seq.max(window).max(1));
         // The frames this device holds, and a base at or below the seq before the first.
         first = first.max(self.floor);
-        while first > 1 && first <= s + 1 && self.base_at_or_below(first - 1).is_none() {
+        // A frame this device classified `Skip` is one the new relay refuses in a seed tail
+        // (`relay.md` §12.7): the tail starts above the newest of them. The tail ends at this
+        // move's Fence when the old relay sequenced it, and what lies above is never carried.
+        let last = self.opx.mv.fence_seq.filter(|_| self.opx.mv.old_answered).unwrap_or(self.l);
+        let unverified = self
+            .meta
+            .alarms
+            .iter()
+            .filter(|a| a.kind == crate::AlarmKind::SkippedFrame)
+            .filter_map(|a| a.seq)
+            .filter(|x| *x >= first && *x <= last)
+            .max();
+        if let Some(x) = unverified {
+            if x > s {
+                // No snapshot lies above it yet: the move waits for one.
+                return Err("engine/move_tail");
+            }
+            first = x + 1;
+        }
+        // The seed's `chain_before` is `C_{first_seq-1}`: a seq whose chain this device holds.
+        while first > 1
+            && first <= s + 1
+            && (self.base_at_or_below(first - 1).is_none() || self.chain_held(first - 1).is_none())
+        {
             first += 1;
         }
-        if first > s + 1 || self.base_at_or_below((first - 1).min(s)).is_none() {
-            return self.op_done(ticket, Err("engine/local_fault"));
+        // Before seq 1 there is nothing to rebuild (`M_0`, every counter zero): no base is needed for it.
+        if first > s + 1
+            || (first > 1 && (self.base_at_or_below((first - 1).min(s)).is_none() || self.chain_held(first - 1).is_none()))
+        {
+            return Err("engine/local_fault");
         }
+        Ok((s, first))
+    }
+
+    /// `C_x` as this device holds it: from its chain index, or from a base at `x` (§7.10); `C_0`
+    /// for the seq before the first.
+    fn chain_held(&self, x: u64) -> Option<crate::Hash32> {
+        if x == 0 {
+            return Some(self.sealer.chain_zero());
+        }
+        self.chain_at(x).or_else(|| self.bases.iter().find(|b| b.0 == x).map(|b| b.1))
+    }
+
+    fn move_seed(&mut self, ticket: u64, host: String) {
+        if let Some((chain_before, devices)) = self.opx.mv.seed.clone() {
+            // The replay is done and the fresh snapshot sealed: seed the new relay (ENG-MOVE-003).
+            let Some(info) = self.opx.mv.info.clone() else { return };
+            let last = self.opx.mv.carried;
+            let op = AdminRequest::Seed {
+                host,
+                home_gen: self.opx.mv.home_gen,
+                first_seq: self.opx.mv.first_seq,
+                chain_before,
+                last_seq: last,
+                chain_last: self.chain_at(last).unwrap_or(self.cb),
+                blob_id: info.blob,
+                devices,
+            };
+            self.opx.mv.seeds = self.opx.mv.seeds.saturating_add(1);
+            return self.mv_admin(ticket, op);
+        }
+        if self.jobs.busy() {
+            return;
+        }
+        let (s, first) = match self.seed_bounds() {
+            Ok(x) => x,
+            Err(code) => return self.op_done(ticket, Err(code)),
+        };
         self.opx.mv.s = s;
         self.opx.mv.first_seq = first;
-        self.opx.mv.carried = self.l;
-        let mut job = Job::new(Purpose::Seed { ticket }, (first - 1).min(s), (first - 1).max(s));
-        job.want_states = vec![first - 1, s];
+        // The tail ends at this move's Fence when the old relay sequenced it: what a fenced relay
+        // shows above its Fence was not accepted from a device.
+        self.opx.mv.carried = self.opx.mv.fence_seq.filter(|_| self.opx.mv.old_answered).unwrap_or(self.l);
+        let from = if first > 1 { (first - 1).min(s) } else { s };
+        let mut job = Job::new(Purpose::Seed { ticket }, from, (first - 1).max(s));
+        job.want_states = if first > 1 { vec![first - 1, s] } else { vec![s] };
         if self.start_job(job) {
             self.mv_busy(ticket, true);
         } else {
@@ -499,11 +702,24 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             return;
         }
         let (first, s) = (self.opx.mv.first_seq, self.opx.mv.s);
-        let fail = |me: &mut Self| me.op_done(ticket, Err("engine/local_fault"));
-        let before = out.stash.iter().find(|x| x.0 == first - 1);
-        let at_s = out.stash.iter().find(|x| x.0 == s);
-        let (Some(before), Some(at_s)) = (before, at_s) else { return fail(self) };
-        let Ok(m_before) = self.sealer.membership_from_bytes(&before.2) else { return fail(self) };
+        let late = self.op_rec(ticket).is_some_and(|o| o.stage >= 6);
+        // From stage 6 on only the snapshot is at stake, and the move does not fail for it.
+        let fail = |me: &mut Self| {
+            if late {
+                me.opx.mv.upload_failures = 3;
+            } else {
+                me.op_done(ticket, Err("engine/local_fault"));
+            }
+        };
+        let Some(at_s) = out.stash.iter().find(|x| x.0 == s) else { return fail(self) };
+        let m_before = if first > 1 {
+            let Some(before) = out.stash.iter().find(|x| x.0 == first - 1) else { return fail(self) };
+            let Ok(m) = self.sealer.membership_from_bytes(&before.2) else { return fail(self) };
+            m
+        } else {
+            // Before seq 1 nobody had sealed anything.
+            self.sealer.membership_zero()
+        };
         let v0 = self.sealer.view(&m_before);
         let v = &self.vk;
         // Every device and recovery identity of M_L; a revoked device or a retired recovery
@@ -550,6 +766,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             SnapshotMaterial { seq: s, chain, hash_version: 1, state_hash: hash, board, membership: at_s.2.clone() };
         let Some(mk) = self.mk.clone() else { return fail(self) };
         match self.sealer.seal_snapshot(&mk, &material) {
+            Err(_) if late => self.opx.mv.upload_failures = 3,
             Err(e) => self.op_done(ticket, Err(e.code)),
             Ok(blob) => {
                 self.opx.mv.info = Some(SnapInfo {
@@ -564,7 +781,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     epoch: blob.epoch,
                 });
                 self.opx.mv.blob = Some(blob);
-                let chain_before = self.chain_at(first - 1).unwrap_or_else(|| self.sealer.chain_zero());
+                let Some(chain_before) = self.chain_held(first - 1) else { return fail(self) };
                 self.opx.mv.seed = Some((chain_before, devices));
             }
         }
@@ -575,7 +792,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let next = self.opx.mv.tail_next.max(self.opx.mv.first_seq);
         let last = self.opx.mv.carried;
         if next > last {
-            return self.op_stage(ticket, 5);
+            return self.mv_switch(ticket);
         }
         self.mv_busy(ticket, true);
         let to = last.min(next + lim::PAGE_ENTRIES as u64 - 1);
@@ -603,7 +820,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if frames.is_empty() {
             return self.op_done(ticket, Err("engine/local_fault"));
         }
-        self.opx.mv.tail_next = first + frames.len() as u64;
+        self.opx.mv.tail_sent = first + frames.len() as u64;
         self.mv_admin(ticket, AdminRequest::SeedTail { host, first, frames });
     }
 

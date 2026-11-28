@@ -42,6 +42,9 @@ pub(crate) struct Pair {
 pub(crate) struct Ops {
     pub mem: Vec<OpMem>,
     pub pair: Option<Pair>,
+    /// The `Register` records found at the `Start` that no relay had acknowledged: pairings whose
+    /// machine ended with the process (§28.4). Each still ends with one `PairFailed`.
+    pub orphans: Vec<[u8; 16]>,
     pub purge_day: i64,
     pub purge_busy: bool,
     pub mv: super::movement::MoveState,
@@ -125,7 +128,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.notify(Notification::OpDone { ticket, result: Err("engine/op_busy") });
             return;
         }
-        self.meta.ops.push(OpRecord { ticket, op, stage, attempts: 0, started_ms: self.wall });
+        self.meta.ops.push(OpRecord { ticket, op, stage, attempts: 0, started_ms: self.wall, mark: 0 });
         self.touch_meta();
         let pid = self.flush_meta();
         self.opx.mem.push(OpMem { ticket, pid, busy: false, snap: None });
@@ -153,7 +156,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.meta.ops.retain(|o| o.ticket != ticket);
         self.opx.mem.retain(|m| m.ticket != ticket);
         self.touch_meta();
-        self.notify_durable(Notification::OpDone { ticket, result });
+        // In this call, ahead of the write that drops the record: a process that stops before
+        // that write is durable resumes the operation from its record and reports it again; one
+        // that stops after it has reported it (§28.8; no row of §7.12 holds it back).
+        self.notify(Notification::OpDone { ticket, result });
     }
 
     fn op_ready(&self, ticket: u64) -> bool {
@@ -170,6 +176,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     pub(crate) fn can_call(&self) -> bool {
         matches!(self.sess.state, SessionState::Live | SessionState::Reconciling)
             && !self.dead
+            // §11.9: a fenced relay reads only; what would be sent waits for the relay its Fence leads to.
+            && !self.sess.fenced
             && self.sess.pause_writes_until.is_none_or(|t| self.wall >= t)
     }
 
@@ -316,6 +324,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     /// Looks at every operation's stage again.
     fn drive_ops(&mut self) {
+        if self.sess.wait_welcome {
+            // §11.9: after a whole-request refusal nothing is repeated until the next welcome.
+            return;
+        }
         let tickets: Vec<u64> = self.meta.ops.iter().map(|o| o.ticket).collect();
         for t in tickets {
             if !self.op_ready(t) {
@@ -394,6 +406,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.outbox.iter().any(|r| r.r.seen == Some(t)) {
             return Err(NO); // this device's own entry
         }
+        let on_its_way = |b: &Body| matches!(b, Body::Ctl(CtlIntent::Skip { targets }) if targets.iter().any(|x| x.0 == t));
+        if self.outbox.iter().any(|r| on_its_way(&r.r.body)) {
+            // This device's Skip of it is in its outbox: a second one would be refused for good.
+            return Err(NO);
+        }
         if self.meta.halt.as_ref().is_some_and(|h| h.seq == t && h.author == self.own) {
             return Err(NO);
         }
@@ -461,7 +478,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let replace = matches!(self.op_rec(ticket).map(|o| &o.op), Some(Operation::Revoke { replace: true, .. }));
         self.op_done(ticket, Ok(()));
         if replace {
-            self.notify_durable(Notification::ReplaceReady { dev });
+            self.notify(Notification::ReplaceReady { dev });
         }
     }
 
@@ -795,7 +812,32 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.opx.pair.as_ref().is_some_and(|p| p.ticket == ticket) {
             return self.pair_entry_done(code);
         }
+        if let Via::Register { dev, .. } = r.via {
+            // A pairing from before a `Start`: nobody waits for it, and it is still reported.
+            let open = self.opx.orphans.contains(&r.entry_id);
+            self.opx.orphans.retain(|x| *x != r.entry_id);
+            match code {
+                Some(c) => {
+                    // ENG-OPS-004: the relay drops the row and token `register` made, then the failure.
+                    if self.can_call() {
+                        let req = self.id();
+                        self.fx(Effect::Admin { req, op: AdminRequest::Revoke { dev } });
+                    }
+                    self.notify(Notification::PairFailed { ticket, code: c });
+                }
+                // Accepted, and never acknowledged to the machine that asked for it.
+                None if open => self.notify(Notification::PairFailed { ticket, code: "engine/pair_interrupted" }),
+                None => {}
+            }
+            return;
+        }
         let Some(op) = self.op_rec(ticket).map(|o| o.op.clone()) else { return };
+        if let (Operation::Skip { seq }, Some("seal/ctl_target")) = (&op, code)
+            && self.vk.skips.iter().any(|s| s.0 == *seq)
+        {
+            // §17.1: another entry skipped the target first; what the user asked for holds.
+            return self.op_done(ticket, Ok(()));
+        }
         match (&op, code) {
             (Operation::Revoke { dev, .. }, None) => self.revoke_finish(ticket, *dev),
             (
@@ -818,6 +860,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.op_done(ticket, Ok(()));
             }
             (Operation::Move { .. }, _) => self.move_entry_done(ticket, seq, code),
+            (Operation::CloseBoard { .. }, None) => {
+                // The devices of the closed board follow its Fence with this code (§28.3 step 2).
+                if let Some(hash) = r.frame_hash {
+                    let text = self.sealer.move_code(seq, &hash);
+                    self.notify_durable(Notification::MoveCode { text });
+                }
+                self.op_done(ticket, Ok(()));
+            }
             (_, None) => self.op_done(ticket, Ok(())),
             (_, Some(c)) => self.op_done(ticket, Err(c)),
         }
@@ -855,7 +905,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         match w {
             Want::OpAdmin(t) => self.op_admin(t, result),
             Want::PurgeDuty => self.purge_result(result),
-            Want::PairRevoke => self.pair_revoked(),
             _ => {}
         }
     }
@@ -893,10 +942,6 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             Want::PairUpload => {
                 self.pair_fail("engine/not_eligible");
                 "blob"
-            }
-            Want::PairRevoke => {
-                self.pair_revoked();
-                "admin/revoke"
             }
             _ => "local",
         }
@@ -997,9 +1042,13 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let id = self.outbox[i].r.entry_id;
         let Some(p) = self.opx.pair.as_ref().filter(|p| p.entry == Some(id)) else {
             if matches!(self.outbox[i].r.via, Via::Register { .. }) {
-                // A pairing this process does not know (a Start in between): the record goes.
+                // A pairing this process does not know (a Start in between): the record goes
+                // unsent, and the pairing is reported failed under the ticket the record kept.
+                let ticket = self.outbox[i].r.op.unwrap_or(0);
+                self.opx.orphans.retain(|x| *x != id);
                 self.outbox.remove(i);
                 self.persist(vec![PersistOp::Outbox(vec![OutboxOp::Drop(id)])]);
+                self.notify(Notification::PairFailed { ticket, code: "engine/pair_interrupted" });
                 return false;
             }
             return true;
@@ -1019,7 +1068,18 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             match (result, p.info.clone()) {
                 (Ok((seq, _)), Some(snapshot)) => {
                     let (ticket, head) = (p.ticket, p.head);
-                    self.notify(Notification::PairRegistered { ticket, head, snapshot, added_seq: seq });
+                    // The acknowledgement is durable before the report: a record found after a
+                    // `Start` with its acknowledgement had its `PairRegistered`, and one without
+                    // it is reported failed (§28.4 "After a Start"), never both for one ticket.
+                    let note = Notification::PairRegistered { ticket, head, snapshot, added_seq: seq };
+                    match self.rec_index(id).map(|i| self.outbox[i].r.clone()) {
+                        Some(rec) => {
+                            self.send.ack_puts.retain(|x| x != id);
+                            let pid = self.persist(vec![PersistOp::Outbox(vec![OutboxOp::Put(rec)])]);
+                            self.after(pid, super::After::Notify(note));
+                        }
+                        None => self.notify(note),
+                    }
                 }
                 (Err(code), _) => self.pair_fail(code),
                 _ => {}
@@ -1052,15 +1112,17 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         match code {
             None => self.opx.pair = None,
             Some(c) => {
-                // `revoke` for the new device first, so that the relay drops its row and token.
+                // `revoke` for the new device first, so that the relay drops its row and token
+                // (an answer `relay/target` is already done); the failure follows in this call,
+                // before the record's `Drop` is written, so that no stop of the process between
+                // the two leaves a pairing that is never reported.
                 p.fail = Some(c);
                 let dev = p.device.dev;
                 if self.can_call() {
-                    let req = self.want(Want::PairRevoke);
+                    let req = self.id();
                     self.fx(Effect::Admin { req, op: AdminRequest::Revoke { dev } });
-                } else {
-                    self.pair_revoked();
                 }
+                self.pair_revoked();
             }
         }
     }

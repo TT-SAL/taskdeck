@@ -79,10 +79,8 @@ impl Net {
                 self.at.insert(dev, relay.host.clone());
                 self.calls.push((dev, "connect".into()));
                 let cred = self.cred(&relay.host, &dev);
-                let Some(r) = self.relays.get_mut(&relay.host) else {
-                    n.feed(Event::Disconnected { unreachable: true, paused_until_ms: None });
-                    return true;
-                };
+                // Nobody answers at that address: the attempt hangs (the runtime's backoff is its own).
+                let Some(r) = self.relays.get_mut(&relay.host) else { return true };
                 match r.login(now, &cred, &dev).result {
                     Ok(login) => {
                         self.gens.insert((relay.host.clone(), dev), login.generation);
@@ -132,7 +130,8 @@ impl Net {
                     _ => host.clone(),
                 };
                 let cred = match &op {
-                    AdminRequest::Door { .. } => Cred::Create,
+                    // The runtime holds the new relay's create secret for the door and the seed.
+                    AdminRequest::Door { .. } | AdminRequest::Seed { .. } => Cred::Create,
                     _ => self.cred(&to, &dev),
                 };
                 let Some(r) = self.relays.get_mut(&to) else {
@@ -181,6 +180,12 @@ impl Net {
     /// The head of the relay a device is at.
     pub(crate) fn head_seq(&self, n: &Node) -> u64 {
         self.at.get(&n.dev()).and_then(|h| self.relays.get(h)).and_then(|r| r.head()).map_or(0, |h| h.seq)
+    }
+
+    /// A second relay for the same board, empty (the target of a move).
+    pub(crate) fn add_relay(&mut self, host: &str) {
+        let board = self.relay().board_id();
+        self.relays.insert(host.to_owned(), ModelRelay::new(board, [8; 32]));
     }
 
     pub(crate) fn log_len(&self) -> u64 {

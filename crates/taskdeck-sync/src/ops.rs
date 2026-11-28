@@ -24,4 +24,7 @@ pub struct OpRecord {
     pub stage: u8,
     pub attempts: u8,
     pub started_ms: i64,
+    /// A seq the operation's later stages need after a `Start`: for a `Move` from stage 5 on,
+    /// the seed's `last_seq`; otherwise 0.
+    pub mark: u64,
 }

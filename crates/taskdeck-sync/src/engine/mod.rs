@@ -83,6 +83,8 @@ pub(crate) mod lim {
     pub const STOP_HELLO_MS: u64 = 900_000;
     pub const SLOW_CONNECT_MS: u64 = 3_600_000;
     pub const CAUGHT_UP_MS: u64 = 600_000;
+    /// On a session with push: a `Hello` when the last one is this old.
+    pub const PUSH_HELLO_MS: u64 = 600_000;
     pub const CKPT_ENTRIES: u32 = 200;
     pub const CKPT_MS: u64 = 600_000;
     pub const ALARMS: usize = 256;
@@ -131,7 +133,6 @@ pub(crate) enum Want {
     FenceFrame(u64),
     PurgeDuty,
     PairUpload,
-    PairRevoke,
     /// Restore tail (repair.rs): the frames from the log, the request, a repair call.
     RestoreChunk,
     RestoreCall,
@@ -194,6 +195,11 @@ pub struct Engine<SM: StateMachine, S: Sealer> {
     pub(crate) pq: VecDeque<Pending>,
     pub(crate) durable: u64,
     pub(crate) last_pid: u64,
+    /// The latest write of a base or of log records: a local read is emitted only once it is
+    /// durable, because the runtime's reads do not wait for its writes (ENG-EFFECT-001).
+    pub(crate) read_gate: u64,
+    /// Local reads waiting for `read_gate`.
+    pub(crate) read_wait: Vec<Effect>,
 
     // ---- records (§7)
     pub(crate) meta: Meta,
@@ -280,6 +286,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             pq: VecDeque::new(),
             durable: 0,
             last_pid: 0,
+            read_gate: 0,
+            read_wait: Vec::new(),
             meta: Meta::default(),
             meta_dirty: false,
             meta_pid: 0,
@@ -418,6 +426,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     }
 
     pub(crate) fn fx(&mut self, e: Effect) {
+        if matches!(e, Effect::ReadBase { .. } | Effect::ReadLog { .. }) && !self.is_durable(self.read_gate) {
+            self.read_wait.push(e);
+            return;
+        }
         self.out.push(e);
     }
 
@@ -437,6 +449,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 PersistOp::RewriteOutbox(v) => self.outbox_ops = v.len(),
                 PersistOp::Notices(v) => self.notice_ops += v.len(),
                 PersistOp::RewriteNotices(v) => self.notice_ops = v.len(),
+                PersistOp::WriteBase(_) | PersistOp::AppendLog(_) => self.read_gate = id,
                 _ => {}
             }
         }
@@ -487,6 +500,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         if let Some(p) = self.pq.pop_front() {
             self.durable = id;
+            if !self.read_wait.is_empty() && self.is_durable(self.read_gate) {
+                let reads = std::mem::take(&mut self.read_wait);
+                self.out.extend(reads);
+            }
             if let Some(m) = p.marker {
                 self.pipe.marker = m;
             }
@@ -696,6 +713,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         !self.meta.stops.is_empty() || self.dead
     }
 
+    /// Every stop in force is a divergence stop: the beat still goes (§22.2).
+    pub(crate) fn divergence_only(&self) -> bool {
+        !self.dead && !self.meta.stops.is_empty() && self.meta.stops.iter().all(|s| s.kind == StopKind::Divergence)
+    }
+
     /// Is a stop in force under which the engine reads and persists nothing from
     /// the relay (§21.2 item 2, §21.4)?
     pub(crate) fn no_apply(&self) -> bool {
@@ -881,6 +903,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                     arm(self.sess.hello_mono.map(|t| t + lim::STOP_HELLO_MS));
                 } else if !self.sess.push || self.sess.wait_welcome {
                     arm(self.sess.hello_mono.map(|t| t + lim::POLL_MS));
+                } else if self.sess.state == crate::SessionState::Live {
+                    arm(self.sess.hello_mono.map(|t| t + lim::PUSH_HELLO_MS));
                 }
                 arm(self.sess.pause_append_until.and_then(ahead));
                 arm(self.sess.pause_writes_until.and_then(ahead));

@@ -154,6 +154,13 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
         }
         self.outbox.sort_by_key(|r| r.r.order);
+        // §28.4: a pairing does not go on after a `Start`; its record still ends with a report.
+        self.opx.orphans = self
+            .outbox
+            .iter()
+            .filter(|x| matches!(x.r.via, crate::Via::Register { .. }) && x.r.ack.is_none())
+            .map(|x| x.r.entry_id)
+            .collect();
 
         // The notice and refusal records with their dismissed flags (§7.7).
         self.notice_ops = notices.len();
@@ -355,7 +362,11 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.mk = Some(r.membership.clone());
         self.mb = Some(r.membership);
         let c = self.checkpoint().ok_or(BAD)?;
+        // The first `Meta` (the relay target) travels with the first checkpoint: a crash must
+        // not leave a replica that has a checkpoint and no relay to go to.
+        self.meta_dirty = false;
         let mut ops = vec![
+            PersistOp::WriteMeta(self.meta.clone()),
             PersistOp::AppendLog(vec![LogRecord { seq: 1, chain: c1, tau, frame: frame_1 }]),
             PersistOp::WriteCheckpoint(c.clone()),
             PersistOp::WriteBase(c),
@@ -364,6 +375,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             ops.push(PersistOp::WriteIdentity(self.sealer.export_identity()));
         }
         let pid = self.persist(ops);
+        self.meta_pid = pid;
         self.bases = vec![(1, c1)];
         self.pipe.ckpt_b = 1;
         self.pipe.ckpt_pid = pid;
@@ -373,9 +385,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// §19.8 Join, and §19.7 step 4: the replica starts from a snapshot at `S`
     /// (ENG-BOOT-006, ENG-HASH-003).
     fn join(&mut self, material: SnapshotMaterial, relay: RelayTarget) -> Result<(), &'static str> {
-        self.install_snapshot(&material)?;
+        // Set before the snapshot is installed: its write carries the first `Meta`.
         self.meta.relay = relay;
         self.meta.last_beat_ms = 0;
+        self.install_snapshot(&material)?;
         Ok(())
     }
 
@@ -411,13 +424,21 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.mk = Some(m.clone());
         self.mb = Some(m);
         self.pipe.queue.clear();
+        self.pipe.skip_at.clear();
         self.pipe.batches.clear();
         self.pipe.skipped.clear();
         self.pipe.pre = None;
         self.pipe.redo.clear();
         self.hashes.retain(|x, _| *x > s);
         let c = self.checkpoint().ok_or(BAD)?;
-        let pid = self.persist(vec![PersistOp::WriteCheckpoint(c.clone()), PersistOp::WriteBase(c)]);
+        // `Meta` in the same write (for a join it is the first one, with the relay target).
+        self.meta_dirty = false;
+        let pid = self.persist(vec![
+            PersistOp::WriteMeta(self.meta.clone()),
+            PersistOp::WriteCheckpoint(c.clone()),
+            PersistOp::WriteBase(c),
+        ]);
+        self.meta_pid = pid;
         if !self.bases.iter().any(|b| b.0 == s) {
             self.bases.push((s, material.chain));
             self.bases.sort();

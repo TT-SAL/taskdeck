@@ -178,9 +178,10 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                         self.say_hello();
                     }
                 } else if self.sess.state == SessionState::Live
-                    && !self.sess.push
-                    && since.is_none_or(|d| d >= lim::POLL_MS)
+                    && since.is_none_or(|d| d >= if self.sess.push { lim::PUSH_HELLO_MS } else { lim::POLL_MS })
                 {
+                    // Without push the engine polls. With push it still asks for the head now and
+                    // then: a push that never arrived must not leave the device behind for good.
                     self.say_hello();
                 }
             }
@@ -197,6 +198,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.fetch_skip_frames();
         }
         let head = self.sess.relay_head.map_or(0, |h| h.seq);
+        // A relay fenced at `f` is read no further (§12.2, ENG-RECV-007).
+        let head = self.fenced_at().map_or(head, |f| head.min(f));
         let idle = self.pipe.flight.is_none() && self.pipe.stash.is_none();
         if head > self.l {
             if self.sess.read.is_none() && self.can_take_page() && !self.sess.wait_welcome && !self.follow_holds_reads() {
@@ -563,14 +566,21 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.sess.pause_writes_until = Some(refusal.until.unwrap_or(self.wall));
                 self.status_dirty = true;
             }
-            (401, "relay/unauthorized")
-                if connecting
-                    && self.vk.home_seq > 0
-                    && self.meta.relay.host == self.vk.home_host
-                    && self.meta.relay.door == self.vk.home_door
-                    && self.meta.relay.home_gen == self.vk.home_gen =>
-            {
-                // ENG-SESS-007: no member of the board there.
+            (401, "relay/unauthorized") if connecting && !self.following() && self.at_home_relay() => {
+                // ENG-SESS-007: no member of the board there. A relay that acknowledged this
+                // device's entries has lost them: the evidence first, so that no loss of those
+                // entries is silent (§11.9).
+                let ack = self.outbox.iter().filter_map(|r| r.r.ack).max_by_key(|a| a.0);
+                if self.me().is_some_and(|d| d.last_ctr > 0) || ack.is_some() {
+                    let local_head = self.log_head();
+                    self.raise_evidence(
+                        AlarmKind::RelayBehind,
+                        None,
+                        None,
+                        Some("relay/unauthorized"),
+                        Evidence::RelayBehind { relay_head: Head::default(), relay_last_ctr: None, local_head, ack },
+                    );
+                }
                 self.add_stop(StopKind::Closed, None);
             }
             (_, code) => {
@@ -583,6 +593,26 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 }
             }
         }
+    }
+
+    /// §11.9: is the target the board's home relay? That of `M_K`'s latest accepted `Fence`, or,
+    /// on a board that never moved, the relay this device was created or joined on (a move or a
+    /// follow sets a generation above `M_K.home_gen`).
+    fn at_home_relay(&self) -> bool {
+        let r = &self.meta.relay;
+        if self.vk.home_seq > 0 {
+            r.host == self.vk.home_host && r.door == self.vk.home_door && r.home_gen == self.vk.home_gen
+        } else {
+            r.home_gen == self.vk.home_gen
+        }
+    }
+
+    /// §12.2 (ENG-RECV-007): the seq at which the relay the session is on is fenced, when it
+    /// sequenced the accepted `Fence` that moves the board to another relay (its generation is
+    /// below that `Fence`'s) and the session does not follow an address.
+    pub(crate) fn fenced_at(&self) -> Option<u64> {
+        let away = self.vk.home_seq > 0 && self.vk.home_gen > self.meta.relay.home_gen;
+        (away && !self.following()).then_some(self.vk.home_seq)
     }
 
     /// A fenced relay whose log holds no accepted `Fence` that leads elsewhere (§11.9).

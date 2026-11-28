@@ -489,6 +489,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
         let mut job = Job::new(Purpose::Skip { s, t }, t.saturating_sub(1), s - 1);
         job.from_rec = t;
+        // The bases from the target on hold its effects: the replay gives their states again.
+        job.want_states = self.bases.iter().map(|b| b.0).filter(|x| (t..s).contains(x)).collect();
         if !self.start_job(job) {
             // §17.3 step 4, §19.9: this device cannot replay.
             self.add_stop(StopKind::Rebootstrap { after: s }, None);
@@ -497,12 +499,39 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     }
 
     fn skip_replayed(&mut self, s: u64, t: u64, out: Replayed<SM, S>) {
+        // §17.3 step 3: every base at a seq from the target to `s - 1` was written with the target
+        // applied; it is written again with the replay's board and membership at its seq.
+        let mut rewrites = Vec::new();
+        for (seq, state, membership) in &out.stash {
+            let Some(&(_, chain)) = self.bases.iter().find(|b| b.0 == *seq && (t..s).contains(seq)) else {
+                continue;
+            };
+            let sm = &self.sm;
+            let Some(board) = guard(|| sm.canonical_bytes(state)) else { return self.fault("engine/local_fault") };
+            rewrites.push((*seq, chain, board, membership.clone()));
+        }
         // ENG-SKIP-002: the state of a device that never applied the target.
         self.state = Some(out.state);
         self.pipe.skipped.insert(t);
         self.replace_records_from(t, out.recs, out.hashes);
         // ENG-SKIP-003: reports for seqs at or above the target describe the state before the Skip.
         self.registry.reports.retain(|r| r.seq < t || r.report_seq >= s);
+        if !rewrites.is_empty() {
+            let ops = rewrites
+                .into_iter()
+                .map(|(board_seq, board_chain, board, membership)| {
+                    PersistOp::WriteBase(Checkpoint {
+                        board_seq,
+                        board_chain,
+                        board,
+                        membership,
+                        log_floor: self.floor,
+                        registry: self.registry.clone(),
+                    })
+                })
+                .collect();
+            self.persist(ops);
+        }
         self.jobs.done_skip = Some((s, t));
         self.pipe.pre = self.state.clone();
         self.pipe.redo.clear();

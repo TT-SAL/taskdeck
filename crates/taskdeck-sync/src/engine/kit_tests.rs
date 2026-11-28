@@ -118,6 +118,8 @@ pub(crate) struct Node {
     pub fx: VecDeque<Effect>,
     pub notes: Vec<Notification>,
     pub persists: Vec<Vec<PersistOp>>,
+    /// This device's build also supports rules 2 (set by `restart_with_rules2`).
+    pub rules2: bool,
     pub build: String,
     pub session: u8,
     pub bootstrap: Option<Bootstrap>,
@@ -161,26 +163,31 @@ impl Node {
                 self.feed(Event::Persisted { id });
             }
             // Local reads see the durable store.
-            while let Some((req, range, seq)) = self.reads.pop_front() {
-                let result = match range {
-                    Some((from, to)) => {
-                        let v: Vec<LogRecord> = (from..=to).filter_map(|s| self.store.log.get(&s).cloned()).collect();
-                        if v.len() as u64 == to - from + 1 {
-                            crate::LocalReadResult::Records(v)
-                        } else {
-                            crate::LocalReadResult::Missing { code: "device/missing" }
-                        }
-                    }
-                    None => match self.store.bases.get(&seq) {
-                        Some(c) => crate::LocalReadResult::Base(c.clone()),
-                        None => crate::LocalReadResult::Missing { code: "device/missing" },
-                    },
-                };
-                self.feed(Event::LocalRead { req, result });
-            }
+            while self.read_one() {}
             }
             self.draining = false;
         }
+    }
+
+    /// Answers the oldest local read from the durable store (manual mode calls it itself).
+    pub(crate) fn read_one(&mut self) -> bool {
+        let Some((req, range, seq)) = self.reads.pop_front() else { return false };
+        let result = match range {
+            Some((from, to)) => {
+                let v: Vec<LogRecord> = (from..=to).filter_map(|s| self.store.log.get(&s).cloned()).collect();
+                if v.len() as u64 == to - from + 1 {
+                    crate::LocalReadResult::Records(v)
+                } else {
+                    crate::LocalReadResult::Missing { code: "device/missing" }
+                }
+            }
+            None => match self.store.bases.get(&seq) {
+                Some(c) => crate::LocalReadResult::Base(c.clone()),
+                None => crate::LocalReadResult::Missing { code: "device/missing" },
+            },
+        };
+        self.feed(Event::LocalRead { req, result });
+        true
     }
 
     /// Confirms the oldest unconfirmed write (manual mode).
@@ -218,11 +225,19 @@ impl Node {
     pub(crate) fn restart(&mut self, reseed: u64) {
         let history = self.e.sealer().history();
         let identity = self.store.identity.clone().unwrap_or_else(|| self.identity0.clone());
-        let sealer = FakeSealer::restore(&identity, history, reseed, &[1]).expect("the identity restores");
-        self.e = Engine::new(ToyMachine::new(false), sealer, Config {});
+        let rules: &[u32] = if self.rules2 { &[1, 2] } else { &[1] };
+        let sealer = FakeSealer::restore(&identity, history, reseed, rules).expect("the identity restores");
+        self.e = Engine::new(ToyMachine::new(self.rules2), sealer, Config {});
         self.pq.clear();
         self.fx.clear();
         self.start();
+    }
+
+    /// The same replica under a newer build, one that also supports rules 2.
+    pub(crate) fn restart_with_rules2(&mut self, reseed: u64) {
+        self.rules2 = true;
+        self.build = "build-2".into();
+        self.restart(reseed);
     }
 
     pub(crate) fn enqueue(&mut self, ticket: u64, command: ToyCommand) {
@@ -273,6 +288,7 @@ pub(crate) fn creator(seed: u64) -> (Node, Vec<u8>) {
         fx: VecDeque::new(),
         notes: Vec::new(),
         persists: Vec::new(),
+        rules2: false,
         build: "build-1".into(),
         session: 0,
         bootstrap: Some(Bootstrap::Genesis { board, frame_1: f1.clone(), relay: relay() }),
@@ -507,6 +523,7 @@ pub(crate) fn joined(sealer: FakeSealer, seed: u64, wall: i64, material: Snapsho
         fx: VecDeque::new(),
         notes: Vec::new(),
         persists: Vec::new(),
+        rules2: false,
         build: "build-1".into(),
         session: 100,
         bootstrap: Some(Bootstrap::Join { material, added_seq, relay: at }),

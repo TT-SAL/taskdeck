@@ -57,7 +57,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// §10.1: may the engine send now?
     pub(crate) fn may_send(&self) -> bool {
         self.sess.state == SessionState::Live
-            && !self.stopped()
+            && (!self.stopped() || self.divergence_only())
             && !self.sess.fenced
             && !self.fence_pending()
             && !self.following()
@@ -82,6 +82,17 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             return; // ENG-HALT-006: only a crash-halted device sends, and only its Skip
         }
         let is_skip = |b: &Body| matches!(b, Body::Ctl(CtlIntent::Skip { .. }));
+        // A Skip's frame carries the next counter, and the relay stores no frame above a gap
+        // (§11.4): the frames sealed before the halt that the relay does not hold go first,
+        // identical. Nothing but the Skip is sealed (ENG-HALT-006).
+        let skip_waits =
+            halted && self.outbox.iter().any(|x| is_skip(&x.r.body) && x.r.ack.is_none() && x.r.seen.is_none());
+        // §22.2: under the divergence stop only the beat is sealed, and ahead of it, identical,
+        // the frames sealed before the stop that the relay does not hold yet (as for a Skip
+        // under a halt).
+        let diverged = self.stopped();
+        let beat_waits =
+            diverged && self.outbox.iter().any(|x| x.r.kind == Kind::Beat && x.r.ack.is_none() && x.r.seen.is_none());
         // Step 1.
         let relay_ctr = self.send.relay_ctr;
         let r: Vec<usize> = (0..self.outbox.len())
@@ -89,7 +100,8 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 let x = &self.outbox[i].r;
                 x.ack.is_none()
                     && x.seen.is_none()
-                    && (!halted || is_skip(&x.body))
+                    && (!halted || is_skip(&x.body) || (skip_waits && x.frame.is_some()))
+                    && (!diverged || x.kind == Kind::Beat || (beat_waits && x.frame.is_some()))
                     && !(x.frame.is_some() && x.ctr.is_some_and(|c| relay_ctr.is_some_and(|rc| c <= rc)))
             })
             .collect();
@@ -576,11 +588,21 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 }
                 (_, code) => {
                     let code = intern(code);
-                    if let Some(i) = self.rec_index(&id) {
+                    let gone = self.rec_index(&id).map(|i| {
                         let rec = self.outbox.remove(i);
                         self.persist(vec![PersistOp::Outbox(vec![OutboxOp::Drop(rec.r.entry_id)])]);
+                        (rec.r.via, rec.r.op)
+                    });
+                    let live = self.opx.pair.as_ref().is_some_and(|p| p.entry == Some(id));
+                    match gone {
+                        Some((Via::Register { .. }, ticket)) if !live => {
+                            // A pairing from before a `Start` (§28.4): reported failed, in the call
+                            // that drops its record, under the ticket the record kept.
+                            self.opx.orphans.retain(|x| *x != id);
+                            self.notify(crate::Notification::PairFailed { ticket: ticket.unwrap_or(0), code });
+                        }
+                        _ => self.carried_done(&id, Err(code)),
                     }
-                    self.carried_done(&id, Err(code));
                 }
             },
         }

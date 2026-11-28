@@ -288,6 +288,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             }
             UserAction::ConfirmClock => self.confirm_clock(),
             UserAction::MoveCode { text } => self.on_move_code(text),
+            UserAction::OldRelayGone => self.on_old_relay_gone(),
             UserAction::ConfirmRejoin => self.confirm_rejoin(),
             UserAction::UseThisCopy => {
                 self.end_stops(|s| s.kind == StopKind::IdentityClone);

@@ -45,6 +45,10 @@ pub(crate) struct Pipe<SM: StateMachine, S: Sealer> {
     pub redo: Vec<(SM::Command, Ctx)>,
     /// The seqs treated as skipped for the current confirmed state (§17.3 step 1).
     pub skipped: BTreeSet<u64>,
+    /// Skips committed to the membership whose entry has not reached the board yet, as
+    /// (target, seq of the Skip). A report for a seq at or above the target that arrives in an
+    /// entry below the Skip describes the state before it (§17.3) and is not compared.
+    pub skip_at: Vec<(u64, u64)>,
     pub adds: Vec<NoticeOp>,
     pub drops: Vec<OutboxOp>,
     pub since_ckpt: u32,
@@ -81,6 +85,7 @@ impl<SM: StateMachine, S: Sealer> Default for Pipe<SM, S> {
             pre: None,
             redo: Vec::new(),
             skipped: BTreeSet::new(),
+            skip_at: Vec::new(),
             adds: Vec::new(),
             drops: Vec::new(),
             since_ckpt: 0,
@@ -250,6 +255,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 self.pipe.tail = false;
                 self.rebase_due = true;
             }
+    }
+
+    /// The notices and outbox `Drop`s of the entries applied so far in a batch, written before a
+    /// checkpoint or base that covers them; the batch's `ClearMarker` still comes at its end.
+    fn flush_settled(&mut self) {
+        if !self.pipe.adds.is_empty() || !self.pipe.drops.is_empty() {
+            self.flush_batch_records(false);
+        }
     }
 
     /// Writes the notice and refusal records and the outbox drops the applies
@@ -713,10 +726,18 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         }
     }
 
+    /// §17.3, ENG-SKIP-003: does a report for the seq `at`, carried by the entry at `e`, describe
+    /// the state before a Skip this device already knows of?
+    fn before_skip(&self, at: u64, e: u64) -> bool {
+        self.pipe.skip_at.iter().any(|(t, s)| *t <= at && e < *s)
+    }
+
     fn apply_beat(&mut self, e: &Entry<S::Membership>) {
         let Some(beat) = e.opened.as_ref().and_then(|o| o.beat.as_ref()) else { return };
         let s = e.seq;
-        if let Some((at, hash, hv)) = beat.state {
+        if let Some((at, hash, hv)) = beat.state
+            && !self.before_skip(at, s)
+        {
             self.add_report(at, e.author, hash, hv, s);
             self.check_divergence(at);
         }
@@ -746,6 +767,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             SnapRecord { entry_seq: s, author: e.author, info: info.clone(), entry_clock: e.tau, verdicts: Vec::new(), own: None };
         // §19.5: this device's verdict, when it holds its own hash at that seq.
         if e.author != self.own
+            && !self.before_skip(info.seq, s)
             && let Some(h) = self.hashes.get(&info.seq).filter(|h| h.hash_version == info.hash_version) {
                 let verdict = if h.hash == info.hash { Verdict::Ack } else { Verdict::Mismatch };
                 rec.own = Some(verdict);
@@ -840,6 +862,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if self.bases.iter().any(|b| b.0 == self.b) {
             return self.last_pid;
         }
+        self.flush_settled();
         let Some(c) = self.checkpoint() else {
             self.fault("engine/local_fault");
             return 0;
@@ -851,6 +874,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
 
     /// Writes the checkpoint at `B` (§18.1) and returns its write.
     pub(crate) fn write_checkpoint(&mut self) -> u64 {
+        // Nothing at or below a checkpoint is settled again after a `Start`: the notices and the
+        // outbox `Drop`s of the entries already applied go first (§7.12 D12, D13).
+        self.flush_settled();
         let Some(c) = self.checkpoint() else {
             self.fault("engine/local_fault");
             return 0;

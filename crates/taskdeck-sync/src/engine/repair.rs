@@ -26,6 +26,9 @@ pub(crate) struct Tail {
     pub repairs: VecDeque<AdminRequest>,
     /// The last seq of the request in flight.
     pub sending_to: u64,
+    /// The control entry at the relay's head whose repairs go out again before the next request
+    /// (0: none): this device cannot know whether they succeeded (§21.3 step 1).
+    pub fix: u64,
 }
 
 impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
@@ -34,7 +37,13 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         if !self.has_unresolved(AlarmKind::RelayBehind) {
             return;
         }
-        let acks_echo = self.outbox.iter().filter_map(|r| r.r.ack).all(|a| a.0 <= head.seq);
+        // §21.3 step 5, "every acknowledgement echoes": one at a seq the log holds has that seq's
+        // chain there; one above the log head is checked by the page that brings it (ENG-ECHO-001).
+        let acks_echo = self
+            .outbox
+            .iter()
+            .filter_map(|r| r.r.ack)
+            .all(|(s, c)| if s <= self.l { self.chain_at(s) == Some(c) } else { s <= head.seq });
         // The relay must also hold every counter of this device that the log holds (§11.3 step 1).
         let counters = last_ctr >= self.me().map_or(0, |d| d.last_ctr);
         if head.seq >= self.l && acks_echo && counters && self.chain_at(self.l).is_some() {
@@ -51,12 +60,18 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         let prefix = head.seq < self.l && self.chain_at(head.seq) == Some(head.chain);
         let may = self.current_member() && !self.halted() && self.meta.stops.iter().all(|s| s.kind == crate::StopKind::Evidence);
         if prefix && may {
+            let fix = self.fix_at(head.seq);
             match self.evid.tail.as_mut() {
                 Some(t) if t.busy => {}
-                Some(t) => t.next = head.seq + 1,
+                Some(t) if t.next == head.seq + 1 => {}
+                Some(t) => {
+                    t.next = head.seq + 1;
+                    t.repairs.clear();
+                    t.fix = fix;
+                }
                 None => {
                     self.evid.tail =
-                        Some(Tail { next: head.seq + 1, busy: false, repairs: VecDeque::new(), sending_to: 0 })
+                        Some(Tail { next: head.seq + 1, busy: false, repairs: VecDeque::new(), sending_to: 0, fix })
                 }
             }
         }
@@ -75,6 +90,14 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             t.busy = true;
             let req = self.want(Want::Repair);
             self.fx(Effect::Admin { req, op });
+            return;
+        }
+        if t.fix > 0 {
+            // The frame of that entry, for the repairs that name its hash.
+            let s = t.fix;
+            t.busy = true;
+            let req = self.want(Want::RestoreChunk);
+            self.fx(Effect::ReadLog { req, from: s, to: s });
             return;
         }
         if t.next > self.l {
@@ -97,6 +120,21 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
     /// The frames of a restore-tail request arrived from the log (ENG-EVID-007).
     pub(crate) fn restore_chunk(&mut self, result: LocalReadResult) {
         let Some(t) = self.evid.tail.as_mut() else { return };
+        if t.fix > 0 {
+            let s = t.fix;
+            let repairs = match result {
+                LocalReadResult::Records(v) if v.first().is_some_and(|r| r.seq == s) => {
+                    let hash = self.sealer.frame_hash(&v[0].frame);
+                    self.repairs_for(s, hash, false)
+                }
+                // A log that no longer holds the entry: what it would repair is not known here.
+                _ => VecDeque::new(),
+            };
+            if let Some(t) = self.evid.tail.as_mut() {
+                (t.fix, t.busy, t.repairs) = (0, false, repairs);
+            }
+            return;
+        }
         let records = match result {
             LocalReadResult::Records(v) if v.first().is_some_and(|r| r.seq == t.next) => v,
             _ => {
@@ -125,7 +163,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             self.fault("engine/local_fault");
             return;
         };
-        let repairs = if self.vk.ctl_seqs.contains(&last) { self.repairs_for(last, last_hash) } else { VecDeque::new() };
+        let repairs = if self.vk.ctl_seqs.contains(&last) { self.repairs_for(last, last_hash, true) } else { VecDeque::new() };
         if let Some(t) = self.evid.tail.as_mut() {
             t.sending_to = last;
             t.repairs = repairs;
@@ -134,8 +172,17 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
         self.fx(Effect::Admin { req, op: AdminRequest::RestoreTail { first_seq: first, chain_before, frames } });
     }
 
+    /// A control entry at the relay's head `s`, where a restore goes on: the device that restored
+    /// it may have lost its repairs (a lost answer, a restart), and the next request is sent only
+    /// after they have succeeded (§21.3 step 1). The relay answers a repair it already has as done
+    /// (`relay.md` §12.3 "Repeat", §12.4 `relay/target`, §12.6 `relay/home_gen`).
+    fn fix_at(&self, s: u64) -> u64 {
+        if s > 1 && self.vk.ctl_seqs.contains(&s) { s } else { 0 }
+    }
+
     /// §21.3 step 2: what the relay needs for the accepted control entry at `s`, from `M_K`.
-    fn repairs_for(&mut self, s: u64, frame_hash: [u8; 32]) -> VecDeque<AdminRequest> {
+    /// `restored`: this device's request restored it (a `DeviceReinstated` is reported then).
+    fn repairs_for(&mut self, s: u64, frame_hash: [u8; 32], restored: bool) -> VecDeque<AdminRequest> {
         let mut out = VecDeque::new();
         let v = self.vk.clone();
         for d in &v.devices {
@@ -156,6 +203,7 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
             match d.status {
                 DeviceStatus::Revoked if d.dev != self.own => out.push_back(AdminRequest::Revoke { dev: d.dev }),
                 DeviceStatus::Revoked => {}
+                DeviceStatus::Current if !restored => {}
                 DeviceStatus::Current => {
                     // A `DeviceReinstated` needs the recovery identity's signature.
                     self.alarm(
@@ -194,8 +242,9 @@ impl<SM: StateMachine, S: Sealer> Engine<SM, S> {
                 t.repairs.clear();
                 match r.head {
                     Some(h) if h.seq <= self.l && self.chain_at(h.seq) == Some(h.chain) => {
+                        let fix = self.fix_at(h.seq);
                         if let Some(t) = self.evid.tail.as_mut() {
-                            t.next = h.seq + 1;
+                            (t.next, t.fix) = (h.seq + 1, fix);
                         }
                     }
                     Some(h) if h.seq > self.l => {

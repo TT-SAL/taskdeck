@@ -217,6 +217,8 @@ pub enum UserAction {
     DismissAlarm { id: u64 },
     ConfirmClock,
     MoveCode { text: String },
+    /// The user says the relay the board is moving away from is gone (§28.3 stage 2).
+    OldRelayGone,
     ConfirmRejoin,
     UseThisCopy,
     ExportUnsent,
