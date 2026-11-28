@@ -346,7 +346,7 @@ The signature covers the header and the body, so the author commits to board, au
 - **SEAL-FRAME-002** (seal, relay) A frame's signature MUST be the Ed25519 signature by the author's signing key over `ctx("frame") ‖ frame[0 .. 48 + len]`.
 - **SEAL-FRAME-003** (seal, relay) A receiver MUST reject a frame whose total length exceeds 262,144 bytes or is below 670 bytes, whose first four bytes are not `"TDF1"`, or whose `len` field is not its total length minus 112, before reading any other field.
 - **SEAL-FRAME-004** (seal) A sealer MUST refuse to produce a frame with `ctr = 0`, returning `seal/frame_format` and no frame.
-- **SEAL-FRAME-005** (device) A sealer MUST produce the frame for a given (author, `ctr`) at most once and MUST return the stored bytes, never a new sealing, when it is asked again for an entry it already sealed (SYNC.md §4.3 rule 2).
+- **SEAL-FRAME-005** (device) A sealer asked again to seal an entry it already sealed, with the same `entry_id`, epoch and (author, `ctr`), MUST return the stored bytes, never a new sealing (SYNC.md §4.3 rule 2), and MUST produce a new sealing under that (author, `ctr`) only for another entry, or for the same entry under another epoch; the engine asks for either only after it cleared that counter's frame for re-sealing (`engine.md` §11.3, §11.4, §24.3).
 
 ## 9. Envelope
 

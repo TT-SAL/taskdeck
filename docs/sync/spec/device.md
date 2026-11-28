@@ -188,7 +188,7 @@ On Android the check is skipped: the folder is app-private storage.
 |---|---|---|
 | `LocalOnly` | every board intent and read query, the fetchers, import check, create board (from this folder or empty), join (pair as a new device), export legacy, `identities` and `forget_identity` (§17.2) | the plain files (§9) |
 | `Synced` | everything of §17 | the identity directory; never the plain files, except "Export legacy" into another folder |
-| `KeyLost` | the reason, the old identity's `board_id`, `dev` and relay address; `join`; `begin_create`; `identities`; `forget_identity`, also of the active identity (§17.2) | nothing until the user acts |
+| `KeyLost` | the reason, the old identity's `board_id`, `dev`, key store and `created_ms` (its `store.tds`, §12.6); `join`; `begin_create`; `identities`; `forget_identity`, also of the active identity (§17.2) | nothing until the user acts |
 
 - **DEV-OPEN-002** (device) `open` MUST decide the mode by the five steps of §5.4 in order.
 - **DEV-OPEN-003** (device) In local-only mode the device MUST NOT open any network connection other than the fetchers' (§13), and MUST NOT create the `sync/` directory except as `begin_create` or `join` does.
@@ -264,11 +264,11 @@ taskdeck_data/
 
 Kinds 9 to 19 are this spec's and are listed in `seal.md` §19.2; kind 19 is the phone's own picture (ruling S29, §14.3).
 
-SYNC.md §4.1 names one `log.tdl`; this spec splits the log into segments so that truncating it below a seq deletes whole files instead of rewriting a 400-day log (§7.3). A segment is closed when it holds 16,384 entries or 67,108,864 bytes; the next page starts a new segment named after its first seq.
+SYNC.md §4.1 names one `log.tdl`; this spec splits the log into segments so that truncating it below a seq deletes whole files instead of rewriting a 400-day log (§7.3). A segment is closed when it holds 16,384 entries or its file has reached 67,108,864 bytes; the next page starts a new segment named after its first seq. An `AppendLog` is cut at the entry boundary, so a page never takes a segment past its 16,384th entry; the bytes are the file's length, checked before each page, so a segment may pass 67,108,864 bytes by its last page.
 
 - **DEV-STORE-001** (device) The store MUST keep every file of an identity in that identity's directory with exactly the names, kinds and record counts of the table of §6.1, and `genesis.tdb` only as §6.1 and §18.1 state.
 - **DEV-STORE-002** (device) The store MUST seal every record of a file of kind `k` under `K_file(k)` with the header and AD of `seal.md` §19, with the identity's own `dev` and `board_id` in the header.
-- **DEV-STORE-003** (device) The store MUST start a new log segment when the current one holds 16,384 entries or 67,108,864 bytes, and MUST name every segment after the seq of its first entry.
+- **DEV-STORE-003** (device) The store MUST start a new log segment before a page that would take the current one past 16,384 entries, and before any page once the current file has reached 67,108,864 bytes, and MUST name every segment after the seq of its first entry.
 
 ### 6.2 The two plain descriptors
 
@@ -361,8 +361,10 @@ The sealer adapter's export (`Sealer::export_identity`, `engine.md` §6.1), held
 | `n_pending` | 1 | u8 | 0 to 16 |
 | pending | 52 × `n_pending` | | `entry_id[16] ‖ epoch u32 ‖ root[32]`: roots drawn for own rotations not yet accepted |
 | `has_anchor` | 1 | u8 | 0 or 1 |
-| anchor | 0 or 80 | | `rsign_pk[32] ‖ salt[16] ‖ root1[32]` (`GenesisAnchor`), present on the creating device until seq 1 is accepted |
+| anchor | 0 or 80 | | `rsign_pk[32] ‖ salt[16] ‖ root1[32]` (`GenesisAnchor`), present on the creating device until a purge deletes `R_1` (`forget_roots_below` with an epoch above 1), so that seq 1 can be classified again after a restart |
 | | **10 + k + 36 `n_roots` + 52 `n_pending` + 80 `has_anchor`** | | |
+
+The export holds no board id: the adapter is given the board id of the identity's `store.tds` (§6.2), which every sealed file's header and AD bind as well (DEV-STORE-002). While 16 own rotations are pending, `seal` refuses a 17th `Rotate` with `device/pending_roots` before it draws anything.
 
 #### 6.4.8 History record (kind 11)
 
@@ -424,7 +426,7 @@ The layout of §6.4.11 with `blob`, `epoch`, `parts`, `sha256` and `size` all ze
 | `Vec<u8>` | `base64` (`core.md` §4.4) |
 | `Vec<T>` | array in the vector's order |
 
-The parser is the canonical parser of `core.md` §4.5 with nesting depth at most 32; a parsed value that does not map back to the Rust type is `device/record_format`. `Body::Ctl` holds a `CtlIntent`, mapped like any enum; `Zeroizing` values never occur in these records.
+The parser is the canonical parser of `core.md` §4.5 with nesting depth at most 32; a parsed value that does not map back to the Rust type is `device/record_format`. `Body::Ctl` holds a `CtlIntent`, mapped like any enum; `Zeroizing` values never occur in these records. `Option<T>` occurs in them only as a named field; a record type that needs one in a tuple, a `Vec` or a tuple variant extends this table first. The engine's types have no `serde` implementations, and `serde`'s derive would not give this mapping (it writes `null` for `None` and names variants in Rust case): the store implements the mapping for them itself, and `store::record_json` (§25) serves only the device's own records.
 
 - **DEV-STORE-007** (device) The store MUST encode `Registry`, `OutboxRecord` and `Meta` by the mapping of §6.5 in the canonical encoding, and MUST refuse with `device/record_format` bytes that the canonical parser refuses or that do not map to the type.
 
@@ -440,7 +442,9 @@ The store performs every file system call through a `FileLayer` (§25) whose met
 
 The crash tests use `CrashFiles`, which counts write boundaries and aborts the process (`std::process::abort`) on the k-th (§7.6).
 
-- **DEV-FILE-001** (device) The store MUST perform every file system call through its `FileLayer`, and `OsFiles` MUST implement `sync`, `rename` and `sync_dir` as §7.1 states for each platform.
+Two kinds of file are outside the `FileLayer` and are no write boundaries: the lock (§5.2), a held open file that no `FileLayer` call gives, and the files a key store keeps itself (§12: `ld.wrap`, the test stores' `.testkey` files).
+
+- **DEV-FILE-001** (device) The store MUST perform every file system call through its `FileLayer`, except the lock's (§5.2) and a key store's own files (§12), and `OsFiles` MUST implement `sync`, `rename` and `sync_dir` as §7.1 states for each platform.
 
 ### 7.2 The write procedures
 
@@ -477,7 +481,7 @@ A `Persist { id, ops }` (`engine.md` §7.11) is executed on the sync thread, op 
 | `WriteMeta(meta)` | replace `meta.tdk` |
 | `WriteIdentity(bytes)` | replace `identity.tdk` |
 
-When every op's last step has returned, the store puts `Persisted { id }` on the local queue. When any step fails, it stops, performs no later step of this or any later `Persist`, puts `PersistFailed { id }` on the local queue, and refuses every later write until the next `open` (ENG-PERSIST-003).
+When every op's last step has returned, the store puts `Persisted { id }` on the local queue. When any step fails, it stops, performs no later step of this or any later `Persist`, puts `PersistFailed { id }` on the local queue, and refuses every later write until the next `open` (ENG-PERSIST-003). The store's error for it is `device/write_failed`; the engine sees only `PersistFailed`.
 
 - **DEV-FILE-004** (device) The runtime MUST complete every step of every op of a `Persist` effect, in order, including each `sync` and `sync_dir`, before it delivers that effect's `Persisted`; the order of the effects and of their `Persisted` events is ENG-PERSIST-001's.
 - **DEV-FILE-005** (device) On the first failed write boundary of a `Persist`, the runtime MUST deliver `PersistFailed` for that effect and MUST perform no further write to the identity directory until the facade is opened again.
@@ -505,7 +509,18 @@ A torn or bad tail on an append file is the write of a crash that did not reach 
 | `hashes.tdk`, `notices.tdk`, `marker.tdk` | renamed as above and treated as empty; reported |
 | `overlay.tdk`, `feed-*.tdk`, `picture.tdk`, `own-picture.tdk`, `weather.tdk`, `draft.tdk` | removed and treated as absent; reported |
 
-`checkpoint.tdk` and `meta.tdk` may be absent only while `bootstrap.tdk` exists or before the first checkpoint of a new identity; otherwise their absence is `device/store_corrupt`. The log records below `log_floor` of `device.tdk` are dropped from `Loaded`, and segments wholly below it are removed (the end of an interrupted `TruncateLogBelow`).
+`checkpoint.tdk` and `meta.tdk` may be absent only while `bootstrap.tdk` exists or before the first checkpoint of a new identity; otherwise their absence is `device/store_corrupt`. The other files, when absent:
+
+- `device.tdk` and `identity.tdk` (both written when the identity is created): `device/store_corrupt` naming the kind;
+- `bootstrap.tdk` while `checkpoint.tdk` is absent too: `device/store_corrupt` naming kind 17;
+- an append file (`hashes.tdk`, `outbox.tdo`, `notices.tdk`, `history.tdk`, a log segment): empty, since the append procedure creates it with its first record (§7.2);
+- `marker.tdk`, `unsent.tdk` and the files of the last row of the table above: absent, as their rows in §6.1 allow.
+
+`bootstrap.tdk` is read only when `checkpoint.tdk` is absent. One left beside a checkpoint (a crash between the checkpoint's rename and the bootstrap's removal, §7.3) is not read, not reported when damaged, and is removed by the next `WriteCheckpoint`; `open` does not remove it.
+
+The log records above the checkpoint's `board_seq` must be consecutive from `board_seq + 1`, across segments; a gap among them (a segment removed or renamed) is `device/store_corrupt` naming kind 1. At or below `board_seq` a gap is allowed, such as a quarantined segment's: those seqs are absent from `Loaded.chains`. The log records below `log_floor` of `device.tdk` are dropped from `Loaded`, and segments wholly below it are removed (the end of an interrupted `TruncateLogBelow`).
+
+The stamp `<YYYYMMDD-HHMMSS>` of a quarantined file's name is the UTC time of the device clock at the `open` that renamed it; §7.5 reads the file's age from that stamp, not from the file system's times. A write that fails during `open` (removing a `*.tmp` file, truncating a tail, renaming or removing a file) fails the `open` with `device/write_failed`.
 
 `Loaded` (`engine.md` §7.10) is filled from these files exactly: `checkpoint` from kind 2; `bases` from kind 3; `chains` and `tail` from kind 1 (`tail` = the records above `checkpoint.board_seq`); `log_floor` and `floor_chain` from kind 12 (`log_floor` 1 and `floor_chain` absent when `device.tdk` holds none); `hashes` from kind 4; `outbox` from kind 5 in file order; `notices` from kind 8 in file order; `meta` from kind 9; `marker` from kind 10; `build_id` from the caller (`OpenOptions`, §17.2); `session` 16 fresh bytes (§10.4); `bootstrap` from kind 17.
 
@@ -515,10 +530,11 @@ The confirmed `BoardData` is loaded from the checkpoint's board bytes with `Boar
 - **DEV-FILE-008** (device) The store MUST truncate a torn or bad tail of an append file to the last record that opened before it appends to that file again.
 - **DEV-FILE-009** (device) The store MUST build `Loaded` from the files exactly as §7.4 maps them, MUST drop log records below `log_floor`, and MUST NOT present a log record, outbox op or notice op that did not open.
 - **DEV-FILE-010** (device) A replica MUST load its `BoardData` only with `BoardData::from_canonical_bytes` from a checkpoint, a base, a snapshot or a bootstrap file, and MUST NOT normalise it in any way (V2-19).
+- **DEV-FILE-012** (device) At open, the store MUST refuse with `device/store_corrupt` naming kind 1 a log whose records above the checkpoint's `board_seq` are not consecutive from `board_seq + 1`.
 
 ### 7.5 Retention
 
-The engine decides what to delete (`engine.md` §7.13); the store deletes only on its ops. The store adds: a quarantined file (`*.corrupt-*`) is removed when it is more than 2,592,000,000 ms (30 days) old by the device clock at an `open`; `feed-<id>.tdk` is removed when the board no longer has a subscription `id` or its URL hash changed (§13.1); `history.tdk` is never truncated, through purges included (`seal.md` §25).
+The engine decides what to delete (`engine.md` §7.13); the store deletes only on its ops. The store adds: a quarantined file (`*.corrupt-*`) is removed when it is more than 2,592,000,000 ms (30 days) old by the device clock at an `open`, its age read from the stamp in its name (§7.4); `feed-<id>.tdk` is removed when the board no longer has a subscription `id` or its URL hash changed (§13.1); `history.tdk` is never truncated, through purges included (`seal.md` §25).
 
 - **DEV-FILE-011** (device) The store MUST NOT delete or truncate any file of an identity directory except by an engine op, the rules of §7.4, the three cases of §7.5, and the removal of a whole identity directory by `forget_identity` or `abandon_create` (§17.2, §18.1), and MUST NOT delete records of `history.tdk` in any other way.
 
@@ -574,14 +590,14 @@ The engine persists its own records as effects (`engine.md` §7). The store adds
 | Addition | Written | Why |
 |---|---|---|
 | history records (kind 11) | after an `AppendLog`: one record for each accepted control entry among the appended seqs, built by `taskdeck_seal::HistoryRecord::from_accepted(seq, frame, opened)` from the sealer adapter's classification (it keeps the frame and the `Opened` of every `Accept` of kind `ctl` from the dry run); only seqs above the last seq in `history.tdk`, so a re-classification after `Start` adds nothing twice | backups carry the full membership history (`seal.md` §21.5, SEAL-BKP-002); the log loses it below `log_floor` |
-| history records from an opened snapshot | after the sealer adapter's `open_snapshot` returned a body (a rejoin, `engine.md` §19.7), in the first `Persist` that carries a `WriteCheckpoint`, before that op: the body's history records (`seal.md` §20.4) with seq above the last seq in `history.tdk`, in seq order; the adapter then drops the body's history | a device that rejoined from a snapshot holds the control history from seq 1 (§15.7, ruling S27) |
+| history records from an opened snapshot | after the sealer adapter's `open_snapshot` returned a body (a rejoin, `engine.md` §19.7), in the first `Persist` that carries a `WriteCheckpoint`, before that op: the body's history records (`seal.md` §20.4) with seq above the last seq in `history.tdk`, in seq order; the adapter keeps the body's history, since its next `seal_snapshot` needs every record from seq 1 (`engine.md` §6.1) | a device that rejoined from a snapshot holds the control history from seq 1 (§15.7, ruling S27) |
 | `log_floor` and `floor_chain` in `device.tdk` | before a `TruncateLogBelow` removes anything | DEV-FILE-006 |
 | `minter` in `device.tdk` | before a `RewriteOutbox`: the element-wise maximum of the stored `minter` and the `IdMinter` of every `Put` in `outbox.tdo` | so that numbers minted for records that left the outbox are never minted again (`core.md` §7.2) |
 | removal of `bootstrap.tdk` | after the first `WriteCheckpoint` | the checkpoint now holds the state |
 
 Outside `Persist` effects, the store writes `device.tdk`, `overlay.tdk`, the feed files, `picture.tdk`, `own-picture.tdk`, `weather.tdk` and `draft.tdk` on its own, from the sync thread, by the replace procedure. Nothing the engine reads at `Start` lives in those files except `log_floor` and `floor_chain`.
 
-**The origin state.** `Enqueue.origin_state` (`engine.md` §9.1) is the `IdMinter` after the compile step advanced it: `device_no u16 ‖ next_item u64 ‖ next_block u64` (18 bytes). At `open`, the facade's minter is the element-wise maximum of `device.tdk`'s `minter` and every `Put`'s `origin_state` in `outbox.tdo`, in file order; the core's minting rule then also takes `mark + 1` from the view (`core.md` §7.2), which raises it after a catch-up that showed higher marks (`engine.md` §11.3).
+**The origin state.** `Enqueue.origin_state` (`engine.md` §9.1) is the `IdMinter` after the compile step advanced it: `device_no u16 ‖ next_item u64 ‖ next_block u64` (18 bytes). At `open`, the facade's minter is the element-wise maximum of `device.tdk`'s `minter` and every `Put`'s `origin_state` in `outbox.tdo`, in file order; the core's minting rule then also takes `mark + 1` from the view (`core.md` §7.2), which raises it after a catch-up that showed higher marks (`engine.md` §11.3). The core adapter's `rebind` (`engine.md` §5.1) refuses with `device/record_format`, and rebinds nothing, an `origin_state` that is not 18 bytes of this layout or whose `device_no` is not `to_device_no`; core's `core/bad_id` (no number left to mint) passes through.
 
 - **DEV-RUN-003** (device, recovery) After each `AppendLog`, in the same `Persist` effect and before its `Persisted`, the runtime MUST append to `history.tdk` one history record (`seal.md` §21.5) for every accepted control entry among the appended seqs that is above the last seq the file holds.
 - **DEV-RUN-004** (device) The runtime MUST persist in each `Enqueue` the minter state after compiling as `origin_state`, laid out as §8.3 states, and MUST never mint from a minter below the maximum of §8.3.
@@ -912,7 +928,7 @@ pub enum KeyStoreError { NotFound, CannotUnwrap, Unavailable, Failed }
 
 With `test-trust`: `FileKeyStore` keeps `L_d` in plain 32-byte files `<dir>/<board hex>-<dev hex>.testkey` (for devicectl, whose processes restart); `MemoryKeyStore` keeps them in a process map.
 
-**"The device is replaced."** When `L_d` cannot be loaded (`NotFound`, `CannotUnwrap`), nothing of the identity can be read: not its outbox, not its keys (SYNC.md §5.6). The facade opens in `KeyLost` mode, shows the old identity's board, `dev`, device name (from `store.tds` and the plaintext headers) and asks the user to pair this machine again as a new device and to revoke the old identity from another device (SYNC.md §5.4). The old identity directory and key-store entry are kept until the user calls `forget_identity` (§17.7); its unsent outbox is lost.
+**"The device is replaced."** When `L_d` cannot be loaded (`NotFound`, `CannotUnwrap`), nothing of the identity can be read: not its outbox, not its keys (SYNC.md §5.6). The facade opens in `KeyLost` mode, shows the old identity's board, `dev`, key store and creation time (from `store.tds`, §6.2) and asks the user to pair this machine again as a new device and to revoke the old identity from another device (SYNC.md §5.4). The old identity directory and key-store entry are kept until the user calls `forget_identity` (§17.7); its unsent outbox is lost. The device name and the relay address are in sealed files (`device.tdk`, `meta.tdk`) and cannot be shown.
 
 - **DEV-KEY-006** (device) In `KeyLost` mode the device MUST NOT delete the old identity directory or its key-store entry, except on `forget_identity`.
 - **DEV-KEY-007** (device) The test key stores MUST exist only with the feature `test-trust`.
@@ -1169,7 +1185,7 @@ After a purge, `Notify(PurgeBackups { before_ms })` is shown to the user; `delet
 
 ### 15.7 History for a device that joined later
 
-Every device holds every control entry from seq 1 in `history.tdk` (`history_complete = true`). A device that created the board, or restored it, has them from the start. A device that bootstraps from a snapshot (a pairing's, or a rejoin's) takes the records up to the snapshot's seq from the snapshot's `history` (`seal.md` §20.4, ruling S27), which `seal.md` §20.5 has verified against the snapshot's membership, and records every later accepted control entry itself (§8.3). The sealer adapter fills a snapshot's `history` from `history.tdk` (the records with seq at most the snapshot's) whenever it seals one. When it opens one for a bootstrap, it hands the records to the store, which writes those it does not already hold to `history.tdk` before it persists the bootstrap: for a pairing, before `bootstrap.tdk` (§18.3, DEV-PAIR-006); for a rejoin (`engine.md` §19.7), in the first `Persist` that carries a `WriteCheckpoint`, before that op (DEV-RUN-006).
+Every device holds every control entry from seq 1 in `history.tdk` (`history_complete = true`). A device that created the board, or restored it, has them from the start. A device that bootstraps from a snapshot (a pairing's, or a rejoin's) takes the records up to the snapshot's seq from the snapshot's `history` (`seal.md` §20.4, ruling S27), which `seal.md` §20.5 has verified against the snapshot's membership, and records every later accepted control entry itself (§8.3). The sealer adapter fills a snapshot's `history` with the records of `history.tdk` with seq at most the snapshot's whenever it seals one; it holds them in memory, or reads them from the file. When it opens one for a bootstrap, it hands the records to the store, which writes those it does not already hold to `history.tdk` before it persists the bootstrap: for a pairing, before `bootstrap.tdk` (§18.3, DEV-PAIR-006); for a rejoin (`engine.md` §19.7), in the first `Persist` that carries a `WriteCheckpoint`, before that op (DEV-RUN-006).
 
 ### 15.8 The recovery tool's online steps
 
@@ -1275,7 +1291,7 @@ pub enum Platform { Windows, MacOs, Linux, Android { api: u32 } }
 
 | Call | Screens | Returns | Errors | Auth | Blocks | Platforms |
 |---|---|---|---|---|---|---|
-| `Device::open(options)` | D, A, T | `(Device, OpenReport)`: the mode, warnings (`folder_locked`, `folder_unlockable`, `torn_tail`, `bad_tail`, `quarantined`, import warnings and quarantines), the local-only import report, the identity (board, dev, relay address, device name) or the `KeyLost` identity, a pending create (§18.1) | `folder_in_use`, `folder_locked` and `folder_unlockable` (synced), `cloud_folder`, `store_descriptor`, `store_corrupt`, `keystore_unavailable`, `keystore_failed`, `legacy_unreadable` | — | long: reads every file; at most 150 ms for a checkpoint of the 10,000-row board plus 1 ms per log entry above it, on the reference hardware | all |
+| `Device::open(options)` | D, A, T | `(Device, OpenReport)`: the mode, warnings (`folder_locked`, `folder_unlockable`, `torn_tail`, `bad_tail`, `quarantined`, import warnings and quarantines), the local-only import report, the identity (board, dev, relay address, device name) or the `KeyLost` identity, a pending create (§18.1) | `folder_in_use`, `folder_locked` and `folder_unlockable` (synced), `cloud_folder`, `store_descriptor`, `store_corrupt`, `write_failed` (a write of §7.4 failed), `keystore_unavailable`, `keystore_failed`, `legacy_unreadable` | — | long: reads every file; at most 150 ms for a checkpoint of the 10,000-row board plus 1 ms per log entry above it, on the reference hardware | all |
 | `mode()` | D, A | `Mode` | — | — | read | all |
 | `shutdown()` | D, A, T | `()` once the engine reported `ReadyToExit` (final checkpoint, outbox and meta durable, ENG-CKPT-002), the notes draft was flushed (§17.6), `device.tdk` was written, and every thread was joined | — | — | long: at most 10,000 ms, after which the threads are left to the process exit and `device/shutdown_timeout` is returned | all |
 | `identities()` | D, A | `Vec<StoredIdentity>`: one entry per identity directory under `sync/` whose `store.tds` is valid, except the one `pending.tds` names, from its `store.tds` (§6.2), with `active` true for the one `active.tds` names; read at `open` and after every call that adds or removes a directory, published with the view, a change raising `Changes.status` | — | — | read | all |
@@ -1606,27 +1622,29 @@ taskdeck-devicectl import-check <folder>
 
 ### 19.2 Protocol
 
-Request: `{"id": u53, "cmd": string, ...arguments}`. Answer: `{"id": u53, "ok": true, ...result}` or `{"id": u53, "ok": false, "error": code}`. Event: `{"event": "changed", "changes": {…§17.3 counters…}}`, written after each publish, and `{"event": "exit", "code": int}` before exit. Lines are at most 16,777,216 bytes; byte strings are lowercase hex; integers within ±(2^53 − 1); JSON is parsed strictly (README §5.3), an invalid line being answered `{"id": 0, "ok": false, "error": "device/ctl_request"}`.
+Request: `{"id": u53, "cmd": string, ...arguments}`. Answer: `{"id": u53, "ok": true, ...result}` or `{"id": u53, "ok": false, "error": code}`. Event: `{"event": "changed", "changes": {…§17.3 counters…}}`, written after each publish, and `{"event": "exit", "code": int}` before exit. Lines are at most 16,777,216 bytes; byte strings are lowercase hex; integers within ±(2^53 − 1); JSON is parsed strictly (README §5.3).
+
+**Answers.** A result is a JSON object whose members are written in the answer itself, beside `id` and `ok`, never under a key of their own; no result has a member named `id`, `ok` or `error`. A row whose Result cell is empty answers `{"id": u53, "ok": true}` alone. Where the cell names a Rust type, the members are that value's fields, mapped by §6.5. A ticket is `{"ticket": u53}`. `wait` takes `since` (the `since_any` of `wait_for_change`, §17.3) and `timeout_ms` (at most 60,000), and its result is the eleven fields of `Changes` (`any`, `view`, `status`, `notices`, `banners`, `overlay`, `weather`, `picture`, `backup`, `pairing`, `ops`); the `changes` object of a `changed` event holds the same eleven. `wait_op` answers `{"done": true}` when the operation ended well, `{"done": false}` at its timeout, and, when the operation failed, `{"id": u53, "ok": false, "error": code}` with the operation's code. A facade error is `{"id": u53, "ok": false, "error": code}` with the `DeviceError`'s `code`, and its `status` (integer) and `message` (string) as members beside it when it carries them. A line that does not parse strictly as a JSON object, or whose `id` is missing or not an integer from 0 to 2^53 − 1, is answered `{"id": 0, "ok": false, "error": "device/ctl_request"}`. A line with a valid `id` whose `cmd` is missing, not a string or not in the table, or whose arguments are missing, or of the wrong type, is answered `{"id": <its id>, "ok": false, "error": "device/ctl_request"}`. In either case nothing is called. `kill` writes no answer; `shutdown` writes its answer, then the `exit` event, then exits.
 
 | `cmd` | Arguments | Facade call | Result |
 |---|---|---|---|
-| `status` | | `status()` | the status as record JSON (§6.5) |
+| `status` | | `status()` | `DeviceStatus` (§17.8) |
 | `snapshot` | `from` date, `days` | `view().answer_snapshot` | `{"snapshot": …}` |
 | `board` | | `view().board()` | `{"canonical": hex, "state_hash": hex32}` (the board bytes and the state hash with the current membership) |
-| `submit`, `submit_named` | `intent`: the intent JSON (`core.md` §12.2) | `submit_json` | `Submitted` |
+| `submit`, `submit_named` | `intent`: the intent JSON (`core.md` §12.2) | `submit_json` | `Submitted` (§17.4) |
 | `release_hold` | | `release_hold` | |
-| `notices`, `dismiss_notice` | `seq`, `index` | | |
+| `notices`, `dismiss_notice` | `seq`, `index` (dismiss) | | `{"notices": […]}`, each a `NoticeView` (`notices`) |
 | `ack_banner`, `dismiss_alarm` | `id` | | |
 | `confirm_clock`, `confirm_rejoin`, `use_this_copy`, `ack_continuity`, `ack_restored_copy`, `ack_based_on_unchecked` | | | |
 | `adopt` | `dev` hex16, `fp` | | ticket |
 | `skip`, `restore_to` | `seq` | | ticket |
-| `restore_targets`, `purge_preview`, `purge` | | | |
+| `restore_targets`, `purge_preview`, `purge` | | | `{"targets": [[seq, τ], …]}` (`restore_targets`); `PurgePreview` (`purge_preview`); ticket (`purge`) |
 | `revoke` | `dev`, `replace` | | ticket |
 | `rules_override` | `version` | | ticket |
 | `move_board` | `host`, `create_secret` hex32 | | ticket |
-| `move_status`, `enter_move_code` | `text` | | |
+| `move_status`, `enter_move_code` | `text` (enter) | | `MoveStatus` (`move_status`) |
 | `follow_address` | `address`, `code` | | ticket |
-| `wait_op` | `ticket`, `timeout_ms` | | the result |
+| `wait_op` | `ticket`, `timeout_ms` | | `{"done": bool}`, or the operation's error (above) |
 | `create` | `relay`, `create_secret`, `source`: `"empty"`, `"this"`, or `{"folder": path}`, `name` | `begin_create` | |
 | `sheet` | | `CreateFlow::sheet` or `RecoveryChangeFlow::sheet` | `{"sheet": text, "address": text, "recovery_fp": text}`: **test only**, the one place the seed leaves a flow |
 | `confirm_sheet` | `text` | | |
@@ -1638,22 +1656,24 @@ Request: `{"id": u53, "cmd": string, ...arguments}`. Answer: `{"id": u53, "ok": 
 | `begin_recovery_change`, `finish_recovery_change` | | | `{"seq": …}` (finish) |
 | `confirm_current_sheet` | `text` | `RecoveryChangeFlow::confirm_current_sheet` | |
 | `reset_trust` | `relay`, `create_secret`, `name` | | |
-| `backup_now`, `backup_status`, `pin_fp` | `text` (pin) | | |
+| `backup_now`, `backup_status`, `pin_fp` | `text` (pin) | | `BackupStatus` (`backup_status`) |
 | `set_destinations` | `destinations` | | |
-| `delete_backups_before` | `before_ms` | | |
+| `delete_backups_before` | `before_ms` | | `{"deleted": u32}` |
 | `set_picture` | `file` path | `set_shared_picture` | |
 | `set_foreground` | `visible` | | |
 | `resume` | | `notify_resume` | |
-| `background_sync` | `budget_ms` | | the outcome |
+| `background_sync` | `budget_ms` | | `BackgroundOutcome` |
 | `fetch_now` | | the calendars and weather threads fetch at once | |
 | `export_legacy` | `target` | | |
-| `wait` | `since`, `timeout_ms` | `wait_for_change` | the counters |
+| `wait` | `since`, `timeout_ms` | `wait_for_change` | `Changes` (§17.3) |
 | `clock` | `set_ms` or `advance_ms` | the manual clock | `{"wall_ms": …}` |
 | `shutdown` | | `shutdown` | then exits with 0 |
-| `kill` | | `std::process::abort()` at once | none |
+| `kill` | | `std::process::abort()` at once | no answer |
 
 - **DEV-CTL-001** (device) `taskdeck-devicectl` MUST exist only with the feature `test-trust`, and MUST answer every request of the table of §19.2 by exactly the facade call the table names.
 - **DEV-CTL-002** (device) `taskdeck-devicectl` MUST write a seed or a pairing code to its output only in the answers of `sheet` and `pair_start`, and MUST write no token, key or create secret.
+- **DEV-CTL-003** (device) `taskdeck-devicectl` MUST write each result's members in the answer beside `id` and `ok`, as the paragraph "Answers" of §19.2 lays them out.
+- **DEV-CTL-004** (device) `taskdeck-devicectl` MUST answer a line that is not a strictly parsed JSON object with a valid `id` with `{"id": 0, "ok": false, "error": "device/ctl_request"}`, MUST answer a line with a valid `id` and an unknown `cmd` or invalid arguments with that `id` and the same error, and MUST call nothing for either.
 
 ## 20. The end-to-end suite
 
@@ -1723,8 +1743,9 @@ Codes the device returns from facade calls, puts in the open report, in statuses
 | `device/cloud_folder` | the data folder is cloud-synchronised | §5.3 | move the data folder |
 | `device/store_descriptor` | `active.tds`, `pending.tds` or `store.tds` is invalid | §6.2 | report; offer `join` as a new device |
 | `device/store_corrupt` | a required sealed file does not open | §7.4 | report; offer `join` as a new device |
-| `device/record_format` | a record plaintext has the wrong layout | §6.3, §6.5 | as the file's row in §7.4 |
+| `device/record_format` | a record plaintext has the wrong layout; or `rebind` was given an origin state that is not this adapter's for the new `device_no` | §6.3, §6.5, §8.3 | as the file's row in §7.4; for `rebind`, the engine's handling of a `rebind` error |
 | `device/record_range` | an engine record holds an integer the encoding cannot carry | §6.5 | a local fault: report the bug |
+| `device/pending_roots` | the sealer adapter holds 16 pending own rotations | §6.4.7, a `seal` of a 17th `Rotate` | a local fault: the operation fails |
 | `device/keystore_unavailable` | the key store cannot answer now | §12.1 | retry later (unlock the keychain; wait for the shell) |
 | `device/keystore_failed` | the key store failed otherwise | §12.1 | report |
 | `device/no_keystore` | this platform has no key store in release builds | §12.2 | local-only mode only |
@@ -1732,7 +1753,7 @@ Codes the device returns from facade calls, puts in the open report, in statuses
 | `device/subscriptions_frozen` | `subscriptions.json` was unreadable at open | §9.2 | fix or remove the file, reopen |
 | `device/needs_sync` | the call needs a synced board | §9.3, §17.12 | create or join a board |
 | `device/bad_place` | `set_weather_place` with `Own` and no place, or a place out of range | §17.12 | the caller has a bug |
-| `device/write_failed` | a plain-file write failed | §9.3, §18.7 | show it; the change was not made |
+| `device/write_failed` | a write to the data folder failed | §9.3, §18.7 (a plain file); §7.3 (a `Persist` step, reported to the engine as `PersistFailed`); §7.4 (a write during `open`) | show it; the change was not made; after a failed `Persist` or `open`, open again |
 | `device/identity_active` | `forget_identity` named the active identity outside `KeyLost` mode | §17.2 | choose another identity |
 | `device/insecure_url` | a URL is not `https` | DEV-NET-001, §13.1 | ask for an `https` address |
 | `device/bad_answer` | a relay answer failed strict parsing | §10.5 | the engine's `RelayProtocol` alarm |
@@ -1773,7 +1794,7 @@ Codes the device returns from facade calls, puts in the open report, in statuses
 | `device/set_aside_failed` | moving the plain files failed | §18.2, §18.4 | show it; for a join, nothing was activated |
 | `device/close_failed` | the old board's `CloseBoard` failed | §18.6 | retry; the new board stays pending |
 | `device/export_target` | the export folder is not empty, not absolute, or inside the data folder | §18.7 | choose another |
-| `device/ctl_request` | a devicectl request line is invalid | §19.2 | a test bug |
+| `device/ctl_request` | a devicectl request line is invalid, or names an unknown `cmd` or invalid arguments | §19.2, DEV-CTL-004 | a test bug |
 | `device/torn_tail` | warning: a torn tail was truncated | §7.4 | none |
 | `device/bad_tail` | warning: a last record did not open and was truncated | §7.4 | none; possibly disk damage |
 | `device/quarantined` | warning: a damaged optional file was set aside | §7.4 | none |
@@ -1864,7 +1885,7 @@ Stage `device` publishes these families under `crates/taskdeck-device/tests/vect
 **`seal.md`.**
 - Requires: the file kinds 1 to 18 of `seal.md` §19.2, kind 1 being the segments `log-<first seq>.tdl` (§6.1), and kind 19 for the phone's own picture (ruling S29), with the matching `FileKind` variants of `seal.md` §26. Kinds 9 and 10 are `engine.md` §36's request; the others are this spec's.
 - Relies on: `taskdeck_seal::verify_backup_file(bytes, writer_sign_pk) -> Result<BackupHeader, SealError>` (`seal.md` §21.6, §26, SEAL-BKP-009), which runs §21.6 steps 1, 2 and 5 only, so a writer checks what it wrote without the recovery key (§15.3.2).
-- Requires: the sealer adapter of `taskdeck-device` composes the identity export of §6.4.7 from `DeviceKeys::to_identity_bytes`, the roots and the anchor; `seal.md` §19.2's description of kind 7 ("its private keys and the epoch roots it holds") is that layout. The adapter and the transport (§10) carry the duties `seal.md` §25 names for them (SEAL-FRAME-005, SEAL-ENV-003, SEAL-ENV-004, SEAL-SIG-005, SEAL-MEM-016, and the caller's halves of SEAL-WRAP-003, SEAL-SIG-002, SEAL-KEY-012 (each function of `seal.md` §26 that takes a `SymKey` is given the key of its own kind) and SEAL-KEY-013 (`derive_epoch_key` and `open_snapshot_declared` are given only roots checked against the commitment the membership records)), and the runtime carries its halves of SEAL-PAIR-008 (it sends `UserConfirmed` only when the user has confirmed on E) and SEAL-PAIR-013 (it feeds both pairing machines monotonic time and ticks, §18.3); stage `device` tests them.
+- Requires: the sealer adapter of `taskdeck-device` composes the identity export of §6.4.7 from `DeviceKeys::to_identity_bytes`, the roots and the anchor; `seal.md` §19.2's description of kind 7 ("its private keys and the epoch roots it holds") is that layout. The adapter and the transport (§10) carry the duties `seal.md` §25 names for them (SEAL-FRAME-005, SEAL-ENV-003, SEAL-ENV-004, SEAL-SIG-005, SEAL-MEM-016, and the caller's halves of SEAL-WRAP-003, SEAL-SIG-002, SEAL-KEY-012 (each function of `seal.md` §26 that takes a `SymKey` is given the key of its own kind) and SEAL-KEY-013 (`derive_epoch_key` and `open_snapshot_declared` are given only roots checked against the commitment the membership records; a root is checked once, when the adapter learns it, and a root read back from `identity.tdk`, which holds only roots checked so, counts as checked)), and the runtime carries its halves of SEAL-PAIR-008 (it sends `UserConfirmed` only when the user has confirmed on E) and SEAL-PAIR-013 (it feeds both pairing machines monotonic time and ticks, §18.3); stage `device` tests them.
 - Assumes: `StorageKey::from_bytes` and `open_file`'s `FileTail { Torn, Bad }` with `valid_bytes` are what §7.4 uses; `sign_login` takes the origin from the caller (SEAL-SIG-002); `seal_frame` and `ctl_payload` with `Signer::Recovery` compose the recovery-authored `Fence` of §15.8; `open_blob` takes the writer as an argument (§14.2 step 3).
 - Relies on: `taskdeck_seal::TEST_ENTROPY_MARKER` (`seal.md` SEAL-GEN-014), which a build with `test-entropy` contains and `release` searches for together with the `test-trust` marker (§11.2, DEV-TRUST-003).
 - Provides: the contents, write and fsync order of every sealed file, torn and bad tails (§7), the key stores that wrap `L_d` with `ctx("local-key") ‖ board_id ‖ dev` (§12), history records kept for life (§8.3, DEV-FILE-011), backup scheduling, destinations, names and `meta` (§15), the pinned recovery fingerprint (§15.5), release builds without `test-entropy` (§11.2).
@@ -2157,10 +2178,14 @@ pub mod store {
     pub fn decode_log_page(bytes: &[u8]) -> Result<Vec<taskdeck_sync::LogRecord>, super::DeviceError>;
     pub fn encode_checkpoint(c: &taskdeck_sync::Checkpoint) -> Result<Vec<u8>, super::DeviceError>;   // §6.4.2
     pub fn decode_checkpoint(bytes: &[u8]) -> Result<taskdeck_sync::Checkpoint, super::DeviceError>;
-    pub fn record_json<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, super::DeviceError>;        // §6.5
+    pub fn record_json<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, super::DeviceError>;        // §6.5, the device's own records;
+    // the engine's Registry, OutboxRecord and Meta have no serde: the store maps them itself (§6.5)
     pub fn from_record_json<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, super::DeviceError>;
     pub fn read_identity_dir(dir: &std::path::Path, l_d: &zeroize::Zeroizing<[u8; 32]>)
         -> Result<(taskdeck_sync::Loaded, Vec<taskdeck_seal::HistoryRecord>), super::DeviceError>;   // Loaded, history records
+    // read_identity_dir is the recovery tool's reader of a device's own folder (§24, stage recovery): §7.4 through
+    // OsFiles with the board and dev of the directory's store.tds and the system clock, making the writes §7.4 makes;
+    // Loaded.build_id is empty. The facade's open does not call it.
     pub fn write_legacy_files(dir: &std::path::Path, board: &taskdeck_core::board::BoardData,
                               zone: &dyn taskdeck_core::time::Zone) -> Result<(), super::DeviceError>;   // §9.3, §18.7
 }
