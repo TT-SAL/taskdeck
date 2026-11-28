@@ -1179,14 +1179,10 @@ impl FileLayer for CrashFiles {
 
 // ---------- adapters (decision D6, §4.1)
 
-/// The state machine over `taskdeck-core` (device.md §4.1, decision D6).
-pub struct CoreMachine {}
-
-/// The sealer over `taskdeck-seal` (device.md §4.1, decision D6).
-pub struct SealSealer {}
-
-// impl taskdeck_sync::StateMachine for CoreMachine and impl taskdeck_sync::Sealer for SealSealer are stage
-// device's to write (device.md §25); the skeleton carries the two structs without them.
+/// `CoreMachine` (`taskdeck_sync::StateMachine` over `taskdeck-core`) and
+/// `SealSealer` (`taskdeck_sync::Sealer` over `taskdeck-seal`), device.md §25.
+pub mod adapt;
+pub use adapt::{CoreMachine, SealSealer};
 
 // ---------- test-only (§11)
 
